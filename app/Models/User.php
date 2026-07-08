@@ -10,7 +10,13 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Carbon;
 
+/**
+ * @property string|null $two_factor_secret
+ * @property list<string>|null $two_factor_recovery_codes
+ * @property Carbon|null $two_factor_confirmed_at
+ */
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -37,6 +43,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
     ];
 
     /**
@@ -50,6 +58,9 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'two_factor_secret' => 'encrypted',
+            'two_factor_recovery_codes' => 'encrypted:array',
+            'two_factor_confirmed_at' => 'datetime',
         ];
     }
 
@@ -59,5 +70,32 @@ class User extends Authenticatable
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    public function hasEnabledTwoFactor(): bool
+    {
+        return ! is_null($this->two_factor_secret);
+    }
+
+    public function hasConfirmedTwoFactor(): bool
+    {
+        return $this->hasEnabledTwoFactor() && ! is_null($this->two_factor_confirmed_at);
+    }
+
+    /** @return list<string> */
+    public function recoveryCodes(): array
+    {
+        return $this->two_factor_recovery_codes ?? [];
+    }
+
+    /** Verbraucht (entfernt) genau einen Recovery-Code und speichert. */
+    public function replaceRecoveryCode(string $code): void
+    {
+        $this->forceFill([
+            'two_factor_recovery_codes' => array_values(array_filter(
+                $this->recoveryCodes(),
+                fn (string $c) => ! hash_equals($c, $code),
+            )),
+        ])->save();
     }
 }
