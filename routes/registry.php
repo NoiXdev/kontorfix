@@ -25,4 +25,9 @@ Route::prefix('/r/{group:slug}')->middleware([SubstituteBindings::class, 'regist
         ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
     Route::get('/{package}', [NpmController::class, 'packument'])
         ->where(['package' => '(?!packages\.json$)[a-z0-9._-]+']);
+
+    Route::put('/{scope}/{package}', [NpmController::class, 'publishScoped'])
+        ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
+    Route::put('/{package}', [NpmController::class, 'publish'])
+        ->where(['package' => '[a-z0-9._-]+']);
 });
