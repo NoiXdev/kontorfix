@@ -45,7 +45,9 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Ein defekter/langsamer Upstream ist ein Gateway-Fehler, kein 500 unsererseits.
-        $exceptions->render(fn (UpstreamException $e, Request $request) => $request->expectsJson() || $request->is('r/*')
-            ? response()->json(['error' => 'Upstream registry unavailable.'], 502)
-            : null);
+        // UpstreamException wird ausschließlich im Registry-Proxy geworfen — daher immer
+        // 502, unabhängig davon, ob der Zugriff über /r/{slug} oder eine Custom-Domain kam.
+        $exceptions->render(fn (UpstreamException $e, Request $request) => response()->json(
+            ['error' => 'Upstream registry unavailable.'], 502
+        ));
     })->create();
