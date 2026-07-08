@@ -35,11 +35,12 @@ return new class extends Migration
             $table->timestamp('released_at')->nullable();
             $table->timestamps();
             $table->unique(['package_id', 'version']);
+            $table->index(['package_id', 'released_at']);
         });
 
         Schema::create('groups', function (Blueprint $table) {
             $table->uuid('id')->primary();
-            $table->foreignUuid('organization_id')->nullable()->constrained();
+            $table->foreignUuid('organization_id')->nullable()->constrained()->nullOnDelete();
             $table->string('name');
             $table->string('slug')->unique();
             $table->boolean('public')->default(false);
@@ -52,6 +53,7 @@ return new class extends Migration
             $table->string('version_constraint')->nullable();
             $table->timestamp('available_until')->nullable();
             $table->primary(['group_id', 'package_id']);
+            $table->index('package_id');
         });
 
         Schema::create('domains', function (Blueprint $table) {   // genutzt ab v0.2

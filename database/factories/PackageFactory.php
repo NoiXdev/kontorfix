@@ -22,7 +22,7 @@ class PackageFactory extends Factory
     {
         return [
             'type' => PackageType::Composer,
-            'name' => Str::lower(fake()->unique()->word().'/'.fake()->unique()->word()),
+            'name' => Str::lower(fake()->word().'-'.fake()->unique()->numberBetween(1, 99999).'/'.fake()->word()),
             'description' => fake()->sentence(),
             'repository_url' => null,
             'sync_status' => SyncStatus::Pending,

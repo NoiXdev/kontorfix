@@ -5,6 +5,8 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Carbon;
 
 it('assigns pool packages to groups with constraints', function () {
     $pkg = Package::factory()->create(['name' => 'kadenz/shop-bridge']);
@@ -16,6 +18,31 @@ it('assigns pool packages to groups with constraints', function () {
     expect($group->packages()->first()->is($pkg))->toBeTrue()
         ->and($pkg->type)->toBe(PackageType::Composer)
         ->and($group->packages()->first()->pivot->available_until)->not->toBeNull();
+});
+
+it('casts the pivot available_until to a datetime', function () {
+    $pkg = Package::factory()->create();
+    $group = Group::factory()->create();
+    $group->packages()->attach($pkg, ['available_until' => now()->addYear()]);
+
+    expect($group->packages()->first()->pivot->available_until)
+        ->toBeInstanceOf(Carbon::class);
+});
+
+it('enforces the unique constraint on package type and name', function () {
+    Package::factory()->create(['name' => 'acme/demo']);
+
+    expect(fn () => Package::factory()->create(['name' => 'acme/demo']))
+        ->toThrow(QueryException::class);
+});
+
+it('prevents duplicate package assignments to the same group', function () {
+    $pkg = Package::factory()->create();
+    $group = Group::factory()->create();
+    $group->packages()->attach($pkg);
+
+    expect(fn () => $group->packages()->attach($pkg))
+        ->toThrow(QueryException::class);
 });
 
 it('links groups to an organization owner', function () {

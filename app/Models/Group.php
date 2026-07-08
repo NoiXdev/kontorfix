@@ -38,11 +38,12 @@ class Group extends Model
     }
 
     /**
-     * @return BelongsToMany<Package, $this>
+     * @return BelongsToMany<Package, $this, GroupPackage>
      */
     public function packages(): BelongsToMany
     {
         return $this->belongsToMany(Package::class)
+            ->using(GroupPackage::class)
             ->withPivot('version_constraint', 'available_until');
     }
 

@@ -40,15 +40,16 @@ class Package extends Model
      */
     public function versions(): HasMany
     {
-        return $this->hasMany(PackageVersion::class);
+        return $this->hasMany(PackageVersion::class)->orderByDesc('released_at');
     }
 
     /**
-     * @return BelongsToMany<Group, $this>
+     * @return BelongsToMany<Group, $this, GroupPackage>
      */
     public function groups(): BelongsToMany
     {
         return $this->belongsToMany(Group::class)
+            ->using(GroupPackage::class)
             ->withPivot('version_constraint', 'available_until');
     }
 }
