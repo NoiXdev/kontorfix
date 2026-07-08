@@ -1,0 +1,13 @@
+.git
+.github
+.ddev
+node_modules
+vendor
+public/build
+storage/app/artifacts
+storage/app/vcs
+storage/logs
+.claude
+docs
+tests
+.env
