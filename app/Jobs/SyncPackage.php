@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Enums\SyncStatus;
+use App\Events\PackageSynced;
+use App\Events\PackageSyncFailed;
 use App\Models\Package;
 use App\Services\Vcs\GitRepository;
 use Composer\Semver\Semver;
@@ -83,10 +85,14 @@ class SyncPackage implements ShouldQueue
                 'synced_at' => now(),
                 'description' => $this->latestDescription() ?? $this->package->description,
             ]);
+
+            PackageSynced::dispatch($this->package);
         } catch (Throwable $e) {
             // In der DB sichtbar machen UND weiterwerfen, damit die Queue transiente
             // Fehler erneut versucht (bei Erfolg überschreibt Synced den Failed-Status).
             $this->markFailed($e->getMessage());
+
+            PackageSyncFailed::dispatch($this->package, $e->getMessage());
 
             throw $e;
         }
