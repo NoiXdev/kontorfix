@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class RegistryToken extends Model
 {
@@ -47,5 +48,31 @@ class RegistryToken extends Model
     public function group(): BelongsTo
     {
         return $this->belongsTo(Group::class);
+    }
+
+    /**
+     * @return array{0: self, 1: string}
+     */
+    public static function issue(Organization $org, string $name, ?Group $group, TokenAbility $ability = TokenAbility::Read, ?\DateTimeInterface $expiresAt = null): array
+    {
+        $plain = 'kfx_'.Str::random(40);
+        $token = static::create([
+            'organization_id' => $org->id,
+            'group_id' => $group?->id,
+            'name' => $name,
+            'token_hash' => hash('sha256', $plain),
+            'ability' => $ability,
+            'expires_at' => $expiresAt,
+        ]);
+
+        return [$token, $plain];
+    }
+
+    public static function findByPlainText(string $plain): ?self
+    {
+        return static::query()
+            ->where('token_hash', hash('sha256', $plain))
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->first();
     }
 }
