@@ -13,6 +13,7 @@ class GroupController extends Controller
 {
     public function index(): Response
     {
+        // TODO(multi-tenant): auf organization_id des Users einschränken, sobald Kunden-Admins existieren.
         return Inertia::render('admin/groups/Index', [
             'groups' => Group::withCount('packages')->with('domains:id,group_id,hostname')->orderBy('name')->get()
                 ->map(fn (Group $g) => [

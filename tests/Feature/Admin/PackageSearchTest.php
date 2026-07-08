@@ -26,3 +26,14 @@ it('forbids members from searching', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
         ->getJson('/admin/package-search?q=x')->assertForbidden();
 });
+
+it('escapes like wildcards so a percent does not match everything', function () {
+    Package::factory()->create(['name' => 'acme/alpha']);
+    Package::factory()->create(['name' => 'acme/beta']);
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+    // '%' als wörtliches Zeichen gesucht -> kein Paket hat ein '%' im Namen -> 0 Treffer.
+    $this->actingAs($admin)->getJson('/admin/package-search?q=%25')->assertOk()->assertJsonCount(0);
+    // '_' ebenso wörtlich.
+    $this->actingAs($admin)->getJson('/admin/package-search?q=_')->assertOk()->assertJsonCount(0);
+});

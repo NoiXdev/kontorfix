@@ -57,13 +57,6 @@ function resetForm() {
     selected.value = [];
 }
 
-function onCreateNewPackage(query: string) {
-    // v0.1: das Anlegen neuer Pakete läuft weiterhin über /admin/packages.
-    // Wir navigieren nicht automatisch weg, um den Zuweisungs-Flow nicht zu unterbrechen —
-    // die Zeile signalisiert dem Nutzer nur, dass der Pool hier noch leer ist.
-    console.info(`Neues Paket anlegen: ${query}`);
-}
-
 function submit() {
     form.package_ids = selected.value.map((p) => p.id);
     form.post(route('admin.groups.store'), {
@@ -113,7 +106,7 @@ function close() {
 
                 <div class="grid gap-2">
                     <Label>Pakete</Label>
-                    <PackagePicker v-model="selected" @create-new="onCreateNewPackage" />
+                    <PackagePicker v-model="selected" />
                     <InputError :message="form.errors.package_ids" />
                 </div>
 

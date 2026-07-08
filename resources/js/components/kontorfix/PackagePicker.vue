@@ -2,7 +2,7 @@
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Input } from '@/components/ui/input';
 import { X } from 'lucide-vue-next';
-import { ref, watch } from 'vue';
+import { onUnmounted, ref, watch } from 'vue';
 
 interface Pkg {
     id: string;
@@ -12,11 +12,8 @@ interface Pkg {
 
 const selected = defineModel<Pkg[]>({ default: () => [] });
 
-const emit = defineEmits<{
-    createNew: [query: string];
-}>();
-
 const query = ref('');
+const failed = ref(false);
 const results = ref<Pkg[]>([]);
 const loading = ref(false);
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -39,6 +36,7 @@ watch(query, (value) => {
 async function search(value: string) {
     const token = ++requestToken;
     loading.value = true;
+    failed.value = false;
 
     try {
         const response = await fetch(`/admin/package-search?q=${encodeURIComponent(value)}`, {
@@ -46,13 +44,24 @@ async function search(value: string) {
             credentials: 'same-origin',
         });
 
-        if (!response.ok || token !== requestToken) {
+        if (token !== requestToken) {
+            return;
+        }
+
+        if (!response.ok) {
+            failed.value = true;
+            results.value = [];
             return;
         }
 
         const data: Pkg[] = await response.json();
         const selectedIds = new Set(selected.value.map((p) => p.id));
         results.value = data.filter((p) => !selectedIds.has(p.id));
+    } catch {
+        if (token === requestToken) {
+            failed.value = true;
+            results.value = [];
+        }
     } finally {
         if (token === requestToken) {
             loading.value = false;
@@ -62,7 +71,6 @@ async function search(value: string) {
 
 function addPackage(pkg: Pkg) {
     selected.value = [...selected.value, pkg];
-    results.value = results.value.filter((p) => p.id !== pkg.id);
     query.value = '';
     results.value = [];
 }
@@ -71,15 +79,11 @@ function removePackage(id: string) {
     selected.value = selected.value.filter((p) => p.id !== id);
 }
 
-function requestCreateNew() {
-    const q = query.value.trim();
-    if (q === '') {
-        return;
+onUnmounted(() => {
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
     }
-    emit('createNew', q);
-    query.value = '';
-    results.value = [];
-}
+});
 </script>
 
 <template>
@@ -98,16 +102,10 @@ function requestCreateNew() {
                 <span class="font-mono">{{ pkg.name }}</span>
             </button>
 
-            <p v-if="!loading && results.length === 0" class="px-3 py-2 text-sm text-muted-foreground">Keine Treffer im Pool.</p>
-
-            <button
-                type="button"
-                class="flex w-full items-center gap-1 border-t border-sidebar-border/70 px-3 py-2 text-left text-sm text-copper-hi hover:bg-muted/50 dark:border-sidebar-border"
-                @click="requestCreateNew"
-            >
-                <span aria-hidden="true">＋</span>
-                <span>Neues Paket „{{ query }}“ anlegen und zuweisen</span>
-            </button>
+            <p v-if="failed" class="px-3 py-2 text-sm text-destructive">Suche fehlgeschlagen — bitte erneut versuchen.</p>
+            <p v-else-if="!loading && results.length === 0" class="px-3 py-2 text-sm text-muted-foreground">
+                Keine Treffer im Pool. Neue Pakete legst du unter „Pakete“ an.
+            </p>
         </div>
 
         <div v-if="selected.length > 0" class="flex flex-wrap gap-2">
