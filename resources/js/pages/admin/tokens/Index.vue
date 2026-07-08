@@ -1,0 +1,237 @@
+<script setup lang="ts">
+import InputError from '@/components/InputError.vue';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import AppLayout from '@/layouts/AppLayout.vue';
+import { type BreadcrumbItem, type SharedData } from '@/types';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Copy, Plus, Trash2 } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+
+interface TokenRow {
+    id: string;
+    name: string;
+    organization: string | null;
+    group: string | null;
+    ability: 'read' | 'publish';
+    last_used_at: string | null;
+    expires_at: string | null;
+}
+
+interface OrganizationOption {
+    id: string;
+    name: string;
+}
+
+interface GroupOption {
+    id: string;
+    name: string;
+    organization_id: string;
+}
+
+const props = defineProps<{
+    tokens: TokenRow[];
+    organizations: OrganizationOption[];
+    groups: GroupOption[];
+}>();
+
+const breadcrumbs: BreadcrumbItem[] = [{ title: 'Tokens', href: '/admin/tokens' }];
+
+const page = usePage<SharedData>();
+const flashSuccess = computed(() => page.props.flash?.success ?? null);
+const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
+
+const tokenCalloutDismissed = ref(false);
+watch(plainTextToken, (value) => {
+    if (value) {
+        tokenCalloutDismissed.value = false;
+    }
+});
+
+const showTokenCallout = computed(() => !!plainTextToken.value && !tokenCalloutDismissed.value);
+
+function copyToken() {
+    if (plainTextToken.value) {
+        navigator.clipboard.writeText(plainTextToken.value);
+    }
+}
+
+const dialogOpen = ref(false);
+
+const form = useForm({
+    name: '',
+    organization_id: '',
+    group_id: '',
+    ability: 'read' as 'read' | 'publish',
+});
+
+const filteredGroups = computed(() => props.groups.filter((g) => g.organization_id === form.organization_id));
+
+watch(
+    () => form.organization_id,
+    () => {
+        form.group_id = '';
+    },
+);
+
+function submit() {
+    form.post(route('admin.tokens.store'), {
+        onSuccess: () => {
+            dialogOpen.value = false;
+            form.reset();
+        },
+    });
+}
+
+function abilityLabel(ability: 'read' | 'publish') {
+    return ability === 'publish' ? 'Veröffentlichen' : 'Lesen';
+}
+
+function destroyToken(id: string) {
+    router.delete(route('admin.tokens.destroy', id), {
+        onBefore: () => confirm('Token wirklich widerrufen?'),
+    });
+}
+</script>
+
+<template>
+    <Head title="Tokens" />
+
+    <AppLayout :breadcrumbs="breadcrumbs">
+        <div class="flex flex-1 flex-col gap-4 p-4">
+            <div
+                v-if="flashSuccess"
+                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+            >
+                {{ flashSuccess }}
+            </div>
+
+            <div v-if="showTokenCallout" class="rounded-xl border border-copper/30 bg-copper/10 p-4">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0 flex-1 space-y-2">
+                        <p class="font-medium text-copper-hi">Neuer Token erstellt</p>
+                        <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                            {{ plainTextToken }}
+                        </p>
+                        <p class="text-sm text-muted-foreground">Dieser Token wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <Button variant="outline" size="sm" @click="copyToken">
+                            <Copy class="size-4" />
+                            Kopieren
+                        </Button>
+                        <Button variant="ghost" size="sm" @click="tokenCalloutDismissed = true"> Schließen </Button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <h1 class="text-xl font-semibold">Tokens</h1>
+                <Button @click="dialogOpen = true">
+                    <Plus class="size-4" />
+                    Token erstellen
+                </Button>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                <table class="w-full text-left text-sm">
+                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                        <tr>
+                            <th class="px-4 py-3 font-medium">Name</th>
+                            <th class="px-4 py-3 font-medium">Organisation</th>
+                            <th class="px-4 py-3 font-medium">Gruppe</th>
+                            <th class="px-4 py-3 font-medium">Recht</th>
+                            <th class="px-4 py-3 font-medium">Zuletzt genutzt</th>
+                            <th class="px-4 py-3 font-medium">Läuft ab</th>
+                            <th class="px-4 py-3 font-medium">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="token in props.tokens"
+                            :key="token.id"
+                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                        >
+                            <td class="px-4 py-3 font-mono">{{ token.name }}</td>
+                            <td class="px-4 py-3">{{ token.organization ?? '—' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ token.group ?? 'Alle Gruppen' }}</td>
+                            <td class="px-4 py-3">{{ abilityLabel(token.ability) }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ token.last_used_at ?? 'nie' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ token.expires_at ?? '—' }}</td>
+                            <td class="px-4 py-3">
+                                <Button variant="ghost" size="icon" @click="destroyToken(token.id)" aria-label="Token widerrufen">
+                                    <Trash2 class="size-4 text-destructive" />
+                                </Button>
+                            </td>
+                        </tr>
+                        <tr v-if="props.tokens.length === 0">
+                            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground">Noch keine Tokens erstellt.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <Dialog v-model:open="dialogOpen">
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Token erstellen</DialogTitle>
+                </DialogHeader>
+
+                <form class="space-y-4" @submit.prevent="submit">
+                    <div class="grid gap-2">
+                        <Label for="name">Name</Label>
+                        <Input id="name" v-model="form.name" placeholder="kadenz-ci" autocomplete="off" />
+                        <InputError :message="form.errors.name" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="organization_id">Organisation</Label>
+                        <select
+                            id="organization_id"
+                            v-model="form.organization_id"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                            <option value="" disabled>Bitte wählen</option>
+                            <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
+                        </select>
+                        <InputError :message="form.errors.organization_id" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="group_id">Gruppe</Label>
+                        <select
+                            id="group_id"
+                            v-model="form.group_id"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                            <option value="">Alle Gruppen</option>
+                            <option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+                        </select>
+                        <InputError :message="form.errors.group_id" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="ability">Recht</Label>
+                        <select
+                            id="ability"
+                            v-model="form.ability"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                            <option value="read">Lesen</option>
+                            <option value="publish">Veröffentlichen</option>
+                        </select>
+                        <InputError :message="form.errors.ability" />
+                    </div>
+
+                    <DialogFooter>
+                        <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
+                        <Button type="submit" :disabled="form.processing">Erstellen</Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+    </AppLayout>
+</template>

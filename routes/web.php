@@ -16,7 +16,7 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
-    // tokens kommen in Task 14
+    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
 });
 
 require __DIR__.'/settings.php';
