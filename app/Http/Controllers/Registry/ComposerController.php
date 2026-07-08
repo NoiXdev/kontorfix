@@ -8,8 +8,11 @@ use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Composer\ComposerMetadataBuilder;
 use App\Services\RegistryAccessService;
+use App\Services\Vcs\GitRepository;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ComposerController extends Controller
 {
@@ -36,9 +39,42 @@ class ComposerController extends Controller
         return response()->json($this->metadata->build($package, $group, $request->getSchemeAndHttpHost()));
     }
 
-    public function dist(Request $request, Group $group, string $vendor, string $name, string $version): never
+    public function dist(Request $request, Group $group, string $vendor, string $name, string $version): StreamedResponse
     {
-        abort(501, 'Dist download implemented in Task 10.');
+        $this->authorizeGroup($request, $group);
+        $package = $this->findAccessible($request, $group, "{$vendor}/{$name}");
+        $pkgVersion = $package->versions()->where('version', $version)->first();
+
+        if ($pkgVersion === null) {
+            abort(404);
+        }
+
+        $disk = Storage::disk('artifacts');
+        $path = $pkgVersion->dist_path ?? "dists/{$package->id}/{$version}.zip";
+
+        if (! $disk->exists($path)) {
+            if ($package->repository_url === null) {
+                abort(404);
+            }
+            $repo = new GitRepository($package->repository_url, $package->id);
+            $repo->sync();
+            $tmp = $repo->archiveZip($pkgVersion->source_reference);
+            $disk->put($path, file_get_contents($tmp));
+            @unlink($tmp);
+            $pkgVersion->update(['dist_path' => $path]);
+        }
+
+        return response()->streamDownload(
+            function () use ($disk, $path) {
+                $stream = $disk->readStream($path);
+                if ($stream !== null) {
+                    fpassthru($stream);
+                    fclose($stream);
+                }
+            },
+            "{$name}-{$pkgVersion->version_pretty}.zip",
+            ['Content-Type' => 'application/zip'],
+        );
     }
 
     protected function authorizeGroup(Request $request, Group $group): void

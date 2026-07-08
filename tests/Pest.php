@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Group;
+use App\Models\RegistryToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -50,4 +52,11 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+function tokenHeaderFor(Group $group): array
+{
+    [, $plain] = RegistryToken::issue($group->organization, 'test', $group);
+
+    return ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
 }

@@ -4,14 +4,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
-use App\Models\RegistryToken;
-
-function tokenHeaderFor(Group $group): array
-{
-    [, $plain] = RegistryToken::issue($group->organization, 'test', $group);
-
-    return ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
-}
 
 it('serves packages.json with metadata-url and available packages', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
