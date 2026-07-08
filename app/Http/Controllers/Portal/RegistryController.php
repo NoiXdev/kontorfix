@@ -1,0 +1,65 @@
+<?php
+
+namespace App\Http\Controllers\Portal;
+
+use App\Http\Controllers\Controller;
+use App\Models\Group;
+use App\Models\Package;
+use App\Services\Registry\RegistryUrl;
+use App\Services\Registry\SetupSnippetBuilder;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use Inertia\Response;
+
+class RegistryController extends Controller
+{
+    public function __construct(private RegistryUrl $url, private SetupSnippetBuilder $snippets) {}
+
+    public function index(Request $request): Response
+    {
+        $groups = Group::where('organization_id', $request->user()->organization_id)
+            ->with('domains')
+            ->withCount('packages')
+            ->orderBy('name')
+            ->get();
+
+        return Inertia::render('portal/Registries', [
+            'registries' => $groups->map(fn (Group $g) => [
+                'id' => $g->id,
+                'name' => $g->name,
+                'slug' => $g->slug,
+                'url' => $this->url->base($g),
+                'packages_count' => $g->packages_count,
+            ]),
+        ]);
+    }
+
+    public function show(Request $request, Group $group): Response
+    {
+        $this->authorize('view', $group);
+        $group->load('domains');
+
+        // Versionen absteigend nach released_at laden und in PHP die neueste greifen —
+        // KEIN limit(1) im Eager-Load (constrained das über alle Pakete hinweg, nicht pro Paket).
+        $packages = $group->packages()
+            ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
+            ->orderBy('name')
+            ->get();
+
+        return Inertia::render('portal/Registry', [
+            'registry' => [
+                'id' => $group->id,
+                'name' => $group->name,
+                'slug' => $group->slug,
+                'url' => $this->url->base($group),
+            ],
+            'snippets' => $this->snippets->for($group),
+            'packages' => $packages->map(fn (Package $p) => [
+                'name' => $p->name,
+                'type' => $p->type->value,
+                'description' => $p->description,
+                'latest_version' => $p->versions->first()?->version_pretty,
+            ]),
+        ]);
+    }
+}

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin;
+use App\Http\Controllers\Portal\RegistryController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -20,6 +21,11 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
+});
+
+Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
+    Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
+    Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
 });
 
 require __DIR__.'/settings.php';
