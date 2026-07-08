@@ -21,6 +21,7 @@ class OrganizationFactory extends Factory
         return [
             'name' => $n = fake()->company(),
             'slug' => Str::slug($n).'-'.fake()->unique()->numberBetween(1, 9999),
+            'is_operator' => false,
         ];
     }
 }

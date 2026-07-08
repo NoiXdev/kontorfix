@@ -14,3 +14,16 @@ it('creates users and organizations with uuid v7 keys', function () {
         ->and($user->organization->is($org))->toBeTrue()
         ->and($user->role)->toBe(UserRole::Admin);
 });
+
+it('generates time-ordered uuid v7 keys', function () {
+    $first = Organization::factory()->create();
+    $second = Organization::factory()->create();
+
+    expect($first->id[14])->toBe('7')   // Versions-Nibble
+        ->and($second->id[14])->toBe('7')
+        ->and(strcmp($first->id, $second->id))->toBeLessThan(0);
+});
+
+it('defaults organizations to non-operator with a boolean cast', function () {
+    expect(Organization::factory()->create()->is_operator)->toBeFalse();
+});
