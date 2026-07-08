@@ -36,9 +36,9 @@ class ProxyDownloadController extends Controller
     public function composer(Request $request, Group $group, string $upstream, string $vendor, string $name, string $version): StreamedResponse
     {
         $this->authorizeGroup($request, $group);
-        $up = $this->resolveUpstream($upstream, $group, PackageType::Composer);
-
         $packageName = "{$vendor}/{$name}";
+        $up = $this->resolveUpstream($upstream, $group, PackageType::Composer, $packageName);
+
         $path = "proxy/{$up->id}/composer/{$vendor}/{$name}/{$version}.zip";
         $disk = Storage::disk('artifacts');
 
@@ -47,8 +47,9 @@ class ProxyDownloadController extends Controller
             // gecachten Upstream-Payload (dist.url), niemals aus der Client-Anfrage. Version
             // und Paketname aus der Route dienen nur dazu, den passenden Cache-Eintrag zu
             // SELEKTIEREN — nicht dazu, eine beliebige URL zu konstruieren.
-            $originalUrl = $this->resolveComposerDistUrl($request, $group, $up, $packageName, $version);
-            abort_if($originalUrl === null, 404);
+            $originalUrl = $this->assertSafeArtifactUrl(
+                $this->resolveComposerDistUrl($request, $group, $up, $packageName, $version)
+            );
 
             $bytes = $this->client->getBytes($up, $originalUrl);
             abort_if($bytes === null, 404);
@@ -82,7 +83,7 @@ class ProxyDownloadController extends Controller
     private function respondNpm(Request $request, Group $group, string $upstream, string $packageName, string $file): StreamedResponse
     {
         $this->authorizeGroup($request, $group);
-        $up = $this->resolveUpstream($upstream, $group, PackageType::Npm);
+        $up = $this->resolveUpstream($upstream, $group, PackageType::Npm, $packageName);
 
         $path = "proxy/{$up->id}/npm/{$packageName}/{$file}";
         $disk = Storage::disk('artifacts');
@@ -91,8 +92,9 @@ class ProxyDownloadController extends Controller
             // SSRF-Schutz: die abzurufende URL ist AUSSCHLIESSLICH dist.tarball aus dem
             // gecachten Packument — der Client-Dateiname dient nur zur Auswahl des
             // passenden Versions-Eintrags, nie zur Konstruktion der Ziel-URL.
-            $originalUrl = $this->resolveNpmTarballUrl($request, $group, $up, $packageName, $file);
-            abort_if($originalUrl === null, 404);
+            $originalUrl = $this->assertSafeArtifactUrl(
+                $this->resolveNpmTarballUrl($request, $group, $up, $packageName, $file)
+            );
 
             $bytes = $this->client->getBytes($up, $originalUrl);
             abort_if($bytes === null, 404);
@@ -113,12 +115,44 @@ class ProxyDownloadController extends Controller
         );
     }
 
-    private function resolveUpstream(string $upstreamId, Group $group, PackageType $type): Upstream
+    private function resolveUpstream(string $upstreamId, Group $group, PackageType $type, string $packageName): Upstream
     {
         $up = Upstream::find($upstreamId);
-        abort_if($up === null || $up->group_id !== $group->id || $up->type !== $type, 404);
+        abort_if($up === null || $up->group_id !== $group->id || $up->type !== $type || ! $up->enabled, 404);
+
+        // Strict-Mode gilt auch für den Artefakt-Download — sonst ließe sich das Artefakt
+        // eines nicht freigegebenen Pakets über einen alten Cache-Eintrag laden, obwohl
+        // die Metadaten bereits 404 liefern (Dependency-Confusion-Schutz).
+        abort_unless($up->allowsPackage($packageName), 404);
 
         return $up;
+    }
+
+    /**
+     * Verhindert Second-Order-SSRF: eine vom (evtl. kompromittierten) Upstream gelieferte
+     * dist-URL darf kein file://, gopher:// o.Ä. sein und nicht auf interne/reservierte
+     * Adressen zeigen. Dist-URLs zeigen legitim auf CDNs (GitHub, npm), daher keine
+     * Host-Gleichheit mit dem Upstream, aber Scheme- und Adressbereichs-Prüfung.
+     */
+    private function assertSafeArtifactUrl(?string $url): string
+    {
+        abort_if($url === null, 404);
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        abort_unless(in_array($scheme, ['http', 'https'], true), 422, 'Unsafe upstream artifact URL.');
+
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        abort_if($host === '', 422, 'Unsafe upstream artifact URL.');
+
+        // IP-Literale in privaten/reservierten Bereichen ablehnen; 'localhost' ebenso.
+        if (strtolower($host) === 'localhost'
+            || (filter_var($host, FILTER_VALIDATE_IP) !== false
+                && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false)
+        ) {
+            abort(422, 'Unsafe upstream artifact URL.');
+        }
+
+        return $url;
     }
 
     private function resolveComposerDistUrl(Request $request, Group $group, Upstream $up, string $packageName, string $version): ?string

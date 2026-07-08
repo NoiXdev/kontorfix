@@ -2,7 +2,6 @@
 
 namespace App\Services\Upstream;
 
-use App\Enums\UpstreamPolicy;
 use App\Models\Group;
 use App\Models\Upstream;
 
@@ -18,9 +17,7 @@ class NpmProxyService
      */
     public function packument(Group $group, Upstream $upstream, string $packageName, string $baseUrl): ?array
     {
-        if ($upstream->policy === UpstreamPolicy::Strict
-            && ! $upstream->allowedPackages()->where('name', $packageName)->exists()
-        ) {
+        if (! $upstream->allowsPackage($packageName)) {
             return null;
         }
 

@@ -54,6 +54,20 @@ class Upstream extends Model
     }
 
     /**
+     * Ob dieses Paket über diesen Upstream ausgeliefert werden darf. Im Strict-Modus
+     * nur, wenn es auf der Allowlist steht (Schutz gegen Dependency Confusion). Diese
+     * eine Stelle gilt für Metadaten UND Artefakt-Download.
+     */
+    public function allowsPackage(string $name): bool
+    {
+        if ($this->policy !== UpstreamPolicy::Strict) {
+            return true;
+        }
+
+        return $this->allowedPackages()->where('name', $name)->exists();
+    }
+
+    /**
      * @return HasMany<UpstreamMetadataCache, $this>
      */
     public function metadataCache(): HasMany

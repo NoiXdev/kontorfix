@@ -29,7 +29,9 @@ class UpstreamClient
 
     public function getBytes(Upstream $upstream, string $absoluteUrl): ?string
     {
-        $response = $this->request($upstream)->get($absoluteUrl);
+        // Keine Redirects folgen — sonst könnte ein Upstream via 302 auf eine interne
+        // Adresse umleiten und die vorgelagerte URL-Prüfung umgehen.
+        $response = $this->request($upstream)->withoutRedirecting()->get($absoluteUrl);
         if ($response->status() === 404) {
             return null;
         }

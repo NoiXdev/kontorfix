@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PackageType;
+use App\Enums\UpstreamPolicy;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Upstream;
@@ -76,4 +77,51 @@ it('404 when the requested version is not in the cached metadata', function () {
 
     $this->withHeaders(tokenHeaderFor($group))
         ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/9.9.9.0")->assertNotFound();
+});
+
+it('enforces strict mode on the download route even with cached metadata', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test', 'policy' => UpstreamPolicy::Strict]);
+    // Metadaten sind im Cache (z.B. aus der Zeit vor strict), aber das Paket ist NICHT freigegeben.
+    seedComposerCache($up, 'evil/pkg', '1.0.0.0', 'https://cdn.test/evil.zip');
+    Http::fake(['cdn.test/*' => Http::response('bytes', 200)]);
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/evil/pkg/1.0.0.0")->assertNotFound();
+    Http::assertNothingSent();
+
+    // Nach Freigabe: ladbar.
+    $up->allowedPackages()->create(['name' => 'evil/pkg']);
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/evil/pkg/1.0.0.0")->assertOk();
+});
+
+it('refuses a hostile upstream dist url pointing at an internal address', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'http://169.254.169.254/latest/meta-data/');
+    Http::fake();
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertStatus(422);
+    Http::assertNothingSent(); // die interne Adresse darf nie angefragt werden
+
+    // file:// ebenso.
+    UpstreamMetadataCache::where('upstream_id', $up->id)->delete();
+    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'file:///etc/passwd');
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertStatus(422);
+    Http::assertNothingSent();
+});
+
+it('404s a download through a disabled upstream', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test', 'enabled' => false]);
+    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'https://cdn.test/a.zip');
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertNotFound();
 });
