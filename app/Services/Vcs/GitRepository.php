@@ -4,6 +4,7 @@ namespace App\Services\Vcs;
 
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
+use InvalidArgumentException;
 use RuntimeException;
 
 class GitRepository
@@ -12,6 +13,10 @@ class GitRepository
 
     public function __construct(private readonly string $url, string $storageKey)
     {
+        if (! preg_match('/^[A-Za-z0-9._-]+$/', $storageKey) || str_contains($storageKey, '..')) {
+            throw new InvalidArgumentException('Invalid storage key.');
+        }
+
         $this->mirrorPath = storage_path('app/vcs/'.$storageKey.'.git');
     }
 
@@ -44,20 +49,32 @@ class GitRepository
 
     public function commitFor(string $ref): string
     {
-        return trim($this->run(['git', 'rev-list', '-n', '1', $ref])->output());
+        return trim($this->run(['git', 'rev-list', '-n', '1', '--end-of-options', $ref])->output());
     }
 
     public function fileAtRef(string $ref, string $path): string
     {
-        return $this->run(['git', 'show', "{$ref}:{$path}"])->output();
+        // --end-of-options verhindert, dass ein Ref/Pfad wie "--output=..." als git-Option
+        // interpretiert wird (Option-Injection aus einem bösartigen Upstream-Tag).
+        return $this->run(['git', 'show', '--end-of-options', "{$ref}:{$path}"])->output();
     }
 
+    /**
+     * Baut ein Zip-Archiv des Refs. Der Aufrufer ist für das Löschen der zurückgegebenen
+     * Datei verantwortlich.
+     */
     public function archiveZip(string $ref): string
     {
-        $tmp = tempnam(sys_get_temp_dir(), 'kfx-dist-').'.zip';
-        $this->run(['git', 'archive', '--format=zip', '-o', $tmp, $ref]);
+        $stub = tempnam(sys_get_temp_dir(), 'kfx-dist-');
+        $zip = $stub.'.zip';
 
-        return $tmp;
+        try {
+            $this->run(['git', 'archive', '--format=zip', '-o', $zip, '--end-of-options', $ref]);
+        } finally {
+            @unlink($stub); // tempnam legt eine leere Stub-Datei an — auch bei Fehler entfernen
+        }
+
+        return $zip;
     }
 
     /**

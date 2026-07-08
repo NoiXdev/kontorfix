@@ -59,3 +59,31 @@ it('throws a useful error for unreachable urls', function () {
     $repo = new GitRepository('file:///does/not/exist-'.uniqid(), 'test-pkg-'.uniqid());
     expect(fn () => $repo->sync())->toThrow(RuntimeException::class);
 });
+
+it('rejects storage keys that attempt path traversal', function () {
+    expect(fn () => new GitRepository('file:///tmp/x', '../../etc/evil'))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('does not let a malicious ref inject git options', function () {
+    $repo = new GitRepository('file://'.FixtureRepo::make(), 'test-pkg-'.uniqid());
+    $repo->sync();
+
+    // Ein Tag/Ref, der wie eine git-Option aussieht, darf keine Datei schreiben,
+    // sondern muss als (ungültiger) Objektname scheitern.
+    $evil = '/tmp/kfx-pwned-'.uniqid().'.zip';
+    expect(fn () => $repo->archiveZip("--output={$evil}"))->toThrow(RuntimeException::class);
+    expect(file_exists($evil))->toBeFalse();
+});
+
+it('does not leave the tempnam stub behind when archiving', function () {
+    $repo = new GitRepository('file://'.FixtureRepo::make(), 'test-pkg-'.uniqid());
+    $repo->sync();
+
+    $stubsBefore = array_filter(glob(sys_get_temp_dir().'/kfx-dist-*'), fn ($f) => ! str_ends_with($f, '.zip'));
+    $zip = $repo->archiveZip('v1.0.0');
+    $stubsAfter = array_filter(glob(sys_get_temp_dir().'/kfx-dist-*'), fn ($f) => ! str_ends_with($f, '.zip'));
+
+    expect($stubsAfter)->toBe($stubsBefore); // kein neuer Stub durch diesen Aufruf
+    unlink($zip);
+});
