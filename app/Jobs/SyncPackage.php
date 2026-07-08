@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\SyncStatus;
 use App\Models\Package;
 use App\Services\Vcs\GitRepository;
+use Composer\Semver\Semver;
 use Composer\Semver\VersionParser;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -16,7 +17,16 @@ class SyncPackage implements ShouldQueue
 {
     use Queueable;
 
+    /** Transiente Fehler (Netzwerk, git timeout) werden erneut versucht. */
+    public int $tries = 3;
+
     public function __construct(public Package $package) {}
+
+    /** @return list<int> */
+    public function backoff(): array
+    {
+        return [60, 300, 900];
+    }
 
     /** @return list<WithoutOverlapping> */
     public function middleware(): array
@@ -27,12 +37,9 @@ class SyncPackage implements ShouldQueue
     public function handle(): void
     {
         if ($this->package->repository_url === null) {
-            $this->package->update([
-                'sync_status' => SyncStatus::Failed,
-                'sync_error' => 'Package has no repository_url configured.',
-            ]);
+            $this->markFailed('Package has no repository_url configured.');
 
-            return;
+            return; // Konfigurationsfehler — kein Retry sinnvoll
         }
 
         $this->package->update(['sync_status' => SyncStatus::Syncing]);
@@ -49,7 +56,12 @@ class SyncPackage implements ShouldQueue
                     continue; // kein Versions-Tag
                 }
 
-                $composerJson = json_decode($repo->fileAtRef($tag, 'composer.json'), true);
+                try {
+                    $composerJson = json_decode($repo->fileAtRef($tag, 'composer.json'), true);
+                } catch (Throwable) {
+                    continue; // Tag ohne composer.json — überspringen, nicht den ganzen Sync abbrechen
+                }
+
                 if (! is_array($composerJson)) {
                     continue;
                 }
@@ -60,26 +72,47 @@ class SyncPackage implements ShouldQueue
                         'version_pretty' => $tag,
                         'source_reference' => $repo->commitFor($tag),
                         'metadata' => $composerJson,
-                        'released_at' => now(),
+                        'released_at' => $repo->committedAt($tag), // stabiles Commit-Datum, kein now()
                     ],
                 );
             }
-
-            $latest = $this->package->versions()->first();
-            $description = $latest !== null ? ($latest->metadata['description'] ?? null) : null;
-            $description ??= $this->package->description;
 
             $this->package->update([
                 'sync_status' => SyncStatus::Synced,
                 'sync_error' => null,
                 'synced_at' => now(),
-                'description' => $description,
+                'description' => $this->latestDescription() ?? $this->package->description,
             ]);
         } catch (Throwable $e) {
-            $this->package->update([
-                'sync_status' => SyncStatus::Failed,
-                'sync_error' => $e->getMessage(),
-            ]);
+            // In der DB sichtbar machen UND weiterwerfen, damit die Queue transiente
+            // Fehler erneut versucht (bei Erfolg überschreibt Synced den Failed-Status).
+            $this->markFailed($e->getMessage());
+
+            throw $e;
         }
+    }
+
+    private function markFailed(string $message): void
+    {
+        $this->package->update([
+            'sync_status' => SyncStatus::Failed,
+            'sync_error' => $message,
+        ]);
+    }
+
+    /** Description der höchsten Semver-Version (nicht nach Sync-Zeit sortiert). */
+    private function latestDescription(): ?string
+    {
+        $versions = $this->package->versions()->get();
+
+        if ($versions->isEmpty()) {
+            return null;
+        }
+
+        /** @var list<string> $sorted */
+        $sorted = Semver::rsort($versions->pluck('version')->all());
+        $latest = $versions->firstWhere('version', $sorted[0]);
+
+        return $latest !== null ? ($latest->metadata['description'] ?? null) : null;
     }
 }

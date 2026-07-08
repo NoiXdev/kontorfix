@@ -52,6 +52,15 @@ class GitRepository
         return trim($this->run(['git', 'rev-list', '-n', '1', '--end-of-options', $ref])->output());
     }
 
+    /**
+     * Committer-Datum des Refs als ISO-8601-String — stabil über Re-Syncs hinweg,
+     * anders als now().
+     */
+    public function committedAt(string $ref): string
+    {
+        return trim($this->run(['git', 'log', '-1', '--format=%cI', '--end-of-options', $ref])->output());
+    }
+
     public function fileAtRef(string $ref, string $path): string
     {
         // --end-of-options verhindert, dass ein Ref/Pfad wie "--output=..." als git-Option
