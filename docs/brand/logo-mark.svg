@@ -1,0 +1,6 @@
+<svg width="96" height="96" viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Kontorfix">
+  <rect width="96" height="96" rx="20" fill="#151F2E"/>
+  <circle cx="48" cy="21.5" r="3" fill="#7FB5A2"/>
+  <path d="M18 78 V54 H30 V42 H42 V30 H54 V42 H66 V54 H78 V78 Z" fill="#D07A45"/>
+  <rect x="43" y="60" width="10" height="18" fill="#151F2E"/>
+</svg>

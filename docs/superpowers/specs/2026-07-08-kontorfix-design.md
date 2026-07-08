@@ -179,8 +179,10 @@ Readmes/Versionen.
   Umschlagplatz von Paketen; fügt sich in die NoiXdev-Namensfamilie (mailrelaynix,
   notefix, marketix, inventorix). Kollisionsprüfung 2026-07-08: keine Software-,
   Registry- oder Paketnamens-Kollision.
-- **Logo/CI:** eigener Arbeitsschritt vor Implementierungsstart (Logo, Farbwelt,
-  Wortmarke; Verwendung in GUI-Login, Readme, ggf. Landing Pages der Registries).
+- **Logo/CI:** freigegeben am 2026-07-08 — Bildmarke „Der Speichergiebel"
+  (Treppengiebel, Backstein-Kupfer auf Seenacht-Blau, Grünspan als Sekundärton),
+  Typografie Bricolage Grotesque + JetBrains Mono, UI dark-first.
+  Assets und Token-Tabelle: `docs/brand/`.
 - Öffentliche Außendarstellung (falls später OSS): keine Tech-Stack-Details in
   Landingpage-Copy (Haus-Regel); technische Doku darf alles benennen.
 
