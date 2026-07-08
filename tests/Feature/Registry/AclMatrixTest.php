@@ -41,9 +41,13 @@ it('denies anonymous access to private groups but allows public ones', function 
 });
 
 it('lists only packages assigned to the group and not expired', function () {
+    $stillThere = Package::factory()->create();
+    $this->groupA->packages()->attach($stillThere);
     $this->groupA->packages()->updateExistingPivot($this->pkgA->id, ['available_until' => now()->subDay()]);
-    expect($this->svc->packagesFor($this->groupA)->pluck('id'))
-        ->not->toContain($this->pkgA->id);
+
+    $ids = $this->svc->packagesFor($this->groupA)->pluck('id');
+    expect($ids)->not->toContain($this->pkgA->id)
+        ->and($ids)->toContain($stillThere->id);
 });
 
 it('denies a group-scoped token of the same org access to sibling groups', function () {
