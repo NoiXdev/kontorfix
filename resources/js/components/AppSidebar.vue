@@ -11,17 +11,25 @@ import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
 
-// Admin-Bereich nur für Rollen mit Zugriff einblenden — sonst führen die Links zu 403.
-const canManage = computed(() => ['admin', 'maintainer'].includes(page.props.auth.user?.role ?? ''));
+// Nur echte Member sehen ausschließlich die Portal-Navigation. Fehlt/unbekannt die Rolle,
+// verhalten wir uns wie admin/maintainer, damit keine leere Nav entsteht.
+const isMember = computed(() => page.props.auth.user?.role === 'member');
 
-const mainNavItems = computed<NavItem[]>(() => [
-    {
-        title: 'Dashboard',
-        href: '/dashboard',
-        icon: LayoutGrid,
-    },
-    ...(canManage.value
+const mainNavItems = computed<NavItem[]>(() =>
+    isMember.value
         ? [
+              {
+                  title: 'Registries',
+                  href: route('portal.registries.index'),
+                  icon: Boxes,
+              },
+          ]
+        : [
+              {
+                  title: 'Dashboard',
+                  href: '/dashboard',
+                  icon: LayoutGrid,
+              },
               {
                   title: 'Pakete',
                   href: '/admin/packages',
@@ -52,9 +60,13 @@ const mainNavItems = computed<NavItem[]>(() => [
                   href: '/admin/webhooks',
                   icon: Webhook,
               },
-          ]
-        : []),
-]);
+              {
+                  title: 'Portal',
+                  href: route('portal.registries.index'),
+                  icon: Package,
+              },
+          ],
+);
 
 const footerNavItems: NavItem[] = [
     {

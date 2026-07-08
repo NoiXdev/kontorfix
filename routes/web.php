@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
@@ -11,6 +12,10 @@ Route::get('/', function () {
 })->name('home');
 
 Route::get('dashboard', function () {
+    if (request()->user()->role === UserRole::Member) {
+        return redirect()->route('portal.registries.index');
+    }
+
     return Inertia::render('Dashboard');
 })->middleware(['auth', 'verified'])->name('dashboard');
 
