@@ -125,3 +125,31 @@ it('404s a download through a disabled upstream', function () {
     $this->withHeaders(tokenHeaderFor($group))
         ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertNotFound();
 });
+
+it('follows a safe upstream redirect (like github zipball) to the final artifact', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'https://cdn.test/acme/demo-1.0.0.zip');
+
+    Http::fake([
+        'cdn.test/*' => Http::response('', 302, ['Location' => 'https://codeload.test/final.zip']),
+        'codeload.test/*' => Http::response('zip-bytes', 200),
+    ]);
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertOk();
+});
+
+it('refuses an upstream redirect that points at an internal address', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    seedComposerCache($up, 'evil/pkg', '1.0.0.0', 'https://cdn.test/evil.zip');
+
+    Http::fake(['cdn.test/*' => Http::response('', 302, ['Location' => 'http://169.254.169.254/meta'])]);
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/evil/pkg/1.0.0.0")->assertStatus(502);
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), '169.254'));
+});

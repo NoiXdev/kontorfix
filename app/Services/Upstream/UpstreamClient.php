@@ -29,17 +29,39 @@ class UpstreamClient
 
     public function getBytes(Upstream $upstream, string $absoluteUrl): ?string
     {
-        // Keine Redirects folgen — sonst könnte ein Upstream via 302 auf eine interne
-        // Adresse umleiten und die vorgelagerte URL-Prüfung umgehen.
-        $response = $this->request($upstream)->withoutRedirecting()->get($absoluteUrl);
-        if ($response->status() === 404) {
-            return null;
-        }
-        if (! $response->successful()) {
-            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.");
+        // Redirects manuell folgen und JEDEN Hop erneut gegen die SSRF-Regeln prüfen —
+        // packagist-Dists zeigen legitim auf GitHub, das per 302 auf einen anderen Host
+        // (codeload/objects.githubusercontent) weiterleitet; ein bösartiger Upstream
+        // dürfte darüber aber nicht auf eine interne Adresse umlenken.
+        $url = $absoluteUrl;
+
+        for ($hop = 0; $hop < 5; $hop++) {
+            if (! UrlSafety::isSafe($url)) {
+                throw new UpstreamException("Refusing unsafe upstream artifact URL: {$url}.");
+            }
+
+            $response = $this->request($upstream)->withoutRedirecting()->get($url);
+
+            if ($response->status() === 404) {
+                return null;
+            }
+            if ($response->redirect()) {
+                $location = $response->header('Location');
+                if ($location === '') {
+                    throw new UpstreamException("Upstream artifact redirect without a Location header from {$url}.");
+                }
+                $url = $location;
+
+                continue;
+            }
+            if (! $response->successful()) {
+                throw new UpstreamException("Upstream artifact {$url} returned {$response->status()}.");
+            }
+
+            return $response->body();
         }
 
-        return $response->body();
+        throw new UpstreamException("Too many redirects fetching upstream artifact {$absoluteUrl}.");
     }
 
     private function request(Upstream $upstream): PendingRequest

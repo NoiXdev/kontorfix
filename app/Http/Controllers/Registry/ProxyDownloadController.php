@@ -11,6 +11,7 @@ use App\Services\Upstream\ComposerProxyService;
 use App\Services\Upstream\NpmProxyService;
 use App\Services\Upstream\UpstreamCache;
 use App\Services\Upstream\UpstreamClient;
+use App\Services\Upstream\UrlSafety;
 use Composer\MetadataMinifier\MetadataMinifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -137,20 +138,7 @@ class ProxyDownloadController extends Controller
     private function assertSafeArtifactUrl(?string $url): string
     {
         abort_if($url === null, 404);
-
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        abort_unless(in_array($scheme, ['http', 'https'], true), 422, 'Unsafe upstream artifact URL.');
-
-        $host = (string) parse_url($url, PHP_URL_HOST);
-        abort_if($host === '', 422, 'Unsafe upstream artifact URL.');
-
-        // IP-Literale in privaten/reservierten Bereichen ablehnen; 'localhost' ebenso.
-        if (strtolower($host) === 'localhost'
-            || (filter_var($host, FILTER_VALIDATE_IP) !== false
-                && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false)
-        ) {
-            abort(422, 'Unsafe upstream artifact URL.');
-        }
+        abort_unless(UrlSafety::isSafe($url), 422, 'Unsafe upstream artifact URL.');
 
         return $url;
     }
