@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\StorePackageRequest;
 use App\Jobs\SyncPackage;
 use App\Models\Group;
 use App\Models\Package;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -29,11 +30,21 @@ class PackageController extends Controller
         ]);
     }
 
-    public function store(StorePackageRequest $request): RedirectResponse
+    public function store(StorePackageRequest $request): RedirectResponse|JsonResponse
     {
         $package = Package::create($request->safe()->except('group_ids'));
         $package->groups()->sync($request->validated('group_ids', []));
         SyncPackage::dispatch($package);
+
+        // Der PackagePicker legt Pakete inline per fetch an und braucht das
+        // erstellte Paket zurück, um es direkt der Auswahl hinzuzufügen.
+        if ($request->expectsJson()) {
+            return response()->json([
+                'id' => $package->id,
+                'name' => $package->name,
+                'type' => $package->type,
+            ], 201);
+        }
 
         return back()->with('success', "Paket {$package->name} angelegt — Sync gestartet.");
     }

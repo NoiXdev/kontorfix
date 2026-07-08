@@ -32,6 +32,34 @@ it('creates a package, assigns groups inline and dispatches sync', function () {
     Queue::assertPushed(SyncPackage::class);
 });
 
+it('returns the created package as json for inline picker creation', function () {
+    Queue::fake();
+
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+        ->postJson('/admin/packages', [
+            'type' => 'npm',
+            'name' => 'acme/widget',
+            'repository_url' => 'https://git.example.com/acme/widget.git',
+        ])
+        ->assertCreated()
+        ->assertJson(['name' => 'acme/widget', 'type' => 'npm'])
+        ->assertJsonStructure(['id', 'name', 'type']);
+
+    Queue::assertPushed(SyncPackage::class);
+    expect(Package::where('name', 'acme/widget')->exists())->toBeTrue();
+});
+
+it('returns json validation errors for inline picker creation', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+        ->postJson('/admin/packages', [
+            'type' => 'composer',
+            'name' => 'Invalid Name',
+            'repository_url' => 'file:///etc/passwd',
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['name', 'repository_url']);
+});
+
 it('validates package name format and uniqueness', function () {
     Package::factory()->create(['type' => 'composer', 'name' => 'acme/demo']);
     $admin = User::factory()->create(['role' => UserRole::Admin]);
