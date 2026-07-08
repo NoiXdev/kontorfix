@@ -55,3 +55,35 @@ it('forbids members from managing tokens', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
         ->get('/admin/tokens')->assertForbidden();
 });
+
+it('never exposes the token hash or plaintext in the index payload', function () {
+    $org = Organization::factory()->create();
+    RegistryToken::issue($org, 'ci', null);
+
+    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+        ->get('/admin/tokens')
+        ->assertInertia(fn ($page) => $page
+            ->has('tokens.0', fn ($token) => $token
+                ->hasAll(['id', 'name', 'organization', 'group', 'ability', 'last_used_at', 'expires_at'])
+                ->missing('token_hash')
+                ->etc()
+            )
+        );
+});
+
+it('flashes the plaintext token only for a single request', function () {
+    $org = Organization::factory()->create();
+    $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)
+        ->post('/admin/tokens', ['name' => 'once', 'organization_id' => $org->id])
+        ->assertSessionHas('plainTextToken');
+
+    // Erster GET = Redirect-Ziel: zeigt den Klartext und verbraucht das Flash.
+    $this->actingAs($admin)->get('/admin/tokens')
+        ->assertInertia(fn ($page) => $page->whereNot('flash.plainTextToken', null)->etc());
+
+    // Zweiter GET: der Klartext darf nicht erneut auftauchen.
+    $this->actingAs($admin)->get('/admin/tokens')
+        ->assertInertia(fn ($page) => $page->where('flash.plainTextToken', null)->etc());
+});

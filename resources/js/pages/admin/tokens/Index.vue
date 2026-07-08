@@ -52,9 +52,21 @@ watch(plainTextToken, (value) => {
 
 const showTokenCallout = computed(() => !!plainTextToken.value && !tokenCalloutDismissed.value);
 
-function copyToken() {
-    if (plainTextToken.value) {
-        navigator.clipboard.writeText(plainTextToken.value);
+const copied = ref(false);
+
+async function copyToken() {
+    if (!plainTextToken.value) {
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(plainTextToken.value);
+        copied.value = true;
+        setTimeout(() => (copied.value = false), 2000);
+    } catch {
+        // Clipboard-API nicht verfügbar (z. B. unsicherer Kontext) — der Token ist
+        // markierbar, der Nutzer kann ihn manuell kopieren.
+        copied.value = false;
     }
 }
 
@@ -120,7 +132,7 @@ function destroyToken(id: string) {
                     <div class="flex shrink-0 items-center gap-2">
                         <Button variant="outline" size="sm" @click="copyToken">
                             <Copy class="size-4" />
-                            Kopieren
+                            {{ copied ? 'Kopiert!' : 'Kopieren' }}
                         </Button>
                         <Button variant="ghost" size="sm" @click="tokenCalloutDismissed = true"> Schließen </Button>
                     </div>
