@@ -24,6 +24,7 @@ class Package extends Model
         'sync_status',
         'sync_error',
         'synced_at',
+        'dist_tags',
     ];
 
     protected function casts(): array
@@ -32,6 +33,7 @@ class Package extends Model
             'type' => PackageType::class,
             'sync_status' => SyncStatus::class,
             'synced_at' => 'datetime',
+            'dist_tags' => 'array',
         ];
     }
 

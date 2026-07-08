@@ -21,6 +21,9 @@ class PackageVersion extends Model
         'metadata',
         'dist_path',
         'released_at',
+        'dist_shasum',
+        'dist_integrity',
+        'dist_tarball_name',
     ];
 
     protected function casts(): array
