@@ -68,3 +68,50 @@ it('503 when no incoming secret is configured', function () {
     config(['kontorfix.incoming_webhook_secret' => null]);
     $this->postJson('/webhooks/github', githubPush('https://github.com/acme/demo.git'))->assertStatus(503);
 });
+
+it('accepts a valid gitea signature', function () {
+    Queue::fake();
+    Package::factory()->create(['repository_url' => 'https://gitea.example.com/acme/demo.git']);
+    $payload = ['repository' => ['clone_url' => 'https://gitea.example.com/acme/demo.git']];
+    $sig = hash_hmac('sha256', json_encode($payload), 'topsecret'); // Gitea: hex, kein Prefix
+
+    $this->withHeaders(['X-Gitea-Signature' => $sig])
+        ->postJson('/webhooks/gitea', $payload)->assertOk()->assertJsonPath('synced', 1);
+    Queue::assertPushed(SyncPackage::class);
+});
+
+it('rejects a gitea push with a bad signature', function () {
+    Queue::fake();
+    Package::factory()->create(['repository_url' => 'https://gitea.example.com/acme/demo.git']);
+    $this->withHeaders(['X-Gitea-Signature' => 'deadbeef'])
+        ->postJson('/webhooks/gitea', ['repository' => ['clone_url' => 'https://gitea.example.com/acme/demo.git']])
+        ->assertUnauthorized();
+    Queue::assertNothingPushed();
+});
+
+it('accepts a valid bitbucket token and matches the html url against a clone url', function () {
+    Queue::fake();
+    // Paket ist mit der .git-Clone-URL registriert; Bitbucket liefert die html-URL.
+    Package::factory()->create(['repository_url' => 'https://bitbucket.org/acme/demo.git']);
+
+    $this->postJson('/webhooks/bitbucket?token=topsecret', [
+        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
+    ])->assertOk()->assertJsonPath('synced', 1);
+    Queue::assertPushed(SyncPackage::class);
+});
+
+it('rejects a bitbucket push with a bad token', function () {
+    Queue::fake();
+    $this->postJson('/webhooks/bitbucket?token=wrong', [
+        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
+    ])->assertUnauthorized();
+    Queue::assertNothingPushed();
+});
+
+it('returns 422 for a valid signature but unparseable payload', function () {
+    Queue::fake();
+    $payload = ['not' => 'a repository'];
+    $this->withHeaders(['X-Hub-Signature-256' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'topsecret')])
+        ->postJson('/webhooks/github', $payload)->assertStatus(422);
+    Queue::assertNothingPushed();
+});

@@ -14,11 +14,25 @@ class RepoUrlMatcher
         $url = (string) preg_replace('#^[a-z0-9+]+://#i', '', $url);        // scheme
         $url = (string) preg_replace('#^[^/@]*@#', '', $url);               // user@host
         $url = (string) preg_replace('#\.git$#', '', $url);
+        $url = rtrim($url, '/');
 
-        return strtolower(rtrim($url, '/'));
+        // Host case-insensitiv, Pfad case-SENSITIV — auf case-sensitiven Git-Hostern sind
+        // /Acme/Demo und /acme/demo verschiedene Repos.
+        if (str_contains($url, '/')) {
+            [$host, $path] = explode('/', $url, 2);
+
+            return strtolower($host).'/'.$path;
+        }
+
+        return strtolower($url);
     }
 
-    /** @return Collection<int, Package> */
+    /**
+     * @return Collection<int, Package>
+     *
+     * TODO(scale): lädt den ganzen Paket-Pool und filtert in PHP (O(n) pro Webhook).
+     * Bei größerem Pool eine normalisierte, indizierte repository_url-Spalte einführen.
+     */
     public function match(string $repoUrl): Collection
     {
         $norm = $this->normalize($repoUrl);
