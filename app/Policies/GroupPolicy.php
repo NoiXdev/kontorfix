@@ -10,7 +10,8 @@ class GroupPolicy
 {
     public function view(User $user, Group $group): bool
     {
-        return $this->operatorAdmin($user) || $group->organization_id === $user->organization_id;
+        return $this->operatorAdmin($user)
+            || ($user->organization_id !== null && $group->organization_id === $user->organization_id);
     }
 
     private function operatorAdmin(User $user): bool

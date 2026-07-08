@@ -9,7 +9,8 @@ class RegistryUrl
     /** Vollständige Basis-URL der Registry (ohne abschließenden Slash). */
     public function base(Group $group): string
     {
-        $domain = $group->domains->first();
+        // Deterministische Auswahl bei mehreren Custom-Domains (sonst reihenfolgeabhängig).
+        $domain = $group->domains->sortBy('hostname')->first();
 
         if ($domain !== null) {
             return 'https://'.$domain->hostname;

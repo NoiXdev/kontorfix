@@ -10,7 +10,8 @@ class RegistryTokenPolicy
 {
     public function delete(User $user, RegistryToken $token): bool
     {
-        return $this->operatorAdmin($user) || $token->organization_id === $user->organization_id;
+        return $this->operatorAdmin($user)
+            || ($user->organization_id !== null && $token->organization_id === $user->organization_id);
     }
 
     private function operatorAdmin(User $user): bool
