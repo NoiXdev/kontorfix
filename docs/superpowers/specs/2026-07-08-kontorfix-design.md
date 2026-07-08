@@ -40,7 +40,8 @@ Aus der Analyse beider Projekte (Features, Issues, Architektur) abgeleitete Leit
 
 - **Backend:** Laravel (aktuelle Major-Version, Stand Juli 2026: 13), PHP 8.4
 - **Frontend:** Inertia.js v2 + Vue 3 + Tailwind CSS 4; UI-Komponenten auf reka-ui/shadcn-vue-Basis (kein Admin-Panel-Framework — eigenes, modernes UI)
-- **DB:** PostgreSQL · **Queue/Cache:** Redis + Laravel Horizon
+- **DB:** PostgreSQL — **alle Primärschlüssel als UUID (v7)**, auch in Pivots/Foreign Keys
+- **Queue/Cache:** Redis + Laravel Horizon
 - **Storage:** Flysystem (local, S3/Minio; per GUI konfigurierbar)
 - **Qualität:** Pest (Tests), Pint (Format), Larastan (Static Analysis)
 - **Dev:** DDEV (Projektname = Repo-Name), **Deploy:** Docker-Image + Compose via Portainer
@@ -52,12 +53,17 @@ Aus der Analyse beider Projekte (Features, Issues, Architektur) abgeleitete Leit
 - **Package:** protokoll-typisiert (`composer` | `npm`, später `oci`). Quelle:
   VCS-Repository (Auto-Sync via Webhook/Poll), Artifact-Upload oder Mirror (aus Upstream
   gecacht). Besitzt Versions/Releases mit Metadaten + Verweis auf Dist-Artefakt im Storage.
-- **Registry:** konfigurierbarer Endpoint mit Slug, **einer oder mehreren frei
-  konfigurierbaren Domains**, zugewiesenen Paketen (direkt oder über Paket-Gruppen,
-  optional mit Versions-/Datums-Obergrenze — „Lizenz abgelaufen"-Szenario) und optionalen
-  Upstreams. **Eine Registry bedient Composer und npm gleichzeitig auf derselben Domain**
-  (Protokoll-Pfade kollidieren nicht) — die „One Registry"-Idee.
-- **Domain:** Host → Registry-Mapping; Auflösung per Host-Header-Middleware. TLS
+- **Gruppe (Registry / Sub-Repository):** konfigurierbarer Endpoint. **Alle Pakete
+  leben im globalen Pool auf Root-Ebene** und werden Gruppen nur zugewiesen (n:m,
+  optional mit Versions-/Datums-Obergrenze — „Lizenz abgelaufen"-Szenario). Jede Gruppe
+  ist erreichbar über ihren **Slug** (Pfad auf der Hauptdomain, z.B. `/r/<slug>`)
+  **und/oder eine oder mehrere eigene Domains** — beides frei wählbar. Gruppen können
+  optionale Upstreams haben. **Eine Gruppe bedient Composer und npm gleichzeitig auf
+  demselben Endpoint** (Protokoll-Pfade kollidieren nicht) — die „One Registry"-Idee.
+  **Flüssige Zuweisung aus der GUI:** beim Anlegen eines Pakets lassen sich Gruppen
+  inline auswählen oder direkt neu erstellen; beim Anlegen einer Gruppe lassen sich
+  Pakete inline suchen und zuweisen — kein Kontextwechsel nötig.
+- **Domain:** Host → Gruppen-Mapping; Auflösung per Host-Header-Middleware. TLS
   terminiert der Reverse Proxy (Traefik/Portainer) davor.
 - **Token:** gehashtes, sofort revozierbares Registry-Token; Scope = Registry-Bindung +
   Rechte (read/publish); gehört einem User oder einer Organization; optionales Ablaufdatum.
