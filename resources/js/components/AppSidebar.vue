@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { BookOpen, Boxes, CloudDownload, Folder, Globe, KeyRound, LayoutGrid, Package } from 'lucide-vue-next';
+import { BookOpen, Boxes, CloudDownload, Folder, Globe, KeyRound, LayoutGrid, Package, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -46,6 +46,11 @@ const mainNavItems = computed<NavItem[]>(() => [
                   title: 'Domains',
                   href: '/admin/domains',
                   icon: Globe,
+              },
+              {
+                  title: 'Webhooks',
+                  href: '/admin/webhooks',
+                  icon: Webhook,
               },
           ]
         : []),
