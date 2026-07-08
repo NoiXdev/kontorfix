@@ -1,6 +1,7 @@
 <?php
 
 // tests/Feature/Registry/NpmPublishTest.php
+// publishBody() und publishHeaderFor() sind globale Helfer in tests/Pest.php.
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Models\Group;
@@ -8,23 +9,6 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use Illuminate\Support\Facades\Storage;
-
-function publishBody(string $name, string $version, string $file, string $bytes): array
-{
-    return [
-        'name' => $name,
-        'versions' => [$version => ['name' => $name, 'version' => $version, 'dependencies' => []]],
-        'dist-tags' => ['latest' => $version],
-        '_attachments' => [$file => ['content_type' => 'application/octet-stream', 'data' => base64_encode($bytes), 'length' => strlen($bytes)]],
-    ];
-}
-
-function publishHeaderFor(Group $group): array
-{
-    [, $plain] = RegistryToken::issue($group->organization, 'ci', $group, TokenAbility::Publish);
-
-    return ['Authorization' => 'Bearer '.$plain];
-}
 
 it('publishes an npm version, stores the tarball and computes integrity', function () {
     Storage::fake('artifacts');
@@ -84,30 +68,40 @@ it('rejects republishing an existing version with 409', function () {
     $this->withHeaders(publishHeaderFor($group))->putJson('/r/kadenz/leftpad', $body)->assertStatus(409);
 });
 
-it('rejects a tarball filename with path traversal', function () {
+it('derives a safe tarball name and ignores a malicious attachment key', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
+    // npm sendet einen Attachment-Key wie "@scope/name-version.tgz" bzw. hier ein
+    // bösartiger Key — der Storage-Name wird serverseitig abgeleitet, der Key ignoriert.
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', '../../evil.tgz', 'x'))
-        ->assertStatus(422);
+        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', '../../evil.tgz', 'bytes'))
+        ->assertOk();
 
-    // Kein Tarball darf außerhalb (oder überhaupt) geschrieben worden sein.
-    expect($pkg->fresh()->versions()->count())->toBe(0);
-    expect(Storage::disk('artifacts')->allFiles())->toBe([]);
+    $v = $pkg->fresh()->versions()->where('version', '1.0.0')->firstOrFail();
+    expect($v->dist_tarball_name)->toBe('leftpad-1.0.0.tgz');
+    Storage::disk('artifacts')->assertExists("tarballs/{$pkg->id}/leftpad-1.0.0.tgz");
+    // Nichts außerhalb des per-Paket-Ordners.
+    foreach (Storage::disk('artifacts')->allFiles() as $f) {
+        expect($f)->toStartWith("tarballs/{$pkg->id}/");
+    }
 });
 
-it('rejects an uppercase .TGZ filename so publish matches the case-sensitive fetch route', function () {
+it('derives an unscoped tarball name for a scoped package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
     $group->packages()->attach($pkg);
 
+    // npm sendet den echten Attachment-Key "@noixdev/ui-kit-1.0.0.tgz" (mit @ und /).
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'Leftpad-1.0.0.TGZ', 'x'))
-        ->assertStatus(422);
+        ->putJson('/r/kadenz/@noixdev/ui-kit', publishBody('@noixdev/ui-kit', '1.0.0', '@noixdev/ui-kit-1.0.0.tgz', 'bytes'))
+        ->assertOk();
+
+    expect($pkg->fresh()->versions()->where('version', '1.0.0')->first()->dist_tarball_name)->toBe('ui-kit-1.0.0.tgz');
+    Storage::disk('artifacts')->assertExists("tarballs/{$pkg->id}/ui-kit-1.0.0.tgz");
 });
 
 it('rejects a non-semver version string', function () {

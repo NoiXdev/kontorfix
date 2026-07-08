@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\RegistryToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -59,4 +60,27 @@ function tokenHeaderFor(Group $group): array
     [, $plain] = RegistryToken::issue($group->organization, 'test', $group);
 
     return ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
+}
+
+/**
+ * @return array<string, string>
+ */
+function publishHeaderFor(Group $group): array
+{
+    [, $plain] = RegistryToken::issue($group->organization, 'ci', $group, TokenAbility::Publish);
+
+    return ['Authorization' => 'Bearer '.$plain];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function publishBody(string $name, string $version, string $file, string $bytes): array
+{
+    return [
+        'name' => $name,
+        'versions' => [$version => ['name' => $name, 'version' => $version, 'dependencies' => []]],
+        'dist-tags' => ['latest' => $version],
+        '_attachments' => [$file => ['content_type' => 'application/octet-stream', 'data' => base64_encode($bytes), 'length' => strlen($bytes)]],
+    ];
 }

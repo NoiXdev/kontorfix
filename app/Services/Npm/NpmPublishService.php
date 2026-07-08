@@ -36,7 +36,7 @@ class NpmPublishService
 
         $versionString = (string) array_key_first($versions);
         $manifest = is_array($versions[$versionString]) ? $versions[$versionString] : [];
-        $file = (string) array_key_first($attachments);
+        $attachmentKey = (string) array_key_first($attachments);
 
         // Version muss gültiges Semver sein (sonst bricht später Semver::rsort im packument).
         try {
@@ -45,17 +45,20 @@ class NpmPublishService
             throw new InvalidArgumentException('Invalid version string.');
         }
 
-        // Dateiname streng validieren — kein Pfad-Traversal in den Storage-Key.
-        // Lowercase-only, damit Publish und die (case-sensitive) Tarball-Route übereinstimmen.
+        // Den Storage-Dateinamen selbst ableiten statt npms Attachment-Key zu vertrauen
+        // (der bei scoped Paketen "@scope/name-version.tgz" heißt, also @ und / enthält).
+        // So ist der Name garantiert traversal-frei und passt zur case-sensitiven Fetch-Route.
+        $unscoped = str_contains($package->name, '/') ? substr((string) strrchr($package->name, '/'), 1) : $package->name;
+        $file = "{$unscoped}-{$versionString}.tgz";
         if (! preg_match('/^[a-z0-9][a-z0-9._~-]*\.tgz$/', $file) || str_contains($file, '..')) {
-            throw new InvalidArgumentException('Invalid tarball filename.');
+            throw new InvalidArgumentException('Cannot derive a safe tarball filename for this package/version.');
         }
 
         if ($package->versions()->where('version', $versionString)->exists()) {
             throw new VersionConflictException('Version already exists.');
         }
 
-        $data = $attachments[$file]['data'] ?? '';
+        $data = $attachments[$attachmentKey]['data'] ?? '';
         $bytes = base64_decode(is_string($data) ? $data : '', true);
         if ($bytes === false || $bytes === '') {
             throw new InvalidArgumentException('Invalid or empty attachment data.');
