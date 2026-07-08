@@ -21,6 +21,10 @@ return Application::configure(basePath: dirname(__DIR__))
             // Registry-Routen sind stateless (Composer-Client schickt keine Cookies/CSRF) —
             // bewusst außerhalb der `web`-Gruppe, nur mit `registry.auth` geschützt.
             Route::group([], base_path('routes/registry.php'));
+
+            // Incoming-Webhooks sind ebenfalls stateless (externe Git-Hoster schicken
+            // keine Cookies/CSRF-Token) — Absicherung ausschließlich über Signaturprüfung.
+            Route::group([], base_path('routes/webhooks.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware) {
