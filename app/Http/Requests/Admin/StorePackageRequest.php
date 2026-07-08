@@ -27,9 +27,22 @@ class StorePackageRequest extends FormRequest
                 'regex:/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/',
                 Rule::unique('packages')->where('type', $this->input('type')),
             ],
-            'repository_url' => ['required', 'string', 'max:500'],
+            // Nur echte Git-Remotes über https/ssh — kein file:// oder gopher:// etc.,
+            // das sonst als SSRF-Fläche an den git-Subprozess weitergereicht würde.
+            'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
             'group_ids' => ['array'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'repository_url.starts_with' => 'Die Repository-URL muss mit https:// oder ssh:// beginnen.',
+            'repository_url.url' => 'Bitte eine gültige https- oder ssh-Repository-URL angeben.',
         ];
     }
 }

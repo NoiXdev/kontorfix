@@ -3,33 +3,33 @@ import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
-import { type NavItem } from '@/types';
-import { Link } from '@inertiajs/vue3';
-import { BookOpen, Boxes, Folder, KeyRound, LayoutGrid, Package } from 'lucide-vue-next';
+import { type NavItem, type SharedData } from '@/types';
+import { Link, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
+import { BookOpen, Folder, LayoutGrid, Package } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
-const mainNavItems: NavItem[] = [
+const page = usePage<SharedData>();
+
+// Admin-Bereich nur für Rollen mit Zugriff einblenden — sonst führen die Links zu 403.
+const canManage = computed(() => ['admin', 'maintainer'].includes(page.props.auth.user?.role ?? ''));
+
+const mainNavItems = computed<NavItem[]>(() => [
     {
         title: 'Dashboard',
         href: '/dashboard',
         icon: LayoutGrid,
     },
-    {
-        title: 'Pakete',
-        href: '/admin/packages',
-        icon: Package,
-    },
-    {
-        title: 'Gruppen',
-        href: '/admin/groups',
-        icon: Boxes,
-    },
-    {
-        title: 'Tokens',
-        href: '/admin/tokens',
-        icon: KeyRound,
-    },
-];
+    ...(canManage.value
+        ? [
+              {
+                  title: 'Pakete',
+                  href: '/admin/packages',
+                  icon: Package,
+              },
+          ]
+        : []),
+]);
 
 const footerNavItems: NavItem[] = [
     {

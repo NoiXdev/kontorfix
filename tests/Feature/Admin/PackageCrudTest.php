@@ -36,15 +36,48 @@ it('validates package name format and uniqueness', function () {
     Package::factory()->create(['type' => 'composer', 'name' => 'acme/demo']);
     $admin = User::factory()->create(['role' => UserRole::Admin]);
 
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'Invalid Name', 'repository_url' => 'x'])
+    $url = 'https://git.example.com/acme/demo.git';
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'Invalid Name', 'repository_url' => $url])
         ->assertSessionHasErrors('name');
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => 'x'])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => $url])
         ->assertSessionHasErrors('name');
 });
 
-it('forbids members from managing packages', function () {
+it('rejects non-https/ssh repository urls to avoid ssrf', function () {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+    foreach (['file:///etc/passwd', 'http://internal.svc/repo.git', 'gopher://x', 'not-a-url'] as $bad) {
+        $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => $bad])
+            ->assertSessionHasErrors('repository_url');
+    }
+
+    $this->actingAs($admin)->post('/admin/packages', [
+        'type' => 'composer', 'name' => 'acme/demo', 'repository_url' => 'ssh://git@github.com/acme/demo.git',
+    ])->assertSessionDoesntHaveErrors('repository_url');
+});
+
+it('drops sync status injection on create (mass assignment guard)', function () {
+    Queue::fake();
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+        ->post('/admin/packages', [
+            'type' => 'composer',
+            'name' => 'acme/forged',
+            'repository_url' => 'https://git.example.com/acme/forged.git',
+            'sync_status' => 'synced',
+            'sync_error' => 'x',
+        ])->assertRedirect();
+
+    // Der injizierte Synced-Status darf nicht durchkommen — der Sync-Job setzt ihn.
+    expect(Package::where('name', 'acme/forged')->first()->sync_status->value)->toBe('pending');
+});
+
+it('forbids members but allows admins and maintainers', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
         ->get('/admin/packages')->assertForbidden();
+    $this->actingAs(User::factory()->create(['role' => UserRole::Maintainer]))
+        ->get('/admin/packages')->assertOk();
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+        ->get('/admin/packages')->assertOk();
 });
 
 it('deletes a package', function () {
