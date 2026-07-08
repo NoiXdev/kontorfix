@@ -30,27 +30,30 @@ class ComposerController extends Controller
         return $this->access;
     }
 
-    public function root(Request $request, Group $group): JsonResponse
+    public function root(Request $request): JsonResponse
     {
+        $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
+        $prefix = $this->registryPathPrefix($request, $group);
 
         if ($this->composerUpstream($group) !== null) {
             // Bei aktivem Upstream KEIN available-packages ausliefern: Composer würde
             // sonst annehmen, es gäbe ausschließlich die gelisteten lokalen Pakete, und
             // fragt Upstream-Pakete nie per p2-Lookup an.
             return response()->json([
-                'metadata-url' => "/r/{$group->slug}/p2/%package%.json",
+                'metadata-url' => "{$prefix}/p2/%package%.json",
             ]);
         }
 
         return response()->json([
-            'metadata-url' => "/r/{$group->slug}/p2/%package%.json",
+            'metadata-url' => "{$prefix}/p2/%package%.json",
             'available-packages' => $this->access->packagesFor($group)->pluck('name')->sort()->values(),
         ]);
     }
 
-    public function metadata(Request $request, Group $group, string $vendor, string $name): JsonResponse
+    public function metadata(Request $request, string $vendor, string $name): JsonResponse
     {
+        $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $fullName = "{$vendor}/{$name}";
         $package = $this->findLocal($request, $group, PackageType::Composer, $fullName);
@@ -87,8 +90,9 @@ class ComposerController extends Controller
             ->first();
     }
 
-    public function dist(Request $request, Group $group, string $vendor, string $name, string $version): StreamedResponse
+    public function dist(Request $request, string $vendor, string $name, string $version): StreamedResponse
     {
+        $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
         $pkgVersion = $package->versions()->where('version', $version)->first();

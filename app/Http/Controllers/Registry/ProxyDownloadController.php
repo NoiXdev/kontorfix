@@ -34,8 +34,9 @@ class ProxyDownloadController extends Controller
         return $this->access;
     }
 
-    public function composer(Request $request, Group $group, string $upstream, string $vendor, string $name, string $version): StreamedResponse
+    public function composer(Request $request, string $upstream, string $vendor, string $name, string $version): StreamedResponse
     {
+        $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $packageName = "{$vendor}/{$name}";
         $up = $this->resolveUpstream($upstream, $group, PackageType::Composer, $packageName);
@@ -71,14 +72,14 @@ class ProxyDownloadController extends Controller
         );
     }
 
-    public function npm(Request $request, Group $group, string $upstream, string $package, string $file): StreamedResponse
+    public function npm(Request $request, string $upstream, string $package, string $file): StreamedResponse
     {
-        return $this->respondNpm($request, $group, $upstream, $package, $file);
+        return $this->respondNpm($request, $this->registryGroup($request), $upstream, $package, $file);
     }
 
-    public function npmScoped(Request $request, Group $group, string $upstream, string $scope, string $package, string $file): StreamedResponse
+    public function npmScoped(Request $request, string $upstream, string $scope, string $package, string $file): StreamedResponse
     {
-        return $this->respondNpm($request, $group, $upstream, "{$scope}/{$package}", $file);
+        return $this->respondNpm($request, $this->registryGroup($request), $upstream, "{$scope}/{$package}", $file);
     }
 
     private function respondNpm(Request $request, Group $group, string $upstream, string $packageName, string $file): StreamedResponse

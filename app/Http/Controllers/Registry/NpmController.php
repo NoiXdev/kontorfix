@@ -35,14 +35,14 @@ class NpmController extends Controller
         return $this->access;
     }
 
-    public function packument(Request $request, Group $group, string $package): JsonResponse
+    public function packument(Request $request, string $package): JsonResponse
     {
-        return $this->respondPackument($request, $group, $package);
+        return $this->respondPackument($request, $this->registryGroup($request), $package);
     }
 
-    public function packumentScoped(Request $request, Group $group, string $scope, string $package): JsonResponse
+    public function packumentScoped(Request $request, string $scope, string $package): JsonResponse
     {
-        return $this->respondPackument($request, $group, "{$scope}/{$package}");
+        return $this->respondPackument($request, $this->registryGroup($request), "{$scope}/{$package}");
     }
 
     private function respondPackument(Request $request, Group $group, string $name): JsonResponse
@@ -82,14 +82,14 @@ class NpmController extends Controller
             ->first();
     }
 
-    public function tarball(Request $request, Group $group, string $package, string $file): StreamedResponse
+    public function tarball(Request $request, string $package, string $file): StreamedResponse
     {
-        return $this->respondTarball($request, $group, $package, $file);
+        return $this->respondTarball($request, $this->registryGroup($request), $package, $file);
     }
 
-    public function tarballScoped(Request $request, Group $group, string $scope, string $package, string $file): StreamedResponse
+    public function tarballScoped(Request $request, string $scope, string $package, string $file): StreamedResponse
     {
-        return $this->respondTarball($request, $group, "{$scope}/{$package}", $file);
+        return $this->respondTarball($request, $this->registryGroup($request), "{$scope}/{$package}", $file);
     }
 
     private function respondTarball(Request $request, Group $group, string $name, string $file): StreamedResponse
@@ -110,14 +110,14 @@ class NpmController extends Controller
         }, $file, ['Content-Type' => 'application/octet-stream']);
     }
 
-    public function publish(Request $request, Group $group, string $package): JsonResponse
+    public function publish(Request $request, string $package): JsonResponse
     {
-        return $this->respondPublish($request, $group, $package);
+        return $this->respondPublish($request, $this->registryGroup($request), $package);
     }
 
-    public function publishScoped(Request $request, Group $group, string $scope, string $package): JsonResponse
+    public function publishScoped(Request $request, string $scope, string $package): JsonResponse
     {
-        return $this->respondPublish($request, $group, "{$scope}/{$package}");
+        return $this->respondPublish($request, $this->registryGroup($request), "{$scope}/{$package}");
     }
 
     private function respondPublish(Request $request, Group $group, string $name): JsonResponse

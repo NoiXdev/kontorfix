@@ -22,12 +22,30 @@ trait ResolvesRegistryPackage
         }
     }
 
-    /**
-     * v0.4: bei Custom-Domain-Zugriff wird dies domain-root; vorerst immer /r/{slug}.
-     */
+    protected function registryGroup(Request $request): Group
+    {
+        /** @var Group $group */
+        $group = $request->attributes->get('registryGroup');
+
+        return $group;
+    }
+
     protected function registryBaseUrl(Request $request, Group $group): string
     {
+        if ($request->attributes->get('registryDomainMode') === true) {
+            return $request->getSchemeAndHttpHost();
+        }
+
         return $request->getSchemeAndHttpHost().'/r/'.$group->slug;
+    }
+
+    /**
+     * Pfad-Präfix für Metadaten-URLs (z.B. metadata-url in packages.json): bei
+     * Custom-Domain leer (Registry liegt an der Host-Wurzel), sonst /r/{slug}.
+     */
+    protected function registryPathPrefix(Request $request, Group $group): string
+    {
+        return $request->attributes->get('registryDomainMode') === true ? '' : "/r/{$group->slug}";
     }
 
     protected function findAccessible(Request $request, Group $group, PackageType $type, string $fullName): Package
