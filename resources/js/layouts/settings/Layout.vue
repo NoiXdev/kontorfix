@@ -18,6 +18,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Appearance',
         href: '/settings/appearance',
     },
+    {
+        title: 'Zwei-Faktor',
+        href: '/settings/two-factor',
+    },
 ];
 
 const currentPath = window.location.pathname;
