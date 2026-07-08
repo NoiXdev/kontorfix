@@ -10,6 +10,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "chillerlan/php-qrcode": "^6.0",
         "composer/metadata-minifier": "^1.0",
         "composer/semver": "^3.4",
         "inertiajs/inertia-laravel": "^2.0",
