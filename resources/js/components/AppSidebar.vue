@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { BookOpen, Folder, LayoutGrid, Package } from 'lucide-vue-next';
+import { BookOpen, Boxes, Folder, LayoutGrid, Package } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -26,6 +26,11 @@ const mainNavItems = computed<NavItem[]>(() => [
                   title: 'Pakete',
                   href: '/admin/packages',
                   icon: Package,
+              },
+              {
+                  title: 'Gruppen',
+                  href: '/admin/groups',
+                  icon: Boxes,
               },
           ]
         : []),
