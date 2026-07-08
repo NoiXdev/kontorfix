@@ -24,11 +24,25 @@ trait ResolvesRegistryPackage
 
     protected function findAccessible(Request $request, Group $group, PackageType $type, string $fullName): Package
     {
+        $package = $this->findLocal($request, $group, $type, $fullName);
+        if ($package === null) {
+            abort(404); // bewusst kein 403 — Existenz nicht leaken
+        }
+
+        return $package;
+    }
+
+    /**
+     * Wie findAccessible(), bricht aber nicht ab — für Aufrufer, die bei einem Miss
+     * lokal noch einen Upstream-Fallback versuchen wollen (Composer-Fallthrough).
+     */
+    protected function findLocal(Request $request, Group $group, PackageType $type, string $fullName): ?Package
+    {
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
         $package = Package::where('type', $type)->where('name', $fullName)->first();
         if (! $package || ! $this->access()->canAccessPackage($token, $group, $package)) {
-            abort(404); // bewusst kein 403 — Existenz nicht leaken
+            return null;
         }
 
         return $package;
