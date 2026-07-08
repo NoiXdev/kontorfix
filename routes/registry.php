@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Registry\ComposerController;
+use App\Http\Controllers\Registry\NpmController;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 
@@ -12,4 +13,14 @@ Route::prefix('/r/{group:slug}')->middleware([SubstituteBindings::class, 'regist
         ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.~-]+']);
     Route::get('/dists/{vendor}/{name}/{version}.zip', [ComposerController::class, 'dist'])
         ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
+
+    // npm — nach den Composer-Routen (First-Match schützt packages.json/p2/dists).
+    Route::get('/{scope}/{package}/-/{file}', [NpmController::class, 'tarballScoped'])
+        ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+    Route::get('/{package}/-/{file}', [NpmController::class, 'tarball'])
+        ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+    Route::get('/{scope}/{package}', [NpmController::class, 'packumentScoped'])
+        ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
+    Route::get('/{package}', [NpmController::class, 'packument'])
+        ->where(['package' => '(?!packages\.json$)[a-z0-9._-]+']);
 });

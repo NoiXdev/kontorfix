@@ -2,10 +2,9 @@
 
 namespace App\Http\Controllers\Registry;
 
+use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
-use App\Models\Package;
-use App\Models\RegistryToken;
 use App\Services\Composer\ComposerMetadataBuilder;
 use App\Services\RegistryAccessService;
 use App\Services\Vcs\GitRepository;
@@ -16,10 +15,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ComposerController extends Controller
 {
+    use ResolvesRegistryPackage;
+
     public function __construct(
         private readonly RegistryAccessService $access,
         private readonly ComposerMetadataBuilder $metadata,
     ) {}
+
+    protected function access(): RegistryAccessService
+    {
+        return $this->access;
+    }
 
     public function root(Request $request, Group $group): JsonResponse
     {
@@ -34,7 +40,7 @@ class ComposerController extends Controller
     public function metadata(Request $request, Group $group, string $vendor, string $name): JsonResponse
     {
         $this->authorizeGroup($request, $group);
-        $package = $this->findAccessible($request, $group, "{$vendor}/{$name}");
+        $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
 
         return response()->json($this->metadata->build($package, $group, $request->getSchemeAndHttpHost()));
     }
@@ -42,7 +48,7 @@ class ComposerController extends Controller
     public function dist(Request $request, Group $group, string $vendor, string $name, string $version): StreamedResponse
     {
         $this->authorizeGroup($request, $group);
-        $package = $this->findAccessible($request, $group, "{$vendor}/{$name}");
+        $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
         $pkgVersion = $package->versions()->where('version', $version)->first();
 
         if ($pkgVersion === null) {
@@ -91,26 +97,5 @@ class ComposerController extends Controller
             "{$name}-{$pkgVersion->version_pretty}.zip",
             ['Content-Type' => 'application/zip'],
         );
-    }
-
-    protected function authorizeGroup(Request $request, Group $group): void
-    {
-        /** @var RegistryToken|null $token */
-        $token = $request->attributes->get('registryToken');
-        if (! $this->access->canAccessGroup($token, $group)) {
-            abort($token ? 404 : 401, 'Authentication required for this registry.');
-        }
-    }
-
-    protected function findAccessible(Request $request, Group $group, string $fullName): Package
-    {
-        /** @var RegistryToken|null $token */
-        $token = $request->attributes->get('registryToken');
-        $package = Package::where('type', 'composer')->where('name', $fullName)->first();
-        if (! $package || ! $this->access->canAccessPackage($token, $group, $package)) {
-            abort(404); // bewusst kein 403 — Existenz nicht leaken
-        }
-
-        return $package;
     }
 }
