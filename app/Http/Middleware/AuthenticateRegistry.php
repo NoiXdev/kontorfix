@@ -11,7 +11,8 @@ class AuthenticateRegistry
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $candidate = $request->getPassword() ?: $request->getUser();
+        $candidate = $request->bearerToken()                       // npm: Authorization: Bearer <token>
+            ?: ($request->getPassword() ?: $request->getUser());  // composer: HTTP Basic
         $token = $candidate ? RegistryToken::findByPlainText($candidate) : null;
 
         // Gedrosselt: ein composer install trifft dutzende Endpoints — last_used_at
