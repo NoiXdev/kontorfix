@@ -15,6 +15,8 @@ Route::prefix('/r/{group:slug}')->middleware([SubstituteBindings::class, 'regist
         ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
 
     // npm — nach den Composer-Routen (First-Match schützt packages.json/p2/dists).
+    // Der `/-/`-Tarball-Pfad kollidiert mit keiner Composer-Route, daher brauchen die
+    // Tarball-Routen kein packages.json-Lookahead — nur der bare packument-Catch-all unten.
     Route::get('/{scope}/{package}/-/{file}', [NpmController::class, 'tarballScoped'])
         ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
     Route::get('/{package}/-/{file}', [NpmController::class, 'tarball'])
