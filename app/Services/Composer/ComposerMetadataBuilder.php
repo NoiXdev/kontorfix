@@ -14,8 +14,13 @@ class ComposerMetadataBuilder
      */
     public function build(Package $package, Group $group, string $baseUrl): array
     {
+        $baseUrl = rtrim($baseUrl, '/');
+
         $versions = $package->versions()->get()
             ->map(function (PackageVersion $v) use ($package, $group, $baseUrl): array {
+                // Das komplette composer.json des Tags wird durchgereicht (wie Packagist);
+                // name/version/dist/source werden autoritativ von uns überschrieben, damit
+                // ein bösartiges Tag weder die Dist-URL noch die Version fälschen kann.
                 $entry = array_merge($v->metadata ?? [], [
                     'name' => $package->name,
                     'version' => $v->version_pretty,

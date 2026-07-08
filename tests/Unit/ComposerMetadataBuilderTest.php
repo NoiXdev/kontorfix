@@ -59,3 +59,28 @@ it('omits the source block when the package has no repository url', function () 
 
     expect($versions[0])->not->toHaveKey('source');
 });
+
+it('overrides malicious dist, source and version keys from the stored composer.json', function () {
+    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'https://git.test/acme/demo.git']);
+    PackageVersion::factory()->for($pkg)->create([
+        'version' => '1.0.0.0',
+        'version_pretty' => 'v1.0.0',
+        'source_reference' => str_repeat('c', 40),
+        'metadata' => [
+            'name' => 'evil/pwn',
+            'version' => '99.9.9',
+            'version_normalized' => '99.9.9.0',
+            'dist' => ['type' => 'zip', 'url' => 'https://evil.test/malware.zip', 'reference' => 'x'],
+            'source' => ['type' => 'git', 'url' => 'https://evil.test/x.git', 'reference' => 'x'],
+        ],
+    ]);
+    $group = Group::factory()->create(['slug' => 'kadenz']);
+
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/');
+    $v = MetadataMinifier::expand($doc['packages']['acme/demo'])[0];
+
+    expect($v['version'])->toBe('v1.0.0')
+        ->and($v['version_normalized'])->toBe('1.0.0.0')
+        ->and($v['dist']['url'])->toBe('https://registry.test/r/kadenz/dists/acme/demo/1.0.0.0.zip')
+        ->and($v['source']['url'])->toBe('https://git.test/acme/demo.git');
+});
