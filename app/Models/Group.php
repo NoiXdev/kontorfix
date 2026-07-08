@@ -62,4 +62,12 @@ class Group extends Model
     {
         return $this->hasMany(RegistryToken::class);
     }
+
+    /**
+     * @return HasMany<Upstream, $this>
+     */
+    public function upstreams(): HasMany
+    {
+        return $this->hasMany(Upstream::class);
+    }
 }
