@@ -12,12 +12,12 @@ class ComposerMetadataBuilder
     /**
      * @return array<string, mixed>
      */
-    public function build(Package $package, Group $group, string $baseUrl): array
+    public function build(Package $package, Group $group, string $registryBaseUrl): array
     {
-        $baseUrl = rtrim($baseUrl, '/');
+        $registryBaseUrl = rtrim($registryBaseUrl, '/');
 
         $versions = $package->versions()->get()
-            ->map(function (PackageVersion $v) use ($package, $group, $baseUrl): array {
+            ->map(function (PackageVersion $v) use ($package, $registryBaseUrl): array {
                 // Das komplette composer.json des Tags wird durchgereicht (wie Packagist);
                 // name/version/dist/source werden autoritativ von uns überschrieben, damit
                 // ein bösartiges Tag weder die Dist-URL noch die Version fälschen kann.
@@ -27,7 +27,7 @@ class ComposerMetadataBuilder
                     'version_normalized' => $v->version,
                     'dist' => [
                         'type' => 'zip',
-                        'url' => "{$baseUrl}/r/{$group->slug}/dists/{$package->name}/{$v->version}.zip",
+                        'url' => "{$registryBaseUrl}/dists/{$package->name}/{$v->version}.zip",
                         'reference' => $v->source_reference,
                     ],
                 ]);

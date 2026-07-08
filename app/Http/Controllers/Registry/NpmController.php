@@ -51,7 +51,7 @@ class NpmController extends Controller
         $pkg = $this->findLocal($request, $group, PackageType::Npm, $name);
 
         if ($pkg !== null) {
-            return response()->json($this->metadata->build($pkg, $group->slug, $request->getSchemeAndHttpHost()));
+            return response()->json($this->metadata->build($pkg, $this->registryBaseUrl($request, $group)));
         }
 
         // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
@@ -65,7 +65,7 @@ class NpmController extends Controller
             abort(404);
         }
 
-        $doc = $this->proxy->packument($group, $upstream, $name, $request->getSchemeAndHttpHost());
+        $doc = $this->proxy->packument($group, $upstream, $name, $this->registryBaseUrl($request, $group));
         if ($doc === null) {
             abort(404);
         }

@@ -56,7 +56,7 @@ class ComposerController extends Controller
         $package = $this->findLocal($request, $group, PackageType::Composer, $fullName);
 
         if ($package !== null) {
-            return response()->json($this->metadata->build($package, $group, $request->getSchemeAndHttpHost()));
+            return response()->json($this->metadata->build($package, $group, $this->registryBaseUrl($request, $group)));
         }
 
         // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
@@ -70,7 +70,7 @@ class ComposerController extends Controller
             abort(404);
         }
 
-        $doc = $this->proxy->metadata($group, $upstream, $fullName, $request->getSchemeAndHttpHost());
+        $doc = $this->proxy->metadata($group, $upstream, $fullName, $this->registryBaseUrl($request, $group));
         if ($doc === null) {
             abort(404);
         }

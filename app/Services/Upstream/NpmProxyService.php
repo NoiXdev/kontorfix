@@ -15,7 +15,7 @@ class NpmProxyService
     /**
      * @return array<string, mixed>|null null wenn nicht gefunden oder (Strict-Modus) nicht erlaubt
      */
-    public function packument(Group $group, Upstream $upstream, string $packageName, string $baseUrl): ?array
+    public function packument(Group $group, Upstream $upstream, string $packageName, string $registryBaseUrl): ?array
     {
         if (! $upstream->allowsPackage($packageName)) {
             return null;
@@ -30,10 +30,10 @@ class NpmProxyService
             $this->cache->putMetadata($upstream, $packageName, $payload);
         }
 
-        $baseUrl = rtrim($baseUrl, '/');
+        $registryBaseUrl = rtrim($registryBaseUrl, '/');
         $versions = $payload['versions'] ?? [];
 
-        $rewritten = array_map(function (array $version) use ($group, $upstream, $packageName, $baseUrl): array {
+        $rewritten = array_map(function (array $version) use ($upstream, $packageName, $registryBaseUrl): array {
             if (! isset($version['dist']) || ! is_array($version['dist'])) {
                 return $version;
             }
@@ -44,7 +44,7 @@ class NpmProxyService
             }
 
             $file = basename((string) parse_url($original, PHP_URL_PATH));
-            $version['dist']['tarball'] = "{$baseUrl}/r/{$group->slug}/proxy/npm/{$upstream->id}/{$packageName}/-/{$file}";
+            $version['dist']['tarball'] = "{$registryBaseUrl}/proxy/npm/{$upstream->id}/{$packageName}/-/{$file}";
 
             return $version;
         }, $versions);

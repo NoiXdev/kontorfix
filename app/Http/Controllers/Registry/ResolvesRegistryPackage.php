@@ -22,6 +22,14 @@ trait ResolvesRegistryPackage
         }
     }
 
+    /**
+     * v0.4: bei Custom-Domain-Zugriff wird dies domain-root; vorerst immer /r/{slug}.
+     */
+    protected function registryBaseUrl(Request $request, Group $group): string
+    {
+        return $request->getSchemeAndHttpHost().'/r/'.$group->slug;
+    }
+
     protected function findAccessible(Request $request, Group $group, PackageType $type, string $fullName): Package
     {
         $package = $this->findLocal($request, $group, $type, $fullName);

@@ -16,7 +16,7 @@ class ComposerProxyService
     /**
      * @return array<string, mixed>|null null wenn nicht gefunden oder (Strict-Modus) nicht erlaubt
      */
-    public function metadata(Group $group, Upstream $upstream, string $packageName, string $baseUrl): ?array
+    public function metadata(Group $group, Upstream $upstream, string $packageName, string $registryBaseUrl): ?array
     {
         if (! $upstream->allowsPackage($packageName)) {
             return null;
@@ -33,9 +33,9 @@ class ComposerProxyService
 
         $minifiedVersions = $payload['packages'][$packageName] ?? [];
         $versions = MetadataMinifier::expand($minifiedVersions);
-        $baseUrl = rtrim($baseUrl, '/');
+        $registryBaseUrl = rtrim($registryBaseUrl, '/');
 
-        $rewritten = array_map(function (array $version) use ($group, $upstream, $packageName, $baseUrl): array {
+        $rewritten = array_map(function (array $version) use ($upstream, $packageName, $registryBaseUrl): array {
             // Source-only-Versionen (ohne dist) bekommen keinen fabrizierten Dist-Eintrag —
             // sonst würde der Proxy-Download für ein nie existentes Archiv angefragt.
             if (! isset($version['dist']) || ! is_array($version['dist'])) {
@@ -45,7 +45,7 @@ class ComposerProxyService
             $identifier = $version['version_normalized'] ?? $version['version'];
             $version['dist'] = [
                 'type' => $version['dist']['type'] ?? 'zip',
-                'url' => "{$baseUrl}/r/{$group->slug}/proxy/composer/{$upstream->id}/{$packageName}/{$identifier}",
+                'url' => "{$registryBaseUrl}/proxy/composer/{$upstream->id}/{$packageName}/{$identifier}",
                 'reference' => $version['dist']['reference'] ?? null,
             ];
 

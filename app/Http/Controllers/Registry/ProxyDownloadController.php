@@ -149,7 +149,7 @@ class ProxyDownloadController extends Controller
         if ($payload === null) {
             // Cache abgelaufen/leer: Metadaten über den Proxy-Service neu holen (dies
             // befüllt den Cache als Seiteneffekt), danach den Rohcache erneut lesen.
-            $this->composerProxy->metadata($group, $up, $packageName, $request->getSchemeAndHttpHost());
+            $this->composerProxy->metadata($group, $up, $packageName, $this->registryBaseUrl($request, $group));
             $payload = $this->cache->getMetadata($up, $packageName);
         }
 
@@ -174,7 +174,7 @@ class ProxyDownloadController extends Controller
     {
         $payload = $this->cache->getMetadata($up, $packageName);
         if ($payload === null) {
-            $this->npmProxy->packument($group, $up, $packageName, $request->getSchemeAndHttpHost());
+            $this->npmProxy->packument($group, $up, $packageName, $this->registryBaseUrl($request, $group));
             $payload = $this->cache->getMetadata($up, $packageName);
         }
 

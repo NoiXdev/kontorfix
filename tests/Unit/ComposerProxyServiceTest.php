@@ -20,7 +20,7 @@ it('rewrites every version dist url to the proxy route and caches the payload', 
         ])],
     ], 200)]);
 
-    $doc = app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test');
+    $doc = app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test/r/kadenz');
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions)->toHaveCount(2)
@@ -29,6 +29,6 @@ it('rewrites every version dist url to the proxy route and caches the payload', 
 
     // Zweiter Aufruf nutzt den Cache (kein weiterer Http-Call).
     Http::fake();
-    app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test');
+    app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test/r/kadenz');
     Http::assertNothingSent();
 });

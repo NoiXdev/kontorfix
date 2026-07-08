@@ -18,7 +18,7 @@ it('builds minified composer v2 metadata with dist urls scoped to the group', fu
     ]);
     $group = Group::factory()->create(['slug' => 'kadenz']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions[0]['version'])->toBe('v1.0.0')
@@ -39,7 +39,7 @@ it('includes multiple versions ordered newest first and merges source reference'
     ]);
     $group = Group::factory()->create(['slug' => 'kadenz']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions)->toHaveCount(2)
@@ -54,7 +54,7 @@ it('omits the source block when the package has no repository url', function () 
     PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => ['name' => 'acme/demo']]);
     $group = Group::factory()->create(['slug' => 'kadenz']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions[0])->not->toHaveKey('source');
@@ -76,7 +76,7 @@ it('overrides malicious dist, source and version keys from the stored composer.j
     ]);
     $group = Group::factory()->create(['slug' => 'kadenz']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz/');
     $v = MetadataMinifier::expand($doc['packages']['acme/demo'])[0];
 
     expect($v['version'])->toBe('v1.0.0')

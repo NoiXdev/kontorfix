@@ -18,7 +18,7 @@ it('builds a packument with dist-tags and tarball urls scoped to the group', fun
         'dist_tarball_name' => 'ui-kit-1.2.0.tgz',
     ]);
 
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'kadenz', 'https://registry.test');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz');
 
     expect($doc['name'])->toBe('@noixdev/ui-kit')
         ->and($doc['dist-tags'])->toBe(['latest' => '1.2.0'])
@@ -34,7 +34,7 @@ it('derives latest from highest semver when dist_tags is empty', function () {
     foreach (['1.0.0', '2.1.0', '2.0.0'] as $v) {
         PackageVersion::factory()->for($pkg)->create(['version' => $v, 'version_pretty' => $v, 'metadata' => ['name' => 'thing', 'version' => $v], 'dist_tarball_name' => "thing-$v.tgz"]);
     }
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'kadenz', 'https://registry.test');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz');
     expect($doc['dist-tags']['latest'])->toBe('2.1.0');
 });
 
@@ -45,7 +45,7 @@ it('overrides malicious name/version/dist from stored metadata', function () {
         'metadata' => ['name' => 'evil', 'version' => '9.9.9', 'dist' => ['tarball' => 'https://evil.test/x.tgz']],
         'dist_tarball_name' => 'safe-1.0.0.tgz',
     ]);
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'kadenz', 'https://registry.test/');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz/');
     expect($doc['versions']['1.0.0']['name'])->toBe('safe')
         ->and($doc['versions']['1.0.0']['version'])->toBe('1.0.0')
         ->and($doc['versions']['1.0.0']['dist']['tarball'])->toBe('https://registry.test/r/kadenz/safe/-/safe-1.0.0.tgz');

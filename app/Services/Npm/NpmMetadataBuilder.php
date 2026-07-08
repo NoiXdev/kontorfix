@@ -11,9 +11,9 @@ class NpmMetadataBuilder
     /**
      * @return array<string, mixed>
      */
-    public function build(Package $package, string $groupSlug, string $baseUrl): array
+    public function build(Package $package, string $registryBaseUrl): array
     {
-        $baseUrl = rtrim($baseUrl, '/');
+        $registryBaseUrl = rtrim($registryBaseUrl, '/');
         $versions = [];
 
         foreach ($package->versions()->get() as $v) {
@@ -25,7 +25,7 @@ class NpmMetadataBuilder
                 'name' => $package->name,
                 'version' => $v->version,
                 'dist' => array_filter([
-                    'tarball' => "{$baseUrl}/r/{$groupSlug}/{$package->name}/-/{$v->dist_tarball_name}",
+                    'tarball' => "{$registryBaseUrl}/{$package->name}/-/{$v->dist_tarball_name}",
                     'shasum' => $v->dist_shasum,
                     'integrity' => $v->dist_integrity,
                 ], fn (mixed $x): bool => $x !== null),
