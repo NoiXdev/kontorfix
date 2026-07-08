@@ -70,6 +70,15 @@ export default {
                     border: 'hsl(var(--sidebar-border))',
                     ring: 'hsl(var(--sidebar-ring))',
                 },
+                // Kontorfix-Markenpalette (siehe docs/brand) — feste Hex-Werte, kein Theme-Token-Wechsel.
+                ink: '#0D141F',
+                panel: '#151F2E',
+                copper: {
+                    DEFAULT: '#D07A45',
+                    hi: '#E29260',
+                },
+                verdigris: '#7FB5A2',
+                paper: '#E9E4D9',
             },
         },
     },

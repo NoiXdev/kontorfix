@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AuthenticateRegistry;
+use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -36,6 +37,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'registry.auth' => AuthenticateRegistry::class,
+            'role' => EnsureUserRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
