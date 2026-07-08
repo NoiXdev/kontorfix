@@ -79,3 +79,38 @@ it('prefers a local package over the upstream and does not call it', function ()
     $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/local/pkg.json')->assertOk();
     Http::assertNothingSent();
 });
+
+it('does not leak a locally-hosted but inaccessible package name to the upstream', function () {
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
+    // Paket existiert lokal, ist dieser Gruppe aber NICHT zugewiesen.
+    $secret = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
+    PackageVersion::factory()->for($secret)->create();
+
+    Http::fake();
+    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/private/secret.json')->assertNotFound();
+    Http::assertNothingSent(); // der private Name darf packagist nie erreichen
+});
+
+it('returns 502 when the upstream errors', function () {
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org']);
+    Http::fake(['*' => Http::response('boom', 500)]);
+
+    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/some/pkg.json')->assertStatus(502);
+});
+
+it('does not fabricate a dist for source-only upstream versions', function () {
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org']);
+    Http::fake(['*/p2/meta/pkg.json' => Http::response([
+        'packages' => ['meta/pkg' => [[
+            'name' => 'meta/pkg', 'version' => '1.0.0', 'version_normalized' => '1.0.0.0',
+            // kein dist-Block (Metapaket / source-only)
+        ]]],
+    ], 200)]);
+
+    $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/meta/pkg.json')->assertOk()->json();
+    $v = MetadataMinifier::expand($res['packages']['meta/pkg'])[0];
+    expect($v)->not->toHaveKey('dist');
+});

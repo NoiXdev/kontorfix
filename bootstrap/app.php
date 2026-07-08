@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\UpstreamException;
 use App\Http\Middleware\AuthenticateRegistry;
 use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -41,5 +42,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Ein defekter/langsamer Upstream ist ein Gateway-Fehler, kein 500 unsererseits.
+        $exceptions->render(fn (UpstreamException $e, Request $request) => $request->expectsJson() || $request->is('r/*')
+            ? response()->json(['error' => 'Upstream registry unavailable.'], 502)
+            : null);
     })->create();

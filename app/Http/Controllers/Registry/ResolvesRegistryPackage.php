@@ -47,4 +47,14 @@ trait ResolvesRegistryPackage
 
         return $package;
     }
+
+    /**
+     * Ob ein Paket dieses Namens überhaupt lokal existiert (unabhängig von Zugriff/Gruppe).
+     * Verhindert, dass ein privat gehosteter Name beim Upstream-Fallthrough zu packagist/npmjs
+     * durchsickert (Dependency-Confusion-Schutz).
+     */
+    protected function packageExistsLocally(PackageType $type, string $fullName): bool
+    {
+        return Package::where('type', $type)->where('name', $fullName)->exists();
+    }
 }

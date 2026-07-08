@@ -39,6 +39,12 @@ class ComposerProxyService
         $baseUrl = rtrim($baseUrl, '/');
 
         $rewritten = array_map(function (array $version) use ($group, $upstream, $packageName, $baseUrl): array {
+            // Source-only-Versionen (ohne dist) bekommen keinen fabrizierten Dist-Eintrag —
+            // sonst würde der Proxy-Download für ein nie existentes Archiv angefragt.
+            if (! isset($version['dist']) || ! is_array($version['dist'])) {
+                return $version;
+            }
+
             $identifier = $version['version_normalized'] ?? $version['version'];
             $version['dist'] = [
                 'type' => $version['dist']['type'] ?? 'zip',

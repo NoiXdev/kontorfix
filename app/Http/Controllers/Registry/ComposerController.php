@@ -59,6 +59,12 @@ class ComposerController extends Controller
             return response()->json($this->metadata->build($package, $group, $request->getSchemeAndHttpHost()));
         }
 
+        // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
+        // OHNE den Upstream zu fragen — sonst würde ein privater Paketname zu packagist leaken.
+        if ($this->packageExistsLocally(PackageType::Composer, $fullName)) {
+            abort(404);
+        }
+
         $upstream = $this->composerUpstream($group);
         if ($upstream === null) {
             abort(404);
