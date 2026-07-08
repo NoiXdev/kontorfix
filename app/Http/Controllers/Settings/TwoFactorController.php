@@ -39,10 +39,19 @@ class TwoFactorController extends Controller
     {
         $user = $request->user();
 
+        // Bereits aktive 2FA nicht kommentarlos neu würfeln — das würde sie in einen
+        // unbestätigten (effektiv faktorlosen) Zwischenzustand zurücksetzen.
+        if ($user->hasConfirmedTwoFactor()) {
+            throw ValidationException::withMessages([
+                'two_factor' => __('Zwei-Faktor ist bereits aktiv. Bitte zuerst deaktivieren.'),
+            ]);
+        }
+
         $user->forceFill([
             'two_factor_secret' => $this->tfa->generateSecret(),
             'two_factor_recovery_codes' => $this->tfa->generateRecoveryCodes(),
             'two_factor_confirmed_at' => null,
+            'two_factor_last_timestamp' => null,
         ])->save();
 
         return back();
@@ -57,6 +66,9 @@ class TwoFactorController extends Controller
             throw ValidationException::withMessages(['code' => __('Der Code ist ungültig.')]);
         }
 
+        // Zeitschritt wird hier bewusst NICHT festgehalten: sonst würde ein Login unmittelbar
+        // nach dem Bestätigen (gleiches Zeitfenster) fälschlich als Replay abgelehnt. Der
+        // Replay-Schutz greift im Login-Challenge, wo er sicherheitsrelevant ist.
         $user->forceFill(['two_factor_confirmed_at' => now()])->save();
 
         return back()->with('success', 'Zwei-Faktor-Authentifizierung aktiviert.');
@@ -68,6 +80,7 @@ class TwoFactorController extends Controller
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
             'two_factor_confirmed_at' => null,
+            'two_factor_last_timestamp' => null,
         ])->save();
 
         return back()->with('success', 'Zwei-Faktor-Authentifizierung deaktiviert.');

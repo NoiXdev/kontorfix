@@ -8,6 +8,7 @@ use App\Services\Auth\TwoFactorAuthenticator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -32,14 +33,40 @@ class TwoFactorChallengeController extends Controller
             return redirect()->route('login');
         }
 
-        /** @var User $user */
-        $user = User::findOrFail($userId);
+        // Wird der User zwischen Passwort- und Faktor-Schritt gelöscht: sauber zurück zum Login.
+        $user = User::find($userId);
+        if ($user === null) {
+            $request->session()->forget('login.id');
+
+            return redirect()->route('login');
+        }
+
+        // Account-gebundenes Rate-Limit auf die Session-User-ID (nicht die IP) — so lässt es
+        // sich nicht durch rotierende X-Forwarded-For-Header aushebeln.
+        $throttleKey = 'two-factor-challenge:'.$userId;
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'code' => trans('auth.throttle', ['seconds' => $seconds, 'minutes' => ceil($seconds / 60)]),
+            ]);
+        }
 
         $valid = false;
         $field = 'code';
         if ($request->filled('code')) {
-            $valid = $this->tfa->verify($user->two_factor_secret, (string) $request->string('code'));
             $field = 'code';
+            $timestamp = $this->tfa->verifyReturningTimestamp(
+                $user->two_factor_secret,
+                (string) $request->string('code'),
+                $user->two_factor_last_timestamp,
+            );
+
+            if ($timestamp !== false) {
+                // Verwendeten Zeitschritt festhalten → derselbe Code gilt kein zweites Mal.
+                $user->forceFill(['two_factor_last_timestamp' => $timestamp])->save();
+                $valid = true;
+            }
         } elseif ($request->filled('recovery_code')) {
             $field = 'recovery_code';
             $submitted = (string) $request->string('recovery_code');
@@ -50,8 +77,12 @@ class TwoFactorChallengeController extends Controller
         }
 
         if (! $valid) {
+            RateLimiter::hit($throttleKey);
+
             throw ValidationException::withMessages([$field => __('Der Code ist ungültig.')]);
         }
+
+        RateLimiter::clear($throttleKey);
 
         $remember = (bool) $request->session()->pull('login.remember', false);
         $request->session()->forget('login.id');

@@ -46,7 +46,11 @@ class LoginRequest extends FormRequest
         /** @var User|null $user */
         $user = User::where('email', $this->string('email'))->first();
 
-        if (! $user || ! Hash::check((string) $this->string('password'), $user->password)) {
+        // Hash::check läuft auch ohne User gegen einen festen Dummy-Hash — konstante Arbeit,
+        // damit die Antwortzeit nicht verrät, ob ein Account existiert (Timing-Enumeration).
+        $hash = $user->password ?? '$2y$12$wOujnffIB7RK/vXl7tujy.x0A/eb3esFIi0X.CdsC9MUy5aS6cHBi';
+
+        if (! Hash::check((string) $this->string('password'), $hash) || ! $user) {
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([

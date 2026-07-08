@@ -17,7 +17,22 @@ class TwoFactorAuthenticator
     /** Prüft einen 6-stelligen Code gegen das Secret (±1 Zeitfenster Toleranz). */
     public function verify(string $secret, string $code): bool
     {
-        return $this->engine->verifyKey($secret, $code, 1);
+        return $this->verifyReturningTimestamp($secret, $code, null) !== false;
+    }
+
+    /**
+     * Wie verify(), gibt aber den verwendeten Zeitschritt zurück (oder false).
+     * Mit $lastTimestamp werden Codes <= diesem Zeitschritt abgelehnt (Replay-Schutz):
+     * ein bereits genutzter Code kann im ±1-Fenster nicht ein zweites Mal gelten.
+     */
+    public function verifyReturningTimestamp(string $secret, string $code, ?int $lastTimestamp): int|false
+    {
+        // google2fa gibt bei oldTimestamp === null ein bool `true` (statt des Zeitschritts)
+        // zurück — daher 0 statt null übergeben: 0 < jeder echte Zeitschritt, also erhalten
+        // wir immer den tatsächlichen int-Zeitschritt zum Persistieren.
+        $result = $this->engine->verifyKeyNewer($secret, $code, $lastTimestamp ?? 0, 1);
+
+        return $result === false ? false : (int) $result;
     }
 
     /** Aktueller OTP-Code — nur für Tests / Debugging. */
