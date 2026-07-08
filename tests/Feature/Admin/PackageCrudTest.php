@@ -114,3 +114,14 @@ it('deletes a package', function () {
         ->delete("/admin/packages/{$pkg->id}")->assertRedirect();
     expect(Package::find($pkg->id))->toBeNull();
 });
+
+it('forbids members from creating packages via the json path', function () {
+    $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
+        ->postJson('/admin/packages', [
+            'type' => 'composer',
+            'name' => 'acme/sneaky',
+            'repository_url' => 'https://git.example.com/acme/sneaky.git',
+        ])->assertForbidden();
+
+    expect(Package::where('name', 'acme/sneaky')->exists())->toBeFalse();
+});
