@@ -18,6 +18,7 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
 });
 
 require __DIR__.'/settings.php';
