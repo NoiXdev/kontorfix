@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Portal;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\Package;
+use App\Models\RegistryToken;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Http\Request;
@@ -59,6 +60,12 @@ class RegistryController extends Controller
                 'type' => $p->type->value,
                 'description' => $p->description,
                 'latest_version' => $p->versions->first()?->version_pretty,
+            ]),
+            'tokens' => $group->tokens()->latest()->get()->map(fn (RegistryToken $t) => [
+                'id' => $t->id,
+                'name' => $t->name,
+                'ability' => $t->ability->value,
+                'last_used_at' => $t->last_used_at?->diffForHumans(),
             ]),
         ]);
     }

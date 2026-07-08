@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\Portal\RegistryController;
+use App\Http\Controllers\Portal\TokenController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -26,6 +27,8 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
     Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
     Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
+    Route::post('tokens', [TokenController::class, 'store'])->name('tokens.store');
+    Route::delete('tokens/{token}', [TokenController::class, 'destroy'])->name('tokens.destroy');
 });
 
 require __DIR__.'/settings.php';
