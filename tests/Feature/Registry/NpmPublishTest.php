@@ -67,6 +67,10 @@ it('rejects publish without a publish-ability token', function () {
     $this->withHeaders(['Authorization' => 'Bearer '.$plain])
         ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x'))
         ->assertForbidden();
+
+    // Kein Seiteneffekt: weder Version noch Tarball dürfen entstanden sein.
+    expect($pkg->fresh()->versions()->count())->toBe(0);
+    Storage::disk('artifacts')->assertMissing("tarballs/{$pkg->id}/leftpad-1.0.0.tgz");
 });
 
 it('rejects republishing an existing version with 409', function () {
@@ -89,6 +93,56 @@ it('rejects a tarball filename with path traversal', function () {
     $this->withHeaders(publishHeaderFor($group))
         ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', '../../evil.tgz', 'x'))
         ->assertStatus(422);
+
+    // Kein Tarball darf außerhalb (oder überhaupt) geschrieben worden sein.
+    expect($pkg->fresh()->versions()->count())->toBe(0);
+    expect(Storage::disk('artifacts')->allFiles())->toBe([]);
+});
+
+it('rejects an uppercase .TGZ filename so publish matches the case-sensitive fetch route', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'Leftpad-1.0.0.TGZ', 'x'))
+        ->assertStatus(422);
+});
+
+it('rejects a non-semver version string', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', 'not-a-version', 'leftpad-x.tgz', 'x'))
+        ->assertStatus(422);
+});
+
+it('rejects an empty attachment', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', ''))
+        ->assertStatus(422);
+});
+
+it('rejects a tarball larger than the configured limit', function () {
+    config(['kontorfix.npm_max_tarball_bytes' => 8]);
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', str_repeat('A', 64)))
+        ->assertStatus(422);
+    expect($pkg->fresh()->versions()->count())->toBe(0);
 });
 
 it('rejects a body whose name does not match the package', function () {

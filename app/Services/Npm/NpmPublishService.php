@@ -5,11 +5,19 @@ namespace App\Services\Npm;
 use App\Exceptions\VersionConflictException;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use Composer\Semver\VersionParser;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 
 class NpmPublishService
 {
+    /** Obergrenze für einen einzelnen Tarball (Default 100 MB), gegen Memory-/Disk-DoS. */
+    private function maxTarballBytes(): int
+    {
+        return (int) config('kontorfix.npm_max_tarball_bytes', 100 * 1024 * 1024);
+    }
+
     /**
      * @param  array<string, mixed>  $body
      */
@@ -30,8 +38,16 @@ class NpmPublishService
         $manifest = is_array($versions[$versionString]) ? $versions[$versionString] : [];
         $file = (string) array_key_first($attachments);
 
+        // Version muss gültiges Semver sein (sonst bricht später Semver::rsort im packument).
+        try {
+            (new VersionParser)->normalize($versionString);
+        } catch (\UnexpectedValueException) {
+            throw new InvalidArgumentException('Invalid version string.');
+        }
+
         // Dateiname streng validieren — kein Pfad-Traversal in den Storage-Key.
-        if (! preg_match('/^[a-z0-9][a-z0-9._~-]*\.tgz$/i', $file) || str_contains($file, '..')) {
+        // Lowercase-only, damit Publish und die (case-sensitive) Tarball-Route übereinstimmen.
+        if (! preg_match('/^[a-z0-9][a-z0-9._~-]*\.tgz$/', $file) || str_contains($file, '..')) {
             throw new InvalidArgumentException('Invalid tarball filename.');
         }
 
@@ -41,8 +57,11 @@ class NpmPublishService
 
         $data = $attachments[$file]['data'] ?? '';
         $bytes = base64_decode(is_string($data) ? $data : '', true);
-        if ($bytes === false) {
-            throw new InvalidArgumentException('Invalid attachment data.');
+        if ($bytes === false || $bytes === '') {
+            throw new InvalidArgumentException('Invalid or empty attachment data.');
+        }
+        if (strlen($bytes) > $this->maxTarballBytes()) {
+            throw new InvalidArgumentException('Tarball exceeds the maximum allowed size.');
         }
 
         $shasum = sha1($bytes);
@@ -55,17 +74,24 @@ class NpmPublishService
         $disk->put($staging, $bytes);
         $disk->move($staging, $path);
 
-        $version = $package->versions()->create([
-            'version' => $versionString,
-            'version_pretty' => $versionString,
-            'source_reference' => null,
-            'metadata' => $manifest,
-            'dist_shasum' => $shasum,
-            'dist_integrity' => $integrity,
-            'dist_tarball_name' => $file,
-            'dist_path' => $path,
-            'released_at' => now(),
-        ]);
+        try {
+            $version = $package->versions()->create([
+                'version' => $versionString,
+                'version_pretty' => $versionString,
+                'source_reference' => null,
+                'metadata' => $manifest,
+                'dist_shasum' => $shasum,
+                'dist_integrity' => $integrity,
+                'dist_tarball_name' => $file,
+                'dist_path' => $path,
+                'released_at' => now(),
+            ]);
+        } catch (QueryException $e) {
+            // Race: ein paralleler Publish derselben Version hat die exists()-Prüfung
+            // zwischen Check und Insert gewonnen — der Unique-Index fängt den Verlierer.
+            @$disk->delete($path);
+            throw new VersionConflictException('Version already exists.', previous: $e);
+        }
 
         // dist-tags mergen.
         $tags = $package->dist_tags ?? [];
