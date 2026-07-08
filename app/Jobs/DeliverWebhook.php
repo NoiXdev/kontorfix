@@ -32,7 +32,10 @@ class DeliverWebhook implements ShouldQueue
             $headers['X-Kontorfix-Signature'] = 'sha256='.hash_hmac('sha256', (string) $body, $this->webhook->secret);
         }
 
-        $response = Http::timeout(15)->withHeaders($headers)->withBody((string) $body, 'application/json')->post($this->webhook->url);
+        // Keine Redirects folgen — der signierte POST darf nur den konfigurierten Host
+        // treffen, nicht via 302 auf eine andere (evtl. interne) Adresse umgelenkt werden.
+        $response = Http::timeout(15)->withoutRedirecting()->withHeaders($headers)
+            ->withBody((string) $body, 'application/json')->post($this->webhook->url);
 
         $delivery = new WebhookDelivery([
             'event' => $this->event,

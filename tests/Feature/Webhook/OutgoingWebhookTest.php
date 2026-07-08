@@ -2,10 +2,13 @@
 
 use App\Enums\WebhookEvent;
 use App\Events\PackageSynced;
+use App\Events\PackageSyncFailed;
 use App\Jobs\DeliverWebhook;
+use App\Jobs\SyncPackage;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\Webhook;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 
@@ -51,4 +54,27 @@ it('delivers without a signature header when the webhook has no secret', functio
 
     (new DeliverWebhook($wh, 'package.synced', ['event' => 'package.synced']))->handle();
     Http::assertSent(fn ($r) => ! $r->hasHeader('X-Kontorfix-Signature'));
+});
+
+it('fires sync.failed only once, from the job failed() hook (not per retry)', function () {
+    Event::fake([PackageSyncFailed::class]);
+    $pkg = Package::factory()->create(['repository_url' => 'file:///does/not/exist-'.uniqid()]);
+
+    // handle() wirft (und markiert Failed), feuert das Event aber NICHT — das macht failed().
+    expect(fn () => (new SyncPackage($pkg))->handle())->toThrow(RuntimeException::class);
+    Event::assertNotDispatched(PackageSyncFailed::class);
+
+    // Der Queue-Worker ruft failed() nach dem finalen Fehlschlag -> genau ein Event.
+    (new SyncPackage($pkg))->failed(new RuntimeException('boom'));
+    Event::assertDispatched(PackageSyncFailed::class, 1);
+});
+
+it('does not follow redirects when delivering a webhook', function () {
+    Http::fake(['hooks.test/*' => Http::response('', 302, ['Location' => 'http://169.254.169.254/x'])]);
+    $wh = Webhook::factory()->create(['url' => 'https://hooks.test/kfx', 'secret' => 'sec', 'events' => [WebhookEvent::PackageSynced->value]]);
+
+    // 302 gilt als Fehlschlag (nicht 2xx) -> rethrow, und der Redirect wird nie gefolgt.
+    expect(fn () => (new DeliverWebhook($wh, 'package.synced', ['event' => 'package.synced']))->handle())
+        ->toThrow(RuntimeException::class);
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), '169.254'));
 });

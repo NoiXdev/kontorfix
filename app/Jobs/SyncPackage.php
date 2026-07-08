@@ -90,12 +90,18 @@ class SyncPackage implements ShouldQueue
         } catch (Throwable $e) {
             // In der DB sichtbar machen UND weiterwerfen, damit die Queue transiente
             // Fehler erneut versucht (bei Erfolg überschreibt Synced den Failed-Status).
+            // Das PackageSyncFailed-Event feuert erst im failed()-Hook nach dem finalen
+            // Fehlschlag — sonst würde ein transienter Fehler pro Retry Webhook-Spam auslösen.
             $this->markFailed($e->getMessage());
-
-            PackageSyncFailed::dispatch($this->package, $e->getMessage());
 
             throw $e;
         }
+    }
+
+    public function failed(Throwable $e): void
+    {
+        // Erst nach Ausschöpfen aller Retries — ein einziges sync.failed-Event.
+        PackageSyncFailed::dispatch($this->package, $e->getMessage());
     }
 
     private function markFailed(string $message): void
