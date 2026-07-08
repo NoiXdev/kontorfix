@@ -26,4 +26,16 @@ return [
 
     'upstream_cache_ttl' => (int) env('KONTORFIX_UPSTREAM_CACHE_TTL', 300),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Incoming-Webhook-Secret
+    |--------------------------------------------------------------------------
+    |
+    | Shared Secret zur Signaturprüfung eingehender Webhooks (z. B. von CI-
+    | Systemen), die einen Sync anstoßen.
+    |
+    */
+
+    'incoming_webhook_secret' => env('KONTORFIX_INCOMING_WEBHOOK_SECRET'),
+
 ];
