@@ -18,13 +18,19 @@ class StorePackageRequest extends FormRequest
      */
     public function rules(): array
     {
+        // Namensformat je Typ: Composer ist immer vendor/name; npm ist ein bloßer
+        // Name oder @scope/name (scoped — der Normalfall).
+        $nameRegex = $this->input('type') === PackageType::Npm->value
+            ? '/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/'
+            : '/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/';
+
         return [
             'type' => ['required', Rule::enum(PackageType::class)],
             'name' => [
                 'required',
                 'string',
                 'max:190',
-                'regex:/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/',
+                "regex:{$nameRegex}",
                 Rule::unique('packages')->where('type', $this->input('type')),
             ],
             // Nur echte Git-Remotes über https/ssh — kein file:// oder gopher:// etc.,

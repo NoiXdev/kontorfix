@@ -38,15 +38,15 @@ it('returns the created package as json for inline picker creation', function ()
     $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
         ->postJson('/admin/packages', [
             'type' => 'npm',
-            'name' => 'acme/widget',
+            'name' => '@acme/widget',
             'repository_url' => 'https://git.example.com/acme/widget.git',
         ])
         ->assertCreated()
-        ->assertJson(['name' => 'acme/widget', 'type' => 'npm'])
+        ->assertJson(['name' => '@acme/widget', 'type' => 'npm'])
         ->assertJsonStructure(['id', 'name', 'type']);
 
     Queue::assertPushed(SyncPackage::class);
-    expect(Package::where('name', 'acme/widget')->exists())->toBeTrue();
+    expect(Package::where('name', '@acme/widget')->exists())->toBeTrue();
 });
 
 it('returns json validation errors for inline picker creation', function () {
@@ -124,4 +124,23 @@ it('forbids members from creating packages via the json path', function () {
         ])->assertForbidden();
 
     expect(Package::where('name', 'acme/sneaky')->exists())->toBeFalse();
+});
+
+it('accepts a scoped npm package name but still requires vendor/name for composer', function () {
+    Queue::fake();
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $url = 'https://git.example.com/acme/demo.git';
+
+    // npm: scoped erlaubt
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/ui-kit', 'repository_url' => $url])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    // npm: bloßer Name erlaubt
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => 'leftpad', 'repository_url' => $url])
+        ->assertSessionHasNoErrors();
+    // composer: bloßer Name (ohne vendor/) abgelehnt
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'leftpad', 'repository_url' => $url])
+        ->assertSessionHasErrors('name');
+    // npm: Großbuchstaben abgelehnt
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/UI-Kit', 'repository_url' => $url])
+        ->assertSessionHasErrors('name');
 });

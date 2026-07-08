@@ -47,7 +47,9 @@ class NpmPublishService
 
         // Den Storage-Dateinamen selbst ableiten statt npms Attachment-Key zu vertrauen
         // (der bei scoped Paketen "@scope/name-version.tgz" heißt, also @ und / enthält).
-        // So ist der Name garantiert traversal-frei und passt zur case-sensitiven Fetch-Route.
+        // strrchr/substr liefert nur das letzte Pfadsegment → strukturell traversal-frei.
+        // Die anschließende Regex verengt bewusst: Versionen mit Build-Metadaten (1.0.0+x)
+        // oder Großbuchstaben im Pre-Release scheitern hier (fail-closed) — für v0.2 ok.
         $unscoped = str_contains($package->name, '/') ? substr((string) strrchr($package->name, '/'), 1) : $package->name;
         $file = "{$unscoped}-{$versionString}.tgz";
         if (! preg_match('/^[a-z0-9][a-z0-9._~-]*\.tgz$/', $file) || str_contains($file, '..')) {

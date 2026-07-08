@@ -149,3 +149,17 @@ it('rejects a body whose name does not match the package', function () {
         ->putJson('/r/kadenz/leftpad', publishBody('rightpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x'))
         ->assertStatus(422);
 });
+
+it('rejects a package name that would derive an unsafe tarball filename', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    // Über die Factory einschleusbar (umgeht die Anlage-Validierung) — der Publish-Service
+    // muss den abgeleiteten Dateinamen dennoch gegen die Regex prüfen.
+    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@x/..']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson('/r/kadenz/@x/..', publishBody('@x/..', '1.0.0', 'whatever.tgz', 'bytes'))
+        ->assertStatus(422);
+    expect(Storage::disk('artifacts')->allFiles())->toBe([]);
+});
