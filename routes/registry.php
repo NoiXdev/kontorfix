@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Registry\ComposerController;
 use App\Http\Controllers\Registry\NpmController;
+use App\Http\Controllers\Registry\ProxyDownloadController;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 
@@ -30,4 +31,14 @@ Route::prefix('/r/{group:slug}')->middleware([SubstituteBindings::class, 'regist
         ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
     Route::put('/{package}', [NpmController::class, 'publish'])
         ->where(['package' => '[a-z0-9._-]+']);
+
+    // Proxy-Downloads: {upstream} ist eine UUID, wird bewusst NICHT per Route-Model-Binding
+    // aufgelöst, sondern manuell im Controller — so bleibt die Gruppen-Zugehörigkeitsprüfung
+    // explizit (kein Token darf über einen fremden Upstream Downloads anstoßen).
+    Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
+        ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
+    Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
+        ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+    Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
+        ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
 });
