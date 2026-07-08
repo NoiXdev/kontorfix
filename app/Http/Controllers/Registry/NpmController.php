@@ -8,9 +8,11 @@ use App\Exceptions\VersionConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\RegistryToken;
+use App\Models\Upstream;
 use App\Services\Npm\NpmMetadataBuilder;
 use App\Services\Npm\NpmPublishService;
 use App\Services\RegistryAccessService;
+use App\Services\Upstream\NpmProxyService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -25,6 +27,7 @@ class NpmController extends Controller
         private readonly RegistryAccessService $access,
         private readonly NpmMetadataBuilder $metadata,
         private readonly NpmPublishService $publisher,
+        private readonly NpmProxyService $proxy,
     ) {}
 
     protected function access(): RegistryAccessService
@@ -45,9 +48,38 @@ class NpmController extends Controller
     private function respondPackument(Request $request, Group $group, string $name): JsonResponse
     {
         $this->authorizeGroup($request, $group);
-        $pkg = $this->findAccessible($request, $group, PackageType::Npm, $name);
+        $pkg = $this->findLocal($request, $group, PackageType::Npm, $name);
 
-        return response()->json($this->metadata->build($pkg, $group->slug, $request->getSchemeAndHttpHost()));
+        if ($pkg !== null) {
+            return response()->json($this->metadata->build($pkg, $group->slug, $request->getSchemeAndHttpHost()));
+        }
+
+        // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
+        // OHNE den Upstream zu fragen — sonst würde ein privater Paketname zu npmjs leaken.
+        if ($this->packageExistsLocally(PackageType::Npm, $name)) {
+            abort(404);
+        }
+
+        $upstream = $this->npmUpstream($group);
+        if ($upstream === null) {
+            abort(404);
+        }
+
+        $doc = $this->proxy->packument($group, $upstream, $name, $request->getSchemeAndHttpHost());
+        if ($doc === null) {
+            abort(404);
+        }
+
+        return response()->json($doc);
+    }
+
+    private function npmUpstream(Group $group): ?Upstream
+    {
+        return $group->upstreams()
+            ->where('type', PackageType::Npm)
+            ->where('enabled', true)
+            ->orderBy('priority')
+            ->first();
     }
 
     public function tarball(Request $request, Group $group, string $package, string $file): StreamedResponse
