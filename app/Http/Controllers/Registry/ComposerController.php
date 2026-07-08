@@ -50,17 +50,33 @@ class ComposerController extends Controller
         }
 
         $disk = Storage::disk('artifacts');
-        $path = $pkgVersion->dist_path ?? "dists/{$package->id}/{$version}.zip";
+        // Nach Commit-SHA geschlüsselt: ein Force-Push ändert source_reference und damit
+        // den Pfad — das alte Archiv wird nie fälschlich weitergeliefert (Cache-Invalidierung).
+        $path = "dists/{$package->id}/{$pkgVersion->source_reference}.zip";
 
         if (! $disk->exists($path)) {
             if ($package->repository_url === null) {
                 abort(404);
             }
+
             $repo = new GitRepository($package->repository_url, $package->id);
             $repo->sync();
             $tmp = $repo->archiveZip($pkgVersion->source_reference);
-            $disk->put($path, file_get_contents($tmp));
-            @unlink($tmp);
+
+            // Atomar: in einen eindeutigen Temp-Pfad streamen, dann per rename an den
+            // endgültigen Pfad verschieben — verhindert Torn Reads bei parallelen Requests.
+            $staging = "dists/{$package->id}/.{$pkgVersion->source_reference}.".uniqid().'.part';
+            try {
+                $handle = fopen($tmp, 'r');
+                $disk->writeStream($staging, $handle);
+                if (is_resource($handle)) {
+                    fclose($handle);
+                }
+            } finally {
+                @unlink($tmp);
+            }
+            $disk->move($staging, $path);
+
             $pkgVersion->update(['dist_path' => $path]);
         }
 

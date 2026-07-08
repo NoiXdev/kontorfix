@@ -6,6 +6,7 @@ use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
 use RuntimeException;
+use Throwable;
 
 class GitRepository
 {
@@ -79,8 +80,11 @@ class GitRepository
 
         try {
             $this->run(['git', 'archive', '--format=zip', '-o', $zip, '--end-of-options', $ref]);
+        } catch (Throwable $e) {
+            @unlink($zip); // git legt die Ausgabedatei vor der Ref-Prüfung an — bei Fehler wegräumen
+            throw $e;
         } finally {
-            @unlink($stub); // tempnam legt eine leere Stub-Datei an — auch bei Fehler entfernen
+            @unlink($stub); // tempnam-Stub immer entfernen
         }
 
         return $zip;

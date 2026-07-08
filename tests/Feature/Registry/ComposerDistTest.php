@@ -4,6 +4,7 @@ use App\Jobs\SyncPackage;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FixtureRepo;
 
@@ -16,8 +17,9 @@ it('builds the zip lazily, stores it on the artifacts disk and streams it', func
 
     $res = $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip');
 
+    $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     $res->assertOk()->assertHeader('content-type', 'application/zip');
-    Storage::disk('artifacts')->assertExists('dists/'.$pkg->id.'/1.0.0.0.zip');
+    Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$sha}.zip");
 });
 
 it('serves the cached zip on the second request without rebuilding', function () {
@@ -32,8 +34,39 @@ it('serves the cached zip on the second request without rebuilding', function ()
     // Zweiter Request: dist_path ist gesetzt, kein Rebuild nötig
     $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
+    $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     expect($pkg->versions()->where('version', '1.0.0.0')->first()->dist_path)
-        ->toBe('dists/'.$pkg->id.'/1.0.0.0.zip');
+        ->toBe("dists/{$pkg->id}/{$sha}.zip");
+});
+
+it('rebuilds the dist when a tag was force-pushed to a new commit', function () {
+    Storage::fake('artifacts');
+    $fixture = FixtureRepo::make();
+    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.$fixture]);
+    (new SyncPackage($pkg))->handle();
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $group->packages()->attach($pkg);
+    $headers = tokenHeaderFor($group);
+
+    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $oldSha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
+    Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$oldSha}.zip");
+
+    // Echter Force-Push: gleicher Tag, neuer Commit.
+    $git = fn (string $cmd) => Process::path($fixture)->run($cmd)->throw();
+    $git('git -c user.email=t@t -c user.name=t commit --allow-empty -m forcepush');
+    $git('git tag -f v1.0.0');
+    (new SyncPackage($pkg))->handle();
+
+    $newSha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
+    expect($newSha)->not->toBe($oldSha);
+
+    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+
+    // Neuer SHA-Pfad wird gebaut und ausgeliefert — keine stale Auslieferung.
+    Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$newSha}.zip");
+    expect($pkg->versions()->where('version', '1.0.0.0')->first()->dist_path)
+        ->toBe("dists/{$pkg->id}/{$newSha}.zip");
 });
 
 it('denies dist download without access', function () {
