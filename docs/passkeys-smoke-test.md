@@ -32,3 +32,19 @@ Der vollständige End-to-End-Flow wird manuell verifiziert:
 - Registrierung/Löschen nur nach Passwort-Bestätigung (management_middleware).
 - Ein Passkey ist nur vom besitzenden Nutzer löschbar (403 sonst).
 - Passkeys gelten für den App-Login, nicht für die Composer/npm-Registry-Endpunkte.
+
+## Sicherheitsentscheidung: Passkey vs. erzwungene 2FA (TOTP)
+Passkeys verlangen hier zwingend **User-Verification** (Biometrie/PIN;
+`USER_VERIFICATION_REQUIREMENT_REQUIRED` in der Lib) — ein Passkey ist damit selbst ein
+phishing-resistenter **Mehr-Faktor**-Nachweis (Besitz des Authenticators + Verifikation).
+
+Bewusste Entscheidung: **Ein Passkey-Login ersetzt den TOTP-Schritt und ist auch dann
+erlaubt, wenn der Nutzer 2FA aktiviert hat** (FIDO2-Standard). Das ist absichtlich als
+explizite Policy verdrahtet — `Passkeys::authorizeLoginUsing(...)` in
+`app/Providers/AppServiceProvider.php` — und per Test festgeschrieben
+(`tests/Feature/Auth/PasskeyTwoFactorPolicyTest.php`), damit der Verzicht auf den TOTP-Schritt
+keine stille Default-Annahme ist.
+
+Um 2FA stattdessen zu erzwingen (Passkey bei aktiver 2FA blockieren), im Callback
+`return ! $user->hasConfirmedTwoFactor();` — dann muss der Nutzer den regulären
+Passwort-+-TOTP-Flow gehen.

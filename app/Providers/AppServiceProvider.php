@@ -5,8 +5,12 @@ namespace App\Providers;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Passkeys\Contracts\PasskeyUser;
+use Laravel\Passkeys\Passkey;
+use Laravel\Passkeys\Passkeys;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -28,5 +32,15 @@ class AppServiceProvider extends ServiceProvider
         // Methoden verdrahten. Deshalb explizite Registrierung statt Discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
+
+        // Bewusste Sicherheitsentscheidung (v0.8): Ein Passkey verlangt hier zwingend
+        // User-Verification (Biometrie/PIN, siehe config/passkeys.php) und ist damit selbst
+        // ein phishing-resistenter Mehr-Faktor-Nachweis (Besitz + Verifikation). Ein
+        // Passkey-Login ersetzt daher den TOTP-Schritt und ist AUCH bei aktiver 2FA erlaubt —
+        // konsistent mit dem FIDO2-Standard. Diese Policy ist absichtlich explizit registriert
+        // (statt sich auf den „allow"-Default zu verlassen), damit der Verzicht auf den
+        // TOTP-Schritt eine sichtbare, getestete Entscheidung ist. Um 2FA stattdessen zu
+        // erzwingen (Passkey bei aktiver 2FA blocken): `return ! $user->hasConfirmedTwoFactor();`
+        Passkeys::authorizeLoginUsing(fn (Request $request, PasskeyUser $user, Passkey $passkey): bool => true);
     }
 }
