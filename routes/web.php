@@ -47,6 +47,7 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
     Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
     Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
+    Route::get('registries/{group}/packages/{package}', [RegistryController::class, 'showPackage'])->name('registries.package');
     Route::post('tokens', [TokenController::class, 'store'])->name('tokens.store');
     Route::delete('tokens/{token}', [TokenController::class, 'destroy'])->name('tokens.destroy');
 });
