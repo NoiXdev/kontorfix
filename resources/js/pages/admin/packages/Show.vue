@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -111,97 +112,108 @@ if (isOperator) {
                 </div>
             </div>
 
-            <section class="flex flex-col gap-3">
-                <h2 class="text-lg font-medium">Installation</h2>
-                <pre
-                    class="overflow-x-auto rounded-md border border-sidebar-border/70 bg-muted/50 px-4 py-3 font-mono text-sm dark:border-sidebar-border"
-                    >{{ installCommand }}</pre
-                >
-            </section>
+            <Tabs default-value="installation">
+                <TabsList>
+                    <TabsTrigger value="installation">Installation</TabsTrigger>
+                    <TabsTrigger value="registries">Registries</TabsTrigger>
+                    <TabsTrigger value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
+                </TabsList>
 
-            <section class="flex flex-col gap-3">
-                <h2 class="text-lg font-medium">Registries</h2>
-                <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                    <table class="w-full text-left text-sm">
-                        <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                            <tr>
-                                <th class="px-4 py-3 font-medium">Name</th>
-                                <th class="px-4 py-3 font-medium">Pfad</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="group in props.groups"
-                                :key="group.id"
-                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                            >
-                                <td class="px-4 py-3">
-                                    <Link :href="route('admin.groups.index')" class="hover:underline">{{ group.name }}</Link>
-                                </td>
-                                <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
-                            </tr>
-                            <tr v-if="props.groups.length === 0">
-                                <td colspan="2" class="px-4 py-8 text-center text-muted-foreground">Keiner Registry zugeordnet.</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
+                <TabsContent value="installation">
+                    <section class="flex flex-col gap-3">
+                        <pre
+                            class="overflow-x-auto rounded-md border border-sidebar-border/70 bg-muted/50 px-4 py-3 font-mono text-sm dark:border-sidebar-border"
+                            >{{ installCommand }}</pre
+                        >
+                    </section>
+                </TabsContent>
 
-            <section class="flex flex-col gap-3">
-                <h2 class="text-lg font-medium">Versionen</h2>
-                <div
-                    v-if="props.versions.length === 0"
-                    class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
-                >
-                    Noch keine Versionen synchronisiert.
-                </div>
-                <div
-                    v-for="version in props.versions"
-                    :key="version.version"
-                    class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
-                >
-                    <div class="flex flex-wrap items-center gap-3">
-                        <span class="font-mono text-sm font-semibold">{{ version.version }}</span>
-                        <span v-if="version.released_at" class="text-xs text-muted-foreground">{{ version.released_at }}</span>
-                        <span v-if="version.reference" class="font-mono text-xs text-muted-foreground">
-                            {{ version.reference.slice(0, 12) }}
-                        </span>
-                    </div>
+                <TabsContent value="registries">
+                    <section class="flex flex-col gap-3">
+                        <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                            <table class="w-full text-left text-sm">
+                                <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                                    <tr>
+                                        <th class="px-4 py-3 font-medium">Name</th>
+                                        <th class="px-4 py-3 font-medium">Pfad</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="group in props.groups"
+                                        :key="group.id"
+                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                    >
+                                        <td class="px-4 py-3">
+                                            <Link :href="route('admin.groups.index')" class="hover:underline">{{ group.name }}</Link>
+                                        </td>
+                                        <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
+                                    </tr>
+                                    <tr v-if="props.groups.length === 0">
+                                        <td colspan="2" class="px-4 py-8 text-center text-muted-foreground">Keiner Registry zugeordnet.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </TabsContent>
 
-                    <details v-if="depCount(version.dependencies.runtime) > 0" class="mt-3">
-                        <summary class="cursor-pointer text-sm font-medium">
-                            Abhängigkeiten ({{ depCount(version.dependencies.runtime) }})
-                        </summary>
-                        <ul class="mt-2 space-y-1">
-                            <li
-                                v-for="(constraint, name) in version.dependencies.runtime"
-                                :key="name"
-                                class="flex gap-2 font-mono text-xs"
-                            >
-                                <span>{{ name }}</span>
-                                <span class="text-muted-foreground">{{ constraint }}</span>
-                            </li>
-                        </ul>
-                    </details>
+                <TabsContent value="versionen">
+                    <section class="flex flex-col gap-3">
+                        <div
+                            v-if="props.versions.length === 0"
+                            class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                        >
+                            Noch keine Versionen synchronisiert.
+                        </div>
+                        <div
+                            v-for="version in props.versions"
+                            :key="version.version"
+                            class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                        >
+                            <div class="flex flex-wrap items-center gap-3">
+                                <span class="font-mono text-sm font-semibold">{{ version.version }}</span>
+                                <span v-if="version.released_at" class="text-xs text-muted-foreground">{{ version.released_at }}</span>
+                                <span v-if="version.reference" class="font-mono text-xs text-muted-foreground">
+                                    {{ version.reference.slice(0, 12) }}
+                                </span>
+                            </div>
 
-                    <details v-if="depCount(version.dependencies.dev) > 0" class="mt-2">
-                        <summary class="cursor-pointer text-sm font-medium">
-                            Dev-Abhängigkeiten ({{ depCount(version.dependencies.dev) }})
-                        </summary>
-                        <ul class="mt-2 space-y-1">
-                            <li
-                                v-for="(constraint, name) in version.dependencies.dev"
-                                :key="name"
-                                class="flex gap-2 font-mono text-xs"
-                            >
-                                <span>{{ name }}</span>
-                                <span class="text-muted-foreground">{{ constraint }}</span>
-                            </li>
-                        </ul>
-                    </details>
-                </div>
-            </section>
+                            <details v-if="depCount(version.dependencies.runtime) > 0" class="mt-3">
+                                <summary class="cursor-pointer text-sm font-medium">
+                                    Abhängigkeiten ({{ depCount(version.dependencies.runtime) }})
+                                </summary>
+                                <ul class="mt-2 space-y-1">
+                                    <li
+                                        v-for="(constraint, name) in version.dependencies.runtime"
+                                        :key="name"
+                                        class="flex gap-2 font-mono text-xs"
+                                    >
+                                        <span>{{ name }}</span>
+                                        <span class="text-muted-foreground">{{ constraint }}</span>
+                                    </li>
+                                </ul>
+                            </details>
+
+                            <details v-if="depCount(version.dependencies.dev) > 0" class="mt-2">
+                                <summary class="cursor-pointer text-sm font-medium">
+                                    Dev-Abhängigkeiten ({{ depCount(version.dependencies.dev) }})
+                                </summary>
+                                <ul class="mt-2 space-y-1">
+                                    <li
+                                        v-for="(constraint, name) in version.dependencies.dev"
+                                        :key="name"
+                                        class="flex gap-2 font-mono text-xs"
+                                    >
+                                        <span>{{ name }}</span>
+                                        <span class="text-muted-foreground">{{ constraint }}</span>
+                                    </li>
+                                </ul>
+                            </details>
+                        </div>
+                    </section>
+                </TabsContent>
+            </Tabs>
         </div>
     </AppLayout>
 </template>
