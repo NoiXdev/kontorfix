@@ -6,8 +6,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AuthBase from '@/layouts/AuthLayout.vue';
+import { loginWithPasskey, passkeysSupported } from '@/lib/passkeys';
 import { Head, useForm } from '@inertiajs/vue3';
-import { LoaderCircle } from 'lucide-vue-next';
+import { Fingerprint, LoaderCircle } from 'lucide-vue-next';
+import { ref } from 'vue';
 
 defineProps<{
     status?: string;
@@ -24,6 +26,24 @@ const submit = () => {
     form.post(route('login'), {
         onFinish: () => form.reset('password'),
     });
+};
+
+const passkeysAvailable = passkeysSupported();
+const passkeyPending = ref(false);
+const passkeyError = ref<string | null>(null);
+
+const signInWithPasskey = async () => {
+    passkeyPending.value = true;
+    passkeyError.value = null;
+
+    try {
+        const redirect = await loginWithPasskey(form.remember);
+        window.location.href = redirect;
+    } catch (e) {
+        passkeyError.value =
+            e instanceof Error && e.name === 'NotAllowedError' ? 'Anmeldung abgebrochen.' : 'Anmeldung per Passkey fehlgeschlagen.';
+        passkeyPending.value = false;
+    }
 };
 </script>
 
@@ -80,6 +100,15 @@ const submit = () => {
                     <LoaderCircle v-if="form.processing" class="h-4 w-4 animate-spin" />
                     Log in
                 </Button>
+
+                <div v-if="passkeysAvailable" class="grid gap-2">
+                    <Button type="button" variant="outline" class="w-full" :disabled="passkeyPending" @click="signInWithPasskey">
+                        <LoaderCircle v-if="passkeyPending" class="h-4 w-4 animate-spin" />
+                        <Fingerprint v-else class="h-4 w-4" />
+                        Mit Passkey anmelden
+                    </Button>
+                    <InputError :message="passkeyError ?? undefined" class="text-center" />
+                </div>
             </div>
 
             <div class="text-center text-sm text-muted-foreground">

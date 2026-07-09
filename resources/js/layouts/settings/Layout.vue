@@ -22,6 +22,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Zwei-Faktor',
         href: '/settings/two-factor',
     },
+    {
+        title: 'Passkeys',
+        href: '/settings/passkeys',
+    },
 ];
 
 const currentPath = window.location.pathname;
