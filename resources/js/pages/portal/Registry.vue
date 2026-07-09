@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Check, Copy, Plus, Trash2 } from 'lucide-vue-next';
+import { Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 interface Registry {
@@ -130,29 +132,6 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Registries', href: '/portal' },
     { title: props.registry.name, href: `/portal/registries/${props.registry.id}` },
 ];
-
-const copiedKey = ref<string | null>(null);
-
-async function copy(text: string, key: string) {
-    try {
-        await navigator.clipboard.writeText(text);
-        copiedKey.value = key;
-        setTimeout(() => {
-            if (copiedKey.value === key) {
-                copiedKey.value = null;
-            }
-        }, 2000);
-    } catch {
-        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Inhalt ist markierbar.
-        copiedKey.value = null;
-    }
-}
-
-const steps = [
-    { key: 'composer', title: 'Composer einrichten', content: () => props.snippets.composer },
-    { key: 'auth', title: 'Zugang einrichten', content: () => props.snippets.auth },
-    { key: 'npm', title: 'npm einrichten', content: () => props.snippets.npm },
-];
 </script>
 
 <template>
@@ -165,25 +144,23 @@ const steps = [
                 <p class="mt-1 break-all font-mono text-sm text-muted-foreground">{{ props.registry.url }}</p>
             </div>
 
-            <div class="grid gap-4">
-                <div
-                    v-for="step in steps"
-                    :key="step.key"
-                    class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border"
-                >
-                    <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
-                        <h2 class="font-medium">{{ step.title }}</h2>
-                        <Button variant="outline" size="sm" @click="copy(step.content(), step.key)">
-                            <component :is="copiedKey === step.key ? Check : Copy" class="size-4" />
-                            {{ copiedKey === step.key ? 'Kopiert!' : 'Kopieren' }}
-                        </Button>
-                    </div>
-                    <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content() }}</pre>
-                </div>
-            </div>
+            <Tabs default-value="einrichtung">
+                <TabsList>
+                    <TabsTrigger value="einrichtung">Einrichtung</TabsTrigger>
+                    <TabsTrigger value="pakete">Pakete</TabsTrigger>
+                    <TabsTrigger value="tokens">Zugriffstokens</TabsTrigger>
+                </TabsList>
 
-            <div>
-                <h2 class="mb-3 font-medium">Pakete</h2>
+                <TabsContent value="einrichtung">
+                    <RegistrySetup
+                        :snippets="props.snippets"
+                        store-route="portal.tokens.store"
+                        :store-payload="{ group_id: props.registry.id }"
+                        :personal-tokens="props.tokens"
+                    />
+                </TabsContent>
+
+                <TabsContent value="pakete">
                 <div class="mb-3 flex flex-wrap items-center gap-3">
                     <Input
                         v-model="filterQ"
@@ -245,11 +222,9 @@ const steps = [
                         </tbody>
                     </table>
                 </div>
-            </div>
+                </TabsContent>
 
-            <div>
-                <h2 class="mb-3 font-medium">Zugriffstokens</h2>
-
+                <TabsContent value="tokens">
                 <div v-if="showTokenCallout" class="mb-4 rounded-xl border border-copper/30 bg-copper/10 p-4">
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0 flex-1 space-y-2">
@@ -329,7 +304,8 @@ const steps = [
                         </tbody>
                     </table>
                 </div>
-            </div>
+                </TabsContent>
+            </Tabs>
         </div>
     </AppLayout>
 </template>
