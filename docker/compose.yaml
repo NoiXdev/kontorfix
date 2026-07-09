@@ -42,6 +42,16 @@ services:
       redis: { condition: service_healthy }
     restart: unless-stopped
 
+  reverb:
+    image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    environment:
+      CONTAINER_ROLE: reverb
+    env_file: .env
+    ports: ['8081:8080']
+    depends_on:
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
