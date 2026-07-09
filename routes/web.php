@@ -25,6 +25,7 @@ Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin'
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
+    Route::get('search', Admin\GlobalSearchController::class)->name('search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);

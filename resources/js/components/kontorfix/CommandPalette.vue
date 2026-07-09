@@ -1,17 +1,40 @@
 <script setup lang="ts">
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { router } from '@inertiajs/vue3';
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-interface Pkg {
+interface PackageHit {
     id: string;
     name: string;
     type: 'composer' | 'npm';
 }
 
+interface RegistryHit {
+    id: string;
+    name: string;
+    slug: string;
+}
+
+interface CustomerHit {
+    id: string;
+    name: string;
+    is_operator: boolean;
+}
+
+interface SearchResults {
+    packages: PackageHit[];
+    registries: RegistryHit[];
+    customers: CustomerHit[];
+}
+
+type FlatHit =
+    | { kind: 'package'; item: PackageHit }
+    | { kind: 'registry'; item: RegistryHit }
+    | { kind: 'customer'; item: CustomerHit };
+
 const open = ref(false);
 const query = ref('');
-const results = ref<Pkg[]>([]);
+const results = ref<SearchResults>({ packages: [], registries: [], customers: [] });
 const loading = ref(false);
 const failed = ref(false);
 const activeIndex = ref(0);
@@ -19,6 +42,22 @@ const inputEl = ref<HTMLInputElement | null>(null);
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let requestToken = 0;
+
+// Flache Reihenfolge aller Treffer (packages → registries → customers) für
+// die Tastatur-Navigation und die Enter-/Klick-Auswahl.
+const flatHits = computed<FlatHit[]>(() => [
+    ...results.value.packages.map((item) => ({ kind: 'package', item }) as FlatHit),
+    ...results.value.registries.map((item) => ({ kind: 'registry', item }) as FlatHit),
+    ...results.value.customers.map((item) => ({ kind: 'customer', item }) as FlatHit),
+]);
+
+const totalHits = computed(() => flatHits.value.length);
+
+// Laufender Offset pro Sektion, damit der aktive Index über alle Sektionen
+// hinweg konsistent ist.
+const packageOffset = computed(() => 0);
+const registryOffset = computed(() => results.value.packages.length);
+const customerOffset = computed(() => results.value.packages.length + results.value.registries.length);
 
 // Laravel erwartet den entschlüsselten CSRF-Token als X-XSRF-TOKEN-Header
 // (analog zu PackagePicker.vue bzw. lib/passkeys.ts).
@@ -35,7 +74,7 @@ function openPalette() {
 function closePalette() {
     open.value = false;
     query.value = '';
-    results.value = [];
+    results.value = { packages: [], registries: [], customers: [] };
     loading.value = false;
     failed.value = false;
     activeIndex.value = 0;
@@ -68,7 +107,7 @@ watch(query, (value) => {
     activeIndex.value = 0;
 
     if (value.trim() === '') {
-        results.value = [];
+        results.value = { packages: [], registries: [], customers: [] };
         loading.value = false;
         failed.value = false;
         return;
@@ -83,7 +122,7 @@ async function search(value: string) {
     failed.value = false;
 
     try {
-        const response = await fetch(`${route('admin.package-search')}?q=${encodeURIComponent(value)}`, {
+        const response = await fetch(`${route('admin.search')}?q=${encodeURIComponent(value)}`, {
             headers: {
                 Accept: 'application/json',
                 'X-XSRF-TOKEN': xsrfToken(),
@@ -97,16 +136,16 @@ async function search(value: string) {
 
         if (!response.ok) {
             failed.value = true;
-            results.value = [];
+            results.value = { packages: [], registries: [], customers: [] };
             return;
         }
 
-        results.value = (await response.json()) as Pkg[];
+        results.value = (await response.json()) as SearchResults;
         activeIndex.value = 0;
     } catch {
         if (token === requestToken) {
             failed.value = true;
-            results.value = [];
+            results.value = { packages: [], registries: [], customers: [] };
         }
     } finally {
         if (token === requestToken) {
@@ -116,22 +155,28 @@ async function search(value: string) {
 }
 
 function moveActive(delta: number) {
-    if (results.value.length === 0) {
+    const count = totalHits.value;
+    if (count === 0) {
         return;
     }
-    const count = results.value.length;
     activeIndex.value = (activeIndex.value + delta + count) % count;
 }
 
 function selectActive() {
-    const pkg = results.value[activeIndex.value];
-    if (pkg) {
-        openPackage(pkg);
+    const hit = flatHits.value[activeIndex.value];
+    if (hit) {
+        openHit(hit);
     }
 }
 
-function openPackage(pkg: Pkg) {
-    router.visit(route('admin.packages.show', pkg.id));
+function openHit(hit: FlatHit) {
+    if (hit.kind === 'package') {
+        router.visit(route('admin.packages.show', hit.item.id));
+    } else if (hit.kind === 'registry') {
+        router.visit(route('admin.groups.show', hit.item.id));
+    } else {
+        router.visit(route('admin.organizations.show', hit.item.id));
+    }
     closePalette();
 }
 
@@ -148,7 +193,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div v-if="open" class="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[15vh]" role="dialog" aria-modal="true" aria-label="Paketsuche">
+    <div v-if="open" class="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[15vh]" role="dialog" aria-modal="true" aria-label="Suche">
         <div class="fixed inset-0 bg-black/50" @click="closePalette" />
 
         <div class="relative w-full max-w-lg overflow-hidden rounded-lg border border-sidebar-border/70 bg-background shadow-lg dark:border-sidebar-border">
@@ -158,7 +203,7 @@ onBeforeUnmount(() => {
                     v-model="query"
                     type="text"
                     autocomplete="off"
-                    placeholder="Pakete suchen…"
+                    placeholder="Pakete, Registries, Kunden suchen…"
                     class="w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
                     @keydown.down.prevent="moveActive(1)"
                     @keydown.up.prevent="moveActive(-1)"
@@ -171,25 +216,79 @@ onBeforeUnmount(() => {
 
             <div class="max-h-80 overflow-y-auto">
                 <p v-if="failed" class="px-3 py-6 text-center text-sm text-destructive">Suche fehlgeschlagen — bitte erneut versuchen.</p>
-                <p v-else-if="query.trim() === ''" class="px-3 py-6 text-center text-sm text-muted-foreground">Tippe, um Pakete zu suchen.</p>
-                <p v-else-if="!loading && results.length === 0" class="px-3 py-6 text-center text-sm text-muted-foreground">Keine Pakete gefunden.</p>
+                <p v-else-if="query.trim() === ''" class="px-3 py-6 text-center text-sm text-muted-foreground">Tippe, um zu suchen.</p>
+                <p v-else-if="!loading && totalHits === 0" class="px-3 py-6 text-center text-sm text-muted-foreground">Keine Treffer.</p>
 
-                <ul v-else class="py-1">
-                    <li v-for="(pkg, index) in results" :key="pkg.id">
-                        <button
-                            type="button"
-                            :class="[
-                                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
-                                index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50',
-                            ]"
-                            @click="openPackage(pkg)"
-                            @mouseenter="activeIndex = index"
-                        >
-                            <TypeBadge :type="pkg.type" />
-                            <span class="font-mono">{{ pkg.name }}</span>
-                        </button>
-                    </li>
-                </ul>
+                <div v-else class="py-1">
+                    <template v-if="results.packages.length > 0">
+                        <p class="px-3 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Pakete</p>
+                        <ul>
+                            <li v-for="(pkg, index) in results.packages" :key="`pkg-${pkg.id}`">
+                                <button
+                                    type="button"
+                                    :class="[
+                                        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                                        packageOffset + index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50',
+                                    ]"
+                                    @click="openHit({ kind: 'package', item: pkg })"
+                                    @mouseenter="activeIndex = packageOffset + index"
+                                >
+                                    <TypeBadge :type="pkg.type" />
+                                    <span class="font-mono">{{ pkg.name }}</span>
+                                </button>
+                            </li>
+                        </ul>
+                    </template>
+
+                    <template v-if="results.registries.length > 0">
+                        <p class="px-3 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Registries</p>
+                        <ul>
+                            <li v-for="(reg, index) in results.registries" :key="`reg-${reg.id}`">
+                                <button
+                                    type="button"
+                                    :class="[
+                                        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                                        registryOffset + index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50',
+                                    ]"
+                                    @click="openHit({ kind: 'registry', item: reg })"
+                                    @mouseenter="activeIndex = registryOffset + index"
+                                >
+                                    <span class="font-medium">{{ reg.name }}</span>
+                                    <span class="font-mono text-xs text-muted-foreground">/r/{{ reg.slug }}</span>
+                                </button>
+                            </li>
+                        </ul>
+                    </template>
+
+                    <template v-if="results.customers.length > 0">
+                        <p class="px-3 pt-2 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Kunden</p>
+                        <ul>
+                            <li v-for="(cust, index) in results.customers" :key="`cust-${cust.id}`">
+                                <button
+                                    type="button"
+                                    :class="[
+                                        'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                                        customerOffset + index === activeIndex ? 'bg-muted' : 'hover:bg-muted/50',
+                                    ]"
+                                    @click="openHit({ kind: 'customer', item: cust })"
+                                    @mouseenter="activeIndex = customerOffset + index"
+                                >
+                                    <span class="font-medium">{{ cust.name }}</span>
+                                    <span
+                                        :class="[
+                                            'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium',
+                                            cust.is_operator
+                                                ? 'border-copper/30 bg-copper/15 text-copper-hi'
+                                                : 'border-sidebar-border/70 bg-muted text-muted-foreground',
+                                        ]"
+                                    >
+                                        {{ cust.is_operator ? 'Betreiber' : 'Kunde' }}
+                                    </span>
+                                </button>
+                            </li>
+                        </ul>
+                    </template>
+                </div>
             </div>
         </div>
     </div>
