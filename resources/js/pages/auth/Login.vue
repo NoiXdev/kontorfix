@@ -8,13 +8,19 @@ import { Label } from '@/components/ui/label';
 import AuthBase from '@/layouts/AuthLayout.vue';
 import { loginWithPasskey, passkeysSupported } from '@/lib/passkeys';
 import { Head, useForm } from '@inertiajs/vue3';
-import { Fingerprint, LoaderCircle } from 'lucide-vue-next';
+import { Fingerprint, KeyRound, LoaderCircle } from 'lucide-vue-next';
 import { ref } from 'vue';
 
-defineProps<{
-    status?: string;
-    canResetPassword: boolean;
-}>();
+withDefaults(
+    defineProps<{
+        status?: string;
+        canResetPassword: boolean;
+        oidcProviders?: Array<{ slug: string; name: string }>;
+    }>(),
+    {
+        oidcProviders: () => [],
+    },
+);
 
 const form = useForm({
     email: '',
@@ -53,6 +59,26 @@ const signInWithPasskey = async () => {
 
         <div v-if="status" class="mb-4 text-center text-sm font-medium text-green-600">
             {{ status }}
+        </div>
+
+        <div v-if="oidcProviders.length" class="mb-6 flex flex-col gap-2">
+            <Button
+                v-for="provider in oidcProviders"
+                :key="provider.slug"
+                as="a"
+                :href="route('oidc.redirect', provider.slug)"
+                variant="outline"
+                class="w-full"
+            >
+                <KeyRound class="h-4 w-4" />
+                Mit {{ provider.name }} anmelden
+            </Button>
+
+            <div class="my-2 flex items-center gap-3 text-xs text-muted-foreground">
+                <span class="h-px flex-1 bg-border" />
+                <span>oder</span>
+                <span class="h-px flex-1 bg-border" />
+            </div>
         </div>
 
         <form @submit.prevent="submit" class="flex flex-col gap-6">
