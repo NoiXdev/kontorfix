@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
 use App\Http\Controllers\Auth\NewPasswordController;
+use App\Http\Controllers\Auth\OidcController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\Auth\TwoFactorChallengeController;
@@ -39,6 +40,11 @@ Route::middleware('guest')->group(function () {
 
     Route::post('reset-password', [NewPasswordController::class, 'store'])
         ->name('password.store');
+
+    Route::get('auth/oidc/{slug}/redirect', [OidcController::class, 'redirect'])
+        ->name('oidc.redirect')->middleware('throttle:10,1');
+    Route::get('auth/oidc/{slug}/callback', [OidcController::class, 'callback'])
+        ->name('oidc.callback')->middleware('throttle:10,1');
 });
 
 Route::middleware('auth')->group(function () {
