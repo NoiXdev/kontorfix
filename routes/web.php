@@ -29,6 +29,11 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
 });
 
+Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
+    Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
+    Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
+});
+
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
     Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
     Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
