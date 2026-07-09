@@ -134,12 +134,14 @@ class ProxyDownloadController extends Controller
      * Verhindert Second-Order-SSRF: eine vom (evtl. kompromittierten) Upstream gelieferte
      * dist-URL darf kein file://, gopher:// o.Ä. sein und nicht auf interne/reservierte
      * Adressen zeigen. Dist-URLs zeigen legitim auf CDNs (GitHub, npm), daher keine
-     * Host-Gleichheit mit dem Upstream, aber Scheme- und Adressbereichs-Prüfung.
+     * Host-Gleichheit mit dem Upstream, aber Scheme- und Adressbereichs-Prüfung — inkl.
+     * DNS-Auflösung, damit auch ein intern auflösender Hostname oder eine oktal/dezimal
+     * kodierte private IP abgewiesen wird.
      */
     private function assertSafeArtifactUrl(?string $url): string
     {
         abort_if($url === null, 404);
-        abort_unless(UrlSafety::isSafe($url), 422, 'Unsafe upstream artifact URL.');
+        abort_unless(UrlSafety::isSafeResolving($url), 422, 'Unsafe upstream artifact URL.');
 
         return $url;
     }

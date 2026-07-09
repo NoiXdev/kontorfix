@@ -36,7 +36,7 @@ class UpstreamClient
         $url = $absoluteUrl;
 
         for ($hop = 0; $hop < 5; $hop++) {
-            if (! UrlSafety::isSafe($url)) {
+            if (! UrlSafety::isSafeResolving($url)) {
                 throw new UpstreamException("Refusing unsafe upstream artifact URL: {$url}.");
             }
 

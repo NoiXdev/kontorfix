@@ -116,6 +116,35 @@ it('refuses a hostile upstream dist url pointing at an internal address', functi
     Http::assertNothingSent();
 });
 
+it('refuses a dist url whose host resolves to an internal address', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    // 2130706433 == 127.0.0.1: kein IP-Literal, filter_var behandelt es als Hostnamen —
+    // erst die DNS-Auflösung in isSafeResolving() erkennt das interne Ziel.
+    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'http://2130706433/latest/meta-data/');
+    Http::fake();
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertStatus(422);
+    Http::assertNothingSent(); // die intern auflösende Adresse darf nie angefragt werden
+});
+
+it('refuses an upstream redirect to a host that resolves to an internal address', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    seedComposerCache($up, 'evil/pkg', '1.0.0.0', 'https://cdn.test/evil.zip');
+
+    // Redirect-Ziel ist dezimal-kodierter Loopback (127.0.0.1) — kein IP-Literal,
+    // erst die DNS-Auflösung des re-validierten Hops erkennt es als intern.
+    Http::fake(['cdn.test/*' => Http::response('', 302, ['Location' => 'http://2130706433/meta'])]);
+
+    $this->withHeaders(tokenHeaderFor($group))
+        ->get("/r/kadenz/proxy/composer/{$up->id}/evil/pkg/1.0.0.0")->assertStatus(502);
+    Http::assertNotSent(fn ($r) => str_contains($r->url(), '2130706433'));
+});
+
 it('404s a download through a disabled upstream', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
