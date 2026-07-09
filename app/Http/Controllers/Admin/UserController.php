@@ -8,8 +8,10 @@ use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\Organization;
 use App\Models\User;
+use App\Notifications\UserInvitation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -37,10 +39,30 @@ class UserController extends Controller
 
     public function store(StoreUserRequest $request): RedirectResponse
     {
-        $user = User::create($request->validated());
+        $validated = $request->validated();
+        $withPassword = $request->filled('password');
+
+        if (! $withPassword) {
+            $validated['password'] = Str::random(40);
+        }
+
+        $user = User::create($validated);
         $user->forceFill(['email_verified_at' => now()])->save();
 
-        return back()->with('success', "Nutzer {$user->name} angelegt.");
+        if ($withPassword) {
+            return back()->with('success', "Nutzer {$user->name} angelegt.");
+        }
+
+        $user->notify(new UserInvitation);
+
+        return back()->with('success', "Nutzer {$user->name} eingeladen.");
+    }
+
+    public function invite(User $user): RedirectResponse
+    {
+        $user->notify(new UserInvitation);
+
+        return back()->with('success', 'Einladung erneut gesendet.');
     }
 
     public function update(UpdateUserRequest $request, User $user): RedirectResponse

@@ -45,6 +45,7 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
     Route::resource('organizations', Admin\OrganizationController::class)->only(['index', 'show', 'store', 'destroy'])->parameters(['organizations' => 'organization']);
 
     Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::post('users/{user}/invite', [Admin\UserController::class, 'invite'])->name('users.invite');
 });
 
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
