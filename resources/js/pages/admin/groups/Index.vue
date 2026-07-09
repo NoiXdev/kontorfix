@@ -3,7 +3,7 @@ import GroupSheet from '@/components/kontorfix/GroupSheet.vue';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, router, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -80,7 +80,9 @@ function destroyGroup(id: string) {
                             :key="group.id"
                             class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                         >
-                            <td class="px-4 py-3">{{ group.name }}</td>
+                            <td class="px-4 py-3">
+                                <Link :href="route('admin.groups.show', group.id)" class="hover:underline">{{ group.name }}</Link>
+                            </td>
                             <td class="px-4 py-3 font-mono">/r/{{ group.slug }}</td>
                             <td class="px-4 py-3 text-muted-foreground">{{ group.organization ?? '—' }}</td>
                             <td class="px-4 py-3 text-muted-foreground">

@@ -6,6 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\Package;
+use App\Models\RegistryToken;
+use App\Models\Upstream;
+use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -29,6 +33,28 @@ class GroupController extends Controller
                     'organization' => $g->organization?->name,
                 ]),
             'organizations' => Organization::orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
+    public function show(Group $group, SetupSnippetBuilder $snippets): Response
+    {
+        $group->load(['organization:id,name', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
+
+        return Inertia::render('admin/groups/Show', [
+            'group' => [
+                'id' => $group->id,
+                'name' => $group->name,
+                'slug' => $group->slug,
+                'public' => $group->public,
+                'organization' => $group->organization?->name,
+            ],
+            // Der belongsToMany-Join macht `id` mehrdeutig — daher packages.id qualifizieren.
+            'packages' => $group->packages()->orderBy('name')->get(['packages.id', 'name', 'type', 'sync_status'])
+                ->map(fn (Package $p) => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type->value, 'sync_status' => $p->sync_status->value]),
+            'domains' => $group->domains->pluck('hostname'),
+            'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => $u->url, 'policy' => $u->policy->value]),
+            'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value]),
+            'setup' => $snippets->for($group),
         ]);
     }
 
