@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Mail, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 interface UserRow {
@@ -40,6 +40,7 @@ const roleOptions = [
 ];
 
 const dialogOpen = ref(false);
+const mode = ref<'invite' | 'password'>('invite');
 
 const form = useForm({
     name: '',
@@ -49,13 +50,34 @@ const form = useForm({
     password: '',
 });
 
+function setMode(next: 'invite' | 'password') {
+    mode.value = next;
+    if (next === 'invite') {
+        // Passwort leeren, damit es im Einladungs-Modus nicht mitgesendet wird.
+        form.password = '';
+    }
+}
+
 function submit() {
-    form.post(route('admin.users.store'), {
+    // Im Einladungs-Modus kein Passwort mitsenden, damit das Backend eine Einladung verschickt.
+    form.transform((data) => {
+        if (mode.value === 'invite') {
+            const payload = { ...data };
+            delete (payload as Partial<typeof data>).password;
+            return payload;
+        }
+        return data;
+    }).post(route('admin.users.store'), {
         onSuccess: () => {
             dialogOpen.value = false;
             form.reset();
+            mode.value = 'invite';
         },
     });
+}
+
+function sendInvite(id: string) {
+    router.post(route('admin.users.invite', id), {}, { preserveScroll: true });
 }
 
 function changeRole(id: string, role: string) {
@@ -120,9 +142,15 @@ function destroyUser(id: string) {
                                 </select>
                             </td>
                             <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" @click="destroyUser(user.id)" aria-label="Nutzer löschen">
-                                    <Trash2 class="size-4 text-destructive" />
-                                </Button>
+                                <div class="flex items-center gap-1">
+                                    <Button variant="ghost" size="sm" @click="sendInvite(user.id)">
+                                        <Mail class="size-4" />
+                                        Einladung senden
+                                    </Button>
+                                    <Button variant="ghost" size="icon" @click="destroyUser(user.id)" aria-label="Nutzer löschen">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </div>
                             </td>
                         </tr>
                         <tr v-if="props.users.length === 0">
@@ -178,6 +206,39 @@ function destroyUser(id: string) {
                     </div>
 
                     <div class="grid gap-2">
+                        <Label>Zugang</Label>
+                        <div class="flex flex-col gap-2">
+                            <label class="flex items-start gap-2 text-sm">
+                                <input
+                                    type="radio"
+                                    name="mode"
+                                    value="invite"
+                                    :checked="mode === 'invite'"
+                                    @change="setMode('invite')"
+                                    class="mt-1"
+                                />
+                                <span>
+                                    Einladung per E-Mail senden
+                                    <span class="block text-xs text-muted-foreground">
+                                        Der Nutzer bekommt eine E-Mail mit einem Link, um sein Passwort selbst zu setzen.
+                                    </span>
+                                </span>
+                            </label>
+                            <label class="flex items-start gap-2 text-sm">
+                                <input
+                                    type="radio"
+                                    name="mode"
+                                    value="password"
+                                    :checked="mode === 'password'"
+                                    @change="setMode('password')"
+                                    class="mt-1"
+                                />
+                                <span>Passwort direkt setzen</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div v-if="mode === 'password'" class="grid gap-2">
                         <Label for="password">Passwort</Label>
                         <Input id="password" type="password" v-model="form.password" autocomplete="new-password" />
                         <InputError :message="form.errors.password" />
