@@ -1,4 +1,5 @@
 import '../css/app.css';
+import './echo';
 
 import { createInertiaApp } from '@inertiajs/vue3';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
@@ -11,6 +12,10 @@ import { initializeTheme } from './composables/useAppearance';
 declare module 'vite/client' {
     interface ImportMetaEnv {
         readonly VITE_APP_NAME: string;
+        readonly VITE_REVERB_APP_KEY: string;
+        readonly VITE_REVERB_HOST: string;
+        readonly VITE_REVERB_PORT: string;
+        readonly VITE_REVERB_SCHEME: string;
         [key: string]: string | boolean | undefined;
     }
 

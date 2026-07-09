@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
+import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem } from '@/types';
-import { Head, Link } from '@inertiajs/vue3';
+import { type BreadcrumbItem, type SharedData } from '@/types';
+import { Head, Link, usePage } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
+import { ref } from 'vue';
 
 interface Dependencies {
     runtime: Record<string, string>;
@@ -50,6 +52,28 @@ const installCommand =
 function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
 }
+
+// Live-Update des Sync-Status für das aktuell angezeigte Paket.
+// Lokaler State, damit die Live-Aktualisierung die Prop nicht mutiert.
+const page = usePage<SharedData>();
+const syncStatus = ref(props.package.sync_status);
+const syncError = ref(props.package.sync_error);
+
+function applyStatus(p: PackagePayload) {
+    if (p.id !== props.package.id) {
+        return;
+    }
+    syncStatus.value = p.sync_status as typeof props.package.sync_status;
+    syncError.value = p.error ?? null;
+}
+
+const isOperator = page.props.auth.user.role !== 'member';
+if (isOperator) {
+    useOperatorChannel({
+        onSynced: applyStatus,
+        onFailed: applyStatus,
+    });
+}
 </script>
 
 <template>
@@ -61,7 +85,7 @@ function depCount(deps: Record<string, string>): number {
                 <div class="flex flex-wrap items-center gap-3">
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>
                     <TypeBadge :type="props.package.type" />
-                    <StatusPill :status="props.package.sync_status" />
+                    <StatusPill :status="syncStatus" />
                 </div>
                 <p v-if="props.package.description" class="max-w-2xl text-sm text-muted-foreground">
                     {{ props.package.description }}
@@ -80,10 +104,10 @@ function depCount(deps: Record<string, string>): number {
                     Zuletzt synchronisiert: {{ props.package.synced_at }}
                 </div>
                 <div
-                    v-if="props.package.sync_error"
+                    v-if="syncError"
                     class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
                 >
-                    {{ props.package.sync_error }}
+                    {{ syncError }}
                 </div>
             </div>
 

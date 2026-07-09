@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { useOperatorChannel } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem } from '@/types';
-import { Head, Link } from '@inertiajs/vue3';
+import { type BreadcrumbItem, type SharedData } from '@/types';
+import { Head, Link, usePage } from '@inertiajs/vue3';
 import { AlertTriangle, Boxes, CloudDownload, Globe, KeyRound, Layers, Package } from 'lucide-vue-next';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 interface Stats {
     packages: number;
@@ -43,6 +44,25 @@ const syncTotal = computed(() => syncSegments.value.reduce((n, s) => n + s.value
 function statusDot(status: string): string {
     return { synced: 'bg-[#6CBF8B]', syncing: 'bg-copper', pending: 'bg-muted-foreground/50', failed: 'bg-destructive' }[status] ?? 'bg-muted-foreground/50';
 }
+
+// Dezenter Live-Hinweis bei Sync-Aktivität über den Operator-Channel.
+const page = usePage<SharedData>();
+const liveHint = ref<{ message: string; failed: boolean } | null>(null);
+let hintTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showHint(message: string, failed: boolean) {
+    liveHint.value = { message, failed };
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => (liveHint.value = null), 5000);
+}
+
+const isOperator = page.props.auth.user.role !== 'member';
+if (isOperator) {
+    useOperatorChannel({
+        onSynced: (p) => showHint(`Aktivität: ${p.name} synchronisiert`, false),
+        onFailed: (p) => showHint(`Aktivität: ${p.name}: Sync fehlgeschlagen`, true),
+    });
+}
 </script>
 
 <template>
@@ -50,6 +70,18 @@ function statusDot(status: string): string {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex h-full flex-1 flex-col gap-5 p-4">
+            <div
+                v-if="liveHint"
+                class="fixed right-4 top-4 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
+                :class="
+                    liveHint.failed
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : 'border-verdigris/30 bg-verdigris/15 text-verdigris'
+                "
+            >
+                {{ liveHint.message }}
+            </div>
+
             <!-- Kennzahlen -->
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Link

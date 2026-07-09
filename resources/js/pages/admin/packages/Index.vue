@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
@@ -85,6 +86,38 @@ function resetFilters() {
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
+// Live-Hinweis für Sync-Events über den Operator-Channel.
+const liveHint = ref<{ message: string; failed: boolean } | null>(null);
+let hintTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showHint(message: string, failed: boolean) {
+    liveHint.value = { message, failed };
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => (liveHint.value = null), 5000);
+}
+
+function applyStatus(p: PackagePayload) {
+    const row = props.packages.data.find((pkg) => pkg.id === p.id);
+    if (row) {
+        row.sync_status = p.sync_status as PackageRow['sync_status'];
+        row.sync_error = p.error ?? null;
+    }
+}
+
+const isOperator = page.props.auth.user.role !== 'member';
+if (isOperator) {
+    useOperatorChannel({
+        onSynced: (p) => {
+            applyStatus(p);
+            showHint(`${p.name} synchronisiert`, false);
+        },
+        onFailed: (p) => {
+            applyStatus(p);
+            showHint(`${p.name}: Sync fehlgeschlagen`, true);
+        },
+    });
+}
+
 const dialogOpen = ref(false);
 
 const form = useForm({
@@ -128,6 +161,18 @@ function destroyPackage(id: string) {
                 class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
+            </div>
+
+            <div
+                v-if="liveHint"
+                class="fixed right-4 top-16 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
+                :class="
+                    liveHint.failed
+                        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                        : 'border-verdigris/30 bg-verdigris/15 text-verdigris'
+                "
+            >
+                {{ liveHint.message }}
             </div>
 
             <div class="flex items-center justify-between">
