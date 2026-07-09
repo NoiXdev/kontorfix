@@ -2,6 +2,7 @@
 
 use App\Exceptions\UpstreamException;
 use App\Http\Middleware\AuthenticateRegistry;
+use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\ResolveRegistryContext;
@@ -44,6 +45,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'registry.auth' => AuthenticateRegistry::class,
             'registry.context' => ResolveRegistryContext::class,
+            'operator' => EnsureOperator::class,
             'role' => EnsureUserRole::class,
         ]);
     })

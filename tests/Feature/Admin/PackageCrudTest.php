@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Queue;
 
 it('lists packages for admins', function () {
     Package::factory()->count(2)->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/packages')
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/packages/Index')->has('packages.data', 2));
@@ -19,7 +19,7 @@ it('creates a package, assigns groups inline and dispatches sync', function () {
     Queue::fake();
     $groups = Group::factory()->count(2)->create();
 
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/packages', [
             'type' => 'composer',
             'repository_url' => 'https://git.example.com/acme/demo.git',
@@ -35,7 +35,7 @@ it('creates a package, assigns groups inline and dispatches sync', function () {
 it('returns the created package as json for inline picker creation', function () {
     Queue::fake();
 
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->postJson('/admin/packages', [
             'type' => 'npm',
             'name' => '@acme/widget',
@@ -50,7 +50,7 @@ it('returns the created package as json for inline picker creation', function ()
 });
 
 it('returns json validation errors for inline picker creation', function () {
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->postJson('/admin/packages', [
             'type' => 'composer',
             'name' => 'Invalid Name',
@@ -62,7 +62,7 @@ it('returns json validation errors for inline picker creation', function () {
 
 it('validates package name format and uniqueness', function () {
     Package::factory()->create(['type' => 'composer', 'name' => 'acme/demo']);
-    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
     $url = 'https://git.example.com/acme/demo.git';
     $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'Invalid Name', 'repository_url' => $url])
@@ -72,7 +72,7 @@ it('validates package name format and uniqueness', function () {
 });
 
 it('rejects non-https/ssh repository urls to avoid ssrf', function () {
-    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
     foreach (['file:///etc/passwd', 'http://internal.svc/repo.git', 'gopher://x', 'not-a-url'] as $bad) {
         $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => $bad])
@@ -86,7 +86,7 @@ it('rejects non-https/ssh repository urls to avoid ssrf', function () {
 
 it('drops sync status injection on create (mass assignment guard)', function () {
     Queue::fake();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/packages', [
             'type' => 'composer',
             'name' => 'acme/forged',
@@ -102,15 +102,15 @@ it('drops sync status injection on create (mass assignment guard)', function () 
 it('forbids members but allows admins and maintainers', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
         ->get('/admin/packages')->assertForbidden();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Maintainer]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Maintainer]))
         ->get('/admin/packages')->assertOk();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/packages')->assertOk();
 });
 
 it('deletes a package', function () {
     $pkg = Package::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->delete("/admin/packages/{$pkg->id}")->assertRedirect();
     expect(Package::find($pkg->id))->toBeNull();
 });
@@ -128,7 +128,7 @@ it('forbids members from creating packages via the json path', function () {
 
 it('accepts a scoped npm package name but still requires vendor/name for composer', function () {
     Queue::fake();
-    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
     $url = 'https://git.example.com/acme/demo.git';
 
     // npm: scoped erlaubt

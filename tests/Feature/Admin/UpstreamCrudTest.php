@@ -9,7 +9,7 @@ use App\Models\User;
 
 it('lists upstreams with their group for admins', function () {
     $up = Upstream::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/upstreams')
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/upstreams/Index')->has('upstreams', 1));
@@ -17,7 +17,7 @@ it('lists upstreams with their group for admins', function () {
 
 it('creates an upstream with optional strict allowlist', function () {
     $group = Group::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/upstreams', [
             'group_id' => $group->id,
             'type' => 'composer',
@@ -36,14 +36,14 @@ it('creates an upstream with optional strict allowlist', function () {
 
 it('validates the upstream url must be http/https', function () {
     $group = Group::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/upstreams', ['group_id' => $group->id, 'type' => 'composer', 'url' => 'file:///etc/passwd', 'policy' => 'proxy'])
         ->assertSessionHasErrors('url');
 });
 
 it('never exposes the auth token in the index payload', function () {
     Upstream::factory()->create(['auth_token' => 'topsecret']);
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/upstreams')
         ->assertInertia(fn ($page) => $page->has('upstreams.0', fn ($u) => $u
             ->hasAll(['id', 'group', 'type', 'url', 'policy', 'priority', 'enabled', 'has_auth', 'allowed_packages'])
@@ -54,7 +54,7 @@ it('never exposes the auth token in the index payload', function () {
 
 it('deletes an upstream', function () {
     $up = Upstream::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->delete("/admin/upstreams/{$up->id}")->assertRedirect();
     expect(Upstream::find($up->id))->toBeNull();
 });

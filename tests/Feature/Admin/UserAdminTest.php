@@ -33,7 +33,7 @@ it('forbids maintainers from managing users', function () {
 });
 
 it('can change a users role', function () {
-    $u = User::factory()->for(Organization::factory())->create(['role' => UserRole::Member]);
+    $u = User::factory()->for($this->operator)->create(['role' => UserRole::Member]);
     $this->actingAs($this->admin)->put("/admin/users/{$u->id}", ['role' => 'maintainer'])->assertRedirect();
     expect($u->fresh()->role)->toBe(UserRole::Maintainer);
 });
@@ -51,7 +51,7 @@ it('refuses to delete the last operator admin', function () {
 
     // Sperre-Fall: jetzt ist $this->admin der letzte Operator-Admin. Ein Admin einer anderen
     // Organisation umgeht die Selbst-Regel, aber die count-Regel schützt den letzten Operator-Admin.
-    $foreignAdmin = User::factory()->for(Organization::factory())->create(['role' => UserRole::Admin]);
+    $foreignAdmin = User::factory()->operator()->create(['role' => UserRole::Admin]);
     $this->actingAs($foreignAdmin)->delete("/admin/users/{$this->admin->id}")->assertSessionHasErrors();
     expect(User::find($this->admin->id))->not->toBeNull();
 });

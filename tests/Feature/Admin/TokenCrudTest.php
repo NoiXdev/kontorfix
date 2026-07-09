@@ -9,7 +9,7 @@ use App\Models\User;
 it('lists tokens for admins', function () {
     $org = Organization::factory()->create();
     RegistryToken::issue($org, 'ci', null);
-    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/tokens')
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/tokens/Index')->has('tokens', 1));
@@ -19,7 +19,7 @@ it('creates a token and flashes the plaintext exactly once', function () {
     $org = Organization::factory()->create();
     $group = Group::factory()->for($org)->create();
 
-    $res = $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $res = $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/tokens', ['name' => 'kadenz-ci', 'organization_id' => $org->id, 'group_id' => $group->id]);
 
     $res->assertRedirect()->assertSessionHas('plainTextToken');
@@ -29,7 +29,7 @@ it('creates a token and flashes the plaintext exactly once', function () {
 
 it('creates an org-wide token when no group is given', function () {
     $org = Organization::factory()->create();
-    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/tokens', ['name' => 'org-wide', 'organization_id' => $org->id])
         ->assertRedirect();
     expect(RegistryToken::where('name', 'org-wide')->first()->group_id)->toBeNull();
@@ -38,7 +38,7 @@ it('creates an org-wide token when no group is given', function () {
 it('validates that the group belongs to the chosen organization', function () {
     $org = Organization::factory()->create();
     $otherGroup = Group::factory()->for(Organization::factory())->create();
-    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/tokens', ['name' => 'x', 'organization_id' => $org->id, 'group_id' => $otherGroup->id])
         ->assertSessionHasErrors('group_id');
 });
@@ -46,7 +46,7 @@ it('validates that the group belongs to the chosen organization', function () {
 it('revokes tokens by deletion', function () {
     $org = Organization::factory()->create();
     [$token] = RegistryToken::issue($org, 'x', null);
-    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->delete("/admin/tokens/{$token->id}")->assertRedirect();
     expect(RegistryToken::find($token->id))->toBeNull();
 });
@@ -60,7 +60,7 @@ it('never exposes the token hash or plaintext in the index payload', function ()
     $org = Organization::factory()->create();
     RegistryToken::issue($org, 'ci', null);
 
-    $this->actingAs(User::factory()->for($org)->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/tokens')
         ->assertInertia(fn ($page) => $page
             ->has('tokens.0', fn ($token) => $token
@@ -73,7 +73,7 @@ it('never exposes the token hash or plaintext in the index payload', function ()
 
 it('flashes the plaintext token only for a single request', function () {
     $org = Organization::factory()->create();
-    $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
     $this->actingAs($admin)
         ->post('/admin/tokens', ['name' => 'once', 'organization_id' => $org->id])

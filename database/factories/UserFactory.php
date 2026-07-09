@@ -46,4 +46,14 @@ class UserFactory extends Factory
             'email_verified_at' => null,
         ]);
     }
+
+    /**
+     * Indicate that the user belongs to the operator organization.
+     */
+    public function operator(): static
+    {
+        return $this->state(fn () => [
+            'organization_id' => Organization::factory()->state(['is_operator' => true]),
+        ]);
+    }
 }

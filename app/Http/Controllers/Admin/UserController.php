@@ -45,7 +45,18 @@ class UserController extends Controller
 
     public function update(UpdateUserRequest $request, User $user): RedirectResponse
     {
-        $user->update($request->validated());
+        $validated = $request->validated();
+
+        if ($user->role === UserRole::Admin
+            && $user->organization->is_operator
+            && ($validated['role'] ?? null) !== UserRole::Admin->value
+            && $user->organization->users()->where('role', UserRole::Admin->value)->count() <= 1) {
+            throw ValidationException::withMessages([
+                'user' => 'Der letzte Betreiber-Admin kann nicht herabgestuft werden.',
+            ]);
+        }
+
+        $user->update($validated);
 
         return back()->with('success', "Nutzer {$user->name} aktualisiert.");
     }

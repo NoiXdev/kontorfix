@@ -19,7 +19,7 @@ Route::get('/', function () {
 Route::get('dashboard', [DashboardController::class, 'index'])
     ->middleware(['auth', 'verified'])->name('dashboard');
 
-Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('admin.')->group(function () {
+Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
@@ -30,7 +30,7 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::get('status', [Admin\StatusController::class, 'index'])->name('status');
 });
 
-Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
+Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
 

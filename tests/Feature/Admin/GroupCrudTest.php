@@ -7,7 +7,7 @@ use App\Models\User;
 
 it('lists groups for admins', function () {
     Group::factory()->count(2)->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->get('/admin/groups')
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/groups/Index')->has('groups', 2));
@@ -15,7 +15,7 @@ it('lists groups for admins', function () {
 
 it('creates a group with slug and assigns existing pool packages', function () {
     $pkgs = Package::factory()->count(2)->create();
-    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
     $this->actingAs($admin)->post('/admin/groups', [
         'name' => 'Kadenz GmbH',
@@ -31,7 +31,7 @@ it('creates a group with slug and assigns existing pool packages', function () {
 
 it('rejects duplicate and malformed slugs', function () {
     Group::factory()->create(['slug' => 'kadenz']);
-    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
     $this->actingAs($admin)->post('/admin/groups', ['name' => 'X', 'slug' => 'kadenz'])
         ->assertSessionHasErrors('slug');
@@ -46,7 +46,7 @@ it('forbids members from managing groups', function () {
 
 it('deletes a group', function () {
     $group = Group::factory()->create();
-    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->delete("/admin/groups/{$group->id}")->assertRedirect();
     expect(Group::find($group->id))->toBeNull();
 });
