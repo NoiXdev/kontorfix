@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -117,7 +117,9 @@ function destroyPackage(id: string) {
                             :key="pkg.id"
                             class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                         >
-                            <td class="px-4 py-3 font-mono">{{ pkg.name }}</td>
+                            <td class="px-4 py-3 font-mono">
+                                <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">{{ pkg.name }}</Link>
+                            </td>
                             <td class="px-4 py-3"><TypeBadge :type="pkg.type" /></td>
                             <td class="px-4 py-3">
                                 <span :title="pkg.sync_status === 'failed' ? (pkg.sync_error ?? undefined) : undefined">

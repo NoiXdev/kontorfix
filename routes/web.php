@@ -21,6 +21,7 @@ Route::get('dashboard', [DashboardController::class, 'index'])
 
 Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
+    Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);

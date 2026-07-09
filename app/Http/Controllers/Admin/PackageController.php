@@ -7,6 +7,8 @@ use App\Http\Requests\Admin\StorePackageRequest;
 use App\Jobs\SyncPackage;
 use App\Models\Group;
 use App\Models\Package;
+use App\Models\PackageVersion;
+use App\Services\Package\PackageDependencies;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -27,6 +29,31 @@ class PackageController extends Controller
                 'synced_at' => $p->synced_at?->diffForHumans(),
             ]),
             'groups' => Group::orderBy('name')->get(['id', 'name', 'slug']),
+        ]);
+    }
+
+    public function show(Package $package, PackageDependencies $deps): Response
+    {
+        $package->load(['versions', 'groups:id,name,slug']);
+
+        return Inertia::render('admin/packages/Show', [
+            'package' => [
+                'id' => $package->id,
+                'type' => $package->type->value,
+                'name' => $package->name,
+                'description' => $package->description,
+                'repository_url' => $package->repository_url,
+                'sync_status' => $package->sync_status->value,
+                'sync_error' => $package->sync_error,
+                'synced_at' => $package->synced_at?->diffForHumans(),
+            ],
+            'versions' => $package->versions->map(fn (PackageVersion $v) => [
+                'version' => $v->version_pretty ?? $v->version,
+                'released_at' => $v->released_at?->toDateString(),
+                'reference' => $v->source_reference,
+                'dependencies' => $deps->for($package->type, $v->metadata ?? []),
+            ]),
+            'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
         ]);
     }
 
