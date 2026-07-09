@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, Boxes, CloudDownload, Database, Fingerprint, Folder, Globe, KeyRound, LayoutGrid, Package, Webhook } from 'lucide-vue-next';
+import { Activity, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Globe, KeyRound, LayoutGrid, Package, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -36,6 +36,7 @@ const mainNavItems = computed<NavItem[]>(() => {
 
     // Nur Admins: sicherheits-/infrastrukturkritische Einstellungen (role:admin-Routen).
     if (isAdmin.value) {
+        items.push({ title: 'Kunden', href: '/admin/organizations', icon: Building2 });
         items.push({ title: 'OIDC / SSO', href: '/admin/oidc', icon: Fingerprint });
         items.push({ title: 'Storage', href: '/admin/storage', icon: Database });
     }

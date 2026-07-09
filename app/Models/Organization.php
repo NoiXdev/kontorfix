@@ -27,4 +27,20 @@ class Organization extends Model
     {
         return $this->hasMany(User::class);
     }
+
+    /**
+     * @return HasMany<Group, $this>
+     */
+    public function groups(): HasMany
+    {
+        return $this->hasMany(Group::class);
+    }
+
+    /**
+     * @return HasMany<RegistryToken, $this>
+     */
+    public function registryTokens(): HasMany
+    {
+        return $this->hasMany(RegistryToken::class);
+    }
 }

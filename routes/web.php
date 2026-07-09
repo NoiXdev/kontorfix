@@ -37,6 +37,8 @@ Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->grou
     Route::get('storage', [Admin\StorageController::class, 'show'])->name('storage.show');
     Route::put('storage', [Admin\StorageController::class, 'update'])->name('storage.update');
     Route::post('storage/test', [Admin\StorageController::class, 'test'])->name('storage.test');
+
+    Route::resource('organizations', Admin\OrganizationController::class)->only(['index', 'show', 'store', 'destroy'])->parameters(['organizations' => 'organization']);
 });
 
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
