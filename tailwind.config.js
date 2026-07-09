@@ -13,6 +13,8 @@ export default {
         extend: {
             fontFamily: {
                 sans: ['Instrument Sans', ...defaultTheme.fontFamily.sans],
+                display: ['Bricolage Grotesque Variable', 'Instrument Sans', ...defaultTheme.fontFamily.sans],
+                mono: ['JetBrains Mono', ...defaultTheme.fontFamily.mono],
             },
             borderRadius: {
                 lg: 'var(--radius)',

@@ -8,6 +8,11 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
+    // Angemeldete Nutzer sehen nicht die Marketing-Startseite, sondern ihren Arbeitsbereich.
+    if (request()->user()) {
+        return redirect()->route('dashboard');
+    }
+
     return Inertia::render('Welcome');
 })->name('home');
 

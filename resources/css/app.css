@@ -1,3 +1,8 @@
+/* Kontorfix-Marken-Fonts (siehe docs/brand): Display = Bricolage Grotesque, Data/Code = JetBrains Mono. */
+@import '@fontsource-variable/bricolage-grotesque';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
