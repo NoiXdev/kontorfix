@@ -27,6 +27,7 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
+    Route::get('status', [Admin\StatusController::class, 'index'])->name('status');
 });
 
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
