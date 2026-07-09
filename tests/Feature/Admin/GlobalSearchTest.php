@@ -32,3 +32,14 @@ it('returns empty categories for a blank query', function () {
     $res = $this->actingAs($this->admin)->getJson('/admin/search?q=');
     $res->assertOk()->assertJson(['packages' => [], 'registries' => [], 'customers' => []]);
 });
+
+it('does not return customer results to a maintainer (customer detail is admin-only)', function () {
+    $maintainer = User::factory()->operator()->create(['role' => UserRole::Maintainer]);
+    Package::factory()->create(['name' => 'acme/widget']);
+    Organization::factory()->create(['name' => 'Acme GmbH', 'is_operator' => false]);
+
+    $res = $this->actingAs($maintainer)->getJson('/admin/search?q=acme');
+    $res->assertOk();
+    expect(collect($res->json('packages'))->pluck('name'))->toContain('acme/widget'); // Pakete: ja
+    expect($res->json('customers'))->toBe([]); // Kunden: nein
+});

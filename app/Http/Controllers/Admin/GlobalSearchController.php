@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\Organization;
@@ -21,13 +22,19 @@ class GlobalSearchController extends Controller
 
         $like = '%'.addcslashes($q, '%_\\').'%';
 
+        // Kunden-Verwaltung ist admin-only (Detailseite liegt hinter role:admin) — deshalb
+        // liefert die Suche Kunden-Treffer nur Admins, damit Maintainer keine toten Klicks bekommen.
+        $isAdmin = $request->user()?->role === UserRole::Admin;
+
         return response()->json([
             'packages' => Package::where('name', 'ilike', $like)->orderBy('name')->limit(5)
                 ->get(['id', 'name', 'type'])->map(fn (Package $p) => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type->value]),
             'registries' => Group::where('name', 'ilike', $like)->orderBy('name')->limit(5)
                 ->get(['id', 'name', 'slug'])->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
-            'customers' => Organization::where('name', 'ilike', $like)->orderBy('name')->limit(5)
-                ->get(['id', 'name', 'is_operator'])->map(fn (Organization $o) => ['id' => $o->id, 'name' => $o->name, 'is_operator' => $o->is_operator]),
+            'customers' => $isAdmin
+                ? Organization::where('name', 'ilike', $like)->orderBy('name')->limit(5)
+                    ->get(['id', 'name', 'is_operator'])->map(fn (Organization $o) => ['id' => $o->id, 'name' => $o->name, 'is_operator' => $o->is_operator])
+                : [],
         ]);
     }
 }
