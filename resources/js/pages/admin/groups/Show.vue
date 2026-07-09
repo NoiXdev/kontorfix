@@ -3,7 +3,7 @@ import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { ref } from 'vue';
 
@@ -62,6 +62,15 @@ const steps = [
     { key: 'npm', title: 'npm einrichten', content: () => props.setup.npm },
 ];
 
+const form = useForm({
+    name: props.group.name,
+    public: props.group.public,
+});
+
+function save() {
+    form.put(route('admin.groups.update', props.group.id), { preserveScroll: true });
+}
+
 const copiedKey = ref<string | null>(null);
 
 async function copy(text: string, key: string) {
@@ -101,11 +110,43 @@ async function copy(text: string, key: string) {
                         Privat
                     </span>
                 </div>
-                <p class="font-mono text-sm text-muted-foreground">/r/{{ props.group.slug }}</p>
                 <p v-if="props.group.organization" class="text-sm text-muted-foreground">
                     Kunde / Org: {{ props.group.organization }}
                 </p>
             </div>
+
+            <section class="flex flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                <h2 class="text-lg font-medium">Bearbeiten</h2>
+                <form class="flex flex-col gap-4" @submit.prevent="save">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="registry-name" class="text-sm font-medium">Name</label>
+                        <input
+                            id="registry-name"
+                            v-model="form.name"
+                            type="text"
+                            class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                        <p v-if="form.errors.name" class="text-sm text-destructive">{{ form.errors.name }}</p>
+                    </div>
+
+                    <label class="flex items-center gap-2 text-sm">
+                        <input v-model="form.public" type="checkbox" class="size-4 rounded border-input" />
+                        Öffentlich (ohne Token lesbar)
+                    </label>
+
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-sm font-medium">Slug</span>
+                        <p class="font-mono text-sm text-muted-foreground">/r/{{ props.group.slug }}</p>
+                        <p class="text-xs text-muted-foreground">
+                            Der Slug ist der feste Registry-Endpunkt und kann nicht geändert werden.
+                        </p>
+                    </div>
+
+                    <div>
+                        <Button type="submit" :disabled="form.processing">Speichern</Button>
+                    </div>
+                </form>
+            </section>
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Pakete</h2>

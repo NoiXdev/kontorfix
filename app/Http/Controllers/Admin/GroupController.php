@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
+use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -69,6 +70,13 @@ class GroupController extends Controller
         $group->packages()->sync($request->validated('package_ids', []));
 
         return back()->with('success', "Gruppe {$group->name} erstellt.");
+    }
+
+    public function update(UpdateGroupRequest $request, Group $group): RedirectResponse
+    {
+        $group->update(['name' => $request->validated('name'), 'public' => $request->boolean('public')]);
+
+        return back()->with('success', 'Registry aktualisiert.');
     }
 
     public function destroy(Group $group): RedirectResponse
