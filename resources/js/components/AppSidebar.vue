@@ -16,35 +16,64 @@ const page = usePage<SharedData>();
 const isMember = computed(() => page.props.auth.user?.role === 'member');
 const isAdmin = computed(() => page.props.auth.user?.role === 'admin');
 
-const mainNavItems = computed<NavItem[]>(() => {
+interface NavSection {
+    label: string;
+    items: NavItem[];
+}
+
+// In thematische Sektionen gruppiert (statt einer langen flachen Liste).
+const navSections = computed<NavSection[]>(() => {
     // Kunden sehen ausschließlich das Portal.
     if (isMember.value) {
-        return [{ title: 'Registries', href: route('portal.registries.index'), icon: Boxes }];
+        return [{ label: 'Portal', items: [{ title: 'Registries', href: route('portal.registries.index'), icon: Boxes }] }];
     }
 
     // Betreiber & Maintainer.
-    const items: NavItem[] = [
-        { title: 'Dashboard', href: '/dashboard', icon: LayoutGrid },
-        { title: 'Pakete', href: '/admin/packages', icon: Package },
-        { title: 'Gruppen', href: '/admin/groups', icon: Boxes },
-        { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
-        { title: 'Upstreams', href: '/admin/upstreams', icon: CloudDownload },
-        { title: 'Domains', href: '/admin/domains', icon: Globe },
-        { title: 'Webhooks', href: '/admin/webhooks', icon: Webhook },
-        { title: 'Status', href: '/admin/status', icon: Activity },
+    const sections: NavSection[] = [
+        {
+            label: 'Übersicht',
+            items: [
+                { title: 'Dashboard', href: '/dashboard', icon: LayoutGrid },
+                { title: 'Status', href: '/admin/status', icon: Activity },
+            ],
+        },
+        {
+            label: 'Registry',
+            items: [
+                { title: 'Pakete', href: '/admin/packages', icon: Package },
+                { title: 'Gruppen', href: '/admin/groups', icon: Boxes },
+                { title: 'Upstreams', href: '/admin/upstreams', icon: CloudDownload },
+                { title: 'Domains', href: '/admin/domains', icon: Globe },
+            ],
+        },
+        {
+            label: 'Zugriff',
+            items: [
+                { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
+                { title: 'Webhooks', href: '/admin/webhooks', icon: Webhook },
+            ],
+        },
     ];
 
     // Nur Admins: sicherheits-/infrastrukturkritische Einstellungen (role:admin-Routen).
     if (isAdmin.value) {
-        items.push({ title: 'Kunden', href: '/admin/organizations', icon: Building2 });
-        items.push({ title: 'Nutzer', href: '/admin/users', icon: Users });
-        items.push({ title: 'OIDC / SSO', href: '/admin/oidc', icon: Fingerprint });
-        items.push({ title: 'Storage', href: '/admin/storage', icon: Database });
+        sections.push({
+            label: 'Verwaltung',
+            items: [
+                { title: 'Kunden', href: '/admin/organizations', icon: Building2 },
+                { title: 'Nutzer', href: '/admin/users', icon: Users },
+                { title: 'OIDC / SSO', href: '/admin/oidc', icon: Fingerprint },
+                { title: 'Storage', href: '/admin/storage', icon: Database },
+            ],
+        });
     }
 
-    items.push({ title: 'Portal', href: route('portal.registries.index'), icon: Package });
+    sections.push({
+        label: 'Portal',
+        items: [{ title: 'Kundenportal', href: route('portal.registries.index'), icon: Package }],
+    });
 
-    return items;
+    return sections;
 });
 
 const footerNavItems: NavItem[] = [
@@ -71,7 +100,7 @@ const footerNavItems: NavItem[] = [
         </SidebarHeader>
 
         <SidebarContent>
-            <NavMain :items="mainNavItems" />
+            <NavMain v-for="section in navSections" :key="section.label" :label="section.label" :items="section.items" />
         </SidebarContent>
 
         <SidebarFooter>
