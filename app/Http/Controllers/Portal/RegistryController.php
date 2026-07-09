@@ -47,11 +47,17 @@ class RegistryController extends Controller
         $this->authorize('view', $group);
         $group->load('domains');
 
+        $q = trim((string) $request->query('q', ''));
+        $type = $request->query('type');
+
         // Versionen absteigend nach released_at laden und in PHP die neueste greifen —
         // KEIN limit(1) im Eager-Load (constrained das über alle Pakete hinweg, nicht pro Paket).
+        // Spalten wegen belongsToMany-Join qualifizieren (packages.*), um Mehrdeutigkeit zu vermeiden.
         $packages = $group->packages()
+            ->when($q !== '', fn ($query) => $query->where('packages.name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
+            ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('packages.type', $type))
             ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
-            ->orderBy('name')
+            ->orderBy('packages.name')
             ->get();
 
         return Inertia::render('portal/Registry', [
@@ -60,6 +66,10 @@ class RegistryController extends Controller
                 'name' => $group->name,
                 'slug' => $group->slug,
                 'url' => $this->url->base($group),
+            ],
+            'filters' => [
+                'q' => $q,
+                'type' => $type,
             ],
             'snippets' => $this->snippets->for($group),
             'packages' => $packages->map(fn (Package $p) => [

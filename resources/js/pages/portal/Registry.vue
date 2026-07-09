@@ -42,7 +42,33 @@ const props = defineProps<{
     snippets: Snippets;
     packages: PackageRow[];
     tokens: TokenRow[];
+    filters?: { q: string | null; type: string | null };
 }>();
+
+const filterQ = ref(props.filters?.q ?? '');
+const filterType = ref(props.filters?.type ?? '');
+
+const hasActiveFilters = computed(() => filterQ.value !== '' || filterType.value !== '');
+
+function applyFilters() {
+    router.get(
+        route('portal.registries.show', props.registry.id),
+        { q: filterQ.value, type: filterType.value },
+        { preserveState: true, preserveScroll: true, replace: true },
+    );
+}
+
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+watch(filterQ, () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(applyFilters, 250);
+});
+watch(filterType, applyFilters);
+
+function resetFilters() {
+    filterQ.value = '';
+    filterType.value = '';
+}
 
 const page = usePage<SharedData>();
 const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
@@ -158,6 +184,33 @@ const steps = [
 
             <div>
                 <h2 class="mb-3 font-medium">Pakete</h2>
+                <div class="mb-3 flex flex-wrap items-center gap-3">
+                    <Input
+                        v-model="filterQ"
+                        type="search"
+                        placeholder="Name suchen…"
+                        autocomplete="off"
+                        class="h-10 w-full sm:w-64"
+                        aria-label="Nach Name suchen"
+                    />
+                    <select
+                        v-model="filterType"
+                        aria-label="Nach Typ filtern"
+                        class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        <option value="">Alle Typen</option>
+                        <option value="composer">composer</option>
+                        <option value="npm">npm</option>
+                    </select>
+                    <button
+                        v-if="hasActiveFilters"
+                        type="button"
+                        class="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                        @click="resetFilters"
+                    >
+                        Zurücksetzen
+                    </button>
+                </div>
                 <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                     <table class="w-full text-left text-sm">
                         <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
