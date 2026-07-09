@@ -8,7 +8,6 @@ use App\Models\StorageSetting;
 use App\Services\Storage\StorageManager;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -47,8 +46,18 @@ class StorageController extends Controller
         return back()->with('success', 'Storage-Einstellungen gespeichert.');
     }
 
-    public function test(Request $request): JsonResponse
+    public function test(UpdateStorageSettingRequest $request, StorageManager $manager): JsonResponse
     {
-        return response()->json(app(StorageManager::class)->testConnection());
+        // Die EINGEREICHTE (noch nicht gespeicherte) Config testen, nicht die alte —
+        // ein leeres Secret bedeutet „bestehendes behalten".
+        $current = StorageSetting::current();
+        $setting = new StorageSetting;
+        $setting->fill($request->safe()->except('secret'));
+        $setting->use_path_style = $request->boolean('use_path_style');
+        $setting->secret = filled($request->validated('secret'))
+            ? (string) $request->validated('secret')
+            : $current->secret;
+
+        return response()->json($manager->testConfig($manager->diskConfigFor($setting)));
     }
 }

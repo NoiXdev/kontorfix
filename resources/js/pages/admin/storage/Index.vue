@@ -74,7 +74,18 @@ async function testConnection() {
                 'X-XSRF-TOKEN': xsrfToken(),
             },
             credentials: 'same-origin',
-            body: JSON.stringify({ driver: form.driver }),
+            // Die aktuell eingegebenen Werte testen (nicht nur den Treiber) — leeres
+            // Secret bedeutet serverseitig „bestehendes behalten".
+            body: JSON.stringify({
+                driver: form.driver,
+                key: form.key,
+                secret: form.secret,
+                region: form.region,
+                bucket: form.bucket,
+                endpoint: form.endpoint,
+                url: form.url,
+                use_path_style: form.use_path_style,
+            }),
         });
 
         const data = await response.json();

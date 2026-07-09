@@ -16,8 +16,17 @@ class StorageManager
     /** @return array<string,mixed> */
     public function diskConfig(): array
     {
-        $s = $this->current();
+        return $this->diskConfigFor($this->current());
+    }
 
+    /**
+     * Baut das Flysystem-Config-Array aus einer (auch ungespeicherten) Setting —
+     * so lässt sich eine geplante Konfiguration testen, bevor sie persistiert wird.
+     *
+     * @return array<string,mixed>
+     */
+    public function diskConfigFor(StorageSetting $s): array
+    {
         if ($s->driver === 's3') {
             return [
                 'driver' => 's3',
@@ -42,18 +51,42 @@ class StorageManager
     /** @return array{ok:bool,message:string} */
     public function testConnection(): array
     {
+        return $this->testConfig($this->diskConfig());
+    }
+
+    /**
+     * Schreibt/liest/löscht eine Probedatei auf einer beliebigen Disk-Config.
+     *
+     * @param  array<string,mixed>  $config
+     * @return array{ok:bool,message:string}
+     */
+    public function testConfig(array $config): array
+    {
         try {
-            config(['filesystems.disks.artifacts' => $this->diskConfig()]);
+            config(['filesystems.disks.artifacts' => $config]);
             Storage::forgetDisk('artifacts');
             $disk = Storage::disk('artifacts');
             $probe = '.kontorfix-storage-check-'.bin2hex(random_bytes(4));
-            $disk->put($probe, 'ok');
-            $ok = $disk->get($probe) === 'ok';
-            $disk->delete($probe);
 
-            return ['ok' => $ok, 'message' => $ok ? 'Verbindung erfolgreich.' : 'Schreib-/Leseprobe fehlgeschlagen.'];
+            try {
+                $disk->put($probe, 'ok');
+                $ok = $disk->get($probe) === 'ok';
+
+                return ['ok' => $ok, 'message' => $ok ? 'Verbindung erfolgreich.' : 'Schreib-/Leseprobe fehlgeschlagen.'];
+            } finally {
+                // Probedatei auch bei Teilfehler entfernen, keine Orphans.
+                try {
+                    $disk->delete($probe);
+                } catch (Throwable) {
+                    // ignorieren
+                }
+            }
         } catch (Throwable $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
+        } finally {
+            // Nach dem Test die reguläre (gespeicherte) Config wiederherstellen.
+            config(['filesystems.disks.artifacts' => $this->diskConfig()]);
+            Storage::forgetDisk('artifacts');
         }
     }
 }
