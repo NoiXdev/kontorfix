@@ -11,15 +11,29 @@ use App\Models\PackageVersion;
 use App\Services\Package\PackageDependencies;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class PackageController extends Controller
 {
-    public function index(): Response
+    public function index(Request $request): Response
     {
-        return Inertia::render('admin/packages/Index', [
-            'packages' => Package::withCount('groups')->latest()->paginate(25)->through(fn (Package $p) => [
+        $q = trim((string) $request->query('q', ''));
+        $type = $request->query('type');
+        $status = $request->query('status');
+        $group = $request->query('group');
+
+        $packages = Package::query()
+            ->withCount('groups')
+            ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
+            ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('type', $type))
+            ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
+            ->when(is_string($group) && $group !== '', fn ($query) => $query->whereHas('groups', fn ($g) => $g->whereKey($group)))
+            ->latest()
+            ->paginate(25)
+            ->withQueryString()
+            ->through(fn (Package $p) => [
                 'id' => $p->id,
                 'type' => $p->type,
                 'name' => $p->name,
@@ -27,8 +41,12 @@ class PackageController extends Controller
                 'sync_error' => $p->sync_error,
                 'groups_count' => $p->groups_count,
                 'synced_at' => $p->synced_at?->diffForHumans(),
-            ]),
+            ]);
+
+        return Inertia::render('admin/packages/Index', [
+            'packages' => $packages,
             'groups' => Group::orderBy('name')->get(['id', 'name', 'slug']),
+            'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
         ]);
     }
 

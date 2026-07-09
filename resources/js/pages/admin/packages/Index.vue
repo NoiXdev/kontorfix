@@ -11,7 +11,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 interface PackageRow {
     id: string;
@@ -36,12 +36,51 @@ interface Paginated<T> {
     last_page: number;
 }
 
+interface Filters {
+    q: string | null;
+    type: string | null;
+    status: string | null;
+    group: string | null;
+}
+
 const props = defineProps<{
     packages: Paginated<PackageRow>;
     groups: GroupOption[];
+    filters: Filters;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
+
+const filterQ = ref(props.filters.q ?? '');
+const filterType = ref(props.filters.type ?? '');
+const filterStatus = ref(props.filters.status ?? '');
+const filterGroup = ref(props.filters.group ?? '');
+
+const hasActiveFilters = computed(
+    () => filterQ.value !== '' || filterType.value !== '' || filterStatus.value !== '' || filterGroup.value !== '',
+);
+
+function applyFilters() {
+    router.get(
+        route('admin.packages.index'),
+        { q: filterQ.value, type: filterType.value, status: filterStatus.value, group: filterGroup.value },
+        { preserveState: true, preserveScroll: true, replace: true },
+    );
+}
+
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+watch(filterQ, () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(applyFilters, 250);
+});
+watch([filterType, filterStatus, filterGroup], applyFilters);
+
+function resetFilters() {
+    filterQ.value = '';
+    filterType.value = '';
+    filterStatus.value = '';
+    filterGroup.value = '';
+}
 
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
@@ -97,6 +136,53 @@ function destroyPackage(id: string) {
                     <Plus class="size-4" />
                     Paket hinzufügen
                 </Button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <Input
+                    v-model="filterQ"
+                    type="search"
+                    placeholder="Name suchen…"
+                    autocomplete="off"
+                    class="h-10 w-full sm:w-64"
+                    aria-label="Nach Name suchen"
+                />
+                <select
+                    v-model="filterType"
+                    aria-label="Nach Typ filtern"
+                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    <option value="">Alle Typen</option>
+                    <option value="composer">composer</option>
+                    <option value="npm">npm</option>
+                </select>
+                <select
+                    v-model="filterStatus"
+                    aria-label="Nach Status filtern"
+                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    <option value="">Alle Status</option>
+                    <option value="pending">pending</option>
+                    <option value="syncing">syncing</option>
+                    <option value="synced">synced</option>
+                    <option value="failed">failed</option>
+                </select>
+                <select
+                    v-model="filterGroup"
+                    aria-label="Nach Registry filtern"
+                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                    <option value="">Alle Registries</option>
+                    <option v-for="group in props.groups" :key="group.id" :value="group.id">{{ group.name }}</option>
+                </select>
+                <button
+                    v-if="hasActiveFilters"
+                    type="button"
+                    class="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                    @click="resetFilters"
+                >
+                    Zurücksetzen
+                </button>
             </div>
 
             <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
