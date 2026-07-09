@@ -1,0 +1,44 @@
+<?php
+
+use App\Models\Upstream;
+use App\Services\Health\HealthService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+
+uses(RefreshDatabase::class);
+
+it('reports healthy core services and reachable upstreams', function () {
+    Http::fake(['https://packagist.example/*' => Http::response('ok', 200)]);
+    Upstream::factory()->create(['url' => 'https://packagist.example/packages.json']);
+
+    $checks = collect(app(HealthService::class)->checks())->keyBy('key');
+
+    expect($checks['database']['ok'])->toBeTrue();
+    expect($checks['cache']['ok'])->toBeTrue();
+    expect($checks->has('queue'))->toBeTrue();
+    expect($checks['storage']['ok'])->toBeTrue();
+
+    $upstream = collect(app(HealthService::class)->checks())->firstWhere('key', 'upstream:'.Upstream::first()->id);
+    expect($upstream['ok'])->toBeTrue();
+});
+
+it('marks an unreachable upstream as failed but does not throw', function () {
+    Http::fake(['*' => fn () => throw new ConnectionException('refused')]);
+    Upstream::factory()->create(['url' => 'https://down.example/x']);
+
+    $checks = collect(app(HealthService::class)->checks());
+    $u = $checks->firstWhere('key', 'upstream:'.Upstream::first()->id);
+    expect($u['ok'])->toBeFalse();
+});
+
+it('reports the failed jobs count in the queue check detail', function () {
+    DB::table('failed_jobs')->insert([
+        'uuid' => (string) Str::uuid(), 'connection' => 'redis', 'queue' => 'default',
+        'payload' => '{}', 'exception' => 'x', 'failed_at' => now(),
+    ]);
+
+    $queue = collect(app(HealthService::class)->checks())->firstWhere('key', 'queue');
+    expect($queue['detail'])->toContain('1');
+});
