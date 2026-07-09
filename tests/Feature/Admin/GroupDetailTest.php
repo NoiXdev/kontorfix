@@ -25,7 +25,7 @@ it('shows a registry with packages, domains, upstreams, tokens and a setup snipp
         ->assertInertia(fn ($p) => $p->component('admin/groups/Show')
             ->where('group.name', 'Kadenz')
             ->has('packages', 1)->where('packages.0.name', 'acme/widget')
-            ->has('domains', 1)->where('domains.0', 'packages.kadenz.test')
+            ->has('domains', 1)->where('domains.0.hostname', 'packages.kadenz.test')
             ->has('upstreams', 1)
             ->has('setup.composer'));
 });

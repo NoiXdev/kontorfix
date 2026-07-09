@@ -3,8 +3,8 @@ import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { Check, Copy } from 'lucide-vue-next';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { Check, Copy, Trash2 } from 'lucide-vue-next';
 import { ref } from 'vue';
 
 interface GroupInfo {
@@ -20,6 +20,11 @@ interface PackageRow {
     name: string;
     type: string;
     sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
+}
+
+interface DomainRow {
+    id: string;
+    hostname: string;
 }
 
 interface UpstreamRow {
@@ -44,7 +49,7 @@ interface Setup {
 const props = defineProps<{
     group: GroupInfo;
     packages: PackageRow[];
-    domains: string[];
+    domains: DomainRow[];
     upstreams: UpstreamRow[];
     tokens: TokenRow[];
     setup: Setup;
@@ -69,6 +74,48 @@ const form = useForm({
 
 function save() {
     form.put(route('admin.groups.update', props.group.id), { preserveScroll: true });
+}
+
+const newDomain = ref('');
+
+function addDomain() {
+    router.post(
+        route('admin.domains.store'),
+        { group_id: props.group.id, hostname: newDomain.value },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                newDomain.value = '';
+            },
+        },
+    );
+}
+
+function removeDomain(id: string) {
+    router.delete(route('admin.domains.destroy', id), { preserveScroll: true });
+}
+
+const newUpstream = ref({
+    type: 'composer' as 'composer' | 'npm',
+    url: '',
+    policy: 'proxy' as 'proxy' | 'strict',
+});
+
+function addUpstream() {
+    router.post(
+        route('admin.upstreams.store'),
+        { group_id: props.group.id, type: newUpstream.value.type, url: newUpstream.value.url, policy: newUpstream.value.policy },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                newUpstream.value = { type: 'composer', url: '', policy: 'proxy' };
+            },
+        },
+    );
+}
+
+function removeUpstream(id: string) {
+    router.delete(route('admin.upstreams.destroy', id), { preserveScroll: true });
 }
 
 const copiedKey = ref<string | null>(null);
@@ -185,10 +232,32 @@ async function copy(text: string, key: string) {
                 <h2 class="text-lg font-medium">Domains</h2>
                 <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                     <ul v-if="props.domains.length > 0" class="divide-y divide-sidebar-border/70 dark:divide-sidebar-border">
-                        <li v-for="domain in props.domains" :key="domain" class="px-4 py-3 font-mono text-sm">{{ domain }}</li>
+                        <li
+                            v-for="domain in props.domains"
+                            :key="domain.id"
+                            class="flex items-center justify-between gap-4 px-4 py-3"
+                        >
+                            <span class="font-mono text-sm">{{ domain.hostname }}</span>
+                            <Button variant="ghost" size="icon" aria-label="Domain entfernen" @click="removeDomain(domain.id)">
+                                <Trash2 class="size-4 text-destructive" />
+                            </Button>
+                        </li>
                     </ul>
                     <p v-else class="px-4 py-8 text-center text-sm text-muted-foreground">Keine Domains hinterlegt.</p>
                 </div>
+                <form class="flex flex-wrap items-end gap-3" @submit.prevent="addDomain">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="new-domain" class="text-sm font-medium">Hostname</label>
+                        <input
+                            id="new-domain"
+                            v-model="newDomain"
+                            type="text"
+                            placeholder="packages.example.test"
+                            class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                    </div>
+                    <Button type="submit">Hinzufügen</Button>
+                </form>
             </section>
 
             <section class="flex flex-col gap-3">
@@ -200,6 +269,7 @@ async function copy(text: string, key: string) {
                                 <th class="px-4 py-3 font-medium">Typ</th>
                                 <th class="px-4 py-3 font-medium">URL</th>
                                 <th class="px-4 py-3 font-medium">Policy</th>
+                                <th class="px-4 py-3 font-medium">Aktionen</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -211,13 +281,53 @@ async function copy(text: string, key: string) {
                                 <td class="px-4 py-3">{{ upstream.type }}</td>
                                 <td class="px-4 py-3 font-mono text-muted-foreground">{{ upstream.url }}</td>
                                 <td class="px-4 py-3">{{ upstream.policy }}</td>
+                                <td class="px-4 py-3">
+                                    <Button variant="ghost" size="icon" aria-label="Upstream entfernen" @click="removeUpstream(upstream.id)">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </td>
                             </tr>
                             <tr v-if="props.upstreams.length === 0">
-                                <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">Keine Upstreams konfiguriert.</td>
+                                <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Keine Upstreams konfiguriert.</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
+                <form class="flex flex-wrap items-end gap-3" @submit.prevent="addUpstream">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="new-upstream-type" class="text-sm font-medium">Typ</label>
+                        <select
+                            id="new-upstream-type"
+                            v-model="newUpstream.type"
+                            class="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                            <option value="composer">composer</option>
+                            <option value="npm">npm</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                        <label for="new-upstream-url" class="text-sm font-medium">URL</label>
+                        <input
+                            id="new-upstream-url"
+                            v-model="newUpstream.url"
+                            type="text"
+                            placeholder="https://repo.packagist.org"
+                            class="w-full min-w-64 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                    </div>
+                    <div class="flex flex-col gap-1.5">
+                        <label for="new-upstream-policy" class="text-sm font-medium">Policy</label>
+                        <select
+                            id="new-upstream-policy"
+                            v-model="newUpstream.policy"
+                            class="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                            <option value="proxy">proxy</option>
+                            <option value="strict">strict</option>
+                        </select>
+                    </div>
+                    <Button type="submit">Hinzufügen</Button>
+                </form>
             </section>
 
             <section class="flex flex-col gap-3">
