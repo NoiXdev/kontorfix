@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Settings\AccessTokenController;
 use App\Http\Controllers\Settings\PasskeyController;
 use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
@@ -29,4 +30,8 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/appearance', function () {
         return Inertia::render('settings/Appearance');
     })->name('appearance');
+
+    Route::get('settings/tokens', [AccessTokenController::class, 'index'])->name('tokens.index');
+    Route::post('settings/tokens', [AccessTokenController::class, 'store'])->name('tokens.store');
+    Route::delete('settings/tokens/{token}', [AccessTokenController::class, 'destroy'])->name('tokens.destroy');
 });

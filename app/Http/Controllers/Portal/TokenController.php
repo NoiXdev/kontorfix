@@ -28,6 +28,8 @@ class TokenController extends Controller
             $request->validated('name'),
             $group,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            null,
+            $request->user(),
         );
 
         return back()->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");
