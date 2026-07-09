@@ -79,7 +79,7 @@ class RegistryController extends Controller
                 'description' => $p->description,
                 'latest_version' => $p->versions->first()?->version_pretty,
             ]),
-            'tokens' => $group->tokens()->latest()->get()->map(fn (RegistryToken $t) => [
+            'tokens' => $group->tokens()->where('user_id', $request->user()->id)->latest()->get()->map(fn (RegistryToken $t) => [
                 'id' => $t->id,
                 'name' => $t->name,
                 'ability' => $t->ability->value,

@@ -36,8 +36,9 @@ it('rejects assigning a token to a foreign registry', function () {
     expect(RegistryToken::count())->toBe(0);
 });
 
-it('revokes only own-org tokens', function () {
-    $own = RegistryToken::factory()->for($this->orgA)->create();
+it('revokes only own personal tokens', function () {
+    // Persönliches Token des Members: löschbar.
+    $own = RegistryToken::factory()->for($this->orgA)->create(['user_id' => $this->member->id]);
     $foreign = RegistryToken::factory()->for(Organization::factory()->create())->create();
 
     $this->actingAs($this->member)->delete("/portal/tokens/{$foreign->id}")->assertForbidden();

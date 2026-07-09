@@ -10,8 +10,20 @@ class RegistryTokenPolicy
 {
     public function delete(User $user, RegistryToken $token): bool
     {
-        return $this->operatorAdmin($user)
-            || ($user->organization_id !== null && $token->organization_id === $user->organization_id);
+        if ($this->operatorAdmin($user)) {
+            return true;
+        }
+
+        // Fremde Org niemals.
+        if ($user->organization_id === null || $token->organization_id !== $user->organization_id) {
+            return false;
+        }
+
+        // Persönliche Tokens nur durch den Besitzer; org-geteilte (ohne Besitzer)
+        // nur durch Org-Admin/Maintainer.
+        return $token->user_id === null
+            ? in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)
+            : $token->user_id === $user->id;
     }
 
     private function operatorAdmin(User $user): bool
