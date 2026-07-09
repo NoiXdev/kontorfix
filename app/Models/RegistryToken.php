@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 /**
  * @property Carbon|null $last_used_at
  * @property Carbon|null $expires_at
+ * @property string|null $user_id
  */
 class RegistryToken extends Model
 {
@@ -22,6 +23,7 @@ class RegistryToken extends Model
 
     protected $fillable = [
         'organization_id',
+        'user_id',
         'group_id',
         'name',
         'token_hash',
@@ -56,13 +58,22 @@ class RegistryToken extends Model
     }
 
     /**
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
      * @return array{0: self, 1: string}
      */
-    public static function issue(Organization $org, string $name, ?Group $group, TokenAbility $ability = TokenAbility::Read, ?\DateTimeInterface $expiresAt = null): array
+    public static function issue(Organization $org, string $name, ?Group $group, TokenAbility $ability = TokenAbility::Read, ?\DateTimeInterface $expiresAt = null, ?User $owner = null): array
     {
         $plain = 'kfx_'.Str::random(40);
         $token = static::create([
             'organization_id' => $org->id,
+            'user_id' => $owner?->id,
             'group_id' => $group?->id,
             'name' => $name,
             'token_hash' => hash('sha256', $plain),
