@@ -1,7 +1,11 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\HorizonServiceProvider;
+use App\Providers\StorageServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\HorizonServiceProvider::class,
-    App\Providers\StorageServiceProvider::class,
+    AppServiceProvider::class,
+    HorizonServiceProvider::class,
+    StorageServiceProvider::class,
 ];

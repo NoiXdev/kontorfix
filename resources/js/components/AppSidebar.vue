@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Globe, KeyRound, LayoutGrid, Package, Users, Webhook } from 'lucide-vue-next';
+import { Activity, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Package, Users, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -76,13 +76,26 @@ const navSections = computed<NavSection[]>(() => {
     return sections;
 });
 
-const footerNavItems: NavItem[] = [
-    {
-        title: 'Projekt-Repository',
-        href: 'https://github.com/NoiXdev/kontorfix',
-        icon: Folder,
-    },
-];
+const footerNavItems = computed<NavItem[]>(() => {
+    const items: NavItem[] = [
+        {
+            title: 'Projekt-Repository',
+            href: 'https://github.com/NoiXdev/kontorfix',
+            icon: Folder,
+        },
+    ];
+
+    // Horizon ist eine eigene SPA (kein Inertia) → als echter Browser-Link im Footer.
+    if (isAdmin.value) {
+        items.unshift({
+            title: 'Queue (Horizon)',
+            href: '/horizon',
+            icon: Gauge,
+        });
+    }
+
+    return items;
+});
 </script>
 
 <template>

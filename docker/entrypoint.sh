@@ -10,7 +10,7 @@ if [ "$role" = "app" ]; then
     php artisan view:cache
     exec "$@"
 elif [ "$role" = "worker" ]; then
-    exec php artisan queue:work --tries=3 --max-time=3600
+    exec php artisan horizon
 elif [ "$role" = "scheduler" ]; then
     exec php artisan schedule:work
 fi
