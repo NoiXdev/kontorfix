@@ -31,6 +31,14 @@ class OidcUserResolver
         if ($email !== '' && $emailVerified) {
             $user = User::where('email', $email)->first();
             if ($user !== null) {
+                // Privilegierte Konten (admin/maintainer) NICHT automatisch per E-Mail an eine
+                // föderierte Identität binden: ein IdP, der email_verified frei setzt, könnte
+                // sonst ein Admin-Konto übernehmen. Solche Konten müssen bewusst (eingeloggt)
+                // verknüpft werden — Passwort/2FA/Passkey bleiben ihr Login-Pfad.
+                if (in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)) {
+                    throw new RuntimeException('Automatische SSO-Verknüpfung für privilegierte Konten ist nicht erlaubt.');
+                }
+
                 $this->link($provider, $user, $subject);
 
                 return $user;

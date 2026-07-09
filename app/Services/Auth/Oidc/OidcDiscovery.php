@@ -13,7 +13,7 @@ class OidcDiscovery
      */
     public function discover(string $issuer): array
     {
-        if (! UrlSafety::isSafe($issuer)) {
+        if (! UrlSafety::isSafeResolving($issuer)) {
             throw new RuntimeException('Unsichere issuer-URL.');
         }
 
@@ -38,11 +38,11 @@ class OidcDiscovery
         ];
 
         foreach (['authorization_endpoint', 'token_endpoint', 'jwks_uri'] as $key) {
-            if (! UrlSafety::isSafe($endpoints[$key])) {
+            if (! UrlSafety::isSafeResolving($endpoints[$key])) {
                 throw new RuntimeException("Unsicherer/fehlender Endpunkt: {$key}.");
             }
         }
-        if ($endpoints['userinfo_endpoint'] !== null && ! UrlSafety::isSafe($endpoints['userinfo_endpoint'])) {
+        if ($endpoints['userinfo_endpoint'] !== null && ! UrlSafety::isSafeResolving($endpoints['userinfo_endpoint'])) {
             throw new RuntimeException('Unsicherer userinfo_endpoint.');
         }
 

@@ -32,7 +32,7 @@ class OidcService
      */
     public function exchangeCode(OidcProvider $provider, string $code, string $codeVerifier, string $redirectUri): array
     {
-        if (! UrlSafety::isSafe($provider->token_endpoint)) {
+        if (! UrlSafety::isSafeResolving($provider->token_endpoint)) {
             throw new RuntimeException('Unsicherer token_endpoint.');
         }
 
@@ -61,7 +61,7 @@ class OidcService
      */
     public function verifyIdToken(OidcProvider $provider, string $idToken, string $nonce): array
     {
-        if (! UrlSafety::isSafe($provider->jwks_uri)) {
+        if (! UrlSafety::isSafeResolving($provider->jwks_uri)) {
             throw new RuntimeException('Unsichere jwks_uri.');
         }
 
