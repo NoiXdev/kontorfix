@@ -27,6 +27,7 @@ class StoreGroupRequest extends FormRequest
             'name' => ['required', 'string', 'max:190'],
             'slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', 'unique:groups,slug'],
             'public' => ['boolean'],
+            'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'package_ids' => ['array'],
             'package_ids.*' => ['uuid', 'exists:packages,id'],
         ];

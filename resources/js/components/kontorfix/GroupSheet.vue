@@ -15,6 +15,18 @@ interface Pkg {
     type: 'composer' | 'npm';
 }
 
+interface OrgOption {
+    id: string;
+    name: string;
+}
+
+const props = withDefaults(
+    defineProps<{
+        organizations?: OrgOption[];
+    }>(),
+    { organizations: () => [] },
+);
+
 const open = defineModel<boolean>('open', { default: false });
 
 const emit = defineEmits<{
@@ -25,6 +37,7 @@ const form = useForm({
     name: '',
     slug: '',
     public: false,
+    organization_id: '',
     package_ids: [] as string[],
 });
 
@@ -96,6 +109,19 @@ function close() {
                         Erreichbar unter <span class="font-mono">{{ origin }}/r/{{ form.slug || '…' }}</span>
                     </p>
                     <InputError :message="form.errors.slug" />
+                </div>
+
+                <div class="grid gap-2">
+                    <Label for="group-organization">Kunde / Organisation</Label>
+                    <select
+                        id="group-organization"
+                        v-model="form.organization_id"
+                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        <option value="">Standard (Betreiber)</option>
+                        <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
+                    </select>
+                    <InputError :message="form.errors.organization_id" />
                 </div>
 
                 <div class="flex items-center gap-2">

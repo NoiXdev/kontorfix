@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Models\Group;
+use App\Models\Organization;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -15,7 +16,9 @@ class GroupController extends Controller
     {
         // TODO(multi-tenant): auf organization_id des Users einschränken, sobald Kunden-Admins existieren.
         return Inertia::render('admin/groups/Index', [
-            'groups' => Group::withCount('packages')->with('domains:id,group_id,hostname')->orderBy('name')->get()
+            'groups' => Group::withCount('packages')
+                ->with(['domains:id,group_id,hostname', 'organization:id,name'])
+                ->orderBy('name')->get()
                 ->map(fn (Group $g) => [
                     'id' => $g->id,
                     'name' => $g->name,
@@ -23,7 +26,9 @@ class GroupController extends Controller
                     'public' => $g->public,
                     'packages_count' => $g->packages_count,
                     'domains' => $g->domains->pluck('hostname'),
+                    'organization' => $g->organization?->name,
                 ]),
+            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -33,7 +38,7 @@ class GroupController extends Controller
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
             'public' => $request->boolean('public'),
-            'organization_id' => $request->user()->organization_id,
+            'organization_id' => $request->validated('organization_id') ?? $request->user()->organization_id,
         ]);
         $group->packages()->sync($request->validated('package_ids', []));
 

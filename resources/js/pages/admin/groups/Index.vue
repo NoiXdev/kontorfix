@@ -14,10 +14,17 @@ interface GroupRow {
     public: boolean;
     packages_count: number;
     domains: string[];
+    organization: string | null;
+}
+
+interface OrgOption {
+    id: string;
+    name: string;
 }
 
 const props = defineProps<{
     groups: GroupRow[];
+    organizations: OrgOption[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Gruppen', href: '/admin/groups' }];
@@ -60,6 +67,7 @@ function destroyGroup(id: string) {
                         <tr>
                             <th class="px-4 py-3 font-medium">Name</th>
                             <th class="px-4 py-3 font-medium">Slug</th>
+                            <th class="px-4 py-3 font-medium">Kunde / Org</th>
                             <th class="px-4 py-3 font-medium">Domains</th>
                             <th class="px-4 py-3 font-medium">Pakete</th>
                             <th class="px-4 py-3 font-medium">Sichtbarkeit</th>
@@ -74,6 +82,7 @@ function destroyGroup(id: string) {
                         >
                             <td class="px-4 py-3">{{ group.name }}</td>
                             <td class="px-4 py-3 font-mono">/r/{{ group.slug }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ group.organization ?? '—' }}</td>
                             <td class="px-4 py-3 text-muted-foreground">
                                 {{ group.domains.length > 0 ? group.domains.join(', ') : '—' }}
                             </td>
@@ -99,13 +108,13 @@ function destroyGroup(id: string) {
                             </td>
                         </tr>
                         <tr v-if="props.groups.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Gruppen angelegt.</td>
+                            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground">Noch keine Gruppen angelegt.</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <GroupSheet v-model:open="sheetOpen" />
+        <GroupSheet v-model:open="sheetOpen" :organizations="props.organizations" />
     </AppLayout>
 </template>
