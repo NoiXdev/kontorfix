@@ -32,6 +32,10 @@ Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('adm
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
+
+    Route::get('storage', [Admin\StorageController::class, 'show'])->name('storage.show');
+    Route::put('storage', [Admin\StorageController::class, 'update'])->name('storage.update');
+    Route::post('storage/test', [Admin\StorageController::class, 'test'])->name('storage.test');
 });
 
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
