@@ -26,6 +26,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Passkeys',
         href: '/settings/passkeys',
     },
+    {
+        title: 'Zugriffstokens',
+        href: '/settings/tokens',
+    },
 ];
 
 const currentPath = window.location.pathname;
