@@ -1,7 +1,7 @@
 <?php
 
-use App\Enums\UserRole;
 use App\Http\Controllers\Admin;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
 use Illuminate\Support\Facades\Route;
@@ -16,13 +16,8 @@ Route::get('/', function () {
     return Inertia::render('Welcome');
 })->name('home');
 
-Route::get('dashboard', function () {
-    if (request()->user()->role === UserRole::Member) {
-        return redirect()->route('portal.registries.index');
-    }
-
-    return Inertia::render('Dashboard');
-})->middleware(['auth', 'verified'])->name('dashboard');
+Route::get('dashboard', [DashboardController::class, 'index'])
+    ->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware(['auth', 'role:admin,maintainer'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
