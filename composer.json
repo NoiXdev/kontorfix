@@ -1,11 +1,13 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/vue-starter-kit",
+    "name": "noixdev/kontorfix",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "Self-hosted package registry with multi-tenant access control.",
     "keywords": [
-        "laravel",
-        "framework"
+        "package-registry",
+        "composer",
+        "npm",
+        "self-hosted"
     ],
     "license": "MIT",
     "require": {
