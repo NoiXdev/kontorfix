@@ -3,6 +3,7 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\AccountType;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Collection;
@@ -30,6 +31,17 @@ class User extends Authenticatable implements PasskeyUser
     use HasFactory, HasUuids, Notifiable, PasskeyAuthenticatable;
 
     /**
+     * Default-Werte für neue (nicht aus der DB geladene) Model-Instanzen.
+     * Hält den In-Memory-Zustand mit dem DB-Default von `account_type` synchron,
+     * da UUID-Inserts keine defaulteten Spalten per RETURNING zurückliefern.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'account_type' => 'human',
+    ];
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var list<string>
@@ -40,6 +52,7 @@ class User extends Authenticatable implements PasskeyUser
         'password',
         'organization_id',
         'role',
+        'account_type',
     ];
 
     /**
@@ -65,6 +78,7 @@ class User extends Authenticatable implements PasskeyUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'account_type' => AccountType::class,
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
             'two_factor_confirmed_at' => 'datetime',
@@ -86,6 +100,11 @@ class User extends Authenticatable implements PasskeyUser
     public function oidcIdentities(): HasMany
     {
         return $this->hasMany(OidcIdentity::class);
+    }
+
+    public function isRobot(): bool
+    {
+        return $this->account_type === AccountType::Robot;
     }
 
     public function hasEnabledTwoFactor(): bool

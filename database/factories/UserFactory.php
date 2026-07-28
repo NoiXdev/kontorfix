@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\AccountType;
 use App\Enums\UserRole;
 use App\Models\Organization;
 use App\Models\User;
@@ -54,6 +55,17 @@ class UserFactory extends Factory
     {
         return $this->state(fn () => [
             'organization_id' => Organization::factory()->state(['is_operator' => true]),
+        ]);
+    }
+
+    /**
+     * Indicate that the user is a robot (service) account without a password.
+     */
+    public function robot(): static
+    {
+        return $this->state(fn () => [
+            'account_type' => AccountType::Robot,
+            'password' => null,
         ]);
     }
 }
