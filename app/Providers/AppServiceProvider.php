@@ -2,12 +2,17 @@
 
 namespace App\Providers;
 
+use App\Enums\UserRole;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
+use App\Models\User;
+use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passkeys\Contracts\PasskeyUser;
@@ -53,5 +58,19 @@ class AppServiceProvider extends ServiceProvider
         // TOTP-Schritt eine sichtbare, getestete Entscheidung ist. Um 2FA stattdessen zu
         // erzwingen (Passkey bei aktiver 2FA blocken): `return ! $user->hasConfirmedTwoFactor();`
         Passkeys::authorizeLoginUsing(fn (Request $request, PasskeyUser $user, Passkey $passkey): bool => true);
+
+        // OpenAPI-Doku (Scramble) dokumentiert ausschließlich die versionierten
+        // Management-Endpunkte unter api/v1 — die Composer-/npm-/Proxy-Routen sind
+        // Protokoll-Endpunkte für Package-Clients und gehören nicht in die REST-Referenz.
+        Scramble::configure()
+            ->routes(fn (Route $route): bool => str_starts_with($route->uri(), 'api/v1'));
+
+        // Zugriffs-Gate für die Doku-Routen (/docs/api, /docs/api.json). Scrambles
+        // RestrictedDocsAccess-Middleware wertet dieses Gate in allen Umgebungen außer
+        // `local` aus. Nur Admins einer Betreiber-Organisation dürfen die API-Referenz
+        // sehen — sie legt die interne Verwaltungs-API offen.
+        Gate::define('viewApiDocs', function (User $user): bool {
+            return $user->role === UserRole::Admin && (bool) $user->organization?->is_operator;
+        });
     }
 }

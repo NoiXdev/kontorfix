@@ -13,6 +13,7 @@
         "chillerlan/php-qrcode": "^6.0",
         "composer/metadata-minifier": "^1.0",
         "composer/semver": "^3.4",
+        "dedoc/scramble": "^0.13.36",
         "firebase/php-jwt": "^7.1",
         "inertiajs/inertia-laravel": "^2.0",
         "laravel/framework": "^12.0",
