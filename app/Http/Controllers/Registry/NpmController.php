@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Registry;
 
 use App\Enums\PackageType;
-use App\Enums\TokenAbility;
 use App\Exceptions\VersionConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Npm\NpmMetadataBuilder;
@@ -122,13 +122,20 @@ class NpmController extends Controller
 
     private function respondPublish(Request $request, Group $group, string $name): JsonResponse
     {
-        $this->authorizeGroup($request, $group);
-
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
-        abort_unless($token !== null && $token->ability === TokenAbility::Publish, 403);
 
-        $pkg = $this->findAccessible($request, $group, PackageType::Npm, $name);
+        // Schreib-Pfad: strikte, org-gebundene Autorisierung OHNE public-Kurzschluss.
+        // Eine oeffentlich lesbare Registry ist nicht oeffentlich beschreibbar — sonst
+        // koennte ein org-fremder Publish-Token eine Version einschleusen (Finding C1).
+        // Anonym -> 401 (bitte authentifizieren); vorhandener, aber unbefugter Token -> 403.
+        abort_if($token === null, 401, 'Authentication required for this registry.');
+        abort_unless($this->access->canPublishToGroup($token, $group), 403);
+
+        // Package strikt aufloesen: es muss existieren UND der Ziel-Group zugeordnet sein.
+        // Kein public-Kurzschluss ueber canAccessPackage() auf dem Schreib-Pfad.
+        $pkg = Package::where('type', PackageType::Npm)->where('name', $name)->first();
+        abort_if($pkg === null || ! $this->access->packageBelongsToGroup($group, $pkg), 404);
 
         try {
             $this->publisher->publish($pkg, $request->json()->all());

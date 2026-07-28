@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\GroupPackage;
 use App\Models\Package;
@@ -28,6 +29,42 @@ class RegistryAccessService
 
         return $group->organization_id !== null
             && $token->organization_id === $group->organization_id;
+    }
+
+    /**
+     * Schreib-Autorisierung fuer den Publish-Pfad. Bewusst OHNE den public-Kurzschluss
+     * aus canAccessGroup(): eine oeffentlich LESBARE Registry darf nicht von jedem
+     * beschrieben werden. Ein Token darf nur publishen, wenn er zur Ziel-Org gehoert
+     * (und, falls group-scoped, exakt zur Ziel-Group) und Publish-Faehigkeit hat.
+     * Ohne diese Trennung koennte ein org-fremder Publish-Token eine eingeschleuste
+     * Version an ein global geteiltes Package haengen (Supply-Chain-Injection).
+     */
+    public function canPublishToGroup(?RegistryToken $token, Group $group): bool
+    {
+        if (! $token || $token->ability !== TokenAbility::Publish) {
+            return false;
+        }
+
+        if ($group->organization_id === null || $token->organization_id !== $group->organization_id) {
+            return false;
+        }
+
+        if ($token->group_id !== null) {
+            return $token->group_id === $group->id;
+        }
+
+        return true;
+    }
+
+    /**
+     * Ob ein Package der Ziel-Group zugeordnet ist (nicht abgelaufen). Fuer den
+     * Schreib-Pfad: die Group-Autorisierung muss bereits ueber canPublishToGroup()
+     * erfolgt sein — hier wird nur die Package-Zugehoerigkeit org/group-strikt geprueft,
+     * ohne jeden public-Kurzschluss.
+     */
+    public function packageBelongsToGroup(Group $group, Package $package): bool
+    {
+        return $this->availablePackages($group)->whereKey($package->id)->exists();
     }
 
     /**
