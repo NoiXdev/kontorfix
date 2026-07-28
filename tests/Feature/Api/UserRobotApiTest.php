@@ -52,3 +52,11 @@ it('refuses to delete yourself or the last operator admin via api', function () 
     $victim = User::factory()->create(['organization_id' => $this->op->id, 'role' => 'member']);
     $this->withToken($this->plain)->deleteJson("/api/v1/users/{$victim->id}")->assertNoContent();
 });
+
+it('refuses to issue an api key for a human account', function () {
+    // $this->op / $this->admin / $this->plain aus dem beforeEach (Operator-Admin write-Key).
+    $human = User::factory()->create(['organization_id' => $this->op->id, 'role' => 'member']);
+    $this->withToken($this->plain)->postJson("/api/v1/users/{$human->id}/api-keys", ['name' => 'x', 'permission' => 'write'])
+        ->assertStatus(422);
+    expect(ApiKey::where('user_id', $human->id)->count())->toBe(0);
+});

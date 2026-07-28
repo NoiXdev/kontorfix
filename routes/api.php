@@ -16,13 +16,15 @@ use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 // Alle Management-Endpunkte sind stateless (Bearer-Key), versioniert unter /api/v1.
-// Das Rate-Limit (120 req/min, Global Constraint) erfolgt in der api.auth-Middleware
-// selbst, direkt nach der Key-Auflösung — ein vorgeschaltetes throttle:api würde von
-// Laravels middlewarePriority immer vor api.auth einsortiert und könnte das apiKey-
-// Attribut daher nie sehen (Fallback auf IP statt Key).
+// Zweistufiges Rate-Limit: ein grobes IP-Limit (throttle:api, 240/min) VOR der
+// Auth-Middleware schützt die unauthentifizierte Fläche — ungültige/fehlende Bearer-
+// Tokens würden sonst ungedrosselt je Request einen DB-Lookup auslösen (unauth DoS).
+// Laravels middlewarePriority sortiert throttle ohnehin vor api.auth, das ist hier
+// genau erwünscht. Das feine Pro-Key-Limit (120/min, Global Constraint) bleibt
+// zusätzlich in der api.auth-Middleware selbst, direkt nach der Key-Auflösung.
 Route::prefix('v1')
     ->name('api.v1.')
-    ->middleware('api.auth')
+    ->middleware(['throttle:api', 'api.auth'])
     ->group(function () {
         Route::get('me', [MeController::class, 'show'])->name('me');
 
