@@ -20,7 +20,7 @@ export interface SharedData {
     name: string;
     quote: { message: string; author: string };
     auth: Auth;
-    flash: { success?: string | null; plainTextToken?: string | null };
+    flash: { success?: string | null; plainTextToken?: string | null; plainApiKey?: string | null };
     ziggy: {
         location: string;
         url: string;

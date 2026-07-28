@@ -30,6 +30,10 @@ const sidebarNavItems: NavItem[] = [
         title: 'Zugriffstokens',
         href: '/settings/tokens',
     },
+    {
+        title: 'API-Keys',
+        href: '/settings/api-keys',
+    },
 ];
 
 const currentPath = window.location.pathname;

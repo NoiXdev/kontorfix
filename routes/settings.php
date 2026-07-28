@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Settings\AccessTokenController;
+use App\Http\Controllers\Settings\ApiKeyController;
 use App\Http\Controllers\Settings\PasskeyController;
 use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
@@ -34,4 +35,8 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/tokens', [AccessTokenController::class, 'index'])->name('tokens.index');
     Route::post('settings/tokens', [AccessTokenController::class, 'store'])->name('tokens.store');
     Route::delete('settings/tokens/{token}', [AccessTokenController::class, 'destroy'])->name('tokens.destroy');
+
+    Route::get('settings/api-keys', [ApiKeyController::class, 'index'])->name('api-keys.index');
+    Route::post('settings/api-keys', [ApiKeyController::class, 'store'])->name('api-keys.store');
+    Route::delete('settings/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('api-keys.destroy');
 });
