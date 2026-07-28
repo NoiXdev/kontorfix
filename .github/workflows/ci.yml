@@ -7,7 +7,7 @@ jobs:
   commitlint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
       - uses: wagoid/commitlint-github-action@v6
         with: { configFile: .commitlintrc.yml }
@@ -30,13 +30,13 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
           extensions: pgsql, redis, zip, intl, pcntl
           coverage: none
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: '22', cache: 'npm' }
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
