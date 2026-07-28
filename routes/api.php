@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\Api\V1\ApiKeyController;
 use App\Http\Controllers\Api\V1\GroupController;
+use App\Http\Controllers\Api\V1\GroupDomainController;
+use App\Http\Controllers\Api\V1\GroupPackageController;
+use App\Http\Controllers\Api\V1\GroupUpstreamController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PackageController;
 use Illuminate\Support\Facades\Route;
@@ -37,5 +40,18 @@ Route::prefix('v1')
             Route::get('groups/{group}', [GroupController::class, 'show'])->name('groups.show');
             Route::put('groups/{group}', [GroupController::class, 'update'])->name('groups.update');
             Route::delete('groups/{group}', [GroupController::class, 'destroy'])->name('groups.destroy');
+
+            // Unterressourcen einer Registry: Domains, Upstreams, Paket-Zuordnung.
+            // Wiederverwendet dieselben Form Requests wie der Admin-Flow.
+            Route::get('groups/{group}/domains', [GroupDomainController::class, 'index'])->name('groups.domains.index');
+            Route::post('groups/{group}/domains', [GroupDomainController::class, 'store'])->name('groups.domains.store');
+            Route::delete('groups/{group}/domains/{domain}', [GroupDomainController::class, 'destroy'])->name('groups.domains.destroy');
+
+            Route::get('groups/{group}/upstreams', [GroupUpstreamController::class, 'index'])->name('groups.upstreams.index');
+            Route::post('groups/{group}/upstreams', [GroupUpstreamController::class, 'store'])->name('groups.upstreams.store');
+            Route::delete('groups/{group}/upstreams/{upstream}', [GroupUpstreamController::class, 'destroy'])->name('groups.upstreams.destroy');
+
+            Route::get('groups/{group}/packages', [GroupPackageController::class, 'index'])->name('groups.packages.index');
+            Route::put('groups/{group}/packages', [GroupPackageController::class, 'update'])->name('groups.packages.update');
         });
     });
