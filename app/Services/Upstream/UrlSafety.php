@@ -141,8 +141,12 @@ class UrlSafety
     }
 
     /**
-     * Liefert die eingebettete IPv4 einer IPv4-mapped-IPv6-Adresse (::ffff:0:0/96),
-     * sonst null.
+     * Liefert die eingebettete IPv4 einer IPv6-Adresse mit IPv4 in den letzten 32 Bit,
+     * sonst null. Deckt drei /96-Einbettungen ab, die sonst als „public" durchrutschen
+     * und via Gateway/Stack auf interne IPv4-Ziele zeigen könnten:
+     *   - ::ffff:0:0/96   IPv4-mapped
+     *   - ::/96           IPv4-compatible (deprecated)
+     *   - 64:ff9b::/96    NAT64 Well-Known-Prefix
      */
     private static function mappedIpv4(string $ip): ?string
     {
@@ -151,8 +155,13 @@ class UrlSafety
             return null;
         }
 
-        // Erste 10 Bytes 0x00, danach 0xffff → IPv4-mapped.
-        if (substr($packed, 0, 10) === str_repeat("\x00", 10) && substr($packed, 10, 2) === "\xff\xff") {
+        $prefix12 = substr($packed, 0, 12);
+
+        $isEmbedded = $prefix12 === str_repeat("\x00", 10)."\xff\xff"   // ::ffff:0:0/96
+            || $prefix12 === str_repeat("\x00", 12)                     // ::/96
+            || $prefix12 === "\x00\x64\xff\x9b".str_repeat("\x00", 8);  // 64:ff9b::/96
+
+        if ($isEmbedded) {
             $v4 = @inet_ntop(substr($packed, 12, 4));
 
             return is_string($v4) ? $v4 : null;

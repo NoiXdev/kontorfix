@@ -16,6 +16,9 @@ $unsafe = [
     'http://[fe80::1]/',                     // IPv6 link-local
     'http://[0:0:0:0:0:0:0:1]/',             // ausgeschriebenes loopback
     'http://[::]/',                          // unspecified
+    'http://[64:ff9b::a9fe:a9fe]/x',         // NAT64 → 169.254.169.254 (Cloud-Metadaten)
+    'http://[64:ff9b::7f00:1]/',             // NAT64 → 127.0.0.1
+    'http://[::127.0.0.1]/',                 // IPv4-compatible (deprecated) → loopback
 ];
 
 it('rejects bracketed ipv6 literals that map to private/reserved space (isSafeResolving)', function () use ($unsafe) {
