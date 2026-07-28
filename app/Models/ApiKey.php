@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 /**
  * @property Carbon|null $last_used_at
  * @property Carbon|null $expires_at
+ * @property string|null $plain_text Nur direkt nach issue() gesetzt, nie persistiert.
  */
 class ApiKey extends Model
 {
