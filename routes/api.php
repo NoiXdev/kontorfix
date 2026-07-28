@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\ApiKeyController;
+use App\Http\Controllers\Api\V1\GroupController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PackageController;
 use Illuminate\Support\Facades\Route;
@@ -28,5 +29,13 @@ Route::prefix('v1')
             Route::get('packages/{package}', [PackageController::class, 'show'])->name('packages.show');
             Route::post('packages/{package}/resync', [PackageController::class, 'resync'])->name('packages.resync');
             Route::delete('packages/{package}', [PackageController::class, 'destroy'])->name('packages.destroy');
+
+            // Registries (Gruppen) — dieselben Form Requests wie die Admin-GUI, daher
+            // identisches Validierungsverhalten (inkl. JSON-Fehler bei Accept: application/json).
+            Route::get('groups', [GroupController::class, 'index'])->name('groups.index');
+            Route::post('groups', [GroupController::class, 'store'])->name('groups.store');
+            Route::get('groups/{group}', [GroupController::class, 'show'])->name('groups.show');
+            Route::put('groups/{group}', [GroupController::class, 'update'])->name('groups.update');
+            Route::delete('groups/{group}', [GroupController::class, 'destroy'])->name('groups.destroy');
         });
     });
