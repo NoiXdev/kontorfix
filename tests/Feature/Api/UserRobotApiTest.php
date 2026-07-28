@@ -41,3 +41,14 @@ it('filters robots and enforces the operator role invariant', function () {
         'name' => 'X', 'email' => 'x@acme.test', 'organization_id' => $customer->id, 'role' => 'maintainer',
     ])->assertStatus(422);
 });
+
+it('refuses to delete yourself or the last operator admin via api', function () {
+    // Der einzige Betreiber-Admin darf sich nicht selbst löschen.
+    $this->withToken($this->plain)->deleteJson("/api/v1/users/{$this->admin->id}")
+        ->assertStatus(422);
+    expect(User::find($this->admin->id))->not->toBeNull();
+
+    // Ein zweiter, löschbarer Nutzer geht.
+    $victim = User::factory()->create(['organization_id' => $this->op->id, 'role' => 'member']);
+    $this->withToken($this->plain)->deleteJson("/api/v1/users/{$victim->id}")->assertNoContent();
+});

@@ -7,6 +7,7 @@ use App\Models\ApiKey;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 use Symfony\Component\HttpFoundation\Response;
 
 class AuthenticateApiKey
@@ -34,6 +35,19 @@ class AuthenticateApiKey
         if ($key->last_used_at === null || $key->last_used_at->lt(now()->subMinute())) {
             $key->forceFill(['last_used_at' => now()])->saveQuietly();
         }
+
+        // Pro-Key-Rate-Limit — bewusst hier (nach Key-Auflösung), da middlewarePriority
+        // ein vorgelagertes throttle:api immer vor diese Middleware sortieren würde und
+        // dann nur pro IP statt pro Key drosseln könnte (Global Constraint: 120/min pro Key).
+        $limiterKey = 'apikey:'.$key->getKey();
+        if (RateLimiter::tooManyAttempts($limiterKey, 120)) {
+            return response()->json(
+                ['message' => 'Zu viele Anfragen.'],
+                429,
+                ['Retry-After' => (string) RateLimiter::availableIn($limiterKey)],
+            );
+        }
+        RateLimiter::hit($limiterKey, 60);
 
         return $next($request);
     }

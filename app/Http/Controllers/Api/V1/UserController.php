@@ -64,8 +64,18 @@ class UserController extends Controller
         return new UserResource($user);
     }
 
-    public function destroy(User $user): JsonResponse
+    public function destroy(Request $request, User $user): JsonResponse
     {
+        if ($user->is($request->user())) {
+            throw ValidationException::withMessages(['user' => 'Du kannst dich nicht selbst löschen.']);
+        }
+
+        if ($user->role === UserRole::Admin
+            && $user->organization->is_operator
+            && $user->organization->users()->where('role', UserRole::Admin->value)->count() <= 1) {
+            throw ValidationException::withMessages(['user' => 'Der letzte Betreiber-Admin kann nicht gelöscht werden.']);
+        }
+
         $user->delete();
 
         return response()->json(status: 204);

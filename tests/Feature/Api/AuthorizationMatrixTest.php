@@ -43,3 +43,18 @@ it('rate limits after the configured threshold', function () {
     }
     $this->withToken($plain)->getJson('/api/v1/me')->assertStatus(429);
 });
+
+it('rate limits per key, not per ip', function () {
+    Cache::flush();
+    $u = User::factory()->create();
+    [, $a] = ApiKey::issue($u, 'a', ApiKeyPermission::Read);
+    [, $b] = ApiKey::issue($u, 'b', ApiKeyPermission::Read);
+
+    foreach (range(1, 120) as $_) {
+        $this->withToken($a)->getJson('/api/v1/me');
+    }
+    // Key A erschöpft…
+    $this->withToken($a)->getJson('/api/v1/me')->assertStatus(429);
+    // …Key B (gleiche IP) ist unbetroffen.
+    $this->withToken($b)->getJson('/api/v1/me')->assertOk();
+});

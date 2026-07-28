@@ -8,12 +8,10 @@ use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
 use App\Models\User;
 use Dedoc\Scramble\Scramble;
-use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Passkeys\Contracts\PasskeyUser;
 use Laravel\Passkeys\Passkey;
@@ -39,15 +37,6 @@ class AppServiceProvider extends ServiceProvider
         // Methoden verdrahten. Deshalb explizite Registrierung statt Discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
-
-        // API-Rate-Limit pro Key (bzw. IP für anonyme/ungültige Requests) statt global —
-        // ein einzelner Consumer darf andere nicht aushungern.
-        RateLimiter::for('api', function (Request $request) {
-            $key = $request->attributes->get('apiKey');
-            $id = $key?->getKey() ?? $request->ip();
-
-            return Limit::perMinute(120)->by('api:'.$id);
-        });
 
         // Bewusste Sicherheitsentscheidung (v0.8): Ein Passkey verlangt hier zwingend
         // User-Verification (Biometrie/PIN, siehe config/passkeys.php) und ist damit selbst
