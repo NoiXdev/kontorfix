@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\GroupDomainController;
 use App\Http\Controllers\Api\V1\GroupPackageController;
 use App\Http\Controllers\Api\V1\GroupUpstreamController;
 use App\Http\Controllers\Api\V1\MeController;
+use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PackageController;
 use App\Http\Controllers\Api\V1\RegistryTokenController;
 use App\Http\Controllers\Api\V1\StatusController;
@@ -70,5 +71,14 @@ Route::prefix('v1')
             Route::delete('webhooks/{webhook}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');
 
             Route::get('status', [StatusController::class, 'show'])->name('status');
+        });
+
+        // Organisationsverwaltung (Kunden-Mandanten) ist strenger als die
+        // Betreiber-Ressourcen oben: nur admin, nicht maintainer.
+        Route::middleware(['operator', 'role:admin'])->group(function () {
+            Route::get('organizations', [OrganizationController::class, 'index'])->name('organizations.index');
+            Route::post('organizations', [OrganizationController::class, 'store'])->name('organizations.store');
+            Route::get('organizations/{organization}', [OrganizationController::class, 'show'])->name('organizations.show');
+            Route::delete('organizations/{organization}', [OrganizationController::class, 'destroy'])->name('organizations.destroy');
         });
     });
