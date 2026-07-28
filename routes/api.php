@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\V1\GroupUpstreamController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PackageController;
 use App\Http\Controllers\Api\V1\RegistryTokenController;
+use App\Http\Controllers\Api\V1\StatusController;
+use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 // Alle Management-Endpunkte sind stateless (Bearer-Key), versioniert unter /api/v1.
@@ -60,5 +62,13 @@ Route::prefix('v1')
             Route::get('registry-tokens', [RegistryTokenController::class, 'index'])->name('registry-tokens.index');
             Route::post('registry-tokens', [RegistryTokenController::class, 'store'])->name('registry-tokens.store');
             Route::delete('registry-tokens/{registryToken}', [RegistryTokenController::class, 'destroy'])->name('registry-tokens.destroy');
+
+            // Ausgehende Webhooks (dieselben Form Requests wie die Admin-GUI) und ein
+            // schlanker Status-Endpunkt für externe Monitoring-Clients.
+            Route::get('webhooks', [WebhookController::class, 'index'])->name('webhooks.index');
+            Route::post('webhooks', [WebhookController::class, 'store'])->name('webhooks.store');
+            Route::delete('webhooks/{webhook}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');
+
+            Route::get('status', [StatusController::class, 'show'])->name('status');
         });
     });
