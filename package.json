@@ -42,13 +42,14 @@
         "lucide": "^0.468.0",
         "lucide-vue-next": "^0.468.0",
         "radix-vue": "^1.9.11",
+        "sucrase": "^3.35.1",
         "tailwind-merge": "^2.5.5",
         "tailwindcss": "^3.4.1",
         "tailwindcss-animate": "^1.0.7",
         "typescript": "^5.2.2",
         "vite": "^6.0.3",
         "vue": "^3.5.13",
-        "vue-tsc": "^2.2.0",
+        "vue-tsc": "^3.3.8",
         "ziggy-js": "^2.4.2"
     },
     "optionalDependencies": {
