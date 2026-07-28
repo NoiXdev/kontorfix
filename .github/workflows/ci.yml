@@ -63,6 +63,6 @@ jobs:
           DB_DATABASE: testing
           DB_USERNAME: kfx
           DB_PASSWORD: kfx
-          REDIS_HOST: 127.0.0.1
-          QUEUE_CONNECTION: redis
-          CACHE_STORE: redis
+          # Cache/queue stay on phpunit.xml's array/sync — the suite is validated
+          # against those; forcing redis here leaks state across tests and breaks
+          # auth tests (rate limiter / cached state).
