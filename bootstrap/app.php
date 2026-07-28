@@ -1,6 +1,7 @@
 <?php
 
 use App\Exceptions\UpstreamException;
+use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\AuthenticateRegistry;
 use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureUserRole;
@@ -16,6 +17,8 @@ use Illuminate\Support\Facades\Route;
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
+        apiPrefix: 'api',
         commands: __DIR__.'/../routes/console.php',
         channels: __DIR__.'/../routes/channels.php',
         health: '/up',
@@ -48,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'registry.context' => ResolveRegistryContext::class,
             'operator' => EnsureOperator::class,
             'role' => EnsureUserRole::class,
+            'api.auth' => AuthenticateApiKey::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
