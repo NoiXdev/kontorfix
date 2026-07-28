@@ -102,6 +102,14 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(OidcIdentity::class);
     }
 
+    /**
+     * @return HasMany<ApiKey, $this>
+     */
+    public function apiKeys(): HasMany
+    {
+        return $this->hasMany(ApiKey::class);
+    }
+
     public function isRobot(): bool
     {
         return $this->account_type === AccountType::Robot;
