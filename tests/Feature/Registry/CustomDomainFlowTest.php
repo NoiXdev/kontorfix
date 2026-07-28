@@ -35,7 +35,7 @@ it('runs the full composer flow at the domain root: root -> p2 -> dist', functio
     $meta = $this->withHeaders($headers)->getJson("http://{$host}{$metaUrl}")->assertOk()->json();
     $version = MetadataMinifier::expand($meta['packages']['acme/demo'])[0];
 
-    // Dist-URL ist domain-root (kein /r/{slug}).
+    // Dist URL is domain-root (no /r/{slug}).
     expect($version['dist']['url'])->toStartWith("http://{$host}/dists/");
     $distPath = parse_url($version['dist']['url'], PHP_URL_PATH);
     $this->withHeaders($headers)->get("http://{$host}{$distPath}")->assertOk()->assertHeader('content-type', 'application/zip');
@@ -50,7 +50,7 @@ it('runs the full npm flow at the domain root: packument -> tarball', function (
     $host = 'npm.kadenz.test';
     $headers = domainHeaders($group, $host);
 
-    // publish über den Domain-Root (Bearer-Token mit publish-Ability)
+    // publish via the domain root (bearer token with publish ability)
     $publishHeaders = array_merge(['Host' => $host], publishHeaderFor($group));
     $this->withHeaders($publishHeaders)
         ->putJson("http://{$host}/leftpad", publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'bytes'))
@@ -85,13 +85,13 @@ it('proxies an upstream at the domain root with domain-root proxy urls', functio
 });
 
 /*
- * Manueller Multi-Domain-Smoke-Test (2026-07-08), gegen den laufenden DDEV-Server mit
- * echten Clients verifiziert. Eine Custom-Domain (packages-kadenz.ddev.site, als
- * zusätzlicher DDEV-Hostname) zeigte per domains-Tabelle auf die Gruppe "proxytest"
- * (mit packagist- und npmjs-Proxy-Upstreams):
+ * Manual multi-domain smoke test (2026-07-08), verified against the running DDEV server
+ * with real clients. A custom domain (packages-kadenz.ddev.site, as an additional
+ * DDEV hostname) pointed via the domains table to the group "proxytest"
+ * (with packagist and npmjs proxy upstreams):
  *
  *   GET https://packages-kadenz.ddev.site/packages.json
- *     -> {"metadata-url":"/p2/%package%.json"}   (root-relativ, KEIN /r/slug)
+ *     -> {"metadata-url":"/p2/%package%.json"}   (root-relative, NO /r/slug)
  *
  *   composer.json: repositories=[{"type":"composer","url":"https://packages-kadenz.ddev.site"}]
  *   composer require psr/container  ->  Installing psr/container (2.0.2)
@@ -99,5 +99,5 @@ it('proxies an upstream at the domain root with domain-root proxy urls', functio
  *   .npmrc: registry=https://packages-kadenz.ddev.site/
  *   npm install is-number  ->  added 1 package (is-number@7.0.0)
  *
- * Die gesamte Registry (private Pakete, Proxy, Downloads) lief unter der Domain-Wurzel.
+ * The entire registry (private packages, proxy, downloads) ran under the domain root.
  */

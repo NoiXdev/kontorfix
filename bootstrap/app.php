@@ -25,21 +25,21 @@ return Application::configure(basePath: dirname(__DIR__))
         channels: __DIR__.'/../routes/channels.php',
         health: '/up',
         then: function () {
-            // Registry-Routen sind stateless (Composer-Client schickt keine Cookies/CSRF) —
-            // bewusst außerhalb der `web`-Gruppe, nur mit `registry.auth` geschützt.
+            // Registry routes are stateless (Composer client sends no cookies/CSRF) —
+            // deliberately outside the `web` group, protected only by `registry.auth`.
             Route::group([], base_path('routes/registry.php'));
 
-            // Incoming-Webhooks sind ebenfalls stateless (externe Git-Hoster schicken
-            // keine Cookies/CSRF-Token) — Absicherung ausschließlich über Signaturprüfung.
+            // Incoming webhooks are likewise stateless (external git hosts send
+            // no cookies/CSRF token) — secured exclusively via signature verification.
             Route::group([], base_path('routes/webhooks.php'));
         },
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Deployment läuft hinter einem Reverse Proxy (Traefik/Portainer). Ohne dies
-        // liefert getSchemeAndHttpHost() den internen Host und die generierten
-        // Dist-URLs in den Composer-Metadaten wären falsch. Die vertrauenswürdigen
-        // Proxy-IPs/-Netze sind über TRUSTED_PROXIES konfigurierbar (Default: private
-        // Netzbereiche + localhost), '*' bleibt als expliziter Opt-out möglich.
+        // Deployment runs behind a reverse proxy (Traefik/Portainer). Without this,
+        // getSchemeAndHttpHost() would return the internal host and the generated
+        // dist URLs in the Composer metadata would be wrong. The trusted
+        // proxy IPs/networks are configurable via TRUSTED_PROXIES (default: private
+        // network ranges + localhost), '*' remains available as an explicit opt-out.
         $proxies = (string) env('TRUSTED_PROXIES', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1');
         $middleware->trustProxies(
             at: $proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)),
@@ -65,9 +65,9 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        // Ein defekter/langsamer Upstream ist ein Gateway-Fehler, kein 500 unsererseits.
-        // UpstreamException wird ausschließlich im Registry-Proxy geworfen — daher immer
-        // 502, unabhängig davon, ob der Zugriff über /r/{slug} oder eine Custom-Domain kam.
+        // A broken/slow upstream is a gateway error, not a 500 on our part.
+        // UpstreamException is thrown exclusively in the registry proxy — hence always
+        // 502, regardless of whether access came via /r/{slug} or a custom domain.
         $exceptions->render(fn (UpstreamException $e, Request $request) => response()->json(
             ['error' => 'Upstream registry unavailable.'], 502
         ));

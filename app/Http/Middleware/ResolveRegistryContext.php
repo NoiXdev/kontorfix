@@ -15,19 +15,19 @@ class ResolveRegistryContext
         $slug = $request->route('groupSlug');
 
         if ($slug !== null) {
-            // Slug-Zugriff: /r/{slug}/...
+            // Slug access: /r/{slug}/...
             $group = Group::where('slug', $slug)->first();
             abort_if($group === null, 404);
             $request->attributes->set('registryGroup', $group);
             $request->attributes->set('registryDomainMode', false);
 
-            // Controller-Actions kennen {groupSlug} nicht mehr als Parameter. Ohne dies
-            // würde Laravels (rein positionale) Controller-Dispatch alle nachfolgenden
-            // Routenparameter um eins verschieben.
+            // Controller actions no longer know {groupSlug} as a parameter. Without this,
+            // Laravel's (purely positional) controller dispatch would shift all subsequent
+            // route parameters by one.
             $request->route()->forgetParameter('groupSlug');
         } else {
-            // Domain-Zugriff: Registry unter der Host-Wurzel. Unbekannter Host -> 404
-            // (schützt die Haupt-App: fremde Hosts fallen sauber durch).
+            // Domain access: registry at the host root. Unknown host -> 404
+            // (protects the main app: foreign hosts fall through cleanly).
             $domain = Domain::where('hostname', $request->getHost())->first();
             abort_if($domain === null, 404);
             $request->attributes->set('registryGroup', $domain->group);

@@ -31,10 +31,10 @@ class OidcUserResolver
         if ($email !== '' && $emailVerified) {
             $user = User::where('email', $email)->first();
             if ($user !== null) {
-                // Privilegierte Konten (admin/maintainer) NICHT automatisch per E-Mail an eine
-                // föderierte Identität binden: ein IdP, der email_verified frei setzt, könnte
-                // sonst ein Admin-Konto übernehmen. Solche Konten müssen bewusst (eingeloggt)
-                // verknüpft werden — Passwort/2FA/Passkey bleiben ihr Login-Pfad.
+                // Do NOT automatically link privileged accounts (admin/maintainer) to a
+                // federated identity by email: an IdP that sets email_verified freely could
+                // otherwise take over an admin account. Such accounts must be linked
+                // deliberately (while logged in) — password/2FA/passkey remain their login path.
                 if (in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)) {
                     throw new RuntimeException('Automatische SSO-Verknüpfung für privilegierte Konten ist nicht erlaubt.');
                 }
@@ -60,7 +60,7 @@ class OidcUserResolver
                 'organization_id' => $provider->default_organization_id,
                 'role' => $provider->default_role ?? UserRole::Member,
             ]);
-            // email_verified_at ist nicht fillable → separat setzen.
+            // email_verified_at is not fillable → set it separately.
             $user->forceFill(['email_verified_at' => now()])->save();
 
             $this->link($provider, $user, $subject);

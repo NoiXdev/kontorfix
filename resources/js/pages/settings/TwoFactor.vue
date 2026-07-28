@@ -61,7 +61,7 @@ const disable = () => {
             <div class="space-y-6">
                 <HeadingSmall title="Zwei-Faktor-Authentifizierung" description="Sichere dein Konto mit einem zusätzlichen Bestätigungscode." />
 
-                <!-- Zustand: nicht aktiviert -->
+                <!-- State: not enabled -->
                 <div v-if="!enabled" class="space-y-6">
                     <p class="text-sm text-muted-foreground">
                         Die Zwei-Faktor-Authentifizierung ist derzeit deaktiviert. Aktiviere sie, um bei jeder Anmeldung zusätzlich einen
@@ -71,7 +71,7 @@ const disable = () => {
                     <Button @click="enable">Zwei-Faktor aktivieren</Button>
                 </div>
 
-                <!-- Zustand: aktiviert, aber noch nicht bestätigt (Setup läuft) -->
+                <!-- State: enabled, but not yet confirmed (setup in progress) -->
                 <div v-else-if="enabled && !confirmed && setup" class="space-y-6">
                     <p class="text-sm text-muted-foreground">
                         Scanne den folgenden QR-Code mit deiner Authenticator-App und gib anschließend den generierten Code ein, um die Einrichtung
@@ -116,7 +116,7 @@ const disable = () => {
                     </form>
                 </div>
 
-                <!-- Zustand: bestätigt (aktiv) -->
+                <!-- State: confirmed (active) -->
                 <div v-else-if="confirmed" class="space-y-6">
                     <p class="text-sm font-medium text-green-600">Die Zwei-Faktor-Authentifizierung ist aktiv.</p>
 

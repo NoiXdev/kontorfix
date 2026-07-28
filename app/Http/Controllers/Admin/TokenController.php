@@ -34,9 +34,9 @@ class TokenController extends Controller
 
     public function store(StoreTokenRequest $request): RedirectResponse
     {
-        // TODO(multi-tenant): Im Betreiber-Modell legt der Operator Tokens für Kunden-Orgs
-        // an, daher ist organization_id bewusst frei wählbar. Sobald Kunden-Admins
-        // selbst Tokens erstellen, muss dies auf ihre eigene Org eingeschränkt werden.
+        // TODO(multi-tenant): in the operator model, the operator creates tokens for customer
+        // orgs, so organization_id is deliberately freely selectable. Once customer admins
+        // create tokens themselves, this must be restricted to their own org.
         [$token, $plain] = RegistryToken::issue(
             Organization::findOrFail($request->validated('organization_id')),
             $request->validated('name'),
@@ -49,7 +49,7 @@ class TokenController extends Controller
 
     public function destroy(RegistryToken $token): RedirectResponse
     {
-        // TODO(multi-tenant): auf Tokens der eigenen Org einschränken, sobald Kunden-Admins existieren.
+        // TODO(multi-tenant): restrict to tokens of the own org once customer admins exist.
         $token->delete();
 
         return back()->with('success', 'Token widerrufen.');

@@ -34,31 +34,31 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Ein Listener bedient zwei Event-Typen — Auto-Discovery matcht anhand des
-        // typisierten `handle`-Parameters und würde daher nicht zuverlässig beide
-        // Methoden verdrahten. Deshalb explizite Registrierung statt Discovery.
+        // One listener serves two event types — auto-discovery matches based on the
+        // typed `handle` parameter and would therefore not reliably wire up both
+        // methods. Hence explicit registration instead of discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
 
-        // Coarse IP-Limit schützt die unauthentifizierte API-Fläche (bad-Bearer-Fluten →
-        // DB-Lookup). Der feine Pro-Key-Limiter läuft zusätzlich in AuthenticateApiKey.
+        // Coarse IP limit protects the unauthenticated API surface (bad-bearer floods →
+        // DB lookup). The fine-grained per-key limiter additionally runs in AuthenticateApiKey.
         RateLimiter::for('api', function (Request $request): Limit {
             return Limit::perMinute(240)->by($request->ip());
         });
 
-        // Bewusste Sicherheitsentscheidung (v0.8): Ein Passkey verlangt hier zwingend
-        // User-Verification (Biometrie/PIN, siehe config/passkeys.php) und ist damit selbst
-        // ein phishing-resistenter Mehr-Faktor-Nachweis (Besitz + Verifikation). Ein
-        // Passkey-Login ersetzt daher den TOTP-Schritt und ist AUCH bei aktiver 2FA erlaubt —
-        // konsistent mit dem FIDO2-Standard. Diese Policy ist absichtlich explizit registriert
-        // (statt sich auf den „allow"-Default zu verlassen), damit der Verzicht auf den
-        // TOTP-Schritt eine sichtbare, getestete Entscheidung ist. Um 2FA stattdessen zu
-        // erzwingen (Passkey bei aktiver 2FA blocken): `return ! $user->hasConfirmedTwoFactor();`
+        // Deliberate security decision (v0.8): a passkey here strictly requires
+        // user verification (biometrics/PIN, see config/passkeys.php) and is thus itself
+        // a phishing-resistant multi-factor proof (possession + verification). A
+        // passkey login therefore replaces the TOTP step and is ALSO allowed with 2FA
+        // active — consistent with the FIDO2 standard. This policy is deliberately
+        // registered explicitly (instead of relying on the "allow" default), so that
+        // skipping the TOTP step is a visible, tested decision. To enforce 2FA instead
+        // (block passkey when 2FA is active): `return ! $user->hasConfirmedTwoFactor();`
         //
-        // Zusätzlicher Inline-Check: Robot-Accounts dürfen sich grundsätzlich nicht
-        // interaktiv anmelden — auch nicht per Passkey. Die RejectRobotWebSession-Middleware
-        // fängt das ohnehin ab (Defense-in-Depth), greift aber erst nach dem Login (1-Response-
-        // Fenster). Der Check hier verhindert den Login von vornherein.
+        // Additional inline check: robot accounts must never be able to log in
+        // interactively — not even via passkey. The RejectRobotWebSession middleware
+        // catches this anyway (defense in depth), but only kicks in after the login (1
+        // response window). The check here prevents the login from happening at all.
         Passkeys::authorizeLoginUsing(function (Request $request, PasskeyUser $user, Passkey $passkey): bool {
             if ($user instanceof User && $user->isRobot()) {
                 return false;
@@ -67,16 +67,16 @@ class AppServiceProvider extends ServiceProvider
             return true;
         });
 
-        // OpenAPI-Doku (Scramble) dokumentiert ausschließlich die versionierten
-        // Management-Endpunkte unter api/v1 — die Composer-/npm-/Proxy-Routen sind
-        // Protokoll-Endpunkte für Package-Clients und gehören nicht in die REST-Referenz.
+        // OpenAPI docs (Scramble) document exclusively the versioned management
+        // endpoints under api/v1 — the Composer/npm/proxy routes are protocol
+        // endpoints for package clients and don't belong in the REST reference.
         Scramble::configure()
             ->routes(fn (Route $route): bool => str_starts_with($route->uri(), 'api/v1'));
 
-        // Zugriffs-Gate für die Doku-Routen (/docs/api, /docs/api.json). Scrambles
-        // RestrictedDocsAccess-Middleware wertet dieses Gate in allen Umgebungen außer
-        // `local` aus. Nur Admins einer Betreiber-Organisation dürfen die API-Referenz
-        // sehen — sie legt die interne Verwaltungs-API offen.
+        // Access gate for the docs routes (/docs/api, /docs/api.json). Scramble's
+        // RestrictedDocsAccess middleware evaluates this gate in all environments except
+        // `local`. Only admins of an operator organization may view the API reference —
+        // it exposes the internal management API.
         Gate::define('viewApiDocs', function (User $user): bool {
             return $user->role === UserRole::Admin && (bool) $user->organization?->is_operator;
         });

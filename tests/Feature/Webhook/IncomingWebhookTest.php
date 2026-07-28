@@ -73,7 +73,7 @@ it('accepts a valid gitea signature', function () {
     Queue::fake();
     Package::factory()->create(['repository_url' => 'https://gitea.example.com/acme/demo.git']);
     $payload = ['repository' => ['clone_url' => 'https://gitea.example.com/acme/demo.git']];
-    $sig = hash_hmac('sha256', json_encode($payload), 'topsecret'); // Gitea: hex, kein Prefix
+    $sig = hash_hmac('sha256', json_encode($payload), 'topsecret'); // Gitea: hex, no prefix
 
     $this->withHeaders(['X-Gitea-Signature' => $sig])
         ->postJson('/webhooks/gitea', $payload)->assertOk()->assertJsonPath('synced', 1);
@@ -91,7 +91,7 @@ it('rejects a gitea push with a bad signature', function () {
 
 it('accepts a valid bitbucket token and matches the html url against a clone url', function () {
     Queue::fake();
-    // Paket ist mit der .git-Clone-URL registriert; Bitbucket liefert die html-URL.
+    // The package is registered with the .git clone URL; Bitbucket delivers the html URL.
     Package::factory()->create(['repository_url' => 'https://bitbucket.org/acme/demo.git']);
 
     $this->postJson('/webhooks/bitbucket?token=topsecret', [

@@ -19,8 +19,8 @@ it('serves an npm packument for an assigned scoped package', function () {
         ->assertJsonPath('name', '@noixdev/ui-kit')
         ->assertJsonPath('dist-tags.latest', '1.0.0');
 
-    // "1.0.0" als Array-Key enthält selbst Punkte, daher lässt sich der Pfad nicht per
-    // Dot-Notation (assertJsonPath) adressieren — Arr::get() splittet naiv auf jeden ".".
+    // "1.0.0" as an array key itself contains dots, so the path cannot be addressed
+    // via dot notation (assertJsonPath) — Arr::get() naively splits on every ".".
     expect($response->json('versions')['1.0.0']['dist']['tarball'])
         ->toBe('http://localhost/r/kadenz/@noixdev/ui-kit/-/ui-kit-1.0.0.tgz');
 });
@@ -51,7 +51,7 @@ it('does not shadow the composer root or p2 routes', function () {
 
 it('does not expose a composer package via the npm packument endpoint (cross-type isolation)', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    // Gleicher Name, aber type=composer — darf über den npm-Endpoint nicht auffindbar sein.
+    // Same name, but type=composer — must not be discoverable via the npm endpoint.
     $composerPkg = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'shared-name']);
     PackageVersion::factory()->for($composerPkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => []]);
     $group->packages()->attach($composerPkg);
@@ -61,7 +61,7 @@ it('does not expose a composer package via the npm packument endpoint (cross-typ
 
 it('routes case-variant of packages.json as an npm package name, not the composer root', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    // Uppercase ist im npm-Namensraum ohnehin ungültig -> die Route matcht nicht -> 404,
-    // aber NIEMALS die Composer-Root (die nur exakt 'packages.json' bedient).
+    // Uppercase is invalid in the npm namespace anyway -> the route does not match -> 404,
+    // but NEVER the composer root (which only serves exactly 'packages.json').
     $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/Packages.json')->assertNotFound();
 });

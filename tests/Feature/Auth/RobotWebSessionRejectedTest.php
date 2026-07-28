@@ -7,7 +7,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 uses(RefreshDatabase::class);
 
 it('rejects an authenticated robot session on any web route', function () {
-    // Simuliert einen bereits etablierten Robot-Login (z. B. via Passkey-Vendorpfad).
+    // Simulates an already-established robot login (e.g. via the passkey vendor path).
     $org = Organization::factory()->create();
     $robot = User::factory()->robot()->create(['organization_id' => $org->id]);
 
@@ -21,7 +21,7 @@ it('lets a normal human session through', function () {
     $org = Organization::factory()->create();
     $human = User::factory()->create(['organization_id' => $org->id]);
 
-    // /dashboard erfordert verified; sicherstellen, dass der Mensch nicht am Robot-Guard scheitert.
+    // /dashboard requires verified; make sure the human doesn't fail on the robot guard.
     $response = $this->actingAs($human)->get('/dashboard');
     expect($response->status())->not->toBe(403);
 });

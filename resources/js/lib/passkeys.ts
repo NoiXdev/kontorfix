@@ -5,7 +5,7 @@ import {
     type PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
 
-/** Liest das von Laravel gesetzte XSRF-TOKEN-Cookie für den CSRF-Header. */
+/** Reads the XSRF-TOKEN cookie set by Laravel for the CSRF header. */
 function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
 
@@ -44,7 +44,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     return (await response.json()) as T;
 }
 
-/** Registriert einen neuen Passkey für den eingeloggten Nutzer. */
+/** Registers a new passkey for the logged-in user. */
 export async function registerPasskey(name: string): Promise<void> {
     const { options } = await getJson<{ options: PublicKeyCredentialCreationOptionsJSON }>(
         route('passkey.registration-options'),
@@ -55,7 +55,7 @@ export async function registerPasskey(name: string): Promise<void> {
     await postJson(route('passkey.store'), { name, credential });
 }
 
-/** Meldet passwortlos per Passkey an; gibt das Weiterleitungsziel zurück. */
+/** Signs in passwordlessly via passkey; returns the redirect target. */
 export async function loginWithPasskey(remember: boolean): Promise<string> {
     const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(
         route('passkey.login-options'),
@@ -71,7 +71,7 @@ export async function loginWithPasskey(remember: boolean): Promise<string> {
     return redirect;
 }
 
-/** WebAuthn im Browser verfügbar? */
+/** WebAuthn available in the browser? */
 export function passkeysSupported(): boolean {
     return typeof window !== 'undefined' && !!window.PublicKeyCredential;
 }

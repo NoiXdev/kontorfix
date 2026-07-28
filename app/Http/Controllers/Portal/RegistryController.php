@@ -50,9 +50,9 @@ class RegistryController extends Controller
         $q = trim((string) $request->query('q', ''));
         $type = $request->query('type');
 
-        // Versionen absteigend nach released_at laden und in PHP die neueste greifen —
-        // KEIN limit(1) im Eager-Load (constrained das über alle Pakete hinweg, nicht pro Paket).
-        // Spalten wegen belongsToMany-Join qualifizieren (packages.*), um Mehrdeutigkeit zu vermeiden.
+        // Load versions descending by released_at and pick the newest one in PHP —
+        // NO limit(1) in the eager load (that would constrain across all packages, not per package).
+        // Qualify columns because of the belongsToMany join (packages.*), to avoid ambiguity.
         $packages = $group->packages()
             ->when($q !== '', fn ($query) => $query->where('packages.name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
             ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('packages.type', $type))

@@ -32,12 +32,12 @@ class RegistryAccessService
     }
 
     /**
-     * Schreib-Autorisierung fuer den Publish-Pfad. Bewusst OHNE den public-Kurzschluss
-     * aus canAccessGroup(): eine oeffentlich LESBARE Registry darf nicht von jedem
-     * beschrieben werden. Ein Token darf nur publishen, wenn er zur Ziel-Org gehoert
-     * (und, falls group-scoped, exakt zur Ziel-Group) und Publish-Faehigkeit hat.
-     * Ohne diese Trennung koennte ein org-fremder Publish-Token eine eingeschleuste
-     * Version an ein global geteiltes Package haengen (Supply-Chain-Injection).
+     * Write authorization for the publish path. Deliberately WITHOUT the public
+     * short-circuit from canAccessGroup(): a publicly READABLE registry must not be
+     * writable by everyone. A token may only publish if it belongs to the target org
+     * (and, if group-scoped, exactly to the target group) and has publish ability.
+     * Without this separation, a publish token from a different org could attach an
+     * injected version to a globally shared package (supply-chain injection).
      */
     public function canPublishToGroup(?RegistryToken $token, Group $group): bool
     {
@@ -57,10 +57,10 @@ class RegistryAccessService
     }
 
     /**
-     * Ob ein Package der Ziel-Group zugeordnet ist (nicht abgelaufen). Fuer den
-     * Schreib-Pfad: die Group-Autorisierung muss bereits ueber canPublishToGroup()
-     * erfolgt sein — hier wird nur die Package-Zugehoerigkeit org/group-strikt geprueft,
-     * ohne jeden public-Kurzschluss.
+     * Whether a package is assigned to the target group (not expired). For the
+     * write path: group authorization must already have happened via
+     * canPublishToGroup() — here only package membership is checked strictly by
+     * org/group, without any public short-circuit.
      */
     public function packageBelongsToGroup(Group $group, Package $package): bool
     {
@@ -68,7 +68,7 @@ class RegistryAccessService
     }
 
     /**
-     * Pool-Pakete der Gruppe ohne abgelaufene Zuweisungen.
+     * The group's pool packages without expired assignments.
      *
      * @return Collection<int, Package>
      */
@@ -84,7 +84,7 @@ class RegistryAccessService
     }
 
     /**
-     * Die eine Stelle für das Ablauf-Prädikat der Gruppen-Zuweisung.
+     * The single place for the expiry predicate of the group assignment.
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */

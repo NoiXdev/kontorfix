@@ -18,9 +18,9 @@ class ComposerMetadataBuilder
 
         $versions = $package->versions()->get()
             ->map(function (PackageVersion $v) use ($package, $registryBaseUrl): array {
-                // Das komplette composer.json des Tags wird durchgereicht (wie Packagist);
-                // name/version/dist/source werden autoritativ von uns überschrieben, damit
-                // ein bösartiges Tag weder die Dist-URL noch die Version fälschen kann.
+                // The tag's complete composer.json is passed through (like Packagist);
+                // name/version/dist/source are authoritatively overwritten by us, so
+                // a malicious tag can forge neither the dist URL nor the version.
                 $entry = array_merge($v->metadata ?? [], [
                     'name' => $package->name,
                     'version' => $v->version_pretty,

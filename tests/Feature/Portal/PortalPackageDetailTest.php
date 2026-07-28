@@ -30,10 +30,10 @@ it('forbids a package not in the members registry', function () {
     $otherPkg = Package::factory()->create();
     $otherGroup->packages()->attach($otherPkg);
 
-    // fremde Registry → 403 (GroupPolicy)
+    // foreign registry → 403 (GroupPolicy)
     $this->actingAs($this->member)->get("/portal/registries/{$otherGroup->id}/packages/{$otherPkg->id}")->assertForbidden();
 
-    // eigene Registry, aber Paket nicht zugewiesen → 404
+    // own registry, but package not assigned → 404
     $unassigned = Package::factory()->create();
     $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$unassigned->id}")->assertNotFound();
 });

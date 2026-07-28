@@ -54,8 +54,8 @@ class NpmController extends Controller
             return response()->json($this->metadata->build($pkg, $this->registryBaseUrl($request, $group)));
         }
 
-        // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
-        // OHNE den Upstream zu fragen — sonst würde ein privater Paketname zu npmjs leaken.
+        // If the name exists locally but isn't accessible to this group, we abort,
+        // WITHOUT asking the upstream — otherwise a private package name would leak to npmjs.
         if ($this->packageExistsLocally(PackageType::Npm, $name)) {
             abort(404);
         }
@@ -125,15 +125,15 @@ class NpmController extends Controller
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
 
-        // Schreib-Pfad: strikte, org-gebundene Autorisierung OHNE public-Kurzschluss.
-        // Eine oeffentlich lesbare Registry ist nicht oeffentlich beschreibbar — sonst
-        // koennte ein org-fremder Publish-Token eine Version einschleusen (Finding C1).
-        // Anonym -> 401 (bitte authentifizieren); vorhandener, aber unbefugter Token -> 403.
+        // Write path: strict, org-bound authorization WITHOUT the public shortcut.
+        // A publicly readable registry is not publicly writable — otherwise
+        // a foreign-org publish token could smuggle in a version (finding C1).
+        // Anonymous -> 401 (please authenticate); existing but unauthorized token -> 403.
         abort_if($token === null, 401, 'Authentication required for this registry.');
         abort_unless($this->access->canPublishToGroup($token, $group), 403);
 
-        // Package strikt aufloesen: es muss existieren UND der Ziel-Group zugeordnet sein.
-        // Kein public-Kurzschluss ueber canAccessPackage() auf dem Schreib-Pfad.
+        // Resolve the package strictly: it must exist AND be assigned to the target group.
+        // No public shortcut via canAccessPackage() on the write path.
         $pkg = Package::where('type', PackageType::Npm)->where('name', $name)->first();
         abort_if($pkg === null || ! $this->access->packageBelongsToGroup($group, $pkg), 404);
 

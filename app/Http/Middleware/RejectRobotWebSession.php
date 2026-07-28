@@ -10,8 +10,8 @@ use Symfony\Component\HttpFoundation\Response;
 class RejectRobotWebSession
 {
     /**
-     * Defense-in-depth: Robot-Accounts dürfen keine interaktive Web-Session haben.
-     * Fängt auch Login-Wege ab, die die Auth-Controller umgehen (z. B. Passkey-Vendorpfad).
+     * Defense-in-depth: robot accounts must not have an interactive web session.
+     * Also catches login paths that bypass the auth controllers (e.g. the passkey vendor path).
      */
     public function handle(Request $request, Closure $next): Response
     {

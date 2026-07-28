@@ -61,7 +61,7 @@ it('does not leak a locally-hosted but inaccessible npm name to the upstream', f
     Upstream::factory()->for($group)->create(['type' => PackageType::Npm]);
     $secret = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'private-pkg']);
     PackageVersion::factory()->for($secret)->create(['dist_tarball_name' => 'private-pkg-1.0.0.tgz']);
-    // nicht zugewiesen
+    // not assigned
 
     Http::fake();
     $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/private-pkg')->assertNotFound();

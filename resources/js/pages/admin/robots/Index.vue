@@ -19,7 +19,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Robots', href: '/admin/robots' 
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
-// Klartext-Callout: der API-Key wird nur ein einziges Mal (per Flash) angezeigt.
+// Plaintext callout: the API key is shown only once (via flash).
 const plainApiKey = computed(() => page.props.flash?.plainApiKey ?? null);
 const keyCalloutDismissed = ref(false);
 watch(plainApiKey, (value) => {
@@ -39,7 +39,7 @@ async function copyKey() {
         keyCopied.value = true;
         setTimeout(() => (keyCopied.value = false), 2000);
     } catch {
-        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Key ist markierbar.
+        // Clipboard API not available (insecure context) — the key can be selected manually.
         keyCopied.value = false;
     }
 }
@@ -64,7 +64,7 @@ function submitCreate() {
     });
 }
 
-// Pro Robot ein eigenes, inline aufklappbares Key-Formular.
+// One inline, expandable key form per robot.
 const openKeyForm = ref<string | null>(null);
 const keyForm = useForm({
     name: '',

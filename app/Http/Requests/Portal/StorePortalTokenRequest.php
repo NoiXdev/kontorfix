@@ -23,7 +23,7 @@ class StorePortalTokenRequest extends FormRequest
             'group_id' => [
                 'nullable',
                 'uuid',
-                // Nur Gruppen der eigenen Org zulassen — verhindert Zuweisung an fremde Registry.
+                // Only allow groups of the own org — prevents assignment to a foreign registry.
                 Rule::exists('groups', 'id')->where('organization_id', $this->user()->organization_id),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],

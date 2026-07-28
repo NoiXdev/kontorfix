@@ -34,14 +34,14 @@ const features = [
     <Head title="Kontorfix — ein Kontor für deine Pakete" />
 
     <div class="relative min-h-screen overflow-hidden bg-ink text-paper">
-        <!-- Atmosphäre: Kupferschein + gigantischer, blasser Speichergiebel -->
+        <!-- Atmosphere: copper glow + giant, pale warehouse gable -->
         <div class="kf-glow" aria-hidden="true" />
         <svg class="kf-gable" viewBox="0 0 96 96" aria-hidden="true">
             <path d="M18 78V54h12V42h12V30h12v12h12v12h12v24H18Z" fill="#D07A45" />
         </svg>
 
         <div class="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6">
-            <!-- Kopf -->
+            <!-- Head -->
             <header class="flex items-center justify-between py-6">
                 <div class="flex items-center gap-2.5">
                     <svg viewBox="0 0 96 96" class="size-9" role="img" aria-label="Kontorfix">
@@ -104,7 +104,7 @@ const features = [
                     </div>
                 </div>
 
-                <!-- Code-Vignette -->
+                <!-- Code vignette -->
                 <div class="kf-rise" style="animation-delay: 360ms">
                     <div class="overflow-hidden rounded-xl border border-white/[0.08] bg-panel shadow-2xl shadow-black/40">
                         <div class="flex items-center gap-2 border-b border-white/[0.08] px-4 py-3">
@@ -139,7 +139,7 @@ const features = [
                 </article>
             </section>
 
-            <!-- Fuß -->
+            <!-- Foot -->
             <footer class="flex flex-col items-center justify-between gap-2 border-t border-white/[0.08] py-6 text-sm text-paper/45 sm:flex-row">
                 <span class="font-mono lowercase">kontorfix — ein kontor für deine pakete</span>
                 <span>Selbst gehostet. Deine Daten bleiben bei dir.</span>

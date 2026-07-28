@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            // Letzter erfolgreich verwendeter TOTP-Zeitschritt (unix/30). Codes <= diesem
-            // Wert werden abgelehnt → derselbe Code kann im Fenster nicht erneut genutzt werden.
+            // Last successfully used TOTP time step (unix/30). Codes <= this
+            // value are rejected → the same code cannot be reused within the window.
             $table->unsignedBigInteger('two_factor_last_timestamp')->nullable()->after('two_factor_confirmed_at');
         });
     }

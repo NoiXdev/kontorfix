@@ -13,8 +13,8 @@ defineProps<Props>();
 </script>
 
 <template>
-    <!-- Kontorfix „Speichergiebel": Treppengiebel eines Kontorhauses, Tor = Registry-Zugang,
-         Punkt = Kranbalken. Einfarbig (currentColor) für getönte Kontexte. -->
+    <!-- Kontorfix "warehouse gable": stepped gable of a merchant house, gate = registry access,
+         dot = crane beam. Single-color (currentColor) for tinted contexts. -->
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" :class="className" v-bind="$attrs">
         <circle cx="48" cy="21.5" r="3.5" fill="currentColor" />
         <path

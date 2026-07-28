@@ -13,17 +13,17 @@ it('completes the full npm flow: publish -> packument -> tarball', function () {
     $group->packages()->attach($pkg);
     $bytes = 'hello-tarball';
 
-    // 1. Wie `npm publish`: PUT mit versions + _attachments.
+    // 1. Like `npm publish`: PUT with versions + _attachments.
     $this->withHeaders(publishHeaderFor($group))
         ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', $bytes))
         ->assertOk();
 
-    // 2. Wie `npm install`: packument holen, dist.tarball auslesen.
+    // 2. Like `npm install`: fetch the packument, read dist.tarball.
     $doc = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/leftpad')->assertOk()->json();
     expect($doc['dist-tags']['latest'])->toBe('1.0.0')
         ->and($doc['versions']['1.0.0']['dist']['integrity'])->toBe('sha512-'.base64_encode(hash('sha512', $bytes, true)));
 
-    // 3. Tarball über die exakte URL aus dem packument laden.
+    // 3. Load the tarball via the exact URL from the packument.
     $tarballUrl = $doc['versions']['1.0.0']['dist']['tarball'];
     $path = parse_url($tarballUrl, PHP_URL_PATH);
     $this->withHeaders(tokenHeaderFor($group))->get($path)
@@ -58,18 +58,18 @@ it('serves the npm endpoints a 401 across the board without a token', function (
 });
 
 /*
- * Manueller Smoke-Test (2026-07-08), gegen den laufenden DDEV-Server mit echten
- * npm-Clients verifiziert:
+ * Manual smoke test (2026-07-08), verified against the running DDEV server with real
+ * npm clients:
  *
  *   .npmrc:
  *     @noixdev:registry=https://kontorfix.ddev.site/r/npmsmoke/
- *     //kontorfix.ddev.site/r/npmsmoke/:_authToken=kfx_...   (publish-Token)
+ *     //kontorfix.ddev.site/r/npmsmoke/:_authToken=kfx_...   (publish token)
  *
  *   npm publish  ->  + @noixdev/smoke@1.0.0
- *   npm install @noixdev/smoke (mit read-Token)  ->  added 1 package
- *     -> node_modules/@noixdev/smoke/{package.json,index.js} korrekt entpackt.
+ *   npm install @noixdev/smoke (with a read token)  ->  added 1 package
+ *     -> node_modules/@noixdev/smoke/{package.json,index.js} extracted correctly.
  *
- * Wichtiger Integrationsbefund dabei: npm nennt das _attachments bei scoped Paketen
- * "@scope/name-version.tgz" (mit @ und /). Der Storage-Dateiname wird deshalb
- * serverseitig aus (unscoped) Name + Version abgeleitet, nicht aus npms Key.
+ * Important integration finding along the way: npm names the _attachments entry for
+ * scoped packages "@scope/name-version.tgz" (with @ and /). The storage filename is
+ * therefore derived server-side from the (unscoped) name + version, not from npm's key.
  */

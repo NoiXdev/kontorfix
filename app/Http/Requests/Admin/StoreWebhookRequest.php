@@ -22,9 +22,9 @@ class StoreWebhookRequest extends FormRequest
         return [
             'url' => [
                 'required', 'string', 'max:500', 'url:https,http', 'starts_with:https://,http://',
-                // Sofort-Feedback für offensichtlich interne Ziele (private/reservierte IPs,
-                // Loopback, Link-Local, Cloud-Metadaten). Die autoritative Prüfung erfolgt
-                // zustellzeit-seitig in DeliverWebhook — hier nur early feedback fürs Admin-UI.
+                // Immediate feedback for obviously internal targets (private/reserved IPs,
+                // loopback, link-local, cloud metadata). The authoritative check happens
+                // at delivery time in DeliverWebhook — here it's just early feedback for the admin UI.
                 function (string $attribute, mixed $value, \Closure $fail): void {
                     if (is_string($value) && ! UrlSafety::isSafeResolving($value)) {
                         $fail('Ziel-URL nicht erlaubt (interne/reservierte Adresse).');

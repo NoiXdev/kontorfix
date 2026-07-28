@@ -20,7 +20,7 @@ class GroupController extends Controller
 {
     public function index(): Response
     {
-        // TODO(multi-tenant): auf organization_id des Users einschränken, sobald Kunden-Admins existieren.
+        // TODO(multi-tenant): restrict to the user's organization_id once customer admins exist.
         return Inertia::render('admin/groups/Index', [
             'groups' => Group::withCount('packages')
                 ->with(['domains:id,group_id,hostname', 'organization:id,name'])
@@ -51,7 +51,7 @@ class GroupController extends Controller
                 'organization' => $group->organization?->name,
                 'organization_id' => $group->organization_id,
             ],
-            // Der belongsToMany-Join macht `id` mehrdeutig — daher packages.id qualifizieren.
+            // The belongsToMany join makes `id` ambiguous — hence qualify packages.id.
             'packages' => $group->packages()->orderBy('name')->get(['packages.id', 'name', 'type', 'sync_status'])
                 ->map(fn (Package $p) => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type->value, 'sync_status' => $p->sync_status->value]),
             'domains' => $group->domains->map(fn (Domain $d) => ['id' => $d->id, 'hostname' => $d->hostname]),

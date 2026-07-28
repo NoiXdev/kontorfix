@@ -7,7 +7,7 @@ use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Fakt IdP-Token+JWKS mit einer bestimmten nonce (die aus der echten Session stammt).
+ * Fakes the IdP token + JWKS with a specific nonce (taken from the real session).
  */
 function fakeIdpWithNonce(OidcProvider $provider, string $nonce, array $claimOverrides = []): void
 {
@@ -38,7 +38,7 @@ beforeEach(function () {
 it('runs the full redirect -> callback chain against the live session state', function () {
     $user = User::factory()->create(['email' => 'e2e@idp.test']);
 
-    // 1) Redirect erzeugt state/nonce/verifier in der Session.
+    // 1) Redirect generates state/nonce/verifier in the session.
     $redirect = $this->get('/auth/oidc/authentik/redirect');
     $redirect->assertRedirect();
     expect($redirect->headers->get('Location'))->toStartWith('https://idp.test/authorize?');
@@ -48,10 +48,10 @@ it('runs the full redirect -> callback chain against the live session state', fu
     expect($state)->not->toBeNull();
     expect($nonce)->not->toBeNull();
 
-    // 2) IdP signiert ein id_token mit genau dieser nonce.
+    // 2) IdP signs an id_token with exactly this nonce.
     fakeIdpWithNonce($this->provider, $nonce);
 
-    // 3) Callback mit dem echten Session-state → eingeloggt, Identität verknüpft.
+    // 3) Callback with the real session state -> logged in, identity linked.
     $this->get('/auth/oidc/authentik/callback?code=live-code&state='.$state)
         ->assertRedirect(route('dashboard', absolute: false));
 

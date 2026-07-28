@@ -35,7 +35,7 @@ it('creates a robot account and issues a key for it', function () {
 it('filters robots and enforces the operator role invariant', function () {
     $this->withToken($this->plain)->getJson('/api/v1/users?account_type=robot')->assertOk();
 
-    // maintainer in einer Nicht-Operator-Org ist unzulässig (Invariante).
+    // maintainer in a non-operator org is not allowed (invariant).
     $customer = Organization::factory()->create(['is_operator' => false]);
     $this->withToken($this->plain)->postJson('/api/v1/users', [
         'name' => 'X', 'email' => 'x@acme.test', 'organization_id' => $customer->id, 'role' => 'maintainer',
@@ -43,18 +43,18 @@ it('filters robots and enforces the operator role invariant', function () {
 });
 
 it('refuses to delete yourself or the last operator admin via api', function () {
-    // Der einzige Betreiber-Admin darf sich nicht selbst löschen.
+    // The sole operator admin must not be able to delete themselves.
     $this->withToken($this->plain)->deleteJson("/api/v1/users/{$this->admin->id}")
         ->assertStatus(422);
     expect(User::find($this->admin->id))->not->toBeNull();
 
-    // Ein zweiter, löschbarer Nutzer geht.
+    // A second, deletable user works.
     $victim = User::factory()->create(['organization_id' => $this->op->id, 'role' => 'member']);
     $this->withToken($this->plain)->deleteJson("/api/v1/users/{$victim->id}")->assertNoContent();
 });
 
 it('refuses to issue an api key for a human account', function () {
-    // $this->op / $this->admin / $this->plain aus dem beforeEach (Operator-Admin write-Key).
+    // $this->op / $this->admin / $this->plain from the beforeEach (operator admin write key).
     $human = User::factory()->create(['organization_id' => $this->op->id, 'role' => 'member']);
     $this->withToken($this->plain)->postJson("/api/v1/users/{$human->id}/api-keys", ['name' => 'x', 'permission' => 'write'])
         ->assertStatus(422);

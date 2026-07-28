@@ -23,6 +23,6 @@ it('rejects ip-literal and localhost urls via isSafeResolving', function () {
 });
 
 it('allows an unresolvable host (the http call fails harmlessly, no internal target)', function () {
-    // *.test löst nicht auf → resolveIps ist leer → passiert (der Abruf schlägt dann fehl).
+    // *.test doesn't resolve → resolveIps is empty → passes (the fetch then fails).
     expect(UrlSafety::isSafeResolving('https://idp.test/authorize'))->toBeTrue();
 });

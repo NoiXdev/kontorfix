@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Storage;
 class UpstreamCache
 {
     /**
-     * @return array<string, mixed>|null null bei Miss oder Ablauf
+     * @return array<string, mixed>|null null on miss or expiry
      */
     public function getMetadata(Upstream $upstream, string $packageName): ?array
     {
@@ -40,7 +40,7 @@ class UpstreamCache
 
     public function putArtifact(string $path, string $bytes): void
     {
-        // Atomar: staging -> move.
+        // Atomic: staging -> move.
         $disk = Storage::disk('artifacts');
         $staging = $path.'.'.uniqid().'.part';
         $disk->put($staging, $bytes);

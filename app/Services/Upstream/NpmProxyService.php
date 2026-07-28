@@ -13,7 +13,7 @@ class NpmProxyService
     ) {}
 
     /**
-     * @return array<string, mixed>|null null wenn nicht gefunden oder (Strict-Modus) nicht erlaubt
+     * @return array<string, mixed>|null null if not found or (strict mode) not allowed
      */
     public function packument(Group $group, Upstream $upstream, string $packageName, string $registryBaseUrl): ?array
     {

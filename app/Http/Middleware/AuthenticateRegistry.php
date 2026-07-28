@@ -15,13 +15,13 @@ class AuthenticateRegistry
             ?: ($request->getPassword() ?: $request->getUser());  // composer: HTTP Basic
         $token = $candidate ? RegistryToken::findByPlainText($candidate) : null;
 
-        // Gedrosselt: ein composer install trifft dutzende Endpoints — last_used_at
-        // ist eine Heuristik und braucht keine Sekunden-Präzision.
+        // Throttled: a composer install hits dozens of endpoints — last_used_at
+        // is a heuristic and doesn't need second-level precision.
         if ($token && ($token->last_used_at === null || $token->last_used_at->lt(now()->subMinute()))) {
             $token->forceFill(['last_used_at' => now()])->saveQuietly();
         }
 
-        $request->attributes->set('registryToken', $token); // null = anonym; ACL entscheidet später
+        $request->attributes->set('registryToken', $token); // null = anonymous; the ACL decides later
 
         return $next($request);
     }

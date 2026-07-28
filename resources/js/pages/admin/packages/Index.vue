@@ -86,7 +86,7 @@ function resetFilters() {
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
-// Live-Hinweis für Sync-Events über den Operator-Channel.
+// Live hint for sync events via the operator channel.
 const liveHint = ref<{ message: string; failed: boolean } | null>(null);
 let hintTimer: ReturnType<typeof setTimeout> | undefined;
 

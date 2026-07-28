@@ -83,13 +83,13 @@ it('prefers a local package over the upstream and does not call it', function ()
 it('does not leak a locally-hosted but inaccessible package name to the upstream', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
-    // Paket existiert lokal, ist dieser Gruppe aber NICHT zugewiesen.
+    // Package exists locally but is NOT assigned to this group.
     $secret = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
     PackageVersion::factory()->for($secret)->create();
 
     Http::fake();
     $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/private/secret.json')->assertNotFound();
-    Http::assertNothingSent(); // der private Name darf packagist nie erreichen
+    Http::assertNothingSent(); // the private name must never reach packagist
 });
 
 it('returns 502 when the upstream errors', function () {
@@ -106,7 +106,7 @@ it('does not fabricate a dist for source-only upstream versions', function () {
     Http::fake(['*/p2/meta/pkg.json' => Http::response([
         'packages' => ['meta/pkg' => [[
             'name' => 'meta/pkg', 'version' => '1.0.0', 'version_normalized' => '1.0.0.0',
-            // kein dist-Block (Metapaket / source-only)
+            // no dist block (metapackage / source-only)
         ]]],
     ], 200)]);
 

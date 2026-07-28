@@ -21,7 +21,7 @@ class DashboardController extends Controller
 {
     public function index(Request $request): Response|RedirectResponse
     {
-        // Kunden gehören ins Portal, nicht auf das Betreiber-Dashboard.
+        // Customers belong in the portal, not on the operator dashboard.
         if ($request->user()->role === UserRole::Member) {
             return redirect()->route('portal.registries.index');
         }
@@ -37,7 +37,7 @@ class DashboardController extends Controller
         try {
             $failedJobs = DB::table('failed_jobs')->count();
         } catch (\Throwable) {
-            // Tabelle fehlt evtl. — dann 0.
+            // Table may be missing — fall back to 0.
         }
 
         return Inertia::render('Dashboard', [

@@ -74,7 +74,7 @@ function submit() {
     });
 }
 
-/** Liest das von Laravel gesetzte XSRF-TOKEN-Cookie für den CSRF-Header. */
+/** Reads the XSRF-TOKEN cookie set by Laravel for the CSRF header. */
 function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
 

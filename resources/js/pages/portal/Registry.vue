@@ -96,7 +96,7 @@ async function copyToken() {
         tokenCopied.value = true;
         setTimeout(() => (tokenCopied.value = false), 2000);
     } catch {
-        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Token ist markierbar.
+        // Clipboard API not available (insecure context) — the token can be selected manually.
         tokenCopied.value = false;
     }
 }

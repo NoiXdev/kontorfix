@@ -10,15 +10,15 @@ use Illuminate\Support\Facades\Storage;
 it('lets an admin configure local storage and then round-trips an artifact', function () {
     $admin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
 
-    // Über die GUI auf lokalen Treiber setzen.
+    // Set to the local driver via the GUI.
     $this->actingAs($admin)->put('/admin/storage', ['driver' => 'local'])->assertRedirect();
     expect(StorageSetting::current()->driver)->toBe('local');
 
-    // Verbindungstest meldet Erfolg.
+    // Connection test reports success.
     $this->actingAs($admin)->postJson('/admin/storage/test', ['driver' => 'local'])
         ->assertOk()->assertJsonPath('ok', true);
 
-    // Ein realer Artefakt-Schreib-/Lesevorgang über die konfigurierte artifacts-Disk klappt.
+    // A real artifact write/read through the configured artifacts disk works.
     config(['filesystems.disks.artifacts' => app(StorageManager::class)->diskConfig()]);
     Storage::forgetDisk('artifacts');
     Storage::disk('artifacts')->put('e2e/probe.txt', 'payload');

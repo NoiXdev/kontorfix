@@ -5,10 +5,10 @@ namespace App\Services\Upstream;
 class UrlSafety
 {
     /**
-     * Ob eine (vom Upstream gelieferte) Artefakt-URL sicher abgerufen werden darf:
-     * nur http/https, kein IP-Literal in privaten/reservierten Bereichen, kein localhost.
-     * Verhindert Second-Order-SSRF durch eine kompromittierte/typosquattete Upstream-URL
-     * — gilt für die initiale URL UND jeden Redirect-Hop.
+     * Whether an artifact URL (delivered by the upstream) may be safely fetched:
+     * only http/https, no IP literal in private/reserved ranges, no localhost.
+     * Prevents second-order SSRF via a compromised/typosquatted upstream URL
+     * — applies to the initial URL AND every redirect hop.
      */
     public static function isSafe(?string $url): bool
     {
@@ -26,11 +26,11 @@ class UrlSafety
             return false;
         }
 
-        // Klammern/Zonen-Index entfernen, damit IPv6-Literale (http://[::1]/) als IP
-        // erkannt werden — parse_url liefert den Host sonst inklusive Klammern.
+        // Remove brackets/zone index so IPv6 literals (http://[::1]/) are recognized
+        // as an IP — parse_url otherwise returns the host including brackets.
         $host = self::normalizeHost($host);
 
-        // IP-Literale in privaten/reservierten Bereichen ablehnen (IPv4 UND IPv6).
+        // Reject IP literals in private/reserved ranges (IPv4 AND IPv6).
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return self::ipIsPublic($host);
         }
@@ -39,15 +39,15 @@ class UrlSafety
     }
 
     /**
-     * Wie isSafe(), zusätzlich mit DNS-Auflösung: ein Hostname, der (auch) auf eine
-     * private/reservierte Adresse zeigt, wird abgelehnt — schließt SSRF über interne
-     * Hostnamen (z.B. ein bösartiges OIDC-Discovery-Dokument mit token_endpoint auf
-     * http://vault.internal) sowie oktale/dezimale IP-Kodierungen, die filter_var als
-     * Hostnamen behandelt. Nicht auflösbare Hosts passieren (der HTTP-Abruf scheitert
-     * dann ohnehin harmlos, es gibt kein internes Ziel).
+     * Like isSafe(), additionally with DNS resolution: a hostname that (also) points
+     * to a private/reserved address is rejected — this closes SSRF via internal
+     * hostnames (e.g. a malicious OIDC discovery document with token_endpoint pointing
+     * to http://vault.internal) as well as octal/decimal IP encodings that filter_var
+     * treats as hostnames. Hosts that don't resolve are allowed through (the HTTP
+     * fetch then fails harmlessly anyway, since there's no internal target).
      *
-     * Hinweis: schützt nicht gegen DNS-Rebinding (TOCTOU) — dafür wäre ein an cURL
-     * gepinnter Resolver nötig; das ist als Follow-up notiert.
+     * Note: does not protect against DNS rebinding (TOCTOU) — that would require a
+     * resolver pinned to cURL; this is noted as a follow-up.
      */
     public static function isSafeResolving(?string $url): bool
     {
@@ -57,7 +57,7 @@ class UrlSafety
 
         $host = self::normalizeHost((string) parse_url((string) $url, PHP_URL_HOST));
 
-        // IP-Literale (inkl. Klammer-IPv6) hat isSafe() bereits geprüft.
+        // isSafe() has already checked IP literals (including bracketed IPv6).
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return true;
         }
@@ -71,45 +71,45 @@ class UrlSafety
         return true;
     }
 
-    /** Ob eine IP-Adresse außerhalb privater/reservierter Bereiche liegt. */
+    /** Whether an IP address lies outside private/reserved ranges. */
     public static function ipIsPublic(string $ip): bool
     {
-        // Defensiv: falls Klammern/Zonen-Index mitkommen.
+        // Defensive: in case brackets/a zone index come along.
         $ip = self::normalizeHost($ip);
 
         if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
             return false;
         }
 
-        // IPv4-mapped IPv6 (::ffff:a.b.c.d, ::ffff:0:0/96) auf die eingebettete
-        // IPv4 herunterbrechen und wie IPv4 prüfen — sonst schlüpfen z.B.
-        // ::ffff:169.254.169.254 (Cloud-Metadaten) und ::ffff:10.0.0.1 durch.
+        // Break IPv4-mapped IPv6 (::ffff:a.b.c.d, ::ffff:0:0/96) down to the embedded
+        // IPv4 and check it like IPv4 — otherwise e.g. ::ffff:169.254.169.254
+        // (cloud metadata) and ::ffff:10.0.0.1 would slip through.
         $mapped = self::mappedIpv4($ip);
         if ($mapped !== null) {
             $ip = $mapped;
         }
 
-        // Deckt private + reservierte Bereiche für IPv4 UND IPv6 ab.
+        // Covers private + reserved ranges for both IPv4 AND IPv6.
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
             return false;
         }
 
-        // Explizite IPv6-Ergänzung: ältere PHP-Versionen decken diese Bereiche mit
-        // FILTER_FLAG_NO_RES_RANGE nur lückenhaft ab. Belt-and-Suspenders.
+        // Explicit IPv6 addition: older PHP versions only cover these ranges
+        // patchily with FILTER_FLAG_NO_RES_RANGE. Belt and suspenders.
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
             $packed = @inet_pton($ip);
             if (! is_string($packed) || strlen($packed) !== 16) {
                 return false;
             }
 
-            // :: (unspecified) und ::1 (loopback)
+            // :: (unspecified) and ::1 (loopback)
             if ($packed === str_repeat("\x00", 16) || $packed === str_repeat("\x00", 15)."\x01") {
                 return false;
             }
 
             $first = ord($packed[0]);
 
-            // fc00::/7 (Unique Local Addresses, u.a. fd00::/8)
+            // fc00::/7 (Unique Local Addresses, incl. fd00::/8)
             if (($first & 0xFE) === 0xFC) {
                 return false;
             }
@@ -124,9 +124,9 @@ class UrlSafety
     }
 
     /**
-     * Host für die IP-Prüfung normalisieren: eckige Klammern von IPv6-Literalen
-     * (http://[::1]/ → parse_url liefert "[::1]") und einen etwaigen Zonen-Index
-     * (fe80::1%eth0) entfernen. Für gewöhnliche Hostnamen/IPv4 ein No-Op.
+     * Normalize the host for the IP check: remove square brackets from IPv6
+     * literals (http://[::1]/ → parse_url returns "[::1]") and any zone index
+     * (fe80::1%eth0). A no-op for ordinary hostnames/IPv4.
      */
     private static function normalizeHost(string $host): string
     {
@@ -141,12 +141,12 @@ class UrlSafety
     }
 
     /**
-     * Liefert die eingebettete IPv4 einer IPv6-Adresse mit IPv4 in den letzten 32 Bit,
-     * sonst null. Deckt drei /96-Einbettungen ab, die sonst als „public" durchrutschen
-     * und via Gateway/Stack auf interne IPv4-Ziele zeigen könnten:
+     * Returns the embedded IPv4 of an IPv6 address with IPv4 in the last 32 bits,
+     * otherwise null. Covers three /96 embeddings that would otherwise slip through
+     * as "public" and could point to internal IPv4 targets via gateway/stack:
      *   - ::ffff:0:0/96   IPv4-mapped
      *   - ::/96           IPv4-compatible (deprecated)
-     *   - 64:ff9b::/96    NAT64 Well-Known-Prefix
+     *   - 64:ff9b::/96    NAT64 well-known prefix
      */
     private static function mappedIpv4(string $ip): ?string
     {
@@ -171,7 +171,7 @@ class UrlSafety
     }
 
     /**
-     * Alle A- und AAAA-Adressen eines Hostnamens (leer, wenn nicht auflösbar).
+     * All A and AAAA addresses of a hostname (empty if not resolvable).
      *
      * @return list<string>
      */

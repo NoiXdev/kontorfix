@@ -17,22 +17,22 @@ it('forbids maintainers from updating or testing storage', function () {
 });
 
 it('tests the submitted config, not the saved one, and does not persist it', function () {
-    // Gespeichert ist lokal (Default).
+    // The saved setting is local (default).
     StorageSetting::current();
 
-    // Ein s3-Config mit unerreichbarem Endpoint wird getestet → ok:false.
+    // An s3 config with an unreachable endpoint is tested → ok:false.
     $res = $this->actingAs($this->admin)->postJson('/admin/storage/test', [
         'driver' => 's3', 'key' => 'AKIA', 'secret' => 'sec', 'region' => 'eu',
         'bucket' => 'b', 'endpoint' => 'https://minio.invalid',
     ]);
     $res->assertOk()->assertJsonPath('ok', false);
 
-    // Der Test hat NICHTS gespeichert — die aktive Config bleibt lokal.
+    // The test saved NOTHING — the active config remains local.
     expect(StorageSetting::current()->driver)->toBe('local');
 });
 
 it('requires a secret when first switching to s3', function () {
-    // Noch kein Secret hinterlegt → Secret ist Pflicht.
+    // No secret set yet → secret is required.
     $this->actingAs($this->admin)->put('/admin/storage', [
         'driver' => 's3', 'key' => 'AKIA', 'region' => 'eu', 'bucket' => 'b',
     ])->assertSessionHasErrors('secret');

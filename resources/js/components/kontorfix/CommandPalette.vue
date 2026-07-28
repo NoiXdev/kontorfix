@@ -43,8 +43,8 @@ const inputEl = ref<HTMLInputElement | null>(null);
 let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let requestToken = 0;
 
-// Flache Reihenfolge aller Treffer (packages → registries → customers) für
-// die Tastatur-Navigation und die Enter-/Klick-Auswahl.
+// Flat ordering of all hits (packages → registries → customers) for
+// keyboard navigation and the enter/click selection.
 const flatHits = computed<FlatHit[]>(() => [
     ...results.value.packages.map((item) => ({ kind: 'package', item }) as FlatHit),
     ...results.value.registries.map((item) => ({ kind: 'registry', item }) as FlatHit),
@@ -53,14 +53,14 @@ const flatHits = computed<FlatHit[]>(() => [
 
 const totalHits = computed(() => flatHits.value.length);
 
-// Laufender Offset pro Sektion, damit der aktive Index über alle Sektionen
-// hinweg konsistent ist.
+// Running offset per section, so the active index stays consistent
+// across all sections.
 const packageOffset = computed(() => 0);
 const registryOffset = computed(() => results.value.packages.length);
 const customerOffset = computed(() => results.value.packages.length + results.value.registries.length);
 
-// Laravel erwartet den entschlüsselten CSRF-Token als X-XSRF-TOKEN-Header
-// (analog zu PackagePicker.vue bzw. lib/passkeys.ts).
+// Laravel expects the decrypted CSRF token as an X-XSRF-TOKEN header
+// (analogous to PackagePicker.vue and lib/passkeys.ts).
 function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
     return match ? decodeURIComponent(match[1]) : '';

@@ -19,8 +19,8 @@ class DashboardTest extends TestCase
 
     public function test_authenticated_users_can_visit_the_dashboard()
     {
-        // Das Dashboard ist der Betreiber-/Maintainer-Screen; Member werden aufs
-        // Kunden-Portal umgeleitet (siehe routes/web.php), daher hier eine Nicht-Member-Rolle.
+        // The dashboard is the operator/maintainer screen; members are redirected
+        // to the customer portal (see routes/web.php), hence a non-member role here.
         $user = User::factory()->create(['role' => UserRole::Admin]);
         $this->actingAs($user);
 

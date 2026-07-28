@@ -18,7 +18,7 @@ it('shows the same package in admin detail and read-only portal detail', functio
     PackageVersion::factory()->create(['package_id' => $pkg->id, 'version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => ['require' => ['php' => '^8.2']]]);
     $group->packages()->attach($pkg);
 
-    // Admin-Detail: Versionen + Abhängigkeiten + Registry
+    // Admin detail: versions + dependencies + registry
     $this->actingAs($operatorAdmin)->get("/admin/packages/{$pkg->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('admin/packages/Show')
@@ -27,14 +27,14 @@ it('shows the same package in admin detail and read-only portal detail', functio
             ->where('versions.0.dependencies.runtime', ['php' => '^8.2'])
             ->has('groups', 1));
 
-    // Portal-Detail (read-only) für den Kunden mit Install-Snippet
+    // Portal detail (read-only) for the customer, including install snippet
     $this->actingAs($member)->get("/portal/registries/{$group->id}/packages/{$pkg->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Package')
             ->where('package.name', 'acme/widget')->has('versions', 1)
             ->where('install', fn ($v) => str_contains($v, 'acme/widget')));
 
-    // Fremde Registry bleibt dicht
+    // Foreign registry remains locked down
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
     $foreign->packages()->attach($pkg);
     $this->actingAs($member)->get("/portal/registries/{$foreign->id}/packages/{$pkg->id}")->assertForbidden();

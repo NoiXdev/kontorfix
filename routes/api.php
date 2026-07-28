@@ -15,27 +15,27 @@ use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
-// Alle Management-Endpunkte sind stateless (Bearer-Key), versioniert unter /api/v1.
-// Zweistufiges Rate-Limit: ein grobes IP-Limit (throttle:api, 240/min) VOR der
-// Auth-Middleware schützt die unauthentifizierte Fläche — ungültige/fehlende Bearer-
-// Tokens würden sonst ungedrosselt je Request einen DB-Lookup auslösen (unauth DoS).
-// Laravels middlewarePriority sortiert throttle ohnehin vor api.auth, das ist hier
-// genau erwünscht. Das feine Pro-Key-Limit (120/min, Global Constraint) bleibt
-// zusätzlich in der api.auth-Middleware selbst, direkt nach der Key-Auflösung.
+// All management endpoints are stateless (bearer key), versioned under /api/v1.
+// Two-tier rate limit: a coarse IP limit (throttle:api, 240/min) BEFORE the
+// auth middleware protects the unauthenticated surface — invalid/missing bearer
+// tokens would otherwise trigger an unthrottled DB lookup per request (unauth DoS).
+// Laravel's middlewarePriority sorts throttle before api.auth anyway, which is
+// exactly what's wanted here. The finer per-key limit (120/min, global constraint) remains
+// additionally in the api.auth middleware itself, right after key resolution.
 Route::prefix('v1')
     ->name('api.v1.')
     ->middleware(['throttle:api', 'api.auth'])
     ->group(function () {
         Route::get('me', [MeController::class, 'show'])->name('me');
 
-        // Self-Service für eigene API-Keys. Feste Segmente (me/api-keys/...) vor
-        // etwaigen Wildcard-Routen — keine Kollision mit `me`.
+        // Self-service for one's own API keys. Fixed segments (me/api-keys/...) before
+        // any wildcard routes — no collision with `me`.
         Route::get('me/api-keys', [ApiKeyController::class, 'index'])->name('me.api-keys.index');
         Route::post('me/api-keys', [ApiKeyController::class, 'store'])->name('me.api-keys.store');
         Route::delete('me/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('me.api-keys.destroy');
 
-        // Pakete-Verwaltung ist Betreiber-Sache: nur Orgs mit is_operator und
-        // Rolle admin/maintainer dürfen anlegen/ändern — dieselben Gates wie die GUI.
+        // Package management is an operator concern: only orgs with is_operator and
+        // role admin/maintainer may create/modify — the same gates as the GUI.
         Route::middleware(['operator', 'role:admin,maintainer'])->group(function () {
             Route::get('packages', [PackageController::class, 'index'])->name('packages.index');
             Route::post('packages', [PackageController::class, 'store'])->name('packages.store');
@@ -43,16 +43,16 @@ Route::prefix('v1')
             Route::post('packages/{package}/resync', [PackageController::class, 'resync'])->name('packages.resync');
             Route::delete('packages/{package}', [PackageController::class, 'destroy'])->name('packages.destroy');
 
-            // Registries (Gruppen) — dieselben Form Requests wie die Admin-GUI, daher
-            // identisches Validierungsverhalten (inkl. JSON-Fehler bei Accept: application/json).
+            // Registries (groups) — the same form requests as the admin GUI, hence
+            // identical validation behavior (including JSON errors for Accept: application/json).
             Route::get('groups', [GroupController::class, 'index'])->name('groups.index');
             Route::post('groups', [GroupController::class, 'store'])->name('groups.store');
             Route::get('groups/{group}', [GroupController::class, 'show'])->name('groups.show');
             Route::put('groups/{group}', [GroupController::class, 'update'])->name('groups.update');
             Route::delete('groups/{group}', [GroupController::class, 'destroy'])->name('groups.destroy');
 
-            // Unterressourcen einer Registry: Domains, Upstreams, Paket-Zuordnung.
-            // Wiederverwendet dieselben Form Requests wie der Admin-Flow.
+            // Sub-resources of a registry: domains, upstreams, package assignment.
+            // Reuses the same form requests as the admin flow.
             Route::get('groups/{group}/domains', [GroupDomainController::class, 'index'])->name('groups.domains.index');
             Route::post('groups/{group}/domains', [GroupDomainController::class, 'store'])->name('groups.domains.store');
             Route::delete('groups/{group}/domains/{domain}', [GroupDomainController::class, 'destroy'])->name('groups.domains.destroy');
@@ -64,14 +64,14 @@ Route::prefix('v1')
             Route::get('groups/{group}/packages', [GroupPackageController::class, 'index'])->name('groups.packages.index');
             Route::put('groups/{group}/packages', [GroupPackageController::class, 'update'])->name('groups.packages.update');
 
-            // Registry-Tokens (kfx_-Pull/Publish-Tokens für Composer/npm), nicht zu
-            // verwechseln mit den persönlichen API-Keys (kfxapi_) aus me/api-keys.
+            // Registry tokens (kfx_ pull/publish tokens for Composer/npm), not to be
+            // confused with the personal API keys (kfxapi_) from me/api-keys.
             Route::get('registry-tokens', [RegistryTokenController::class, 'index'])->name('registry-tokens.index');
             Route::post('registry-tokens', [RegistryTokenController::class, 'store'])->name('registry-tokens.store');
             Route::delete('registry-tokens/{registryToken}', [RegistryTokenController::class, 'destroy'])->name('registry-tokens.destroy');
 
-            // Ausgehende Webhooks (dieselben Form Requests wie die Admin-GUI) und ein
-            // schlanker Status-Endpunkt für externe Monitoring-Clients.
+            // Outgoing webhooks (the same form requests as the admin GUI) and a
+            // lean status endpoint for external monitoring clients.
             Route::get('webhooks', [WebhookController::class, 'index'])->name('webhooks.index');
             Route::post('webhooks', [WebhookController::class, 'store'])->name('webhooks.store');
             Route::delete('webhooks/{webhook}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');
@@ -79,16 +79,16 @@ Route::prefix('v1')
             Route::get('status', [StatusController::class, 'show'])->name('status');
         });
 
-        // Organisationsverwaltung (Kunden-Mandanten) ist strenger als die
-        // Betreiber-Ressourcen oben: nur admin, nicht maintainer.
+        // Organization management (customer tenants) is stricter than the
+        // operator resources above: admin only, not maintainer.
         Route::middleware(['operator', 'role:admin'])->group(function () {
             Route::get('organizations', [OrganizationController::class, 'index'])->name('organizations.index');
             Route::post('organizations', [OrganizationController::class, 'store'])->name('organizations.store');
             Route::get('organizations/{organization}', [OrganizationController::class, 'show'])->name('organizations.show');
             Route::delete('organizations/{organization}', [OrganizationController::class, 'destroy'])->name('organizations.destroy');
 
-            // Nutzer- & Robot-Verwaltung sowie das Ausstellen von API-Keys für
-            // beliebige Accounts ist ebenfalls strikt Operator-Admin.
+            // User & robot management as well as issuing API keys for
+            // arbitrary accounts is likewise strictly operator-admin.
             Route::get('users', [UserController::class, 'index'])->name('users.index');
             Route::post('users', [UserController::class, 'store'])->name('users.store');
             Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');

@@ -22,8 +22,8 @@ class GlobalSearchController extends Controller
 
         $like = '%'.addcslashes($q, '%_\\').'%';
 
-        // Kunden-Verwaltung ist admin-only (Detailseite liegt hinter role:admin) — deshalb
-        // liefert die Suche Kunden-Treffer nur Admins, damit Maintainer keine toten Klicks bekommen.
+        // Customer management is admin-only (the detail page sits behind role:admin) — hence
+        // search only returns customer hits to admins, so maintainers don't get dead-end clicks.
         $isAdmin = $request->user()?->role === UserRole::Admin;
 
         return response()->json([

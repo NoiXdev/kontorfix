@@ -4,11 +4,11 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | npm-Publish-Limits
+    | npm publish limits
     |--------------------------------------------------------------------------
     |
-    | Obergrenze für einen einzelnen hochgeladenen npm-Tarball. Schützt vor
-    | Memory-/Disk-Erschöpfung durch Publish-Token-Inhaber. In Bytes.
+    | Upper bound for a single uploaded npm tarball. Protects against
+    | memory/disk exhaustion by publish-token holders. In bytes.
     |
     */
 
@@ -16,11 +16,11 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Upstream-Cache-TTL
+    | Upstream cache TTL
     |--------------------------------------------------------------------------
     |
-    | Gültigkeitsdauer gecachter Upstream-Metadaten in Sekunden, bevor ein
-    | erneuter Fetch beim Upstream ausgelöst wird.
+    | Validity period of cached upstream metadata in seconds, before a
+    | fresh fetch from the upstream is triggered.
     |
     */
 
@@ -28,11 +28,11 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Incoming-Webhook-Secret
+    | Incoming webhook secret
     |--------------------------------------------------------------------------
     |
-    | Shared Secret zur Signaturprüfung eingehender Webhooks (z. B. von CI-
-    | Systemen), die einen Sync anstoßen.
+    | Shared secret for signature verification of incoming webhooks (e.g. from CI
+    | systems) that trigger a sync.
     |
     */
 

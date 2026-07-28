@@ -45,10 +45,10 @@ class ProxyDownloadController extends Controller
         $disk = Storage::disk('artifacts');
 
         if (! $this->cache->hasArtifact($path)) {
-            // SSRF-Schutz: die tatsächlich abzurufende URL kommt AUSSCHLIESSLICH aus dem
-            // gecachten Upstream-Payload (dist.url), niemals aus der Client-Anfrage. Version
-            // und Paketname aus der Route dienen nur dazu, den passenden Cache-Eintrag zu
-            // SELEKTIEREN — nicht dazu, eine beliebige URL zu konstruieren.
+            // SSRF protection: the URL actually fetched comes EXCLUSIVELY from the
+            // cached upstream payload (dist.url), never from the client request. Version
+            // and package name from the route only serve to SELECT the matching cache
+            // entry — not to construct an arbitrary URL.
             $originalUrl = $this->assertSafeArtifactUrl(
                 $this->resolveComposerDistUrl($request, $group, $up, $packageName, $version)
             );
@@ -91,9 +91,9 @@ class ProxyDownloadController extends Controller
         $disk = Storage::disk('artifacts');
 
         if (! $this->cache->hasArtifact($path)) {
-            // SSRF-Schutz: die abzurufende URL ist AUSSCHLIESSLICH dist.tarball aus dem
-            // gecachten Packument — der Client-Dateiname dient nur zur Auswahl des
-            // passenden Versions-Eintrags, nie zur Konstruktion der Ziel-URL.
+            // SSRF protection: the URL to fetch is EXCLUSIVELY dist.tarball from the
+            // cached packument — the client filename only serves to select the
+            // matching version entry, never to construct the target URL.
             $originalUrl = $this->assertSafeArtifactUrl(
                 $this->resolveNpmTarballUrl($request, $group, $up, $packageName, $file)
             );
@@ -122,21 +122,21 @@ class ProxyDownloadController extends Controller
         $up = Upstream::find($upstreamId);
         abort_if($up === null || $up->group_id !== $group->id || $up->type !== $type || ! $up->enabled, 404);
 
-        // Strict-Mode gilt auch für den Artefakt-Download — sonst ließe sich das Artefakt
-        // eines nicht freigegebenen Pakets über einen alten Cache-Eintrag laden, obwohl
-        // die Metadaten bereits 404 liefern (Dependency-Confusion-Schutz).
+        // Strict mode also applies to the artifact download — otherwise the artifact
+        // of a non-approved package could be loaded via an old cache entry, even though
+        // the metadata already returns 404 (dependency confusion protection).
         abort_unless($up->allowsPackage($packageName), 404);
 
         return $up;
     }
 
     /**
-     * Verhindert Second-Order-SSRF: eine vom (evtl. kompromittierten) Upstream gelieferte
-     * dist-URL darf kein file://, gopher:// o.Ä. sein und nicht auf interne/reservierte
-     * Adressen zeigen. Dist-URLs zeigen legitim auf CDNs (GitHub, npm), daher keine
-     * Host-Gleichheit mit dem Upstream, aber Scheme- und Adressbereichs-Prüfung — inkl.
-     * DNS-Auflösung, damit auch ein intern auflösender Hostname oder eine oktal/dezimal
-     * kodierte private IP abgewiesen wird.
+     * Prevents second-order SSRF: a dist URL supplied by the (possibly compromised)
+     * upstream must not be file://, gopher:// or similar, and must not point to
+     * internal/reserved addresses. Dist URLs legitimately point to CDNs (GitHub, npm),
+     * so there's no host-equality check against the upstream, but there is a scheme and
+     * address-range check — including DNS resolution, so that an internally resolving
+     * hostname or an octal/decimal-encoded private IP is also rejected.
      */
     private function assertSafeArtifactUrl(?string $url): string
     {
@@ -150,8 +150,8 @@ class ProxyDownloadController extends Controller
     {
         $payload = $this->cache->getMetadata($up, $packageName);
         if ($payload === null) {
-            // Cache abgelaufen/leer: Metadaten über den Proxy-Service neu holen (dies
-            // befüllt den Cache als Seiteneffekt), danach den Rohcache erneut lesen.
+            // Cache expired/empty: re-fetch metadata via the proxy service (this
+            // populates the cache as a side effect), then read the raw cache again.
             $this->composerProxy->metadata($group, $up, $packageName, $this->registryBaseUrl($request, $group));
             $payload = $this->cache->getMetadata($up, $packageName);
         }

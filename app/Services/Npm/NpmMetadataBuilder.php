@@ -18,9 +18,9 @@ class NpmMetadataBuilder
 
         foreach ($package->versions()->get() as $v) {
             /** @var PackageVersion $v */
-            // Das komplette package.json der Version wird durchgereicht; name/version/dist
-            // werden autoritativ von uns überschrieben, damit eine bösartige Version weder
-            // die Tarball-URL noch die Version fälschen kann.
+            // The version's complete package.json is passed through; name/version/dist
+            // are authoritatively overwritten by us, so a malicious version can forge
+            // neither the tarball URL nor the version.
             $manifest = array_merge($v->metadata ?? [], [
                 'name' => $package->name,
                 'version' => $v->version,

@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('packages', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('type');                    // PackageType
-            $table->string('name');                    // vendor/name bzw. @scope/name
+            $table->string('name');                    // vendor/name or @scope/name
             $table->string('description')->nullable();
             $table->string('repository_url')->nullable();
             $table->string('sync_status')->default('pending');
@@ -27,11 +27,11 @@ return new class extends Migration
         Schema::create('package_versions', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('package_id')->constrained()->cascadeOnDelete();
-            $table->string('version');                 // normalisiert, z.B. 1.2.0.0
-            $table->string('version_pretty');          // z.B. v1.2.0
+            $table->string('version');                 // normalized, e.g. 1.2.0.0
+            $table->string('version_pretty');          // e.g. v1.2.0
             $table->string('source_reference');        // commit sha / tag
-            $table->jsonb('metadata');                 // composer.json des Tags
-            $table->string('dist_path')->nullable();   // Pfad auf artifacts-Disk
+            $table->jsonb('metadata');                 // composer.json of the tag
+            $table->string('dist_path')->nullable();   // path on artifacts disk
             $table->timestamp('released_at')->nullable();
             $table->timestamps();
             $table->unique(['package_id', 'version']);
@@ -56,7 +56,7 @@ return new class extends Migration
             $table->index('package_id');
         });
 
-        Schema::create('domains', function (Blueprint $table) {   // genutzt ab v0.2
+        Schema::create('domains', function (Blueprint $table) {   // used from v0.2
             $table->uuid('id')->primary();
             $table->foreignUuid('group_id')->constrained()->cascadeOnDelete();
             $table->string('hostname')->unique();
@@ -66,7 +66,7 @@ return new class extends Migration
         Schema::create('registry_tokens', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('organization_id')->constrained()->cascadeOnDelete();
-            $table->foreignUuid('group_id')->nullable()->constrained()->cascadeOnDelete(); // null = alle Gruppen der Org
+            $table->foreignUuid('group_id')->nullable()->constrained()->cascadeOnDelete(); // null = all groups of the org
             $table->string('name');
             $table->string('token_hash', 64)->unique();  // sha256
             $table->string('ability')->default('read');

@@ -17,8 +17,8 @@ class TokenController extends Controller
             ? Group::findOrFail($request->validated('group_id'))
             : null;
 
-        // Defense-in-depth: neben der org-scoped Rule im FormRequest hier zusätzlich
-        // per Policy absichern, dass die Ziel-Registry der eigenen Org gehört.
+        // Defense-in-depth: in addition to the org-scoped rule in the FormRequest, also
+        // enforce via policy here that the target registry belongs to the own org.
         if ($group !== null) {
             $this->authorize('view', $group);
         }

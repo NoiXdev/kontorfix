@@ -19,7 +19,7 @@ it('shows real operational stats to an operator', function () {
             ->where('stats.npm', 1)
             ->where('stats.sync.synced', 1)
             ->where('stats.sync.failed', 1)
-            ->has('recent', 1) // nur das synchronisierte Paket hat synced_at
+            ->has('recent', 1) // only the synced package has synced_at
             ->where('recent.0.status', 'synced'));
 });
 

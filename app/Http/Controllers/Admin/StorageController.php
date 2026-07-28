@@ -48,8 +48,8 @@ class StorageController extends Controller
 
     public function test(UpdateStorageSettingRequest $request, StorageManager $manager): JsonResponse
     {
-        // Die EINGEREICHTE (noch nicht gespeicherte) Config testen, nicht die alte —
-        // ein leeres Secret bedeutet „bestehendes behalten".
+        // Test the SUBMITTED (not yet saved) config, not the old one —
+        // an empty secret means "keep the existing one".
         $current = StorageSetting::current();
         $setting = new StorageSetting;
         $setting->fill($request->safe()->except('secret'));

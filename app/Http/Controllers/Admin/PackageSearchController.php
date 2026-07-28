@@ -15,7 +15,7 @@ class PackageSearchController extends Controller
      */
     public function __invoke(Request $request): Collection
     {
-        // TODO(multi-tenant): den globalen Pool auf die Organisation des Users einschränken.
+        // TODO(multi-tenant): restrict the global pool to the user's organization.
         $q = (string) $request->query('q', '');
 
         return Package::query()

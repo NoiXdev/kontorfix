@@ -11,15 +11,15 @@ use Illuminate\Support\Facades\Http;
 class UpstreamClient
 {
     /**
-     * @return array<string, mixed>|null null bei 404
+     * @return array<string, mixed>|null null on 404
      */
     public function getJson(Upstream $upstream, string $path): ?array
     {
         $url = rtrim($upstream->url, '/').'/'.ltrim($path, '/');
 
-        // Wie getBytes: Redirects manuell folgen und jeden Hop erneut gegen die
-        // SSRF-Regeln prüfen — ein bösartiger Upstream darf einen Metadaten-Abruf
-        // nicht per 302 auf eine interne Adresse (http://[::1]/, 169.254.169.254) lenken.
+        // Like getBytes: follow redirects manually and re-check each hop against the
+        // SSRF rules — a malicious upstream must not be able to redirect a metadata
+        // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
         $response = $this->follow($upstream, $url, fn (PendingRequest $req) => $req->acceptJson());
 
         if ($response->status() === 404) {
@@ -47,14 +47,14 @@ class UpstreamClient
     }
 
     /**
-     * Redirects manuell folgen (max. 5) und JEDEN Hop erneut gegen die SSRF-Regeln
-     * prüfen — packagist-Dists zeigen legitim auf GitHub, das per 302 auf einen anderen
-     * Host (codeload/objects.githubusercontent) weiterleitet; ein bösartiger Upstream
-     * dürfte darüber aber nicht auf eine interne Adresse umlenken.
+     * Follow redirects manually (max 5) and re-check EACH hop against the SSRF
+     * rules — Packagist dists legitimately point to GitHub, which redirects via 302
+     * to another host (codeload/objects.githubusercontent); a malicious upstream must
+     * not be able to use that to redirect to an internal address.
      *
-     * Das Bearer-Token wird ausschließlich an den ursprünglichen Upstream-Host gesendet:
-     * bei einem Redirect auf einen fremden Host darf das private Token nicht mitwandern
-     * (sonst erntet ein bösartiger Upstream es per 302 auf einen eigenen Collector).
+     * The bearer token is sent exclusively to the original upstream host: on a
+     * redirect to a different host, the private token must not travel along with it
+     * (otherwise a malicious upstream could harvest it via 302 to its own collector).
      *
      * @param  callable(PendingRequest): PendingRequest  $configure
      */
@@ -95,9 +95,9 @@ class UpstreamClient
     }
 
     /**
-     * Host-Vergleich für die Auth-Weitergabe: case-insensitiv, inklusive Port
-     * (Standard-Port je Schema). Verhindert, dass ein Redirect auf denselben Host mit
-     * anderem Port das Token abgreift.
+     * Host comparison for auth forwarding: case-insensitive, including port
+     * (default port per scheme). Prevents a redirect to the same host with a
+     * different port from grabbing the token.
      */
     private function sameHost(string $a, string $b): bool
     {

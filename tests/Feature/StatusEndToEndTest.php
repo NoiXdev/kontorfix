@@ -26,7 +26,7 @@ it('renders the status page with core checks green and upstream reachability dif
             expect($checks->firstWhere('key', 'database')['ok'])->toBeTrue();
             expect($checks->firstWhere('key', 'cache')['ok'])->toBeTrue();
             expect($checks->firstWhere('key', 'storage')['ok'])->toBeTrue();
-            expect($checks->has('key'))->toBeFalse(); // nur Sanity: es ist eine Liste
+            expect($checks->has('key'))->toBeFalse(); // just a sanity check: it's a list
             expect($checks->firstWhere('key', 'upstream:'.$reachable->id)['ok'])->toBeTrue();
             expect($checks->firstWhere('key', 'upstream:'.$down->id)['ok'])->toBeFalse();
         });

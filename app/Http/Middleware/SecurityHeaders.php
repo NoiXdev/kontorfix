@@ -21,7 +21,7 @@ class SecurityHeaders
             $response->headers->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         }
 
-        // CSP behindert schnell Inertia/Vite — daher zunächst optional als Report-Only.
+        // CSP can easily break Inertia/Vite — hence report-only and optional for now.
         if (config('security.csp_report_only')) {
             $response->headers->set(
                 'Content-Security-Policy-Report-Only',

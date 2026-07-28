@@ -5,10 +5,10 @@ use App\Http\Controllers\Registry\NpmController;
 use App\Http\Controllers\Registry\ProxyDownloadController;
 use Illuminate\Support\Facades\Route;
 
-// Registry-Endpunkte werden EINMAL definiert und unter zwei Zugriffspfaden registriert:
-// per Slug-Präfix (/r/{groupSlug}/...) und an der Host-Wurzel für Custom-Domains.
-// Die Gruppen-Auflösung übernimmt ausschließlich `registry.context` (siehe
-// ResolveRegistryContext) — Controller lesen die Gruppe aus den Request-Attributen.
+// Registry endpoints are defined ONCE and registered under two access paths:
+// via slug prefix (/r/{groupSlug}/...) and at the host root for custom domains.
+// Group resolution is handled exclusively by `registry.context` (see
+// ResolveRegistryContext) — controllers read the group from the request attributes.
 $registryEndpoints = function () {
     // Composer
     Route::get('/packages.json', [ComposerController::class, 'root']);
@@ -17,9 +17,9 @@ $registryEndpoints = function () {
     Route::get('/dists/{vendor}/{name}/{version}.zip', [ComposerController::class, 'dist'])
         ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
 
-    // Proxy-Downloads: {upstream} ist eine UUID, wird bewusst NICHT per Route-Model-Binding
-    // aufgelöst, sondern manuell im Controller — so bleibt die Gruppen-Zugehörigkeitsprüfung
-    // explizit (kein Token darf über einen fremden Upstream Downloads anstoßen).
+    // Proxy downloads: {upstream} is a UUID, deliberately NOT resolved via route model
+    // binding but manually in the controller — this keeps the group-ownership check
+    // explicit (no token may trigger downloads via a foreign upstream).
     Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
         ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
     Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
@@ -27,9 +27,9 @@ $registryEndpoints = function () {
     Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
         ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
 
-    // npm — nach den Composer-Routen (First-Match schützt packages.json/p2/dists).
-    // Der `/-/`-Tarball-Pfad kollidiert mit keiner Composer-Route, daher brauchen die
-    // Tarball-Routen kein packages.json-Lookahead — nur der bare packument-Catch-all unten.
+    // npm — after the Composer routes (first match protects packages.json/p2/dists).
+    // The `/-/` tarball path doesn't collide with any Composer route, so the tarball
+    // routes don't need a packages.json lookahead — only the bare packument catch-all below does.
     Route::get('/{scope}/{package}/-/{file}', [NpmController::class, 'tarballScoped'])
         ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
     Route::get('/{package}/-/{file}', [NpmController::class, 'tarball'])
@@ -45,12 +45,12 @@ $registryEndpoints = function () {
         ->where(['package' => '[a-z0-9._-]+']);
 };
 
-// Slug-Zugriff: {groupSlug} als schlichter Parameter, von der Middleware aufgelöst.
+// Slug access: {groupSlug} as a plain parameter, resolved by the middleware.
 Route::prefix('/r/{groupSlug}')
     ->where(['groupSlug' => '[a-z0-9-]+'])
     ->middleware(['registry.context', 'registry.auth'])
     ->group($registryEndpoints);
 
-// Domain-Zugriff: Root-Ebene. registry.context 404t unbekannte Hosts, daher überschatten
-// diese Routen die Haupt-App nicht (web-Routen sind zuvor registriert -> First-Match).
+// Domain access: root level. registry.context 404s unknown hosts, so these routes
+// don't shadow the main app (web routes are registered first -> first match).
 Route::middleware(['registry.context', 'registry.auth'])->group($registryEndpoints);

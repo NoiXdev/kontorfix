@@ -68,7 +68,7 @@ it('still serves the slug route unchanged after the domain-resolution refactor',
 });
 
 it('does not shadow the main app routes with the registry catch-all', function () {
-    // /login ist eine echte Web-Route und darf nicht vom npm-{package}-Catch-all gekapert werden.
+    // /login is a real web route and must not be hijacked by the npm-{package} catch-all.
     $this->get('/login')->assertOk();
 });
 
@@ -77,11 +77,11 @@ it('gates a custom domain by the group ACL: a wrong-group token gets 404', funct
     Domain::factory()->for($victim)->create(['hostname' => 'packages.victim.test']);
     $attacker = Group::factory()->for(Organization::factory())->create(['slug' => 'attacker']);
 
-    // Ganz ohne Token: 401 (zuerst — withHeaders persistiert sonst den Token in den Folgeruf).
+    // Completely without a token: 401 (first — otherwise withHeaders would persist the token into the next call).
     $this->withHeaders(['Host' => 'packages.victim.test'])
         ->getJson('http://packages.victim.test/packages.json')->assertUnauthorized();
 
-    // Token einer fremden Gruppe, per Host-Spoofing gegen die Victim-Domain -> 404.
+    // Token from a different group, host-spoofed against the victim domain -> 404.
     $this->withHeaders(array_merge(tokenHeaderFor($attacker), ['Host' => 'packages.victim.test']))
         ->getJson('http://packages.victim.test/packages.json')->assertNotFound();
 });
@@ -92,7 +92,7 @@ it('returns 502 on an upstream error even on a custom domain', function () {
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
     Http::fake(['*' => Http::response('boom', 500)]);
 
-    // Roher GET (kein Accept: json) gegen den Domain-Root -> muss trotzdem 502 liefern.
+    // Raw GET (no Accept: json) against the domain root -> must still return 502.
     $this->withHeaders(array_merge(tokenHeaderFor($group), ['Host' => 'packages.kadenz.test']))
         ->get('http://packages.kadenz.test/p2/some/pkg.json')->assertStatus(502);
 });

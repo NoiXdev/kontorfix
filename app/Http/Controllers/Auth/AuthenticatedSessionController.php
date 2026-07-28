@@ -34,7 +34,7 @@ class AuthenticatedSessionController extends Controller
     {
         $user = $request->validateCredentials();
 
-        // Bestätigte 2FA ⇒ noch nicht einloggen, sondern Challenge anstoßen.
+        // Confirmed 2FA ⇒ don't log in yet, trigger the challenge instead.
         if ($user->hasConfirmedTwoFactor()) {
             $request->session()->put('login.id', $user->id);
             $request->session()->put('login.remember', $request->boolean('remember'));

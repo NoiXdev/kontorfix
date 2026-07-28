@@ -81,8 +81,8 @@ class PackageController extends Controller
         $package->groups()->sync($request->validated('group_ids', []));
         SyncPackage::dispatch($package);
 
-        // Der PackagePicker legt Pakete inline per fetch an und braucht das
-        // erstellte Paket zurück, um es direkt der Auswahl hinzuzufügen.
+        // The PackagePicker creates packages inline via fetch and needs the
+        // created package back to add it directly to the selection.
         if ($request->expectsJson()) {
             return response()->json([
                 'id' => $package->id,

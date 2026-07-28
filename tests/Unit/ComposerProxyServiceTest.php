@@ -27,7 +27,7 @@ it('rewrites every version dist url to the proxy route and caches the payload', 
         ->and($versions[0]['dist']['url'])->toStartWith('https://registry.test/r/kadenz/proxy/composer/'.$up->id.'/acme/demo/')
         ->and($up->metadataCache()->where('package_name', 'acme/demo')->exists())->toBeTrue();
 
-    // Zweiter Aufruf nutzt den Cache (kein weiterer Http-Call).
+    // Second call uses the cache (no further HTTP call).
     Http::fake();
     app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test/r/kadenz');
     Http::assertNothingSent();

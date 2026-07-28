@@ -33,7 +33,7 @@ class TwoFactorChallengeController extends Controller
             return redirect()->route('login');
         }
 
-        // Wird der User zwischen Passwort- und Faktor-Schritt gelöscht: sauber zurück zum Login.
+        // If the user is deleted between the password and factor step: go back to login cleanly.
         $user = User::find($userId);
         if ($user === null) {
             $request->session()->forget('login.id');
@@ -41,8 +41,8 @@ class TwoFactorChallengeController extends Controller
             return redirect()->route('login');
         }
 
-        // Account-gebundenes Rate-Limit auf die Session-User-ID (nicht die IP) — so lässt es
-        // sich nicht durch rotierende X-Forwarded-For-Header aushebeln.
+        // Account-bound rate limit on the session user ID (not the IP) — this can't
+        // be circumvented by rotating X-Forwarded-For headers.
         $throttleKey = 'two-factor-challenge:'.$userId;
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
@@ -63,7 +63,7 @@ class TwoFactorChallengeController extends Controller
             );
 
             if ($timestamp !== false) {
-                // Verwendeten Zeitschritt festhalten → derselbe Code gilt kein zweites Mal.
+                // Record the used time step → the same code is not valid a second time.
                 $user->forceFill(['two_factor_last_timestamp' => $timestamp])->save();
                 $valid = true;
             }

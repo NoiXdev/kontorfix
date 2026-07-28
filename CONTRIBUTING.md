@@ -1,11 +1,11 @@
-# Mitwirken
+# Contributing
 
-Danke für dein Interesse an Kontorfix! Diese Kurzanleitung hilft beim Einstieg.
+Thanks for your interest in Kontorfix! This short guide helps you get started.
 
 ## Setup
 
-Die lokale Umgebung basiert auf DDEV. Die vollständige Einrichtung steht in der
-[Entwickler- und Betriebsdokumentation](docs/development.md):
+The local environment is based on DDEV. The full setup is described in the
+[developer and operations documentation](docs/development.md):
 
 ```bash
 ddev start
@@ -15,35 +15,35 @@ ddev exec php artisan key:generate
 ddev exec php artisan migrate --seed
 ```
 
-## Vor einem Pull Request
+## Before a pull request
 
-Alle Prüfungen müssen grün sein:
+All checks must pass:
 
 ```bash
 ddev exec vendor/bin/pest              # Tests
-ddev exec vendor/bin/pint --test       # Code-Style
-ddev exec vendor/bin/phpstan analyse   # Static Analysis
+ddev exec vendor/bin/pint --test       # Code style
+ddev exec vendor/bin/phpstan analyse   # Static analysis
 ddev exec npm run lint                 # ESLint
-ddev exec npm run build                # Frontend-Build
+ddev exec npm run build                # Frontend build
 ```
 
-Neue Logik kommt mit Tests (Pest). Bugfixes bekommen einen Regressionstest.
+New logic comes with tests (Pest). Bug fixes get a regression test.
 
-## Konventionen
+## Conventions
 
 - **Commits:** [Conventional Commits](https://www.conventionalcommits.org/)
   (`feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`).
-  Die CI erzwingt das.
-- **Branches:** Feature-Branches, kein direktes Arbeiten auf `main`.
-- **Pull Requests:** klein und fokussiert; beschreibe Motivation und Auswirkung.
-  Sicherheitsrelevante Änderungen bitte im PR kennzeichnen.
+  This is enforced by CI.
+- **Branches:** feature branches, no direct work on `main`.
+- **Pull requests:** small and focused; describe the motivation and the impact.
+  Please flag security-relevant changes in the PR.
 
-## Sicherheit
+## Security
 
-Schwachstellen bitte **nicht** über öffentliche Issues melden, sondern vertraulich —
-siehe [SECURITY.md](SECURITY.md).
+Please do **not** report vulnerabilities through public issues — report them privately
+instead, see [SECURITY.md](SECURITY.md).
 
-## Verhalten
+## Conduct
 
-Sei freundlich und respektvoll. Wir gehen von guten Absichten aus und halten die
-Kommunikation sachlich und konstruktiv.
+Be kind and respectful. We assume good intent and keep communication factual and
+constructive.

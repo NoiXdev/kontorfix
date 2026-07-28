@@ -1,24 +1,23 @@
-# Entwicklung & Betrieb
+# Development & Operations
 
-Technische Dokumentation für Kontorfix. Hier dürfen Stack-Details benannt werden (die
-außenwirksame README bleibt bewusst technikneutral).
+Technical documentation for Kontorfix. Stack details may be named here (the outward-facing
+README stays deliberately technology-neutral).
 
-## Architektur
+## Architecture
 
-- **Backend:** Laravel 12 (PHP 8.2+), ausgeliefert über FrankenPHP.
+- **Backend:** Laravel 12 (PHP 8.2+), served via FrankenPHP.
 - **Frontend:** Inertia.js v2 + Vue 3 + TypeScript, Tailwind CSS 3, shadcn-vue.
-- **Daten:** PostgreSQL 17 (UUID-v7-Primärschlüssel), Redis (Cache + Queue).
-- **Betrieb:** Laravel Horizon (Queue-Dashboard), Reverb (Live-Updates via WebSockets),
-  Scheduler (periodischer Re-Sync + Cleanup).
-- **Registry-Protokolle:** Composer v2 (`packages.json`, `p2/*.json`, Dist-Download) und
-  npm (Packument, Tarball, Publish). Zusätzlich eine REST-Management-API unter `/api/v1`
-  mit auto-generierter, interaktiver Dokumentation unter `/docs/api` (nur Operator-Admin).
+- **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
+- **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
+  Scheduler (periodic re-sync + cleanup).
+- **Registry protocols:** Composer v2 (`packages.json`, `p2/*.json`, dist download) and
+  npm (packument, tarball, publish). Plus a REST management API under `/api/v1` with
+  auto-generated, interactive documentation at `/docs/api` (operator admins only).
 
-Registry- und Webhook-Endpunkte laufen bewusst **stateless** (außerhalb der `web`-Middleware-
-Gruppe, ohne Cookies/CSRF) und sind ausschließlich über Token- bzw. Signaturprüfung
-abgesichert.
+Registry and webhook endpoints run deliberately **stateless** (outside the `web` middleware
+group, without cookies/CSRF) and are secured solely by token or signature verification.
 
-## Lokale Umgebung (DDEV)
+## Local environment (DDEV)
 
 ```bash
 ddev start
@@ -29,76 +28,78 @@ ddev exec php artisan migrate --seed
 ddev exec npm run dev
 ```
 
-Nützliche Kommandos (alle über `ddev exec …`):
+Useful commands (all via `ddev exec …`):
 
 ```bash
-ddev exec vendor/bin/pest                 # Testsuite
-ddev exec vendor/bin/pint                 # Code-Style (Laravel Pint)
-ddev exec vendor/bin/phpstan analyse      # Static Analysis (Larastan, Level 6)
+ddev exec vendor/bin/pest                 # Test suite
+ddev exec vendor/bin/pint                 # Code style (Laravel Pint)
+ddev exec vendor/bin/phpstan analyse      # Static analysis (Larastan, level 6)
 ddev exec npm run lint                    # ESLint
-ddev exec npm run build                   # Frontend-Build
+ddev exec npm run build                   # Frontend build
 ```
 
-## Verzeichnisstruktur (Kurzüberblick)
+## Directory layout (overview)
 
-- `app/Http/Controllers/{Registry,Api/V1,Admin,Portal,Auth,Settings}` — Endpunkte je Bereich.
-- `app/Services/{Upstream,Registry,Storage,Health,...}` — Geschäftslogik/Services.
-- `app/Http/Middleware` — u. a. `AuthenticateRegistry`, `AuthenticateApiKey`, `EnsureOperator`,
+- `app/Http/Controllers/{Registry,Api/V1,Admin,Portal,Auth,Settings}` — endpoints per area.
+- `app/Services/{Upstream,Registry,Storage,Health,...}` — business logic/services.
+- `app/Http/Middleware` — incl. `AuthenticateRegistry`, `AuthenticateApiKey`, `EnsureOperator`,
   `EnsureUserRole`, `SecurityHeaders`, `RejectRobotWebSession`.
-- `resources/js/pages` — Inertia/Vue-Seiten (Admin, Portal, Settings).
-- `routes/{web,api,registry,webhooks,auth,settings,console,channels}.php` — Routing.
-- `docker/` — Container-Entrypoint (Rollen app/worker/scheduler/reverb) + Compose.
+- `resources/js/pages` — Inertia/Vue pages (admin, portal, settings).
+- `routes/{web,api,registry,webhooks,auth,settings,console,channels}.php` — routing.
+- `docker/` — container entrypoint (roles app/worker/scheduler/reverb) + Compose.
 
-## Mandanten- & Rollenmodell
+## Tenancy & role model
 
-- **Operator-Invariante (sicherheitskritisch):** die privilegierten Rollen `admin`/`maintainer`
-  existieren ausschließlich in der Betreiber-Organisation (`is_operator = true`). Kunden sind
-  `member`. Erzwungen über `EnsureOperator` auf dem gesamten `/admin`-Bereich und in den
-  `Store/UpdateUserRequest`-Regeln.
-- **Account-Typen:** `human` (interaktiver Login) und `robot` (nur API-Key, kein interaktiver
-  Login — gesperrt in Password/2FA/OIDC-Flows plus globale `RejectRobotWebSession`-Middleware).
+- **Operator invariant (security-critical):** the privileged roles `admin`/`maintainer`
+  exist exclusively in the operator organization (`is_operator = true`). Customers are
+  `member`. Enforced by `EnsureOperator` across the entire `/admin` area and in the
+  `Store/UpdateUserRequest` rules.
+- **Account types:** `human` (interactive login) and `robot` (API key only, no interactive
+  login — blocked in the password/2FA/OIDC flows plus a global `RejectRobotWebSession`
+  middleware).
 
-## Deployment & Härtung
+## Deployment & hardening
 
-Kontorfix läuft hinter einem Reverse Proxy (z. B. Traefik). Folgende ENV-Werte beim
-produktiven Deploy setzen:
+Kontorfix runs behind a reverse proxy (e.g. Traefik). Set the following ENV values for a
+production deployment:
 
-- **`TRUSTED_PROXIES`** — auf die **konkrete(n) Proxy-IP(s)** pinnen, nicht auf die breiten
-  Default-Privatbereiche. Die `X-Forwarded-*`-Header werden nur von diesen Adressen akzeptiert;
-  bei zu weiter Konfiguration ließe sich die Client-IP (und damit IP-basierte Rate-Limits sowie
-  der Host in generierten URLs) fälschen. Zusätzlich sicherstellen, dass der App-Port **nur**
-  über den Proxy erreichbar ist (Netzsegmentierung).
-- **`SECURITY_HSTS=true`** — sobald TLS am Proxy terminiert.
-- **`SESSION_SECURE_COOKIE=true`** — Session-Cookie nur über HTTPS.
-- **`SECURITY_CSP_REPORT_ONLY=true`** — Content-Security-Policy zunächst im Report-Only-Modus
-  ausrollen, Verstöße auswerten (Inertia/Vite-Kompatibilität), danach auf Durchsetzung umstellen.
-- **`APP_DEBUG=false`** in Produktion.
+- **`TRUSTED_PROXIES`** — pin to the **concrete proxy IP(s)**, not the broad default private
+  ranges. The `X-Forwarded-*` headers are only accepted from these addresses; with too broad
+  a configuration the client IP (and thus IP-based rate limits as well as the host in
+  generated URLs) could be spoofed. Also make sure the app port is reachable **only** through
+  the proxy (network segmentation).
+- **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
+- **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
+- **`SECURITY_CSP_REPORT_ONLY=true`** — roll out the Content-Security-Policy in report-only
+  mode first, evaluate violations (Inertia/Vite compatibility), then switch to enforcement.
+- **`APP_DEBUG=false`** in production.
 
-### Speicher (Storage)
+### Storage
 
-Der Artefakt-Speicher (`local` oder S3/MinIO) wird vom Operator-Admin konfiguriert und gilt
-als vertrauenswürdige Infrastruktur. Zwei bewusste Eigenschaften:
+The artifact storage (`local` or S3/MinIO) is configured by the operator admin and is treated
+as trusted infrastructure. Two deliberate properties:
 
-- Der S3-**Endpoint** wird nicht gegen interne Adressen gefiltert — ein internes MinIO im
-  Container-Netz ist der Regelfall. Da nur der höchstprivilegierte Operator-Admin diese
-  Konfiguration setzt, ist das ein akzeptiertes Restrisiko (kein niedrigprivilegierter Akteur
-  kann den Endpoint beeinflussen).
-- Eine fehlerhafte S3-Konfiguration kann Downloads unterbrechen (die `artifacts`-Disk wirft
-  bei Fehlern). Vor dem Speichern den eingebauten Verbindungstest nutzen.
+- The S3 **endpoint** is not filtered against internal addresses — an internal MinIO on the
+  container network is the normal case. Since only the highest-privileged operator admin sets
+  this configuration, this is an accepted residual risk (no lower-privileged actor can
+  influence the endpoint).
+- A broken S3 configuration can interrupt downloads (the `artifacts` disk throws on errors).
+  Use the built-in connection test before saving.
 
-## Bekannte Restrisiken / Follow-ups
+## Known residual risks / follow-ups
 
-Aus dem Security-Audit bewusst als niedrig eingestuft und dokumentiert (nicht blockierend):
+Deliberately classified as low and documented in the security audit (non-blocking):
 
-- **DNS-Rebinding (TOCTOU):** Die SSRF-Prüfung (`UrlSafety::isSafeResolving`) und der spätere
-  tatsächliche Verbindungsaufbau lösen den Hostnamen getrennt auf. Vollständig dicht nur mit an
-  cURL gepinntem Resolver (`CURLOPT_RESOLVE`).
-- **Offene Selbstregistrierung:** `/register` erlaubt das Anlegen eines `member`-Kontos ohne
-  Organisation (sieht im Portal nichts). Für eine geschlossene Instanz kann `/register` gated
-  oder deaktiviert werden.
-- **OIDC-E-Mail-Verknüpfung:** Auto-Linking über mehrere aktivierte Identitätsprovider für
-  Member-Konten — nur relevant bei mehreren, teils nicht vertrauenswürdigen IdPs.
-- **API-Existenzorakel:** Route-Model-Binding läuft vor der Key-Auth; nicht existierende
-  `{id}`-Routen liefern 404 statt 401. Wegen nicht enumerierbarer UUIDs geringer Wert.
-- **API-Doku in `local`:** `/docs/api` ist in der `local`-Umgebung ungated (Entwicklung).
-- **JWKS-Cache:** OIDC lädt JWKS je Callback neu (Perf/Robustheit, kein Sicherheitsproblem).
+- **DNS rebinding (TOCTOU):** the SSRF check (`UrlSafety::isSafeResolving`) and the actual
+  later connection resolve the hostname separately. Fully closed only with a resolver pinned
+  to cURL (`CURLOPT_RESOLVE`).
+- **Open self-registration:** `/register` allows creating a `member` account without an
+  organization (which sees nothing in the portal). For a closed instance, `/register` can be
+  gated or disabled.
+- **OIDC email linking:** auto-linking across multiple enabled identity providers for member
+  accounts — relevant only with multiple, partly untrusted IdPs.
+- **API existence oracle:** route model binding runs before the key auth; non-existent
+  `{id}` routes return 404 instead of 401. Low value due to non-enumerable UUIDs.
+- **API docs in `local`:** `/docs/api` is ungated in the `local` environment (development).
+- **JWKS cache:** OIDC reloads the JWKS on each callback (performance/robustness, not a
+  security issue).

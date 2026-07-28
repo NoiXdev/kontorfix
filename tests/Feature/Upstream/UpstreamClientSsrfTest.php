@@ -8,9 +8,9 @@ use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
-// I1: getJson() muss — wie getBytes() — Redirects manuell folgen und jeden Hop
-// gegen die SSRF-Regeln prüfen. Ein bösartiger Upstream darf einen Metadaten-
-// Abruf nicht per 302 auf eine interne Adresse (127.0.0.1 / [::1]) umlenken.
+// I1: getJson() must — like getBytes() — follow redirects manually and check each hop
+// against the SSRF rules. A malicious upstream must not be able to redirect a metadata
+// fetch via 302 to an internal address (127.0.0.1 / [::1]).
 it('refuses a metadata redirect to an internal ipv4 address', function () {
     Http::fake([
         'repo.test/*' => Http::response('', 302, ['Location' => 'http://127.0.0.1/latest/meta-data/']),
@@ -20,7 +20,7 @@ it('refuses a metadata redirect to an internal ipv4 address', function () {
     expect(fn () => app(UpstreamClient::class)->getJson($up, '/p2/acme/demo.json'))
         ->toThrow(UpstreamException::class);
 
-    // Das interne Ziel darf nie angefragt werden.
+    // The internal target must never be requested.
     Http::assertNotSent(fn ($r) => str_contains($r->url(), '127.0.0.1'));
 });
 
@@ -46,23 +46,23 @@ it('follows a safe metadata redirect to another public host', function () {
     expect(app(UpstreamClient::class)->getJson($up, '/p2/acme/demo.json'))->toBe(['ok' => true]);
 });
 
-// I2: getBytes() setzt das Bearer-Token pro Hop neu — auch nach einem Redirect auf
-// einen fremden Host. Ein bösartiger Upstream kann so das private Upstream-Token
-// abgreifen. Das Token darf nur an den ursprünglichen Upstream-Host gehen; nach
-// einem Host-Wechsel darf KEIN Authorization-Header mehr mitgehen.
+// I2: getBytes() re-sets the bearer token on every hop — even after a redirect to
+// a foreign host. A malicious upstream could otherwise capture the private upstream
+// token this way. The token must only go to the original upstream host; after
+// a host change NO Authorization header may be sent anymore.
 it('drops the upstream auth token on a cross-host artifact redirect', function () {
     Http::fake([
         'cdn.test/a/*' => Http::response('', 302, ['Location' => 'https://evil-collector.example/loot.zip']),
         'evil-collector.example/*' => Http::response('zip-bytes', 200),
     ]);
-    // Upstream-Host == Host der Artefakt-URL: der erste Hop trägt das Token legitim.
+    // Upstream host == host of the artifact URL: the first hop legitimately carries the token.
     $up = Upstream::factory()->create(['url' => 'https://cdn.test', 'auth_token' => 'secret-token']);
 
     expect(app(UpstreamClient::class)->getBytes($up, 'https://cdn.test/a/b.zip'))->toBe('zip-bytes');
 
-    // Der fremde Host darf das private Bearer-Token nicht sehen.
+    // The foreign host must not see the private bearer token.
     Http::assertSent(fn ($r) => $r->url() === 'https://evil-collector.example/loot.zip' && ! $r->hasHeader('Authorization'));
-    // Der ursprüngliche Upstream-Host bekommt das Token weiterhin.
+    // The original upstream host still gets the token.
     Http::assertSent(fn ($r) => str_contains($r->url(), 'cdn.test/a/b.zip') && $r->hasHeader('Authorization', 'Bearer secret-token'));
 });
 

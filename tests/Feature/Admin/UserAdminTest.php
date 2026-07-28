@@ -44,13 +44,13 @@ it('refuses to delete yourself', function () {
 });
 
 it('refuses to delete the last operator admin', function () {
-    // Erlaubnis-Fall: mit zwei Operator-Admins ist einer löschbar.
+    // Allowed case: with two operator admins, one can be deleted.
     $secondOperatorAdmin = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
     $this->actingAs($this->admin)->delete("/admin/users/{$secondOperatorAdmin->id}")->assertRedirect();
     expect(User::find($secondOperatorAdmin->id))->toBeNull();
 
-    // Sperre-Fall: jetzt ist $this->admin der letzte Operator-Admin. Ein Admin einer anderen
-    // Organisation umgeht die Selbst-Regel, aber die count-Regel schützt den letzten Operator-Admin.
+    // Blocked case: now $this->admin is the last operator admin. An admin from another
+    // organization bypasses the self-deletion rule, but the count rule protects the last operator admin.
     $foreignAdmin = User::factory()->operator()->create(['role' => UserRole::Admin]);
     $this->actingAs($foreignAdmin)->delete("/admin/users/{$this->admin->id}")->assertSessionHasErrors();
     expect(User::find($this->admin->id))->not->toBeNull();

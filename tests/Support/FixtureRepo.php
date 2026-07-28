@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Process;
 class FixtureRepo
 {
     /**
-     * Erzeugt ein lokales Git-Repo mit composer.json und Tags v1.0.0 + v1.1.0.
-     * Gibt den absoluten Pfad zurück.
+     * Creates a local git repo with composer.json and tags v1.0.0 + v1.1.0.
+     * Returns the absolute path.
      */
     public static function make(string $packageName = 'acme/demo'): string
     {

@@ -87,8 +87,8 @@ it('gates package access through group access and assignment', function () {
     $token = RegistryToken::findByPlainText($plain);
 
     expect($this->svc->canAccessPackage($token, $this->groupA, $this->pkgA))->toBeTrue()
-        ->and($this->svc->canAccessPackage($token, $this->groupA, $this->pkgB))->toBeFalse()  // nicht zugewiesen
-        ->and($this->svc->canAccessPackage($token, $this->groupB, $this->pkgB))->toBeFalse(); // kein Gruppenzugriff
+        ->and($this->svc->canAccessPackage($token, $this->groupA, $this->pkgB))->toBeFalse()  // not assigned
+        ->and($this->svc->canAccessPackage($token, $this->groupB, $this->pkgB))->toBeFalse(); // no group access
 });
 
 it('excludes expired assignments from package access', function () {

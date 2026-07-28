@@ -20,13 +20,13 @@ it('rejects a replayed totp code on a second login', function () {
     $user = confirmedTwoFactorUser();
     $code = app(TwoFactorAuthenticator::class)->currentCode($user->two_factor_secret);
 
-    // Erster Login mit dem Code: erfolgreich.
+    // First login with the code: succeeds.
     $this->post('/login', ['email' => $user->email, 'password' => 'password']);
     $this->post('/two-factor-challenge', ['code' => $code])
         ->assertRedirect(route('dashboard', absolute: false));
     $this->assertAuthenticatedAs($user);
 
-    // Ausloggen und denselben Code erneut spielen: muss abgelehnt werden (Replay-Schutz).
+    // Log out and replay the same code: must be rejected (replay protection).
     $this->post('/logout');
     $this->post('/login', ['email' => $user->email, 'password' => 'password']);
     $this->from(route('two-factor.login'))
@@ -43,7 +43,7 @@ it('locks the challenge after five failed attempts, even for a valid code', func
         $this->post('/two-factor-challenge', ['code' => '000000'])->assertSessionHasErrors('code');
     }
 
-    // Sechster Versuch ist gethrottlet — auch ein gültiger Code kommt nicht mehr durch.
+    // Sixth attempt is throttled — even a valid code no longer gets through.
     $code = app(TwoFactorAuthenticator::class)->currentCode($user->two_factor_secret);
     $this->post('/two-factor-challenge', ['code' => $code])->assertSessionHasErrors('code');
     $this->assertGuest();
@@ -55,7 +55,7 @@ it('refuses to re-enable two factor while it is already confirmed', function () 
 
     $this->actingAs($user)->post('/settings/two-factor/enable')->assertSessionHasErrors('two_factor');
 
-    // Secret unverändert, weiterhin bestätigt — kein Zurückfallen in den unbestätigten Zustand.
+    // Secret unchanged, still confirmed — no falling back to the unconfirmed state.
     $fresh = $user->fresh();
     expect($fresh->hasConfirmedTwoFactor())->toBeTrue();
     expect($fresh->two_factor_secret)->toBe($secretBefore);

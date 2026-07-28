@@ -10,13 +10,13 @@ it('onboards an invited user who sets their own password and logs in', function 
     $admin = User::factory()->for($operator)->create(['role' => UserRole::Admin]);
     $cust = Organization::factory()->create();
 
-    // Einladen (ohne Passwort)
+    // Invite (without a password)
     $this->actingAs($admin)->post('/admin/users', [
         'name' => 'Kunde', 'email' => 'invite@kunde.test', 'organization_id' => $cust->id, 'role' => 'member',
     ])->assertRedirect();
     $user = User::where('email', 'invite@kunde.test')->firstOrFail();
 
-    // Token wie in der Einladung erzeugen und Passwort setzen (nutzt NewPasswordController)
+    // Generate a token as in the invitation and set the password (uses NewPasswordController)
     $token = Password::broker()->createToken($user);
     $this->post('/logout');
     $this->post('/reset-password', [
@@ -24,7 +24,7 @@ it('onboards an invited user who sets their own password and logs in', function 
         'password' => 'neues-geheim-1234', 'password_confirmation' => 'neues-geheim-1234',
     ])->assertSessionHasNoErrors();
 
-    // Einloggen mit dem selbst gesetzten Passwort
+    // Log in with the self-set password
     $this->post('/logout');
     $this->post('/login', ['email' => 'invite@kunde.test', 'password' => 'neues-geheim-1234'])
         ->assertRedirect();

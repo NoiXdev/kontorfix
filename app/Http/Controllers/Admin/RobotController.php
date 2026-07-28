@@ -42,7 +42,7 @@ class RobotController extends Controller
             'role' => ['required', Rule::enum(UserRole::class)],
         ]);
 
-        // Operator-Invariante: privilegierte Rollen nur in der Betreiber-Org.
+        // Operator invariant: privileged roles only in the operator org.
         $org = Organization::findOrFail($validated['organization_id']);
         if (in_array($validated['role'], [UserRole::Admin->value, UserRole::Maintainer->value], true) && ! $org->is_operator) {
             return back()->withErrors(['role' => 'Admin/Maintainer sind nur in der Betreiber-Organisation erlaubt.']);

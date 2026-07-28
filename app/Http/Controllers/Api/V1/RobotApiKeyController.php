@@ -14,10 +14,10 @@ class RobotApiKeyController extends Controller
 {
     public function store(StoreApiKeyRequest $request, User $user): JsonResponse
     {
-        // Nur Robot-Accounts dürfen über diesen Endpunkt einen API-Key erhalten — sonst
-        // ließe sich für beliebige menschliche Nutzer ein unbefristeter Impersonation-Key
-        // ausstellen, der deren 2FA/Passkey umgeht. Analog zum GUI-Pfad (Admin/RobotController
-        // ::issueKey), hier 422 statt 404, da es eine fachliche Ablehnung im API-Kontext ist.
+        // Only robot accounts may obtain an API key via this endpoint — otherwise
+        // an unlimited-lifetime impersonation key could be issued for any human user,
+        // bypassing their 2FA/passkey. Analogous to the GUI path (Admin/RobotController
+        // ::issueKey), here 422 instead of 404, since it's a business-logic rejection in the API context.
         abort_unless($user->isRobot(), 422);
 
         [$key, $plain] = ApiKey::issue(

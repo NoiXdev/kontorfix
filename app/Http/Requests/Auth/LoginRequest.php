@@ -35,7 +35,7 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * Prüft die Credentials MIT Rate-Limit, loggt aber NICHT ein.
+     * Checks the credentials WITH rate limiting, but does NOT log in.
      *
      * @throws ValidationException
      */
@@ -46,8 +46,8 @@ class LoginRequest extends FormRequest
         /** @var User|null $user */
         $user = User::where('email', $this->string('email'))->first();
 
-        // Hash::check läuft auch ohne User gegen einen festen Dummy-Hash — konstante Arbeit,
-        // damit die Antwortzeit nicht verrät, ob ein Account existiert (Timing-Enumeration).
+        // Hash::check also runs against a fixed dummy hash when there is no user — constant work,
+        // so the response time doesn't reveal whether an account exists (timing enumeration).
         $hash = $user->password ?? '$2y$12$wOujnffIB7RK/vXl7tujy.x0A/eb3esFIi0X.CdsC9MUy5aS6cHBi';
 
         if (! Hash::check((string) $this->string('password'), $hash) || ! $user) {

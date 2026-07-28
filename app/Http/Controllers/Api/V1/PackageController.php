@@ -39,9 +39,9 @@ class PackageController extends Controller
         $package->groups()->sync($request->validated('group_ids', []));
         SyncPackage::dispatch($package);
 
-        // sync_status kommt aus einem DB-Default (Migration), der von Eloquent nach
-        // einem plain INSERT nicht automatisch ins Model geladen wird — ohne refresh()
-        // wäre die Property beim Serialisieren null und PackageResource würde crashen.
+        // sync_status comes from a DB default (migration) that Eloquent doesn't
+        // automatically load into the model after a plain INSERT — without refresh()
+        // the property would be null when serializing and PackageResource would crash.
         $package->refresh();
 
         return (new PackageResource($package))->response()->setStatusCode(201);

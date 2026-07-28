@@ -10,12 +10,12 @@ use Laravel\Passkeys\Passkeys;
 
 uses(RefreshDatabase::class);
 
-// Die Passkey-Zeremonie selbst ist krypto-lastig (WebAuthn-Attestation) und nicht
-// sinnvoll ohne brüchiges Mocking testbar. Die maßgebliche Policy-Entscheidung sitzt
-// aber vollständig in der über Passkeys::authorizeLoginUsing() registrierten Closure —
-// die testen wir hier direkt über Passkeys::allowsLogin(), so wie es das Framework
-// selbst beim Login aufruft. Die RejectRobotWebSession-Middleware bleibt zusätzlich
-// als autoritativer Schutz (Defense-in-Depth) bestehen.
+// The passkey ceremony itself is crypto-heavy (WebAuthn attestation) and not
+// reasonably testable without brittle mocking. However, the decisive policy decision lives
+// entirely in the closure registered via Passkeys::authorizeLoginUsing() —
+// we test that directly here via Passkeys::allowsLogin(), just as the framework
+// itself calls it during login. The RejectRobotWebSession middleware additionally
+// remains in place as the authoritative safeguard (defense in depth).
 it('denies a passkey login for a robot account', function () {
     $robot = User::factory()->create(['account_type' => AccountType::Robot]);
     $passkey = new Passkey([

@@ -45,7 +45,7 @@ function statusDot(status: string): string {
     return { synced: 'bg-[#6CBF8B]', syncing: 'bg-copper', pending: 'bg-muted-foreground/50', failed: 'bg-destructive' }[status] ?? 'bg-muted-foreground/50';
 }
 
-// Dezenter Live-Hinweis bei Sync-Aktivität über den Operator-Channel.
+// Subtle live hint on sync activity via the operator channel.
 const page = usePage<SharedData>();
 const liveHint = ref<{ message: string; failed: boolean } | null>(null);
 let hintTimer: ReturnType<typeof setTimeout> | undefined;
@@ -82,7 +82,7 @@ if (isOperator) {
                 {{ liveHint.message }}
             </div>
 
-            <!-- Kennzahlen -->
+            <!-- Metrics -->
             <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Link
                     v-for="t in tiles"
@@ -98,7 +98,7 @@ if (isOperator) {
                     <div class="mt-1 text-xs text-muted-foreground">{{ t.sub }}</div>
                 </Link>
 
-                <!-- Fehlgeschlagene Jobs — hervorgehoben, wenn > 0 -->
+                <!-- Failed jobs — highlighted when > 0 -->
                 <Link
                     href="/admin/status"
                     class="group rounded-xl border p-5 transition-colors"
@@ -114,7 +114,7 @@ if (isOperator) {
             </div>
 
             <div class="grid flex-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                <!-- Sync-Status + letzte Aktivität -->
+                <!-- Sync status + last activity -->
                 <section class="flex flex-col gap-4 rounded-xl border border-sidebar-border/70 bg-card p-5 dark:border-sidebar-border">
                     <div>
                         <h2 class="font-display text-lg font-bold">Sync-Status</h2>
@@ -136,7 +136,7 @@ if (isOperator) {
                     </div>
                 </section>
 
-                <!-- Letzte Aktivität -->
+                <!-- Last activity -->
                 <section class="flex flex-col rounded-xl border border-sidebar-border/70 bg-card p-5 dark:border-sidebar-border">
                     <h2 class="font-display text-lg font-bold">Zuletzt synchronisiert</h2>
                     <div v-if="recent.length" class="mt-3 flex flex-col divide-y divide-sidebar-border/50">
@@ -157,7 +157,7 @@ if (isOperator) {
                 </section>
             </div>
 
-            <!-- Sekundäre Kennzahlen -->
+            <!-- Secondary metrics -->
             <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <div class="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-card px-4 py-3 dark:border-sidebar-border">
                     <Layers class="size-5 text-muted-foreground" :stroke-width="1.75" />

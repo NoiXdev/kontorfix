@@ -19,7 +19,7 @@ class SyncPackage implements ShouldQueue
 {
     use Queueable;
 
-    /** Transiente Fehler (Netzwerk, git timeout) werden erneut versucht. */
+    /** Transient errors (network, git timeout) are retried. */
     public int $tries = 3;
 
     public function __construct(public Package $package) {}
@@ -41,7 +41,7 @@ class SyncPackage implements ShouldQueue
         if ($this->package->repository_url === null) {
             $this->markFailed('Package has no repository_url configured.');
 
-            return; // Konfigurationsfehler — kein Retry sinnvoll
+            return; // Configuration error — retrying makes no sense
         }
 
         $this->package->update(['sync_status' => SyncStatus::Syncing]);
@@ -55,13 +55,13 @@ class SyncPackage implements ShouldQueue
                 try {
                     $normalized = $parser->normalize($tag);
                 } catch (UnexpectedValueException) {
-                    continue; // kein Versions-Tag
+                    continue; // not a version tag
                 }
 
                 try {
                     $composerJson = json_decode($repo->fileAtRef($tag, 'composer.json'), true);
                 } catch (Throwable) {
-                    continue; // Tag ohne composer.json — überspringen, nicht den ganzen Sync abbrechen
+                    continue; // Tag without composer.json — skip it, don't abort the whole sync
                 }
 
                 if (! is_array($composerJson)) {
@@ -74,7 +74,7 @@ class SyncPackage implements ShouldQueue
                         'version_pretty' => $tag,
                         'source_reference' => $repo->commitFor($tag),
                         'metadata' => $composerJson,
-                        'released_at' => $repo->committedAt($tag), // stabiles Commit-Datum, kein now()
+                        'released_at' => $repo->committedAt($tag), // stable commit date, not now()
                     ],
                 );
             }
@@ -88,10 +88,11 @@ class SyncPackage implements ShouldQueue
 
             PackageSynced::dispatch($this->package);
         } catch (Throwable $e) {
-            // In der DB sichtbar machen UND weiterwerfen, damit die Queue transiente
-            // Fehler erneut versucht (bei Erfolg überschreibt Synced den Failed-Status).
-            // Das PackageSyncFailed-Event feuert erst im failed()-Hook nach dem finalen
-            // Fehlschlag — sonst würde ein transienter Fehler pro Retry Webhook-Spam auslösen.
+            // Make it visible in the DB AND rethrow, so the queue retries transient
+            // errors (on success, Synced overwrites the Failed status).
+            // The PackageSyncFailed event only fires in the failed() hook after the
+            // final failure — otherwise a transient error would trigger webhook spam
+            // on every retry.
             $this->markFailed($e->getMessage());
 
             throw $e;
@@ -100,7 +101,7 @@ class SyncPackage implements ShouldQueue
 
     public function failed(Throwable $e): void
     {
-        // Erst nach Ausschöpfen aller Retries — ein einziges sync.failed-Event.
+        // Only after exhausting all retries — a single sync.failed event.
         PackageSyncFailed::dispatch($this->package, $e->getMessage());
     }
 
@@ -112,7 +113,7 @@ class SyncPackage implements ShouldQueue
         ]);
     }
 
-    /** Description der höchsten Semver-Version (nicht nach Sync-Zeit sortiert). */
+    /** Description of the highest semver version (not sorted by sync time). */
     private function latestDescription(): ?string
     {
         $versions = $this->package->versions()->get();

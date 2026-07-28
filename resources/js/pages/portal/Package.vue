@@ -51,7 +51,7 @@ async function copyInstall() {
         copied.value = true;
         setTimeout(() => (copied.value = false), 2000);
     } catch {
-        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Befehl ist markierbar.
+        // Clipboard API not available (insecure context) — the command can be selected manually.
         copied.value = false;
     }
 }

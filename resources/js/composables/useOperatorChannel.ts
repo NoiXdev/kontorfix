@@ -18,7 +18,7 @@ export function useOperatorChannel(handlers: {
             ch?.listen('.package.synced', (e: PackagePayload) => handlers.onSynced?.(e));
             ch?.listen('.package.sync_failed', (e: PackagePayload) => handlers.onFailed?.(e));
         } catch {
-            /* WS nicht verfügbar → still ignorieren */
+            /* WS not available → silently ignore */
         }
     });
 

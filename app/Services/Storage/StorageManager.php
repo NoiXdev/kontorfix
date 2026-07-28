@@ -20,8 +20,8 @@ class StorageManager
     }
 
     /**
-     * Baut das Flysystem-Config-Array aus einer (auch ungespeicherten) Setting —
-     * so lässt sich eine geplante Konfiguration testen, bevor sie persistiert wird.
+     * Builds the Flysystem config array from a (possibly unsaved) setting —
+     * this allows testing a planned configuration before it is persisted.
      *
      * @return array<string,mixed>
      */
@@ -55,7 +55,7 @@ class StorageManager
     }
 
     /**
-     * Schreibt/liest/löscht eine Probedatei auf einer beliebigen Disk-Config.
+     * Writes/reads/deletes a probe file on an arbitrary disk config.
      *
      * @param  array<string,mixed>  $config
      * @return array{ok:bool,message:string}
@@ -74,17 +74,17 @@ class StorageManager
 
                 return ['ok' => $ok, 'message' => $ok ? 'Verbindung erfolgreich.' : 'Schreib-/Leseprobe fehlgeschlagen.'];
             } finally {
-                // Probedatei auch bei Teilfehler entfernen, keine Orphans.
+                // Remove the probe file even on partial failure, no orphans.
                 try {
                     $disk->delete($probe);
                 } catch (Throwable) {
-                    // ignorieren
+                    // ignore
                 }
             }
         } catch (Throwable $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         } finally {
-            // Nach dem Test die reguläre (gespeicherte) Config wiederherstellen.
+            // Restore the regular (persisted) config after the test.
             config(['filesystems.disks.artifacts' => $this->diskConfig()]);
             Storage::forgetDisk('artifacts');
         }

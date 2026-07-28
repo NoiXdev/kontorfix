@@ -47,7 +47,7 @@ it('is idempotent: sync twice fetches instead of recloning', function () {
     $repo = new GitRepository('file://'.$fixture, $key);
     $repo->sync();
 
-    // neuen Tag hinzufügen, erneut syncen
+    // add a new tag, sync again
     Process::path($fixture)
         ->run('git tag v1.2.0')->throw();
     $repo->sync();
@@ -69,8 +69,8 @@ it('does not let a malicious ref inject git options', function () {
     $repo = new GitRepository('file://'.FixtureRepo::make(), 'test-pkg-'.uniqid());
     $repo->sync();
 
-    // Ein Tag/Ref, der wie eine git-Option aussieht, darf keine Datei schreiben,
-    // sondern muss als (ungültiger) Objektname scheitern.
+    // A tag/ref that looks like a git option must not be able to write a file,
+    // it must instead fail as an (invalid) object name.
     $evil = '/tmp/kfx-pwned-'.uniqid().'.zip';
     expect(fn () => $repo->archiveZip("--output={$evil}"))->toThrow(RuntimeException::class);
     expect(file_exists($evil))->toBeFalse();
@@ -84,6 +84,6 @@ it('does not leave the tempnam stub behind when archiving', function () {
     $zip = $repo->archiveZip('v1.0.0');
     $stubsAfter = array_filter(glob(sys_get_temp_dir().'/kfx-dist-*'), fn ($f) => ! str_ends_with($f, '.zip'));
 
-    expect($stubsAfter)->toBe($stubsBefore); // kein neuer Stub durch diesen Aufruf
+    expect($stubsAfter)->toBe($stubsBefore); // no new stub created by this call
     unlink($zip);
 });

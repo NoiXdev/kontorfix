@@ -1,9 +1,9 @@
 <?php
 
 // tests/Feature/Registry/NpmPublishAuthorizationTest.php
-// Absicherung gegen Supply-Chain-Injection über den npm-Publish-Pfad (Finding C1):
-// Ein org-fremder Publish-Token darf NICHT in eine öffentliche Registry publishen,
-// nur weil die Registry oeffentlich lesbar ist. publishBody() ist globaler Helfer.
+// Protection against supply-chain injection via the npm publish path (Finding C1):
+// A publish token from a foreign org must NOT be able to publish to a public registry
+// just because the registry is publicly readable. publishBody() is a global helper.
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Models\Group;
@@ -15,13 +15,13 @@ use Illuminate\Support\Facades\Storage;
 it('blocks a foreign-org publish token from publishing to a public registry', function () {
     Storage::fake('artifacts');
 
-    // Org A: oeffentliche Registry mit einem Paket.
+    // Org A: public registry with one package.
     $orgA = Organization::factory()->create();
     $group = Group::factory()->for($orgA)->create(['slug' => 'orga-public', 'public' => true]);
     $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
-    // Org B: eigener, org-weiter Publish-Token (group_id = null).
+    // Org B: its own org-wide publish token (group_id = null).
     $orgB = Organization::factory()->create();
     [, $evil] = RegistryToken::issue($orgB, 'evil', null, TokenAbility::Publish);
 
@@ -29,7 +29,7 @@ it('blocks a foreign-org publish token from publishing to a public registry', fu
         ->putJson('/r/orga-public/leftpad', publishBody('leftpad', '9.9.9', 'leftpad-9.9.9.tgz', 'evil-bytes'))
         ->assertForbidden();
 
-    // Kein Seiteneffekt: weder Version noch Tarball noch dist-tag-Ueberschreibung.
+    // No side effect: no version, no tarball, no dist-tag override.
     expect($pkg->fresh()->versions()->count())->toBe(0)
         ->and($pkg->fresh()->dist_tags['latest'] ?? null)->not->toBe('9.9.9');
     Storage::disk('artifacts')->assertMissing("tarballs/{$pkg->id}/leftpad-9.9.9.tgz");
@@ -43,8 +43,8 @@ it('still allows a legitimate same-org publish token to publish to the public re
     $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
-    // Token gehoert zur Ziel-Group (bzw. deren Org): publishHeaderFor() gibt einen
-    // Publish-Token fuer group->organization mit group_id = group aus.
+    // Token belongs to the target group (or rather its org): publishHeaderFor() issues
+    // a publish token for group->organization with group_id = group.
     $this->withHeaders(publishHeaderFor($group))
         ->putJson('/r/orga-public/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'ok-bytes'))
         ->assertOk();
@@ -61,6 +61,6 @@ it('still allows anonymous read of the public registry (read short-circuit uncha
     $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
-    // Anonymes GET auf das packument der oeffentlichen Registry bleibt erlaubt.
+    // Anonymous GET on the packument of the public registry remains allowed.
     $this->getJson('/r/orga-public/leftpad')->assertOk();
 });

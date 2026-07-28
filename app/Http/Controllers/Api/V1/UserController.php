@@ -34,7 +34,7 @@ class UserController extends Controller
         $validated = $request->validated();
         $isRobot = ($validated['account_type'] ?? 'human') === AccountType::Robot->value;
 
-        // Robots haben kein Passwort; Menschen ohne Passwort erhalten ein Zufalls-Passwort.
+        // Robots have no password; humans without a password get a random password.
         if ($isRobot) {
             $validated['password'] = null;
         } elseif (empty($validated['password'])) {

@@ -27,8 +27,8 @@ class WebhookController extends Controller
             'events' => $data['events'],
         ]);
 
-        // Frisch von der DB laden: Default-Werte (z. B. `enabled`) werden sonst
-        // in der Resource nicht sichtbar, dieselbe Problematik wie bei UUID-Defaults.
+        // Reload fresh from the DB: otherwise default values (e.g. `enabled`)
+        // wouldn't be visible in the resource, the same issue as with UUID defaults.
         $webhook->refresh();
 
         return (new WebhookResource($webhook))->response()->setStatusCode(201);

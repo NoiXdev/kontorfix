@@ -35,7 +35,7 @@ it('returns 401 without token and 404 for unassigned packages', function () {
 
     $this->getJson('/r/kadenz/packages.json')->assertUnauthorized();
     $this->withHeaders(tokenHeaderFor($group))
-        ->getJson('/r/kadenz/p2/acme/secret.json')->assertNotFound(); // nie 403: kein Leak, ob es das Paket gibt
+        ->getJson('/r/kadenz/p2/acme/secret.json')->assertNotFound(); // never 403: no leak of whether the package exists
 });
 
 it('allows anonymous access to public groups', function () {
@@ -52,7 +52,7 @@ it('returns 404 (not 401) when a valid token has no access to the group', functi
     $pkg = Package::factory()->create(['name' => 'acme/demo']);
     $victim->packages()->attach($pkg);
 
-    // Token einer fremden Gruppe/Org: authentifiziert, aber ohne Zugriff → 404, kein 401.
+    // Token from a different group/org: authenticated, but without access → 404, not 401.
     $attacker = Group::factory()->for(Organization::factory())->create(['slug' => 'attacker']);
 
     $this->withHeaders(tokenHeaderFor($attacker))

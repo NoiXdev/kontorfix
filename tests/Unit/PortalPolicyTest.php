@@ -16,9 +16,9 @@ it('lets a member view and manage only their own org resources', function () {
 
     $ownGroup = Group::factory()->for($orgA)->create();
     $otherGroup = Group::factory()->for($orgB)->create();
-    // Persönliches Token des Members: löschbar.
+    // Member's personal token: deletable.
     $ownToken = RegistryToken::factory()->for($orgA)->create(['user_id' => $member->id]);
-    // Org-geteiltes Token (ohne Besitzer): für Member NICHT löschbar.
+    // Org-shared token (no owner): NOT deletable for a member.
     $sharedToken = RegistryToken::factory()->for($orgA)->create(['user_id' => null]);
     $otherToken = RegistryToken::factory()->for($orgB)->create();
 

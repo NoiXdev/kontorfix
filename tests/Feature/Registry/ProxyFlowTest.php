@@ -22,16 +22,16 @@ it('completes the composer proxy flow: metadata -> rewritten dist -> cached down
     ]);
     $headers = tokenHeaderFor($group);
 
-    // 1. p2-Metadaten proxien und die umgeschriebene Dist-URL lesen.
+    // 1. Proxy the p2 metadata and read the rewritten dist URL.
     $meta = $this->withHeaders($headers)->getJson('/r/kadenz/p2/acme/demo.json')->assertOk()->json();
     $version = MetadataMinifier::expand($meta['packages']['acme/demo'])[0];
     $distPath = parse_url($version['dist']['url'], PHP_URL_PATH);
     expect($distPath)->toContain("/r/kadenz/proxy/composer/{$up->id}/acme/demo/");
 
-    // 2. Über die Proxy-Route laden (cache-on-first).
+    // 2. Load via the proxy route (cache-on-first).
     $this->withHeaders($headers)->get($distPath)->assertOk()->assertHeader('content-type', 'application/zip');
 
-    // 3. Zweiter Zug aus dem Cache — kein weiterer CDN-Aufruf.
+    // 3. Second pull from the cache — no further CDN call.
     Http::fake();
     $this->withHeaders($headers)->get($distPath)->assertOk();
     Http::assertNothingSent();
@@ -79,22 +79,22 @@ it('enforces strict mode end-to-end: metadata and download both 404 until allowl
 });
 
 /*
- * Manuelle Proxy-Smoke-Tests (2026-07-08), gegen echte Upstreams durch den laufenden
- * DDEV-Server verifiziert:
+ * Manual proxy smoke tests (2026-07-08), verified against real upstreams through the
+ * running DDEV server:
  *
- * Composer (packagist.org als Proxy-Upstream der Gruppe "proxytest"):
+ * Composer (packagist.org as the proxy upstream of the "proxytest" group):
  *   composer.json: repositories=[{"type":"composer","url":".../r/proxytest"},{"packagist.org":false}]
  *   composer require psr/log
  *     -> Downloading psr/log (3.0.2) / Installing / Extracting archive
- *   Ablauf: packagist-Metadaten proxiert -> dist-URL auf unsere /proxy/composer/-Route
- *   umgeschrieben -> Artefakt von GitHub geladen (302-Redirect zu codeload gefolgt und
- *   re-validiert) -> auf artifacts-Disk gecacht -> ausgeliefert.
+ *   Flow: packagist metadata proxied -> dist URL rewritten to our /proxy/composer/ route
+ *   -> artifact loaded from GitHub (302 redirect to codeload followed and
+ *   re-validated) -> cached on the artifacts disk -> served.
  *
- * npm (registry.npmjs.org als Proxy-Upstream):
+ * npm (registry.npmjs.org as the proxy upstream):
  *   .npmrc: registry=.../r/proxytest/ + _authToken
  *   npm install is-odd  ->  added 2 packages (is-odd@3.0.1 + is-number)
- *   Ablauf: packument proxiert -> dist.tarball auf /proxy/npm/-Route umgeschrieben ->
- *   Tarball von npmjs geladen, gecacht, entpackt.
+ *   Flow: packument proxied -> dist.tarball rewritten to the /proxy/npm/ route ->
+ *   tarball loaded from npmjs, cached, unpacked.
  *
- * Beide Male liefert der zweite Zug aus dem lokalen Cache (kein erneuter Upstream-Call).
+ * In both cases the second pull is served from the local cache (no further upstream call).
  */

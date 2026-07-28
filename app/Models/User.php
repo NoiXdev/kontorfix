@@ -31,9 +31,9 @@ class User extends Authenticatable implements PasskeyUser
     use HasFactory, HasUuids, Notifiable, PasskeyAuthenticatable;
 
     /**
-     * Default-Werte für neue (nicht aus der DB geladene) Model-Instanzen.
-     * Hält den In-Memory-Zustand mit dem DB-Default von `account_type` synchron,
-     * da UUID-Inserts keine defaulteten Spalten per RETURNING zurückliefern.
+     * Default values for new (not yet loaded from the DB) model instances.
+     * Keeps the in-memory state in sync with the DB default of `account_type`,
+     * since UUID inserts don't return defaulted columns via RETURNING.
      *
      * @var array<string, mixed>
      */
@@ -131,7 +131,7 @@ class User extends Authenticatable implements PasskeyUser
         return $this->two_factor_recovery_codes ?? [];
     }
 
-    /** Verbraucht (entfernt) genau einen Recovery-Code und speichert. */
+    /** Consumes (removes) exactly one recovery code and saves. */
     public function replaceRecoveryCode(string $code): void
     {
         $this->forceFill([

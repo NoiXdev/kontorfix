@@ -27,10 +27,10 @@ it('rejects an invalid or duplicate hostname', function () {
     $group = Group::factory()->create();
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
-    // Duplikat
+    // Duplicate
     $this->actingAs($admin)->post('/admin/domains', ['group_id' => $group->id, 'hostname' => 'packages.kadenz.de'])
         ->assertSessionHasErrors('hostname');
-    // ungültiges Format (kein FQDN, mit Schema/Slash)
+    // invalid format (not an FQDN, with scheme/slash)
     $this->actingAs($admin)->post('/admin/domains', ['group_id' => $group->id, 'hostname' => 'https://x/y'])
         ->assertSessionHasErrors('hostname');
     $this->actingAs($admin)->post('/admin/domains', ['group_id' => $group->id, 'hostname' => 'not a host'])

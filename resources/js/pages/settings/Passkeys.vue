@@ -44,7 +44,7 @@ const addPasskey = async () => {
         name.value = '';
         router.reload({ only: ['passkeys'] });
     } catch (e) {
-        // Nutzer bricht ab oder der Browser lehnt ab.
+        // User cancels or the browser rejects it.
         error.value = e instanceof Error && e.name === 'NotAllowedError' ? 'Registrierung abgebrochen.' : 'Passkey konnte nicht registriert werden.';
     } finally {
         registering.value = false;

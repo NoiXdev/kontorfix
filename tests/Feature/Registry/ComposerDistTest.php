@@ -31,7 +31,7 @@ it('serves the cached zip on the second request without rebuilding', function ()
     $headers = tokenHeaderFor($group);
 
     $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
-    // Zweiter Request: dist_path ist gesetzt, kein Rebuild nötig
+    // Second request: dist_path is set, no rebuild needed
     $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
     $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
@@ -52,7 +52,7 @@ it('rebuilds the dist when a tag was force-pushed to a new commit', function () 
     $oldSha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$oldSha}.zip");
 
-    // Echter Force-Push: gleicher Tag, neuer Commit.
+    // Real force-push: same tag, new commit.
     $git = fn (string $cmd) => Process::path($fixture)->run($cmd)->throw();
     $git('git -c user.email=t@t -c user.name=t commit --allow-empty -m forcepush');
     $git('git tag -f v1.0.0');
@@ -63,7 +63,7 @@ it('rebuilds the dist when a tag was force-pushed to a new commit', function () 
 
     $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
-    // Neuer SHA-Pfad wird gebaut und ausgeliefert — keine stale Auslieferung.
+    // New SHA path is built and served — no stale delivery.
     Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$newSha}.zip");
     expect($pkg->versions()->where('version', '1.0.0.0')->first()->dist_path)
         ->toBe("dists/{$pkg->id}/{$newSha}.zip");
@@ -73,7 +73,7 @@ it('denies dist download without access', function () {
     Storage::fake('artifacts');
     $pkg = Package::factory()->create(['name' => 'acme/demo']);
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    // Paket NICHT zugewiesen
+    // Package NOT assigned
     $this->withHeaders(tokenHeaderFor($group))
         ->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertNotFound();
 });

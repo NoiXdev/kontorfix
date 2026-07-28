@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Hash;
 uses(RefreshDatabase::class);
 
 it('blocks robot accounts from interactive password login', function () {
-    // Robot mit gesetztem Passwort (Kante): darf sich trotzdem nicht interaktiv anmelden.
+    // Robot with a password set (edge case): must still not be able to log in interactively.
     $robot = User::factory()->robot()->create([
         'email' => 'bot@example.test',
         'password' => Hash::make('secret-password'),

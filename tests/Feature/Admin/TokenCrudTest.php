@@ -79,11 +79,11 @@ it('flashes the plaintext token only for a single request', function () {
         ->post('/admin/tokens', ['name' => 'once', 'organization_id' => $org->id])
         ->assertSessionHas('plainTextToken');
 
-    // Erster GET = Redirect-Ziel: zeigt den Klartext und verbraucht das Flash.
+    // First GET = redirect target: shows the plaintext and consumes the flash.
     $this->actingAs($admin)->get('/admin/tokens')
         ->assertInertia(fn ($page) => $page->whereNot('flash.plainTextToken', null)->etc());
 
-    // Zweiter GET: der Klartext darf nicht erneut auftauchen.
+    // Second GET: the plaintext must not appear again.
     $this->actingAs($admin)->get('/admin/tokens')
         ->assertInertia(fn ($page) => $page->where('flash.plainTextToken', null)->etc());
 });

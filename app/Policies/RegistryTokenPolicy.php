@@ -14,13 +14,13 @@ class RegistryTokenPolicy
             return true;
         }
 
-        // Fremde Org niemals.
+        // Never a different org.
         if ($user->organization_id === null || $token->organization_id !== $user->organization_id) {
             return false;
         }
 
-        // Persönliche Tokens nur durch den Besitzer; org-geteilte (ohne Besitzer)
-        // nur durch Org-Admin/Maintainer.
+        // Personal tokens only by the owner; org-shared (without an owner)
+        // only by org admin/maintainer.
         return $token->user_id === null
             ? in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)
             : $token->user_id === $user->id;

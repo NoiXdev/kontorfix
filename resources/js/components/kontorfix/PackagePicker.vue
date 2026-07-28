@@ -103,8 +103,8 @@ function cancelCreate() {
     createErrors.value = {};
 }
 
-// Laravel erwartet den entschlüsselten CSRF-Token als X-XSRF-TOKEN-Header
-// (analog zu dem, was Inertias axios automatisch sendet).
+// Laravel expects the decrypted CSRF token as an X-XSRF-TOKEN header
+// (analogous to what Inertia's axios sends automatically).
 function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
     return match ? decodeURIComponent(match[1]) : '';

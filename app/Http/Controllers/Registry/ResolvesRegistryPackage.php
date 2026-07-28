@@ -40,8 +40,8 @@ trait ResolvesRegistryPackage
     }
 
     /**
-     * Pfad-Präfix für Metadaten-URLs (z.B. metadata-url in packages.json): bei
-     * Custom-Domain leer (Registry liegt an der Host-Wurzel), sonst /r/{slug}.
+     * Path prefix for metadata URLs (e.g. metadata-url in packages.json): empty
+     * for a custom domain (registry sits at the host root), otherwise /r/{slug}.
      */
     protected function registryPathPrefix(Request $request, Group $group): string
     {
@@ -52,15 +52,15 @@ trait ResolvesRegistryPackage
     {
         $package = $this->findLocal($request, $group, $type, $fullName);
         if ($package === null) {
-            abort(404); // bewusst kein 403 — Existenz nicht leaken
+            abort(404); // deliberately not 403 — don't leak existence
         }
 
         return $package;
     }
 
     /**
-     * Wie findAccessible(), bricht aber nicht ab — für Aufrufer, die bei einem Miss
-     * lokal noch einen Upstream-Fallback versuchen wollen (Composer-Fallthrough).
+     * Like findAccessible(), but doesn't abort — for callers that want to still
+     * try an upstream fallback locally on a miss (Composer fallthrough).
      */
     protected function findLocal(Request $request, Group $group, PackageType $type, string $fullName): ?Package
     {
@@ -75,9 +75,9 @@ trait ResolvesRegistryPackage
     }
 
     /**
-     * Ob ein Paket dieses Namens überhaupt lokal existiert (unabhängig von Zugriff/Gruppe).
-     * Verhindert, dass ein privat gehosteter Name beim Upstream-Fallthrough zu packagist/npmjs
-     * durchsickert (Dependency-Confusion-Schutz).
+     * Whether a package with this name exists locally at all (regardless of access/group).
+     * Prevents a privately hosted name from leaking to packagist/npmjs during
+     * the upstream fallthrough (dependency confusion protection).
      */
     protected function packageExistsLocally(PackageType $type, string $fullName): bool
     {

@@ -21,13 +21,13 @@ class AuthenticateApiKey
             return response()->json(['message' => 'Ungültiger oder fehlender API-Key.'], 401);
         }
 
-        // read-Keys dürfen ausschließlich lesen.
+        // read keys may only read.
         if ($key->permission === ApiKeyPermission::Read
             && ! in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)) {
             return response()->json(['message' => 'Dieser API-Key hat nur Leserechte.'], 403);
         }
 
-        // Besitzer als authentifizierten Nutzer setzen → operator/role-Gates + Policies greifen.
+        // Set the owner as the authenticated user → operator/role gates + policies take effect.
         Auth::setUser($key->user);
         $request->setUserResolver(fn () => $key->user);
         $request->attributes->set('apiKey', $key);
@@ -36,9 +36,9 @@ class AuthenticateApiKey
             $key->forceFill(['last_used_at' => now()])->saveQuietly();
         }
 
-        // Pro-Key-Rate-Limit — bewusst hier (nach Key-Auflösung), da middlewarePriority
-        // ein vorgelagertes throttle:api immer vor diese Middleware sortieren würde und
-        // dann nur pro IP statt pro Key drosseln könnte (Global Constraint: 120/min pro Key).
+        // Per-key rate limit — deliberately placed here (after key resolution), because
+        // middlewarePriority would always sort an upstream throttle:api before this
+        // middleware, which would then only throttle per IP instead of per key (global constraint: 120/min per key).
         $limiterKey = 'apikey:'.$key->getKey();
         if (RateLimiter::tooManyAttempts($limiterKey, 120)) {
             return response()->json(

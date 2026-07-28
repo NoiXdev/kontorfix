@@ -18,23 +18,23 @@ it('fully isolates two customers across list, detail, snippets and tokens', func
     $pkg = Package::factory()->create(['name' => 'acme/widget']);
     $groupA->packages()->attach($pkg);
 
-    // Übersicht: nur eigene Registry
+    // Overview: only the member's own registry
     $this->actingAs($memberA)->get('/portal')
         ->assertInertia(fn ($p) => $p->has('registries', 1)->where('registries.0.slug', 'acme'));
 
-    // Detail eigen: Snippets + Paket sichtbar
+    // Own detail: snippets + package visible
     $this->actingAs($memberA)->get("/portal/registries/{$groupA->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->where('snippets.npm', fn ($v) => str_contains($v, '/r/acme/'))->has('packages', 1));
 
-    // Detail fremd: verboten
+    // Foreign detail: forbidden
     $this->actingAs($memberA)->get("/portal/registries/{$groupB->id}")->assertForbidden();
 
-    // Token für eigene Registry: ok
+    // Token for own registry: ok
     $this->actingAs($memberA)->from('/portal')
         ->post('/portal/tokens', ['name' => 'CI', 'group_id' => $groupA->id])->assertRedirect('/portal');
 
-    // Token für fremde Registry: abgelehnt
+    // Token for foreign registry: rejected
     $this->actingAs($memberA)->from('/portal')
         ->post('/portal/tokens', ['name' => 'evil', 'group_id' => $groupB->id])->assertSessionHasErrors('group_id');
 });

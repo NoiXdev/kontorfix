@@ -16,7 +16,7 @@ class SetupSnippetBuilder
         $base = $this->url->base($group);
         $host = $this->url->host($group);
         $prefix = $this->url->pathPrefix($group);
-        // npm-Zeilen adressieren den Host inkl. Pfad-Präfix; mit Slash abgeschlossen.
+        // npm lines address the host including the path prefix; terminated with a slash.
         $npmBase = $host.$prefix.'/';
 
         return [

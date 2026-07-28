@@ -16,13 +16,13 @@ it('read key is blocked on every mutating verb', function () {
 
     $this->withToken($read)->postJson('/api/v1/groups', [])->assertForbidden();
 
-    // Für {group}-Routen mit einer NICHT existierenden ID greift Laravels implizites
-    // Route-Model-Binding (SubstituteBindings, Teil der globalen `api`-Gruppe) vor dem
-    // read/write-Gate der `api.auth`-Middleware — verifiziert per Debug-Request: eine
-    // reale, existierende Group liefert mit demselben read-Key korrekt 403 (Gate greift),
-    // erst bei nicht auflösbarer ID kommt die ModelNotFoundException (404) zuerst durch.
-    // Kein Sicherheitsproblem (keine Mutation, keine Informationslecks), aber ein reales
-    // Verhalten, das hier dokumentiert statt weggemockt wird.
+    // For {group} routes with a NON-existent ID, Laravel's implicit
+    // route-model-binding (SubstituteBindings, part of the global `api` group) kicks in before
+    // the read/write gate of the `api.auth` middleware — verified via a debug request: a
+    // real, existing group correctly returns 403 with the same read key (the gate applies),
+    // only for an unresolvable ID does the ModelNotFoundException (404) come through first.
+    // Not a security issue (no mutation, no information leaks), but real
+    // behavior that is documented here rather than mocked away.
     $this->withToken($read)->putJson('/api/v1/groups/x', [])->assertNotFound();
     $this->withToken($read)->deleteJson('/api/v1/groups/x')->assertNotFound();
 });
@@ -53,8 +53,8 @@ it('rate limits per key, not per ip', function () {
     foreach (range(1, 120) as $_) {
         $this->withToken($a)->getJson('/api/v1/me');
     }
-    // Key A erschöpft…
+    // Key A exhausted…
     $this->withToken($a)->getJson('/api/v1/me')->assertStatus(429);
-    // …Key B (gleiche IP) ist unbetroffen.
+    // …Key B (same IP) is unaffected.
     $this->withToken($b)->getJson('/api/v1/me')->assertOk();
 });

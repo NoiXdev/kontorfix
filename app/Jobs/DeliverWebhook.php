@@ -27,11 +27,12 @@ class DeliverWebhook implements ShouldQueue
 
     public function handle(): void
     {
-        // SSRF-Schutz: Ziel-URL erst unmittelbar vor dem Versand prüfen (auch bei
-        // nachträglich geänderter Konfiguration) — sonst wäre status_code/success
-        // der Delivery ein Orakel für internen Port-/Service-Scan (z.B. 169.254.169.254
-        // oder [::1]). Kein Retry: einmalig als blockiert protokollieren und beenden,
-        // statt die Exception zu werfen, die sonst einen Retry-Sturm auslösen würde.
+        // SSRF protection: check the target URL right before sending (even if the
+        // configuration was changed afterwards) — otherwise the delivery's
+        // status_code/success would become an oracle for scanning internal ports/
+        // services (e.g. 169.254.169.254 or [::1]). No retry: log as blocked once
+        // and stop, instead of throwing the exception, which would otherwise trigger
+        // a retry storm.
         if (! UrlSafety::isSafeResolving($this->webhook->url)) {
             $this->webhook->deliveries()->save(new WebhookDelivery([
                 'event' => $this->event,
@@ -52,8 +53,8 @@ class DeliverWebhook implements ShouldQueue
             $headers['X-Kontorfix-Signature'] = 'sha256='.hash_hmac('sha256', (string) $body, $this->webhook->secret);
         }
 
-        // Keine Redirects folgen — der signierte POST darf nur den konfigurierten Host
-        // treffen, nicht via 302 auf eine andere (evtl. interne) Adresse umgelenkt werden.
+        // Do not follow redirects — the signed POST may only hit the configured host,
+        // not be redirected via 302 to another (possibly internal) address.
         $response = Http::timeout(15)->withoutRedirecting()->withHeaders($headers)
             ->withBody((string) $body, 'application/json')->post($this->webhook->url);
 

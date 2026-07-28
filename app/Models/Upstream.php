@@ -54,9 +54,9 @@ class Upstream extends Model
     }
 
     /**
-     * Ob dieses Paket über diesen Upstream ausgeliefert werden darf. Im Strict-Modus
-     * nur, wenn es auf der Allowlist steht (Schutz gegen Dependency Confusion). Diese
-     * eine Stelle gilt für Metadaten UND Artefakt-Download.
+     * Whether this package may be served via this upstream. In strict mode
+     * only if it's on the allowlist (protection against dependency confusion).
+     * This single place governs both metadata AND artifact download.
      */
     public function allowsPackage(string $name): bool
     {

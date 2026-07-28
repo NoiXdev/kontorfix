@@ -31,7 +31,7 @@ it('records strict-mode allowlisted package names per upstream', function () {
 it('encrypts the auth token at rest', function () {
     $up = Upstream::factory()->create(['auth_token' => 'plaintext-secret']);
 
-    // Der Rohwert in der DB ist verschlüsselt, das Model liefert Klartext.
+    // The raw value in the DB is encrypted, the model returns plaintext.
     $raw = DB::table('upstreams')->where('id', $up->id)->value('auth_token');
     expect($raw)->not->toBe('plaintext-secret')
         ->and($up->fresh()->auth_token)->toBe('plaintext-secret');

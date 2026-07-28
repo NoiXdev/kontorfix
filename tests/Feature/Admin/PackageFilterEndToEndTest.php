@@ -13,7 +13,7 @@ beforeEach(function () {
 });
 
 it('applies combined filters and returns the expected subset', function () {
-    // q=acme + type=composer → nur acme/alpha
+    // q=acme + type=composer → only acme/alpha
     $this->actingAs($this->admin)->get('/admin/packages?q=acme&type=composer')
         ->assertInertia(fn ($p) => $p->has('packages.data', 1)->where('packages.data.0.name', 'acme/alpha'));
 
@@ -21,7 +21,7 @@ it('applies combined filters and returns the expected subset', function () {
     $this->actingAs($this->admin)->get('/admin/packages?status=synced')
         ->assertInertia(fn ($p) => $p->has('packages.data', 2));
 
-    // keine Filter → alle drei
+    // no filters → all three
     $this->actingAs($this->admin)->get('/admin/packages')
         ->assertInertia(fn ($p) => $p->has('packages.data', 3));
 });

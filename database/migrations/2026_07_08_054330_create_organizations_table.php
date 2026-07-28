@@ -15,7 +15,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->string('name');
             $table->string('slug')->unique();
-            $table->boolean('is_operator')->default(false); // Betreiber-Org
+            $table->boolean('is_operator')->default(false); // operator org
             $table->timestamps();
         });
 

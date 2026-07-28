@@ -14,7 +14,7 @@ class ComposerProxyService
     ) {}
 
     /**
-     * @return array<string, mixed>|null null wenn nicht gefunden oder (Strict-Modus) nicht erlaubt
+     * @return array<string, mixed>|null null if not found or (strict mode) not allowed
      */
     public function metadata(Group $group, Upstream $upstream, string $packageName, string $registryBaseUrl): ?array
     {
@@ -36,8 +36,8 @@ class ComposerProxyService
         $registryBaseUrl = rtrim($registryBaseUrl, '/');
 
         $rewritten = array_map(function (array $version) use ($upstream, $packageName, $registryBaseUrl): array {
-            // Source-only-Versionen (ohne dist) bekommen keinen fabrizierten Dist-Eintrag —
-            // sonst würde der Proxy-Download für ein nie existentes Archiv angefragt.
+            // Source-only versions (without dist) don't get a fabricated dist entry —
+            // otherwise the proxy download would be requested for an archive that never exists.
             if (! isset($version['dist']) || ! is_array($version['dist'])) {
                 return $version;
             }

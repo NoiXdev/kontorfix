@@ -54,8 +54,8 @@ class GitRepository
     }
 
     /**
-     * Committer-Datum des Refs als ISO-8601-String — stabil über Re-Syncs hinweg,
-     * anders als now().
+     * Committer date of the ref as an ISO-8601 string — stable across re-syncs,
+     * unlike now().
      */
     public function committedAt(string $ref): string
     {
@@ -64,14 +64,14 @@ class GitRepository
 
     public function fileAtRef(string $ref, string $path): string
     {
-        // --end-of-options verhindert, dass ein Ref/Pfad wie "--output=..." als git-Option
-        // interpretiert wird (Option-Injection aus einem bösartigen Upstream-Tag).
+        // --end-of-options prevents a ref/path like "--output=..." from being
+        // interpreted as a git option (option injection from a malicious upstream tag).
         return $this->run(['git', 'show', '--end-of-options', "{$ref}:{$path}"])->output();
     }
 
     /**
-     * Baut ein Zip-Archiv des Refs. Der Aufrufer ist für das Löschen der zurückgegebenen
-     * Datei verantwortlich.
+     * Builds a zip archive of the ref. The caller is responsible for deleting the
+     * returned file.
      */
     public function archiveZip(string $ref): string
     {
@@ -81,10 +81,10 @@ class GitRepository
         try {
             $this->run(['git', 'archive', '--format=zip', '-o', $zip, '--end-of-options', $ref]);
         } catch (Throwable $e) {
-            @unlink($zip); // git legt die Ausgabedatei vor der Ref-Prüfung an — bei Fehler wegräumen
+            @unlink($zip); // git creates the output file before the ref check — clean up on error
             throw $e;
         } finally {
-            @unlink($stub); // tempnam-Stub immer entfernen
+            @unlink($stub); // always remove the tempnam stub
         }
 
         return $zip;

@@ -11,8 +11,8 @@ import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
 
-// Nur echte Member sehen ausschließlich die Portal-Navigation. Fehlt/unbekannt die Rolle,
-// verhalten wir uns wie admin/maintainer, damit keine leere Nav entsteht.
+// Only actual members see exclusively the portal navigation. If the role is
+// missing/unknown, we behave like admin/maintainer so no empty nav results.
 const isMember = computed(() => page.props.auth.user?.role === 'member');
 const isAdmin = computed(() => page.props.auth.user?.role === 'admin');
 
@@ -21,14 +21,14 @@ interface NavSection {
     items: NavItem[];
 }
 
-// In thematische Sektionen gruppiert (statt einer langen flachen Liste).
+// Grouped into thematic sections (instead of one long flat list).
 const navSections = computed<NavSection[]>(() => {
-    // Kunden sehen ausschließlich das Portal.
+    // Customers see exclusively the portal.
     if (isMember.value) {
         return [{ label: 'Portal', items: [{ title: 'Registries', href: route('portal.registries.index'), icon: Boxes }] }];
     }
 
-    // Betreiber & Maintainer.
+    // Operators & maintainers.
     const sections: NavSection[] = [
         {
             label: 'Übersicht',
@@ -55,7 +55,7 @@ const navSections = computed<NavSection[]>(() => {
         },
     ];
 
-    // Nur Admins: sicherheits-/infrastrukturkritische Einstellungen (role:admin-Routen).
+    // Admins only: security-/infrastructure-critical settings (role:admin routes).
     if (isAdmin.value) {
         sections.push({
             label: 'Verwaltung',
@@ -86,7 +86,7 @@ const footerNavItems = computed<NavItem[]>(() => {
         },
     ];
 
-    // Horizon ist eine eigene SPA (kein Inertia) → als echter Browser-Link im Footer.
+    // Horizon is its own SPA (not Inertia) → as a real browser link in the footer.
     if (isAdmin.value) {
         items.unshift({
             title: 'Queue (Horizon)',

@@ -62,7 +62,7 @@ class HealthService
         try {
             $failed = DB::table('failed_jobs')->count();
         } catch (Throwable) {
-            // Tabelle fehlt evtl. — dann 0.
+            // Table might be missing — then 0.
         }
 
         try {

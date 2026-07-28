@@ -55,7 +55,7 @@ class OidcService
     }
 
     /**
-     * Verifiziert Signatur (JWKS/RS256) und Claims (iss, aud, exp via JWT::decode; nonce).
+     * Verifies signature (JWKS/RS256) and claims (iss, aud, exp via JWT::decode; nonce).
      *
      * @return array<string,mixed>
      */

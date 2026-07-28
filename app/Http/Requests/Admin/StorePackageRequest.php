@@ -18,8 +18,8 @@ class StorePackageRequest extends FormRequest
      */
     public function rules(): array
     {
-        // Namensformat je Typ: Composer ist immer vendor/name; npm ist ein bloßer
-        // Name oder @scope/name (scoped — der Normalfall).
+        // Name format per type: Composer is always vendor/name; npm is a plain
+        // name or @scope/name (scoped — the normal case).
         $nameRegex = $this->input('type') === PackageType::Npm->value
             ? '/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/'
             : '/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/';
@@ -33,8 +33,8 @@ class StorePackageRequest extends FormRequest
                 "regex:{$nameRegex}",
                 Rule::unique('packages')->where('type', $this->input('type')),
             ],
-            // Nur echte Git-Remotes über https/ssh — kein file:// oder gopher:// etc.,
-            // das sonst als SSRF-Fläche an den git-Subprozess weitergereicht würde.
+            // Only real Git remotes over https/ssh — no file:// or gopher:// etc.,
+            // which would otherwise be passed to the git subprocess as an SSRF surface.
             'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
             'group_ids' => ['array'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],

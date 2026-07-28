@@ -33,19 +33,19 @@ it('rejects creating an admin or maintainer in a customer org', function () {
         'name' => 'Y', 'email' => 'y@x.test', 'organization_id' => $cust->id, 'role' => 'maintainer', 'password' => 'geheim-1234',
     ])->assertSessionHasErrors('role');
 
-    // Member in Kunden-Org bleibt erlaubt
+    // Member in a customer org remains allowed
     $this->actingAs($this->operatorAdmin)->post('/admin/users', [
         'name' => 'Z', 'email' => 'z@x.test', 'organization_id' => $cust->id, 'role' => 'member', 'password' => 'geheim-1234',
     ])->assertSessionHasNoErrors();
 });
 
 it('refuses to demote the last operator admin via update', function () {
-    // operatorAdmin ist der einzige Admin der Operator-Org
+    // operatorAdmin is the only admin of the operator org
     $this->actingAs($this->operatorAdmin)->put("/admin/users/{$this->operatorAdmin->id}", ['role' => 'member'])
         ->assertSessionHasErrors('user');
     expect($this->operatorAdmin->fresh()->role)->toBe(UserRole::Admin);
 
-    // Mit einem zweiten Operator-Admin ist die Herabstufung erlaubt
+    // With a second operator admin, the demotion is allowed
     $second = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
     $this->actingAs($this->operatorAdmin)->put("/admin/users/{$second->id}", ['role' => 'member'])->assertRedirect();
     expect($second->fresh()->role)->toBe(UserRole::Member);

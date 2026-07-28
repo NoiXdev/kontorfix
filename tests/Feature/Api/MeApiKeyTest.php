@@ -16,7 +16,7 @@ it('lists only the owners keys', function () {
 
     $this->withToken($plain)->getJson('/api/v1/me/api-keys')
         ->assertOk()
-        ->assertJsonCount(2, 'data'); // mine + auth, nicht theirs
+        ->assertJsonCount(2, 'data'); // mine + auth, not theirs
 });
 
 it('read keys cannot create, write keys can', function () {

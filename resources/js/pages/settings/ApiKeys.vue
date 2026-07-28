@@ -46,7 +46,7 @@ async function copyKey() {
         keyCopied.value = true;
         setTimeout(() => (keyCopied.value = false), 2000);
     } catch {
-        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Key ist markierbar.
+        // Clipboard API not available (insecure context) — the key can be selected manually.
         keyCopied.value = false;
     }
 }

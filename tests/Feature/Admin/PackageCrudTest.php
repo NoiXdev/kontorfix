@@ -95,7 +95,7 @@ it('drops sync status injection on create (mass assignment guard)', function () 
             'sync_error' => 'x',
         ])->assertRedirect();
 
-    // Der injizierte Synced-Status darf nicht durchkommen — der Sync-Job setzt ihn.
+    // The injected synced status must not get through — the sync job sets it.
     expect(Package::where('name', 'acme/forged')->first()->sync_status->value)->toBe('pending');
 });
 
@@ -131,16 +131,16 @@ it('accepts a scoped npm package name but still requires vendor/name for compose
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
     $url = 'https://git.example.com/acme/demo.git';
 
-    // npm: scoped erlaubt
+    // npm: scoped name allowed
     $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/ui-kit', 'repository_url' => $url])
         ->assertRedirect()->assertSessionHasNoErrors();
-    // npm: bloßer Name erlaubt
+    // npm: bare name allowed
     $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => 'leftpad', 'repository_url' => $url])
         ->assertSessionHasNoErrors();
-    // composer: bloßer Name (ohne vendor/) abgelehnt
+    // composer: bare name (without vendor/) rejected
     $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'leftpad', 'repository_url' => $url])
         ->assertSessionHasErrors('name');
-    // npm: Großbuchstaben abgelehnt
+    // npm: uppercase letters rejected
     $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/UI-Kit', 'repository_url' => $url])
         ->assertSessionHasErrors('name');
 });

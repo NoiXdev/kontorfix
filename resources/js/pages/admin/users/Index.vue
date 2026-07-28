@@ -53,13 +53,13 @@ const form = useForm({
 function setMode(next: 'invite' | 'password') {
     mode.value = next;
     if (next === 'invite') {
-        // Passwort leeren, damit es im Einladungs-Modus nicht mitgesendet wird.
+        // Clear the password so it isn't sent along in invite mode.
         form.password = '';
     }
 }
 
 function submit() {
-    // Im Einladungs-Modus kein Passwort mitsenden, damit das Backend eine Einladung verschickt.
+    // Don't send a password in invite mode, so the backend sends an invitation.
     form.transform((data) => {
         if (mode.value === 'invite') {
             const payload = { ...data };

@@ -23,9 +23,9 @@ class UpdateStorageSettingRequest extends FormRequest
             'key' => ['required_if:driver,s3', 'nullable', 'string'],
             'region' => ['required_if:driver,s3', 'nullable', 'string'],
             'bucket' => ['required_if:driver,s3', 'nullable', 'string'],
-            // Bei S3 ist ein Secret Pflicht, SOLANGE noch keins gespeichert ist —
-            // sonst würde ein leeres Secret eine sofort funktionsunfähige Disk speichern.
-            // Ist bereits ein Secret hinterlegt, bedeutet „leer" weiterhin „behalten".
+            // For S3, a secret is required AS LONG AS none is stored yet —
+            // otherwise an empty secret would save an immediately non-functional disk.
+            // If a secret is already stored, "empty" still means "keep".
             'secret' => [
                 Rule::requiredIf(fn () => $this->input('driver') === 's3' && blank(StorageSetting::current()->secret)),
                 'nullable',

@@ -1,29 +1,28 @@
-# Sicherheit
+# Security
 
-Wir nehmen die Sicherheit von Kontorfix ernst. Danke, dass du Schwachstellen
-verantwortungsvoll meldest.
+We take the security of Kontorfix seriously. Thank you for reporting vulnerabilities
+responsibly.
 
-## Schwachstelle melden
+## Reporting a vulnerability
 
-Bitte melde Sicherheitslücken **vertraulich** per E-Mail an **security@noix.dev** —
-nicht über öffentliche GitHub-Issues.
+Please report security issues **privately** by email to **security@noix.dev** —
+not through public GitHub issues.
 
-Hilfreich für eine schnelle Bearbeitung:
+To help us respond quickly, please include:
 
-- eine Beschreibung der Schwachstelle und ihrer möglichen Auswirkung,
-- eine Schritt-für-Schritt-Anleitung zur Reproduktion (Proof of Concept),
-- betroffene Version/Commit und Umgebung.
+- a description of the vulnerability and its potential impact,
+- step-by-step reproduction instructions (proof of concept),
+- the affected version/commit and environment.
 
-## Ablauf
+## Process
 
-- **Erstantwort:** in der Regel innerhalb von 3 Werktagen.
-- Wir bestätigen den Eingang, prüfen den Bericht und halten dich über den Fortschritt
-  auf dem Laufenden.
-- Nach einem Fix stimmen wir eine koordinierte Veröffentlichung ab. Auf Wunsch nennen wir
-  dich als Finder·in.
+- **Initial response:** typically within 3 business days.
+- We confirm receipt, assess the report and keep you updated on progress.
+- Once a fix is ready, we coordinate disclosure with you. On request, we credit you as
+  the reporter.
 
-Bitte gib uns angemessene Zeit zur Behebung, bevor Details öffentlich gemacht werden.
+Please give us reasonable time to fix the issue before any details are made public.
 
-## Unterstützte Versionen
+## Supported versions
 
-Sicherheitsupdates werden für den `main`-Branch bereitgestellt.
+Security updates are provided for the `main` branch.

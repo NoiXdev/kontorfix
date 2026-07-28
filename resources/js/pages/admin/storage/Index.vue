@@ -54,7 +54,7 @@ function submit() {
     });
 }
 
-/** Liest das von Laravel gesetzte XSRF-TOKEN-Cookie für den CSRF-Header. */
+/** Reads the XSRF-TOKEN cookie set by Laravel for the CSRF header. */
 function xsrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
 
@@ -74,8 +74,8 @@ async function testConnection() {
                 'X-XSRF-TOKEN': xsrfToken(),
             },
             credentials: 'same-origin',
-            // Die aktuell eingegebenen Werte testen (nicht nur den Treiber) — leeres
-            // Secret bedeutet serverseitig „bestehendes behalten".
+            // Test the currently entered values (not just the driver) — an empty
+            // secret means "keep existing" on the server side.
             body: JSON.stringify({
                 driver: form.driver,
                 key: form.key,

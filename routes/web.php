@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    // Angemeldete Nutzer sehen nicht die Marketing-Startseite, sondern ihren Arbeitsbereich.
+    // Logged-in users don't see the marketing landing page, but their workspace.
     if (request()->user()) {
         return redirect()->route('dashboard');
     }

@@ -54,8 +54,8 @@ function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
 }
 
-// Live-Update des Sync-Status für das aktuell angezeigte Paket.
-// Lokaler State, damit die Live-Aktualisierung die Prop nicht mutiert.
+// Live update of the sync status for the currently displayed package.
+// Local state, so the live update doesn't mutate the prop.
 const page = usePage<SharedData>();
 const syncStatus = ref(props.package.sync_status);
 const syncError = ref(props.package.sync_error);

@@ -37,9 +37,9 @@ class ComposerController extends Controller
         $prefix = $this->registryPathPrefix($request, $group);
 
         if ($this->composerUpstream($group) !== null) {
-            // Bei aktivem Upstream KEIN available-packages ausliefern: Composer würde
-            // sonst annehmen, es gäbe ausschließlich die gelisteten lokalen Pakete, und
-            // fragt Upstream-Pakete nie per p2-Lookup an.
+            // With an active upstream, do NOT serve available-packages: Composer would
+            // otherwise assume only the listed local packages exist, and would
+            // never query upstream packages via p2 lookup.
             return response()->json([
                 'metadata-url' => "{$prefix}/p2/%package%.json",
             ]);
@@ -62,8 +62,8 @@ class ComposerController extends Controller
             return response()->json($this->metadata->build($package, $group, $this->registryBaseUrl($request, $group)));
         }
 
-        // Existiert der Name lokal, ist aber dieser Gruppe nicht zugänglich, brechen wir ab,
-        // OHNE den Upstream zu fragen — sonst würde ein privater Paketname zu packagist leaken.
+        // If the name exists locally but isn't accessible to this group, we abort,
+        // WITHOUT asking the upstream — otherwise a private package name would leak to packagist.
         if ($this->packageExistsLocally(PackageType::Composer, $fullName)) {
             abort(404);
         }
@@ -102,8 +102,8 @@ class ComposerController extends Controller
         }
 
         $disk = Storage::disk('artifacts');
-        // Nach Commit-SHA geschlüsselt: ein Force-Push ändert source_reference und damit
-        // den Pfad — das alte Archiv wird nie fälschlich weitergeliefert (Cache-Invalidierung).
+        // Keyed by commit SHA: a force-push changes source_reference and thus
+        // the path — the old archive is never mistakenly served again (cache invalidation).
         $path = "dists/{$package->id}/{$pkgVersion->source_reference}.zip";
 
         if (! $disk->exists($path)) {
@@ -115,8 +115,8 @@ class ComposerController extends Controller
             $repo->sync();
             $tmp = $repo->archiveZip($pkgVersion->source_reference);
 
-            // Atomar: in einen eindeutigen Temp-Pfad streamen, dann per rename an den
-            // endgültigen Pfad verschieben — verhindert Torn Reads bei parallelen Requests.
+            // Atomic: stream into a unique temp path, then move to the
+            // final path via rename — prevents torn reads on concurrent requests.
             $staging = "dists/{$package->id}/.{$pkgVersion->source_reference}.".uniqid().'.part';
             try {
                 $handle = fopen($tmp, 'r');

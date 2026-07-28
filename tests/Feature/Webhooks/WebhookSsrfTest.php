@@ -9,13 +9,13 @@ use Illuminate\Support\Facades\Http;
 uses(RefreshDatabase::class);
 
 it('refuses to deliver to an internal target and records it as blocked', function () {
-    Http::fake(); // nichts darf real rausgehen
+    Http::fake(); // nothing may actually go out
     $webhook = Webhook::factory()->create(['url' => 'http://127.0.0.1/hook', 'events' => ['package.synced']]);
 
     DeliverWebhook::dispatchSync($webhook, 'package.synced', ['name' => 'acme/x']);
 
     Http::assertNothingSent();
-    // Es muss eine Delivery mit klarem Blockiert-Status geben (kein echter HTTP-Statuscode als Orakel).
+    // There must be a delivery with a clear blocked status (no real HTTP status code as an oracle).
     $delivery = WebhookDelivery::where('webhook_id', $webhook->id)->latest()->first();
     expect($delivery)->not->toBeNull();
     expect($delivery->success)->toBeFalse();

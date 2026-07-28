@@ -6,9 +6,9 @@ use Laravel\Passkeys\Passkey;
 use Laravel\Passkeys\Passkeys;
 
 it('allows passkey login even when the user has enforced two factor', function () {
-    // Bewusste Policy (v0.8): ein Passkey (User-Verification erzwungen) ist selbst starke
-    // Mehr-Faktor-Auth und ersetzt den TOTP-Schritt. Dieser Test schreibt die Entscheidung
-    // fest — kippt jemand auf „2FA erzwingen", schlägt er fehl.
+    // Deliberate policy (v0.8): a passkey (with user verification enforced) is itself strong
+    // multi-factor auth and replaces the TOTP step. This test locks in that decision —
+    // if someone flips it to "enforce 2FA", this test will fail.
     $user = User::factory()->create();
     $tfa = app(TwoFactorAuthenticator::class);
     $user->forceFill([
