@@ -8,6 +8,7 @@ use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\ResolveRegistryContext;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -36,14 +37,21 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         // Deployment läuft hinter einem Reverse Proxy (Traefik/Portainer). Ohne dies
         // liefert getSchemeAndHttpHost() den internen Host und die generierten
-        // Dist-URLs in den Composer-Metadaten wären falsch.
-        $middleware->trustProxies(at: '*', headers: Request::HEADER_X_FORWARDED_FOR |
-            Request::HEADER_X_FORWARDED_HOST |
-            Request::HEADER_X_FORWARDED_PORT |
-            Request::HEADER_X_FORWARDED_PROTO);
+        // Dist-URLs in den Composer-Metadaten wären falsch. Die vertrauenswürdigen
+        // Proxy-IPs/-Netze sind über TRUSTED_PROXIES konfigurierbar (Default: private
+        // Netzbereiche + localhost), '*' bleibt als expliziter Opt-out möglich.
+        $proxies = (string) env('TRUSTED_PROXIES', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1');
+        $middleware->trustProxies(
+            at: $proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)),
+            headers: Request::HEADER_X_FORWARDED_FOR |
+                Request::HEADER_X_FORWARDED_HOST |
+                Request::HEADER_X_FORWARDED_PORT |
+                Request::HEADER_X_FORWARDED_PROTO,
+        );
 
         $middleware->web(append: [
             HandleInertiaRequests::class,
+            SecurityHeaders::class,
             RejectRobotWebSession::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
