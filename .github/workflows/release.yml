@@ -1,0 +1,202 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      prerelease:
+        description: "Mark as a pre-release (skips :latest and major/minor Docker tags)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run all steps but skip pushes (no Docker push, no commit, no tag, no release)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release ${{ inputs.bump }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Docker Hub configuration
+        run: |
+          : "${DOCKERHUB_NAMESPACE:?Variable DOCKERHUB_NAMESPACE is not set}"
+          : "${DOCKERHUB_IMAGE:?Variable DOCKERHUB_IMAGE is not set}"
+          : "${DOCKERHUB_USERNAME:?Secret DOCKERHUB_USERNAME is not set}"
+          : "${DOCKERHUB_TOKEN:?Secret DOCKERHUB_TOKEN is not set}"
+        env:
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute next version
+        id: bump
+        run: |
+          current=$(node -p "require('./package.json').version")
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ inputs.bump }}" in
+            major) next="$((major+1)).0.0" ;;
+            minor) next="${major}.$((minor+1)).0" ;;
+            patch) next="${major}.${minor}.$((patch+1))" ;;
+            *) echo "::error::Unknown bump type '${{ inputs.bump }}'"; exit 1 ;;
+          esac
+          tag="v${next}"
+          {
+            echo "current=${current}"
+            echo "next=${next}"
+            echo "tag=${tag}"
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Bumping ${current} -> ${next} (${tag})"
+
+      - name: Ensure tag does not already exist
+        run: |
+          if git rev-parse "refs/tags/${{ steps.bump.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.bump.outputs.tag }} already exists. Pick a different bump."
+            exit 1
+          fi
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: "8.4"
+          extensions: pgsql, redis, zip, intl, pcntl, opcache
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Bump package version
+        run: |
+          # The "Compute next version" step is the single source of truth. Write it
+          # into package.json/package-lock.json before the changelog step (which is
+          # changelog-text-only and must NOT bump).
+          npm ci --no-audit --no-fund
+          npm version "${{ steps.bump.outputs.next }}" --no-git-tag-version --allow-same-version
+
+      - name: Generate CHANGELOG.md
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@ee43def3241429afddab215ba89090cbf64fb45c # v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          preset: conventionalcommits
+          tag-prefix: "v"
+          output-file: CHANGELOG.md
+          release-count: 0
+          skip-commit: "true"
+          skip-tag: "true"
+          skip-bump: "true"
+          skip-version-file: "true"
+          skip-on-empty: "false"
+
+      - name: Verify version is in sync
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          want="${{ steps.bump.outputs.next }}"
+          if [ "$pkg" != "$want" ]; then
+            echo "::error::package.json version ($pkg) does not match the release version ($want)."
+            exit 1
+          fi
+          echo "package.json version is $pkg — in sync with tag ${{ steps.bump.outputs.tag }}"
+
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - name: Log in to Docker Hub
+        if: ${{ inputs.dry_run == false }}
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable=${{ inputs.prerelease == false }}
+            type=semver,pattern={{version}},value=${{ steps.bump.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.bump.outputs.tag }},enable=${{ inputs.prerelease == false }}
+            type=semver,pattern={{major}},value=${{ steps.bump.outputs.tag }},enable=${{ inputs.prerelease == false }}
+          labels: |
+            org.opencontainers.image.title=kontorfix
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.bump.outputs.next }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build & push image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: ${{ inputs.dry_run == false }}
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Commit version bump + CHANGELOG to main
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GIT_AUTHOR_NAME: noix-dev-bot
+          GIT_AUTHOR_EMAIL: noix-dev-bot@noix.dev
+          GIT_COMMITTER_NAME: noix-dev-bot
+          GIT_COMMITTER_EMAIL: noix-dev-bot@noix.dev
+        run: |
+          git add CHANGELOG.md package.json package-lock.json
+          if git diff --staged --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "chore(release): ${{ steps.bump.outputs.tag }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Tag release
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GIT_AUTHOR_NAME: noix-dev-bot
+          GIT_AUTHOR_EMAIL: noix-dev-bot@noix.dev
+          GIT_COMMITTER_NAME: noix-dev-bot
+          GIT_COMMITTER_EMAIL: noix-dev-bot@noix.dev
+        run: |
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "${{ steps.bump.outputs.tag }}"
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Create GitHub Release
+        if: ${{ inputs.dry_run == false }}
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+          body_path: CHANGELOG.md
