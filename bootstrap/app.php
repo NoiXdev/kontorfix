@@ -6,6 +6,7 @@ use App\Http\Middleware\AuthenticateRegistry;
 use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\ResolveRegistryContext;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -43,6 +44,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->web(append: [
             HandleInertiaRequests::class,
+            RejectRobotWebSession::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
 
