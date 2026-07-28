@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\AccountType;
 use App\Enums\UserRole;
 use App\Models\Organization;
 use Illuminate\Contracts\Validation\Validator;
@@ -26,6 +27,7 @@ class StoreUserRequest extends FormRequest
             'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
             'role' => ['required', Rule::enum(UserRole::class)],
             'password' => ['nullable', 'string', 'min:8'],
+            'account_type' => ['nullable', Rule::enum(AccountType::class)],
         ];
     }
 

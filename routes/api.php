@@ -9,7 +9,9 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PackageController;
 use App\Http\Controllers\Api\V1\RegistryTokenController;
+use App\Http\Controllers\Api\V1\RobotApiKeyController;
 use App\Http\Controllers\Api\V1\StatusController;
+use App\Http\Controllers\Api\V1\UserController;
 use App\Http\Controllers\Api\V1\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -80,5 +82,13 @@ Route::prefix('v1')
             Route::post('organizations', [OrganizationController::class, 'store'])->name('organizations.store');
             Route::get('organizations/{organization}', [OrganizationController::class, 'show'])->name('organizations.show');
             Route::delete('organizations/{organization}', [OrganizationController::class, 'destroy'])->name('organizations.destroy');
+
+            // Nutzer- & Robot-Verwaltung sowie das Ausstellen von API-Keys für
+            // beliebige Accounts ist ebenfalls strikt Operator-Admin.
+            Route::get('users', [UserController::class, 'index'])->name('users.index');
+            Route::post('users', [UserController::class, 'store'])->name('users.store');
+            Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');
+            Route::delete('users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+            Route::post('users/{user}/api-keys', [RobotApiKeyController::class, 'store'])->name('users.api-keys.store');
         });
     });
