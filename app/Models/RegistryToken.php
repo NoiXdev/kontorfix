@@ -15,6 +15,7 @@ use Illuminate\Support\Str;
  * @property Carbon|null $last_used_at
  * @property Carbon|null $expires_at
  * @property string|null $user_id
+ * @property string|null $plain_text Nur direkt nach issue() gesetzt, nie persistiert.
  */
 class RegistryToken extends Model
 {

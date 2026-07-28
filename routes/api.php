@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\GroupPackageController;
 use App\Http\Controllers\Api\V1\GroupUpstreamController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PackageController;
+use App\Http\Controllers\Api\V1\RegistryTokenController;
 use Illuminate\Support\Facades\Route;
 
 // Alle Management-Endpunkte sind stateless (Bearer-Key), versioniert unter /api/v1.
@@ -53,5 +54,11 @@ Route::prefix('v1')
 
             Route::get('groups/{group}/packages', [GroupPackageController::class, 'index'])->name('groups.packages.index');
             Route::put('groups/{group}/packages', [GroupPackageController::class, 'update'])->name('groups.packages.update');
+
+            // Registry-Tokens (kfx_-Pull/Publish-Tokens für Composer/npm), nicht zu
+            // verwechseln mit den persönlichen API-Keys (kfxapi_) aus me/api-keys.
+            Route::get('registry-tokens', [RegistryTokenController::class, 'index'])->name('registry-tokens.index');
+            Route::post('registry-tokens', [RegistryTokenController::class, 'store'])->name('registry-tokens.store');
+            Route::delete('registry-tokens/{registryToken}', [RegistryTokenController::class, 'destroy'])->name('registry-tokens.destroy');
         });
     });
