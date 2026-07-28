@@ -1,0 +1,253 @@
+<script setup lang="ts">
+import InputError from '@/components/InputError.vue';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import AppLayout from '@/layouts/AppLayout.vue';
+import { type BreadcrumbItem, type SharedData } from '@/types';
+import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Copy, KeyRound, Plus, Trash2 } from 'lucide-vue-next';
+import { computed, ref, watch } from 'vue';
+
+const props = defineProps<{
+    robots: { id: string; name: string; email: string; role: string; organization: string | null; keys_count: number }[];
+    organizations: { id: string; name: string }[];
+}>();
+
+const breadcrumbs: BreadcrumbItem[] = [{ title: 'Robots', href: '/admin/robots' }];
+
+const page = usePage<SharedData>();
+const flashSuccess = computed(() => page.props.flash?.success ?? null);
+
+// Klartext-Callout: der API-Key wird nur ein einziges Mal (per Flash) angezeigt.
+const plainApiKey = computed(() => page.props.flash?.plainApiKey ?? null);
+const keyCalloutDismissed = ref(false);
+watch(plainApiKey, (value) => {
+    if (value) {
+        keyCalloutDismissed.value = false;
+    }
+});
+const showKeyCallout = computed(() => !!plainApiKey.value && !keyCalloutDismissed.value);
+
+const keyCopied = ref(false);
+async function copyKey() {
+    if (!plainApiKey.value) {
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(plainApiKey.value);
+        keyCopied.value = true;
+        setTimeout(() => (keyCopied.value = false), 2000);
+    } catch {
+        // Clipboard-API nicht verfügbar (unsicherer Kontext) — der Key ist markierbar.
+        keyCopied.value = false;
+    }
+}
+
+const roleOptions = [
+    { value: 'member', label: 'Member' },
+    { value: 'maintainer', label: 'Maintainer' },
+    { value: 'admin', label: 'Admin' },
+];
+
+const createForm = useForm({
+    name: '',
+    email: '',
+    organization_id: '',
+    role: 'member',
+});
+
+function submitCreate() {
+    createForm.post(route('admin.robots.store'), {
+        preserveScroll: true,
+        onSuccess: () => createForm.reset(),
+    });
+}
+
+// Pro Robot ein eigenes, inline aufklappbares Key-Formular.
+const openKeyForm = ref<string | null>(null);
+const keyForm = useForm({
+    name: '',
+    permission: 'read' as 'read' | 'write',
+});
+
+function toggleKeyForm(id: string) {
+    openKeyForm.value = openKeyForm.value === id ? null : id;
+    keyForm.reset();
+    keyForm.clearErrors();
+}
+
+function submitKey(id: string) {
+    keyForm.post(route('admin.robots.keys.store', id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            openKeyForm.value = null;
+            keyForm.reset();
+        },
+    });
+}
+
+function destroyRobot(id: string) {
+    router.delete(route('admin.robots.destroy', id), {
+        preserveScroll: true,
+        onBefore: () => confirm('Robot wirklich löschen?'),
+    });
+}
+
+function roleLabel(role: string) {
+    return roleOptions.find((opt) => opt.value === role)?.label ?? role;
+}
+</script>
+
+<template>
+    <Head title="Robots" />
+
+    <AppLayout :breadcrumbs="breadcrumbs">
+        <div class="flex flex-1 flex-col gap-4 p-4">
+            <div
+                v-if="flashSuccess"
+                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+            >
+                {{ flashSuccess }}
+            </div>
+
+            <div>
+                <h1 class="text-xl font-semibold">Robots</h1>
+                <p class="mt-1 text-sm text-muted-foreground">
+                    Maschinen-/Service-Accounts für die REST-API — melden sich nur per API-Key an.
+                </p>
+            </div>
+
+            <div v-if="showKeyCallout" class="rounded-xl border border-copper/30 bg-copper/10 p-4">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0 flex-1 space-y-2">
+                        <p class="font-medium text-copper-hi">Neuer API-Key erstellt</p>
+                        <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                            {{ plainApiKey }}
+                        </p>
+                        <p class="text-sm text-muted-foreground">Dieser Key wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
+                    </div>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <Button variant="outline" size="sm" @click="copyKey">
+                            <Copy class="size-4" />
+                            {{ keyCopied ? 'Kopiert!' : 'Kopieren' }}
+                        </Button>
+                        <Button variant="ghost" size="sm" @click="keyCalloutDismissed = true">Schließen</Button>
+                    </div>
+                </div>
+            </div>
+
+            <form
+                class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_1fr_1fr_auto_auto] sm:items-end dark:border-sidebar-border"
+                @submit.prevent="submitCreate"
+            >
+                <div class="grid gap-2">
+                    <Label for="robot_name">Name</Label>
+                    <Input id="robot_name" v-model="createForm.name" placeholder="CI-Runner" autocomplete="off" />
+                    <InputError :message="createForm.errors.name" />
+                </div>
+
+                <div class="grid gap-2">
+                    <Label for="robot_email">E-Mail</Label>
+                    <Input id="robot_email" type="email" v-model="createForm.email" placeholder="ci@kunde.de" autocomplete="off" />
+                    <InputError :message="createForm.errors.email" />
+                </div>
+
+                <div class="grid gap-2">
+                    <Label for="robot_org">Organisation</Label>
+                    <select
+                        id="robot_org"
+                        v-model="createForm.organization_id"
+                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        <option value="" disabled>Bitte wählen</option>
+                        <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
+                    </select>
+                    <InputError :message="createForm.errors.organization_id" />
+                </div>
+
+                <div class="grid gap-2">
+                    <Label for="robot_role">Rolle</Label>
+                    <select
+                        id="robot_role"
+                        v-model="createForm.role"
+                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                    </select>
+                    <InputError :message="createForm.errors.role" />
+                </div>
+
+                <Button type="submit" :disabled="createForm.processing">
+                    <Plus class="size-4" />
+                    Robot anlegen
+                </Button>
+            </form>
+
+            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                <table class="w-full text-left text-sm">
+                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                        <tr>
+                            <th class="px-4 py-3 font-medium">Name</th>
+                            <th class="px-4 py-3 font-medium">E-Mail</th>
+                            <th class="px-4 py-3 font-medium">Rolle</th>
+                            <th class="px-4 py-3 font-medium">Organisation</th>
+                            <th class="px-4 py-3 font-medium">Keys</th>
+                            <th class="px-4 py-3 font-medium">Aktionen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template v-for="robot in props.robots" :key="robot.id">
+                            <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                <td class="px-4 py-3 font-medium">{{ robot.name }}</td>
+                                <td class="px-4 py-3 font-mono text-xs">{{ robot.email }}</td>
+                                <td class="px-4 py-3">{{ roleLabel(robot.role) }}</td>
+                                <td class="px-4 py-3">{{ robot.organization ?? '—' }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ robot.keys_count }}</td>
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center gap-1">
+                                        <Button variant="ghost" size="sm" @click="toggleKeyForm(robot.id)">
+                                            <KeyRound class="size-4" />
+                                            Key ausstellen
+                                        </Button>
+                                        <Button variant="ghost" size="icon" aria-label="Robot löschen" @click="destroyRobot(robot.id)">
+                                            <Trash2 class="size-4 text-destructive" />
+                                        </Button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr v-if="openKeyForm === robot.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
+                                <td colspan="6" class="px-4 py-3">
+                                    <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitKey(robot.id)">
+                                        <div class="grid gap-2">
+                                            <Label :for="`key_name_${robot.id}`">Key-Name</Label>
+                                            <Input :id="`key_name_${robot.id}`" v-model="keyForm.name" placeholder="deploy-key" autocomplete="off" />
+                                            <InputError :message="keyForm.errors.name" />
+                                        </div>
+                                        <div class="grid gap-2">
+                                            <Label :for="`key_perm_${robot.id}`">Recht</Label>
+                                            <select
+                                                :id="`key_perm_${robot.id}`"
+                                                v-model="keyForm.permission"
+                                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                            >
+                                                <option value="read">Lesen</option>
+                                                <option value="write">Schreiben</option>
+                                            </select>
+                                            <InputError :message="keyForm.errors.permission" />
+                                        </div>
+                                        <Button type="submit" :disabled="keyForm.processing">Key erstellen</Button>
+                                        <Button type="button" variant="ghost" @click="toggleKeyForm(robot.id)">Abbrechen</Button>
+                                    </form>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr v-if="props.robots.length === 0">
+                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </AppLayout>
+</template>

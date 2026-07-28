@@ -46,6 +46,11 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
 
     Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::post('users/{user}/invite', [Admin\UserController::class, 'invite'])->name('users.invite');
+
+    Route::get('robots', [Admin\RobotController::class, 'index'])->name('robots.index');
+    Route::post('robots', [Admin\RobotController::class, 'store'])->name('robots.store');
+    Route::post('robots/{user}/keys', [Admin\RobotController::class, 'issueKey'])->name('robots.keys.store');
+    Route::delete('robots/{user}', [Admin\RobotController::class, 'destroy'])->name('robots.destroy');
 });
 
 Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
