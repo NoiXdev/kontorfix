@@ -42,6 +42,8 @@ class AuthenticatedSessionController extends Controller
             return redirect()->route('two-factor.login');
         }
 
+        abort_if($user->isRobot(), 403, 'Robot-Accounts können sich nicht interaktiv anmelden.');
+
         Auth::login($user, $request->boolean('remember'));
         $request->session()->regenerate();
 

@@ -53,6 +53,8 @@ class OidcController extends Controller
             return redirect()->route('login')->withErrors(['email' => __('Anmeldung über den Identity-Provider fehlgeschlagen.')]);
         }
 
+        abort_if($user->isRobot(), 403, 'Robot-Accounts können sich nicht interaktiv anmelden.');
+
         Auth::login($user);
         $request->session()->regenerate();
 

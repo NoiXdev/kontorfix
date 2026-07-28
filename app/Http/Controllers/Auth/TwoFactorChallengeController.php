@@ -87,6 +87,8 @@ class TwoFactorChallengeController extends Controller
         $remember = (bool) $request->session()->pull('login.remember', false);
         $request->session()->forget('login.id');
 
+        abort_if($user->isRobot(), 403, 'Robot-Accounts können sich nicht interaktiv anmelden.');
+
         Auth::login($user, $remember);
         $request->session()->regenerate();
 
