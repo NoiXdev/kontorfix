@@ -3,7 +3,10 @@
 FROM composer:2 AS vendor
 WORKDIR /app
 COPY composer.json composer.lock ./
-RUN composer install --no-dev --no-scripts --no-interaction --prefer-dist --no-progress --no-autoloader
+# Build-only intermediate stage — the composer:2 image lacks ext-pcntl/ext-posix
+# (required by horizon). The final app stage installs those and runs the real,
+# platform-checked install, so ignoring platform reqs here is safe.
+RUN composer install --no-dev --no-scripts --no-interaction --prefer-dist --no-progress --no-autoloader --ignore-platform-reqs
 
 FROM node:22-alpine AS assets
 WORKDIR /app
@@ -14,7 +17,7 @@ COPY --from=vendor /app/vendor ./vendor
 RUN npm run build
 
 FROM dunglas/frankenphp:1-php8.4 AS app
-RUN install-php-extensions pcntl pdo_pgsql redis zip intl opcache
+RUN install-php-extensions pcntl posix pdo_pgsql redis zip intl opcache
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
