@@ -4,17 +4,29 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import { Check, LoaderCircle, Send } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
     appName: string;
+    locked?: boolean;
     defaults: {
         from_address: string | null;
         from_name: string | null;
     };
 }>();
+
+// When a setup token is configured, the wizard stays locked until it is presented.
+const tokenInput = ref('');
+
+function unlock() {
+    if (tokenInput.value.trim() === '') {
+        return;
+    }
+    // Re-hit the wizard with the token; the server verifies and remembers it.
+    router.get(route('setup.show'), { token: tokenInput.value.trim() }, { preserveState: false });
+}
 
 const form = useForm({
     admin_name: '',
@@ -170,8 +182,25 @@ function submit() {
                 </p>
             </div>
 
+            <!-- Locked: a setup token is configured and hasn't been presented yet. -->
+            <div v-if="props.locked" class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border">
+                <div>
+                    <h2 class="text-sm font-medium">Setup-Token erforderlich</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">
+                        Aus Sicherheitsgründen ist die Einrichtung durch ein Token geschützt. Es steht in den
+                        Startup-Logs des Containers (Zeile „FIRST-RUN SETUP TOKEN"). Bei jedem App-Start wird ein
+                        neues Token erzeugt.
+                    </p>
+                </div>
+                <div class="grid gap-2">
+                    <Label for="setup_token">Token</Label>
+                    <Input id="setup_token" v-model="tokenInput" autocomplete="off" placeholder="aus den Startup-Logs" @keyup.enter="unlock" />
+                </div>
+                <Button type="button" :disabled="!tokenInput.trim()" @click="unlock">Entsperren</Button>
+            </div>
+
             <!-- Step indicator -->
-            <ol class="mb-6 flex items-center justify-between gap-2">
+            <ol v-if="!props.locked" class="mb-6 flex items-center justify-between gap-2">
                 <li v-for="(s, i) in steps" :key="s.title" class="flex flex-1 items-center gap-2">
                     <span
                         class="flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-medium"
@@ -190,7 +219,7 @@ function submit() {
                 </li>
             </ol>
 
-            <form class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
+            <form v-if="!props.locked" class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
                 <!-- Submission errors are otherwise invisible when they land on a field
                      of a hidden conditional block, so surface every message here. -->
                 <div

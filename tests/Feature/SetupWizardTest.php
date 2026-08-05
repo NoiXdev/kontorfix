@@ -6,6 +6,7 @@ use App\Models\MailSetting;
 use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
+use App\Services\Setup\SetupToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
@@ -198,6 +199,37 @@ it('does not error on stale s3 values when the local driver is chosen', function
     ]))->assertRedirect(route('dashboard'))->assertSessionHasNoErrors();
 
     expect(StorageSetting::sole()->driver)->toBe('local');
+});
+
+it('locks the wizard when a setup token is configured', function () {
+    app(SetupToken::class)->regenerate();
+
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', true));
+});
+
+it('unlocks the wizard with the correct setup token', function () {
+    $token = app(SetupToken::class)->regenerate();
+
+    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+});
+
+it('refuses to complete setup without the token when one is configured', function () {
+    app(SetupToken::class)->regenerate();
+
+    $this->post('/setup', setupPayload())->assertForbidden();
+    expect(User::query()->count())->toBe(0);
+});
+
+it('completes setup after unlocking with the token', function () {
+    $token = app(SetupToken::class)->regenerate();
+
+    // Unlock (stores the verification in the session), then submit.
+    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+    $this->post('/setup', setupPayload())->assertRedirect(route('dashboard'));
+
+    expect(User::query()->count())->toBe(1);
+    // Token is cleared once setup is done.
+    expect(app(SetupToken::class)->current())->toBeNull();
 });
 
 it('leaves the health check reachable during setup', function () {

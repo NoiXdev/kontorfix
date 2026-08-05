@@ -21,6 +21,7 @@ export interface SharedData {
     quote: { message: string; author: string };
     auth: Auth;
     flash: { success?: string | null; plainTextToken?: string | null; plainApiKey?: string | null };
+    registrationEnabled?: boolean;
     ziggy: {
         location: string;
         url: string;

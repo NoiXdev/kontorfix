@@ -54,6 +54,9 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
     Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
 
+    Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
+    Route::put('system', [Admin\SystemController::class, 'update'])->name('system.update');
+
     Route::get('storage', [Admin\StorageController::class, 'show'])->name('storage.show');
     Route::put('storage', [Admin\StorageController::class, 'update'])->name('storage.update');
     Route::post('storage/test', [Admin\StorageController::class, 'test'])->name('storage.test');

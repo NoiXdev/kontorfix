@@ -12,8 +12,10 @@ use App\Models\StorageSetting;
 use App\Models\User;
 use App\Services\Mail\MailManager;
 use App\Services\Setup\SetupStatus;
+use App\Services\Setup\SetupToken;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -23,10 +25,28 @@ use Inertia\Response;
 
 class SetupController extends Controller
 {
-    public function show(): Response
+    private const SESSION_KEY = 'setup.token_ok';
+
+    public function show(Request $request, SetupToken $token): Response
     {
+        // If a setup token is configured (production, via `setup:token` at boot), the
+        // wizard stays locked until the correct token is presented — see class docblock
+        // on SetupToken. A token passed as ?token= is verified once and remembered in
+        // the session so the multi-step wizard doesn't need it on every request.
+        $locked = false;
+
+        if ($token->current() !== null) {
+            if ($token->matches($request->query('token'))) {
+                $request->session()->put(self::SESSION_KEY, true);
+            }
+
+            $locked = ! $request->session()->get(self::SESSION_KEY, false);
+        }
+
         return Inertia::render('setup/Wizard', [
             'appName' => config('app.name'),
+            // When locked, the wizard shows only a token prompt.
+            'locked' => $locked,
             // Pre-fills the sender with whatever .env already provides, so the
             // common case is a confirm rather than a retype.
             'defaults' => [
@@ -37,21 +57,36 @@ class SetupController extends Controller
     }
 
     /**
+     * Guards the writing endpoints (store/test) against a caller that never passed the
+     * setup token, even though they somehow reached the routes.
+     */
+    private function assertTokenSatisfied(Request $request, SetupToken $token): void
+    {
+        if ($token->current() !== null && ! $request->session()->get(self::SESSION_KEY, false)) {
+            abort(403, 'Setup token required.');
+        }
+    }
+
+    /**
      * Lets the installer prove the mail backend works before committing to it.
      *
      * Unauthenticated by necessity — there is no account yet — but bounded the same way
      * as the wizard itself: EnsureSetupIncomplete makes it unreachable once any user
      * exists, and the route is rate limited, so it cannot be used as an open relay.
      */
-    public function testMail(TestMailRequest $request, MailManager $manager): JsonResponse
+    public function testMail(TestMailRequest $request, MailManager $manager, SetupToken $token): JsonResponse
     {
+        $this->assertTokenSatisfied($request, $token);
+
         $setting = $manager->fromInput($request->validated());
 
         return response()->json($manager->sendTest($setting, (string) $request->validated('recipient')));
     }
 
-    public function store(StoreSetupRequest $request, SetupStatus $status): RedirectResponse
+    public function store(StoreSetupRequest $request, SetupStatus $status, SetupToken $token): RedirectResponse
     {
+        $this->assertTokenSatisfied($request, $token);
+
         $data = $request->validated();
 
         $user = DB::transaction(function () use ($data, $status): User {
@@ -97,6 +132,9 @@ class SetupController extends Controller
 
             return $user;
         });
+
+        // Setup is done — the token has served its purpose.
+        $token->clear();
 
         Auth::login($user);
         $request->session()->regenerate();
