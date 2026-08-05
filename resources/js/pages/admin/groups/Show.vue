@@ -77,8 +77,23 @@ const props = defineProps<{
     upstreams: UpstreamRow[];
     tokens: TokenRow[];
     setup: Setup;
+    stats: { downloads: number; storage_bytes: number; packages: number };
     activities: ActivityRow[];
 }>();
+
+function formatBytes(bytes: number | null | undefined): string {
+    if (!bytes) {
+        return '—';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let i = 0;
+    while (value >= 1024 && i < units.length - 1) {
+        value /= 1024;
+        i++;
+    }
+    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: route('dashboard') },
@@ -241,6 +256,22 @@ async function copyToken() {
                 >
                     Portal deaktiviert — reine Paketsammlung, im Kundenportal ausgeblendet
                 </p>
+
+                <!-- Registry-level usage stats (rolled up over all packages) -->
+                <div class="grid max-w-lg grid-cols-3 gap-3">
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Downloads</div>
+                        <div class="text-lg font-semibold">{{ props.stats.downloads.toLocaleString('de-DE') }}</div>
+                    </div>
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Speicher</div>
+                        <div class="text-lg font-semibold">{{ formatBytes(props.stats.storage_bytes) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Pakete</div>
+                        <div class="text-lg font-semibold">{{ props.stats.packages }}</div>
+                    </div>
+                </div>
             </div>
 
             <Tabs default-value="bearbeiten">

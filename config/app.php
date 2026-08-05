@@ -17,6 +17,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Application Version
+    |--------------------------------------------------------------------------
+    |
+    | Read from package.json (the release workflow's single source of truth) so
+    | the running instance can display its own version. Resolved once and cached
+    | with the rest of the config via `config:cache`.
+    |
+    */
+
+    'version' => trim((string) (json_decode((string) @file_get_contents(base_path('package.json')), true)['version'] ?? 'dev')),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Environment
     |--------------------------------------------------------------------------
     |

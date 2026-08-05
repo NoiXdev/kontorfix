@@ -42,6 +42,7 @@ class HandleInertiaRequests extends Middleware
         return array_merge(parent::share($request), [
             ...parent::share($request),
             'name' => config('app.name'),
+            'appVersion' => config('app.version'),
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             // Lets the login page hide the "sign up" link when self-registration is off.
             'registrationEnabled' => fn (): bool => SystemSetting::current()->registration_enabled,

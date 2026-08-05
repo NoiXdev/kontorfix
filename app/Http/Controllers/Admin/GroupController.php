@@ -9,6 +9,7 @@ use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Registry\SetupSnippetBuilder;
@@ -62,8 +63,29 @@ class GroupController extends Controller
             'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => $u->url, 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
             'setup' => $snippets->for($group),
+            'stats' => $this->groupStats($group),
             'activities' => ActivityPresenter::recentFor($group),
         ]);
+    }
+
+    /**
+     * Registry-level rollup of the usage stats of all its packages' versions.
+     *
+     * @return array{downloads:int, storage_bytes:int, packages:int}
+     */
+    private function groupStats(Group $group): array
+    {
+        $packageIds = $group->packages()->pluck('packages.id');
+
+        $agg = PackageVersion::whereIn('package_id', $packageIds)
+            ->selectRaw('COALESCE(SUM(download_count),0) as downloads, COALESCE(SUM(dist_size),0) as storage_bytes')
+            ->first();
+
+        return [
+            'downloads' => (int) ($agg->downloads ?? 0),
+            'storage_bytes' => (int) ($agg->storage_bytes ?? 0),
+            'packages' => $packageIds->count(),
+        ];
     }
 
     public function store(StoreGroupRequest $request): RedirectResponse

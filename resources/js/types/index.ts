@@ -28,6 +28,7 @@ export interface SharedData {
         incomingWebhookUrl?: string | null;
     };
     registrationEnabled?: boolean;
+    appVersion?: string;
     ziggy: {
         location: string;
         url: string;

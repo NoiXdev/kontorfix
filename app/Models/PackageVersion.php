@@ -20,6 +20,8 @@ class PackageVersion extends Model
         'source_reference',
         'metadata',
         'dist_path',
+        'download_count',
+        'dist_size',
         'released_at',
         'dist_shasum',
         'dist_integrity',
@@ -31,6 +33,8 @@ class PackageVersion extends Model
         return [
             'metadata' => 'array',
             'released_at' => 'datetime',
+            'download_count' => 'integer',
+            'dist_size' => 'integer',
         ];
     }
 

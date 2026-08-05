@@ -132,6 +132,12 @@ class ComposerController extends Controller
             $pkgVersion->update(['dist_path' => $path]);
         }
 
+        // Usage stats: record the download and (once) the dist size.
+        if ($pkgVersion->dist_size === null) {
+            $pkgVersion->update(['dist_size' => $disk->size($path)]);
+        }
+        $pkgVersion->increment('download_count');
+
         return response()->streamDownload(
             function () use ($disk, $path) {
                 $stream = $disk->readStream($path);

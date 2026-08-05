@@ -15,6 +15,7 @@ const page = usePage<SharedData>();
 // missing/unknown, we behave like admin/maintainer so no empty nav results.
 const isMember = computed(() => page.props.auth.user?.role === 'member');
 const isAdmin = computed(() => page.props.auth.user?.role === 'admin');
+const appVersion = computed(() => page.props.appVersion ?? null);
 
 interface NavSection {
     label: string;
@@ -138,6 +139,9 @@ const footerNavItems = computed<NavItem[]>(() => {
         <SidebarFooter>
             <NavFooter :items="footerNavItems" />
             <NavUser />
+            <p v-if="appVersion" class="px-2 pb-1 text-center text-xs text-muted-foreground group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden">
+                Kontorfix v{{ appVersion }}
+            </p>
         </SidebarFooter>
     </Sidebar>
     <slot />

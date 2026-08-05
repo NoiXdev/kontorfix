@@ -101,6 +101,12 @@ class NpmController extends Controller
         $disk = Storage::disk('artifacts');
         abort_unless($version->dist_path !== null && $disk->exists($version->dist_path), 404);
 
+        // Usage stats: record the download and (once) the dist size.
+        if ($version->dist_size === null) {
+            $version->update(['dist_size' => $disk->size($version->dist_path)]);
+        }
+        $version->increment('download_count');
+
         return response()->streamDownload(function () use ($disk, $version) {
             $stream = $disk->readStream($version->dist_path);
             if ($stream !== null) {

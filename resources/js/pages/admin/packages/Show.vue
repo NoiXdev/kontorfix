@@ -20,6 +20,22 @@ interface VersionRow {
     released_at: string | null;
     reference: string | null;
     dependencies: Dependencies;
+    download_count: number;
+    dist_size: number | null;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+    if (!bytes) {
+        return '—';
+    }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let i = 0;
+    while (value >= 1024 && i < units.length - 1) {
+        value /= 1024;
+        i++;
+    }
+    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 interface GroupRow {
@@ -54,6 +70,7 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     groups: GroupRow[];
+    stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
 }>();
 
@@ -125,6 +142,22 @@ if (isOperator) {
                 >
                     {{ syncError }}
                 </div>
+
+                <!-- Usage stats -->
+                <div class="grid max-w-lg grid-cols-3 gap-3">
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Downloads</div>
+                        <div class="text-lg font-semibold">{{ props.stats.downloads.toLocaleString('de-DE') }}</div>
+                    </div>
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Speicher</div>
+                        <div class="text-lg font-semibold">{{ formatBytes(props.stats.storage_bytes) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-sidebar-border/70 p-3 dark:border-sidebar-border">
+                        <div class="text-xs text-muted-foreground">Versionen</div>
+                        <div class="text-lg font-semibold">{{ props.stats.versions }}</div>
+                    </div>
+                </div>
             </div>
 
             <Tabs default-value="installation">
@@ -192,6 +225,9 @@ if (isOperator) {
                                 <span v-if="version.released_at" class="text-xs text-muted-foreground">{{ version.released_at }}</span>
                                 <span v-if="version.reference" class="font-mono text-xs text-muted-foreground">
                                     {{ version.reference.slice(0, 12) }}
+                                </span>
+                                <span class="ml-auto text-xs text-muted-foreground">
+                                    {{ version.download_count.toLocaleString('de-DE') }} Downloads · {{ formatBytes(version.dist_size) }}
                                 </span>
                             </div>
 

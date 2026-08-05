@@ -74,8 +74,15 @@ class PackageController extends Controller
                 'released_at' => $v->released_at?->toDateString(),
                 'reference' => $v->source_reference,
                 'dependencies' => $deps->for($package->type, $v->metadata ?? []),
+                'download_count' => $v->download_count,
+                'dist_size' => $v->dist_size,
             ]),
             'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
+            'stats' => [
+                'downloads' => (int) $package->versions->sum('download_count'),
+                'storage_bytes' => (int) $package->versions->sum('dist_size'),
+                'versions' => $package->versions->count(),
+            ],
             'activities' => ActivityPresenter::recentFor($package),
         ]);
     }
