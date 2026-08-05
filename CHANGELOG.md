@@ -1,4 +1,11 @@
-## [0.1.1](https://github.com/NoiXdev/kontorfix/compare/v0.1.0...v) (2026-08-05)
+## [0.2.0](https://github.com/NoiXdev/kontorfix/compare/v0.1.1...v) (2026-08-05)
+
+
+### Features
+
+* setup-wizard + mail + postal ([d1891bb](https://github.com/NoiXdev/kontorfix/commit/d1891bbd090839e9e0b8bfb3296d74e383332ca6))
+
+## [0.1.1](https://github.com/NoiXdev/kontorfix/compare/v0.1.0...v0.1.1) (2026-08-05)
 
 
 ### Features
