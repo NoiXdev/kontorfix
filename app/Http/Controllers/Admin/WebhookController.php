@@ -3,10 +3,14 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreIncomingWebhookRequest;
 use App\Http\Requests\Admin\StoreWebhookRequest;
+use App\Models\IncomingWebhook;
+use App\Models\IncomingWebhookEvent;
 use App\Models\Webhook;
 use App\Models\WebhookDelivery;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -31,7 +35,16 @@ class WebhookController extends Controller
                         'delivered_at' => $d->delivered_at?->diffForHumans(),
                     ])->values()->all(),
                 ]),
-            'incoming' => [
+            'incoming' => IncomingWebhook::latest()->get()->map(fn (IncomingWebhook $w) => [
+                'id' => $w->id,
+                'name' => $w->name,
+                'provider' => $w->provider,
+                'enabled' => $w->enabled,
+                'url' => url("/webhooks/{$w->provider}/{$w->id}"),
+                'last_received_at' => $w->last_received_at?->diffForHumans(),
+            ]),
+            // Legacy shared endpoints (env secret) — still shown for reference.
+            'legacy' => [
                 'configured' => (bool) config('kontorfix.incoming_webhook_secret'),
                 'urls' => [
                     'github' => url('/webhooks/github'),
@@ -39,6 +52,36 @@ class WebhookController extends Controller
                     'gitea' => url('/webhooks/gitea'),
                     'bitbucket' => url('/webhooks/bitbucket'),
                 ],
+            ],
+            // Audit: the most recent incoming and outgoing traffic with payloads.
+            'audit' => [
+                'incoming' => IncomingWebhookEvent::with('incomingWebhook:id,name')
+                    ->latest()->limit(50)->get()
+                    ->map(fn (IncomingWebhookEvent $e) => [
+                        'id' => $e->id,
+                        'source' => $e->incomingWebhook?->name,
+                        'provider' => $e->provider,
+                        'repo_url' => $e->repo_url,
+                        'signature_valid' => $e->signature_valid,
+                        'matched_packages' => $e->matched_packages,
+                        'status_code' => $e->status_code,
+                        'ip' => $e->ip,
+                        'payload' => $e->payload,
+                        'received_at' => $e->created_at?->diffForHumans(),
+                    ]),
+                'outgoing' => WebhookDelivery::with('webhook:id,url')
+                    ->latest()->limit(50)->get()
+                    ->map(fn (WebhookDelivery $d) => [
+                        'id' => $d->id,
+                        'url' => $d->webhook?->url,
+                        'event' => $d->event,
+                        'status_code' => $d->status_code,
+                        'success' => $d->success,
+                        'attempts' => $d->attempts,
+                        'error' => $d->error,
+                        'payload' => $d->payload,
+                        'delivered_at' => $d->delivered_at?->diffForHumans(),
+                    ]),
             ],
         ]);
     }
@@ -62,5 +105,41 @@ class WebhookController extends Controller
         $webhook->delete();
 
         return back()->with('success', 'Webhook gelöscht.');
+    }
+
+    public function storeIncoming(StoreIncomingWebhookRequest $request): RedirectResponse
+    {
+        // Generate the secret server-side and reveal it once — it has to be copied into
+        // the git host's webhook configuration. It is stored encrypted thereafter.
+        $secret = 'whsec_'.Str::random(40);
+
+        $hook = IncomingWebhook::create([
+            'name' => $request->validated('name'),
+            'provider' => $request->validated('provider'),
+            'secret' => $secret,
+        ]);
+
+        return back()
+            ->with('success', "Eingehender Webhook {$hook->name} erstellt.")
+            ->with('incomingWebhookSecret', $secret)
+            ->with('incomingWebhookUrl', url("/webhooks/{$hook->provider}/{$hook->id}"));
+    }
+
+    public function regenerateIncoming(IncomingWebhook $incoming): RedirectResponse
+    {
+        $secret = 'whsec_'.Str::random(40);
+        $incoming->update(['secret' => $secret]);
+
+        return back()
+            ->with('success', 'Secret neu erzeugt.')
+            ->with('incomingWebhookSecret', $secret)
+            ->with('incomingWebhookUrl', url("/webhooks/{$incoming->provider}/{$incoming->id}"));
+    }
+
+    public function destroyIncoming(IncomingWebhook $incoming): RedirectResponse
+    {
+        $incoming->delete();
+
+        return back()->with('success', 'Eingehender Webhook gelöscht.');
     }
 }

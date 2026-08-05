@@ -52,6 +52,8 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn () => $request->session()->get('success'),
                 'plainTextToken' => fn () => $request->session()->get('plainTextToken'),
                 'plainApiKey' => fn () => $request->session()->get('plainApiKey'),
+                'incomingWebhookSecret' => fn () => $request->session()->get('incomingWebhookSecret'),
+                'incomingWebhookUrl' => fn () => $request->session()->get('incomingWebhookUrl'),
             ],
         ]);
     }

@@ -47,6 +47,10 @@ Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin'
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
+    // Incoming webhook endpoints (per-source secret + URL) and audit.
+    Route::post('incoming-webhooks', [Admin\WebhookController::class, 'storeIncoming'])->name('incoming-webhooks.store');
+    Route::post('incoming-webhooks/{incoming}/regenerate', [Admin\WebhookController::class, 'regenerateIncoming'])->name('incoming-webhooks.regenerate');
+    Route::delete('incoming-webhooks/{incoming}', [Admin\WebhookController::class, 'destroyIncoming'])->name('incoming-webhooks.destroy');
     Route::get('status', [Admin\StatusController::class, 'index'])->name('status');
 });
 

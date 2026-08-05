@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Copy, Plus, RefreshCw, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 type WebhookEventKey = 'package.synced' | 'sync.failed' | 'version.released';
@@ -30,27 +31,53 @@ interface WebhookRow {
     recent_deliveries: DeliveryRow[];
 }
 
-interface IncomingInfo {
-    configured: boolean;
-    urls: {
-        github: string;
-        gitlab: string;
-        gitea: string;
-        bitbucket: string;
-    };
+interface IncomingRow {
+    id: string;
+    name: string;
+    provider: string;
+    enabled: boolean;
+    url: string;
+    last_received_at: string | null;
+}
+
+interface AuditIncoming {
+    id: string;
+    source: string | null;
+    provider: string;
+    repo_url: string | null;
+    signature_valid: boolean;
+    matched_packages: number;
+    status_code: number | null;
+    ip: string | null;
+    payload: unknown;
+    received_at: string | null;
+}
+
+interface AuditOutgoing {
+    id: string;
+    url: string | null;
+    event: string;
+    status_code: number | null;
+    success: boolean;
+    attempts: number;
+    error: string | null;
+    payload: unknown;
+    delivered_at: string | null;
 }
 
 const props = defineProps<{
     webhooks: WebhookRow[];
-    incoming: IncomingInfo;
+    incoming: IncomingRow[];
+    legacy: { configured: boolean; urls: Record<string, string> };
+    audit: { incoming: AuditIncoming[]; outgoing: AuditOutgoing[] };
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Webhooks', href: '/admin/webhooks' }];
 
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
-
-const dialogOpen = ref(false);
+const newSecret = computed(() => page.props.flash?.incomingWebhookSecret ?? null);
+const newSecretUrl = computed(() => page.props.flash?.incomingWebhookUrl ?? null);
 
 const eventOptions: { value: WebhookEventKey; label: string }[] = [
     { value: 'package.synced', label: 'Paket synchronisiert' },
@@ -58,6 +85,24 @@ const eventOptions: { value: WebhookEventKey; label: string }[] = [
     { value: 'version.released', label: 'Version veröffentlicht' },
 ];
 
+function eventLabel(value: string) {
+    return eventOptions.find((o) => o.value === value)?.label ?? value;
+}
+
+function copyToClipboard(value: string) {
+    navigator.clipboard?.writeText(value);
+}
+
+function pretty(payload: unknown): string {
+    try {
+        return JSON.stringify(payload, null, 2);
+    } catch {
+        return String(payload);
+    }
+}
+
+// --- Outgoing create ---
+const dialogOpen = ref(false);
 const form = useForm({
     url: '',
     secret: '',
@@ -75,11 +120,7 @@ function toggleEvent(value: WebhookEventKey, checked: boolean) {
 }
 
 function submit() {
-    form.transform((data) => ({
-        url: data.url,
-        secret: data.secret || null,
-        events: data.events,
-    })).post(route('admin.webhooks.store'), {
+    form.transform((data) => ({ url: data.url, secret: data.secret || null, events: data.events })).post(route('admin.webhooks.store'), {
         onSuccess: () => {
             dialogOpen.value = false;
             form.reset();
@@ -87,19 +128,37 @@ function submit() {
     });
 }
 
-function eventLabel(value: string) {
-    return eventOptions.find((o) => o.value === value)?.label ?? value;
+function destroyWebhook(id: string) {
+    router.delete(route('admin.webhooks.destroy', id), { onBefore: () => confirm('Webhook wirklich löschen?') });
 }
 
-function destroyWebhook(id: string) {
-    router.delete(route('admin.webhooks.destroy', id), {
-        onBefore: () => confirm('Webhook wirklich löschen?'),
+// --- Incoming create/manage ---
+const incomingDialogOpen = ref(false);
+const incomingForm = useForm({
+    name: '',
+    provider: 'github' as 'github' | 'gitlab' | 'gitea' | 'bitbucket',
+});
+
+function submitIncoming() {
+    incomingForm.post(route('admin.incoming-webhooks.store'), {
+        preserveScroll: true,
+        onSuccess: () => {
+            incomingDialogOpen.value = false;
+            incomingForm.reset();
+        },
     });
 }
 
-function copyToClipboard(value: string) {
-    navigator.clipboard?.writeText(value);
+function regenerateIncoming(id: string) {
+    router.post(route('admin.incoming-webhooks.regenerate', id), {}, { preserveScroll: true, onBefore: () => confirm('Neues Secret erzeugen? Das alte wird ungültig.') });
 }
+
+function destroyIncoming(id: string) {
+    router.delete(route('admin.incoming-webhooks.destroy', id), { preserveScroll: true, onBefore: () => confirm('Eingehenden Webhook wirklich löschen?') });
+}
+
+const selectClass =
+    'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
 </script>
 
 <template>
@@ -114,141 +173,208 @@ function copyToClipboard(value: string) {
                 {{ flashSuccess }}
             </div>
 
-            <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                <div class="mb-3 flex items-center justify-between">
-                    <h2 class="text-base font-semibold">Eingehende Webhooks</h2>
-                    <span
-                        :class="
-                            cn(
-                                'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                                props.incoming.configured
-                                    ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                    : 'border-destructive/30 bg-destructive/15 text-destructive',
-                            )
-                        "
-                    >
-                        {{ props.incoming.configured ? 'Konfiguriert' : 'Kein Secret gesetzt' }}
-                    </span>
-                </div>
-
-                <div class="space-y-2">
-                    <div
-                        v-for="(url, provider) in props.incoming.urls"
-                        :key="provider"
-                        class="flex items-center justify-between gap-2 rounded-md border border-sidebar-border/70 px-3 py-2 dark:border-sidebar-border"
-                    >
-                        <span class="w-24 shrink-0 text-sm font-medium capitalize">{{ provider }}</span>
-                        <code class="flex-1 truncate font-mono text-xs text-muted-foreground">{{ url }}</code>
-                        <Button variant="ghost" size="sm" @click="copyToClipboard(url)">Kopieren</Button>
+            <!-- Reveal-once secret callout after creating/regenerating an incoming hook -->
+            <div v-if="newSecret" class="rounded-xl border border-copper/30 bg-copper/10 p-4">
+                <p class="font-medium text-copper-hi">Secret erstellt — nur jetzt sichtbar</p>
+                <div class="mt-2 space-y-2">
+                    <div>
+                        <span class="text-xs text-muted-foreground">Endpoint-URL (im Git-Host eintragen)</span>
+                        <div class="flex items-center gap-2">
+                            <code class="flex-1 select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-xs">{{ newSecretUrl }}</code>
+                            <Button variant="outline" size="sm" @click="copyToClipboard(newSecretUrl ?? '')"><Copy class="size-4" /></Button>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-xs text-muted-foreground">Secret (im Git-Host als Webhook-Secret hinterlegen)</span>
+                        <div class="flex items-center gap-2">
+                            <code class="flex-1 select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-xs">{{ newSecret }}</code>
+                            <Button variant="outline" size="sm" @click="copyToClipboard(newSecret ?? '')"><Copy class="size-4" /></Button>
+                        </div>
                     </div>
                 </div>
-
-                <p class="mt-3 text-xs text-muted-foreground">
-                    Damit eingehende Webhooks angenommen werden, muss <code class="font-mono">KONTORFIX_INCOMING_WEBHOOK_SECRET</code>
-                    gesetzt und im Git-Host als Webhook-Secret hinterlegt sein.
-                </p>
             </div>
 
-            <div class="flex items-center justify-between">
-                <h1 class="text-xl font-semibold">Ausgehende Webhooks</h1>
-                <Button @click="dialogOpen = true">
-                    <Plus class="size-4" />
-                    Webhook hinzufügen
-                </Button>
-            </div>
+            <Tabs default-value="incoming">
+                <TabsList>
+                    <TabsTrigger value="incoming">Eingehend</TabsTrigger>
+                    <TabsTrigger value="outgoing">Ausgehend</TabsTrigger>
+                    <TabsTrigger value="audit">Audit</TabsTrigger>
+                </TabsList>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">URL</th>
-                            <th class="px-4 py-3 font-medium">Events</th>
-                            <th class="px-4 py-3 font-medium">Auth</th>
-                            <th class="px-4 py-3 font-medium">Aktiv</th>
-                            <th class="px-4 py-3 font-medium">Letzte Zustellungen</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="webhook in props.webhooks"
-                            :key="webhook.id"
-                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                        >
-                            <td class="px-4 py-3 font-mono text-xs">{{ webhook.url }}</td>
-                            <td class="px-4 py-3">
-                                <div class="flex flex-wrap gap-1">
-                                    <span
-                                        v-for="event in webhook.events"
-                                        :key="event"
-                                        class="inline-flex items-center rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium"
-                                    >
-                                        {{ eventLabel(event) }}
-                                    </span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span
-                                    v-if="webhook.has_secret"
-                                    class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi"
-                                >
-                                    Signiert
-                                </span>
-                                <span v-else class="text-muted-foreground">—</span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span
-                                    :class="
-                                        cn(
-                                            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                                            webhook.enabled
-                                                ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                                : 'border-border bg-muted text-muted-foreground',
-                                        )
-                                    "
-                                >
-                                    {{ webhook.enabled ? 'Ja' : 'Nein' }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <ul v-if="webhook.recent_deliveries.length > 0" class="space-y-1">
-                                    <li
-                                        v-for="(delivery, idx) in webhook.recent_deliveries"
-                                        :key="idx"
-                                        class="flex items-center gap-2 text-xs"
-                                    >
-                                        <span
-                                            :class="
-                                                cn(
-                                                    'inline-flex items-center rounded-full border px-2 py-0.5 font-medium',
-                                                    delivery.success
-                                                        ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                                        : 'border-destructive/30 bg-destructive/15 text-destructive',
-                                                )
-                                            "
-                                        >
-                                            {{ delivery.status_code ?? '—' }}
+                <!-- Incoming -->
+                <TabsContent value="incoming" class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h1 class="text-xl font-semibold">Eingehende Webhooks</h1>
+                            <p class="text-sm text-muted-foreground">
+                                Pro Git-Host/Repo ein eigener Endpunkt mit eigenem Secret. Push löst den Sync passender Pakete aus.
+                            </p>
+                        </div>
+                        <Button @click="incomingDialogOpen = true">
+                            <Plus class="size-4" />
+                            Endpunkt anlegen
+                        </Button>
+                    </div>
+
+                    <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                        <table class="w-full text-left text-sm">
+                            <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                                <tr>
+                                    <th class="px-4 py-3 font-medium">Name</th>
+                                    <th class="px-4 py-3 font-medium">Provider</th>
+                                    <th class="px-4 py-3 font-medium">URL</th>
+                                    <th class="px-4 py-3 font-medium">Zuletzt empfangen</th>
+                                    <th class="px-4 py-3 font-medium">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="hook in props.incoming" :key="hook.id" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                    <td class="px-4 py-3 font-medium">{{ hook.name }}</td>
+                                    <td class="px-4 py-3 capitalize">{{ hook.provider }}</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <code class="max-w-xs truncate font-mono text-xs text-muted-foreground">{{ hook.url }}</code>
+                                            <Button variant="ghost" size="icon" aria-label="URL kopieren" @click="copyToClipboard(hook.url)"><Copy class="size-4" /></Button>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-muted-foreground">{{ hook.last_received_at ?? 'nie' }}</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-1">
+                                            <Button variant="ghost" size="icon" aria-label="Secret neu erzeugen" @click="regenerateIncoming(hook.id)"><RefreshCw class="size-4" /></Button>
+                                            <Button variant="ghost" size="icon" aria-label="Löschen" @click="destroyIncoming(hook.id)"><Trash2 class="size-4 text-destructive" /></Button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr v-if="props.incoming.length === 0">
+                                    <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">Noch keine eingehenden Endpunkte angelegt.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <details class="rounded-xl border border-sidebar-border/70 p-4 text-sm dark:border-sidebar-border">
+                        <summary class="cursor-pointer text-muted-foreground">Legacy-Endpunkte (globales <code class="font-mono">KONTORFIX_INCOMING_WEBHOOK_SECRET</code>)</summary>
+                        <p class="mt-2 text-xs text-muted-foreground">
+                            {{ props.legacy.configured ? 'Konfiguriert.' : 'Kein globales Secret gesetzt.' }} Die neuen Endpunkte oben sind der empfohlene Weg.
+                        </p>
+                        <div class="mt-2 space-y-1">
+                            <div v-for="(url, provider) in props.legacy.urls" :key="provider" class="flex items-center gap-2">
+                                <span class="w-20 shrink-0 text-xs font-medium capitalize">{{ provider }}</span>
+                                <code class="flex-1 truncate font-mono text-xs text-muted-foreground">{{ url }}</code>
+                            </div>
+                        </div>
+                    </details>
+                </TabsContent>
+
+                <!-- Outgoing -->
+                <TabsContent value="outgoing" class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h1 class="text-xl font-semibold">Ausgehende Webhooks</h1>
+                        <Button @click="dialogOpen = true">
+                            <Plus class="size-4" />
+                            Webhook hinzufügen
+                        </Button>
+                    </div>
+
+                    <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                        <table class="w-full text-left text-sm">
+                            <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                                <tr>
+                                    <th class="px-4 py-3 font-medium">URL</th>
+                                    <th class="px-4 py-3 font-medium">Events</th>
+                                    <th class="px-4 py-3 font-medium">Auth</th>
+                                    <th class="px-4 py-3 font-medium">Aktiv</th>
+                                    <th class="px-4 py-3 font-medium">Letzte Zustellungen</th>
+                                    <th class="px-4 py-3 font-medium">Aktionen</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="webhook in props.webhooks" :key="webhook.id" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                    <td class="px-4 py-3 font-mono text-xs">{{ webhook.url }}</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex flex-wrap gap-1">
+                                            <span v-for="event in webhook.events" :key="event" class="inline-flex items-center rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium">
+                                                {{ eventLabel(event) }}
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span v-if="webhook.has_secret" class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi">Signiert</span>
+                                        <span v-else class="text-muted-foreground">—</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <span :class="cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', webhook.enabled ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-border bg-muted text-muted-foreground')">
+                                            {{ webhook.enabled ? 'Ja' : 'Nein' }}
                                         </span>
-                                        <span>{{ eventLabel(delivery.event) }}</span>
-                                        <span class="text-muted-foreground">{{ delivery.delivered_at }}</span>
-                                    </li>
-                                </ul>
-                                <span v-else class="text-muted-foreground">Noch keine Zustellungen.</span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" @click="destroyWebhook(webhook.id)" aria-label="Webhook löschen">
-                                    <Trash2 class="size-4 text-destructive" />
-                                </Button>
-                            </td>
-                        </tr>
-                        <tr v-if="props.webhooks.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Webhooks angelegt.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <ul v-if="webhook.recent_deliveries.length > 0" class="space-y-1">
+                                            <li v-for="(delivery, idx) in webhook.recent_deliveries" :key="idx" class="flex items-center gap-2 text-xs">
+                                                <span :class="cn('inline-flex items-center rounded-full border px-2 py-0.5 font-medium', delivery.success ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-destructive/30 bg-destructive/15 text-destructive')">
+                                                    {{ delivery.status_code ?? '—' }}
+                                                </span>
+                                                <span>{{ eventLabel(delivery.event) }}</span>
+                                                <span class="text-muted-foreground">{{ delivery.delivered_at }}</span>
+                                            </li>
+                                        </ul>
+                                        <span v-else class="text-muted-foreground">Noch keine Zustellungen.</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <Button variant="ghost" size="icon" @click="destroyWebhook(webhook.id)" aria-label="Webhook löschen"><Trash2 class="size-4 text-destructive" /></Button>
+                                    </td>
+                                </tr>
+                                <tr v-if="props.webhooks.length === 0">
+                                    <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Webhooks angelegt.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </TabsContent>
+
+                <!-- Audit -->
+                <TabsContent value="audit" class="space-y-6">
+                    <section class="space-y-2">
+                        <h2 class="text-base font-semibold">Eingehend (letzte {{ props.audit.incoming.length }})</h2>
+                        <div class="space-y-2">
+                            <details v-for="e in props.audit.incoming" :key="e.id" class="rounded-lg border border-sidebar-border/70 px-3 py-2 text-sm dark:border-sidebar-border">
+                                <summary class="flex cursor-pointer flex-wrap items-center gap-2">
+                                    <span :class="cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', e.signature_valid ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-destructive/30 bg-destructive/15 text-destructive')">
+                                        {{ e.status_code }}
+                                    </span>
+                                    <span class="capitalize">{{ e.provider }}</span>
+                                    <span v-if="e.source" class="text-xs text-muted-foreground">· {{ e.source }}</span>
+                                    <span class="truncate font-mono text-xs text-muted-foreground">{{ e.repo_url ?? '—' }}</span>
+                                    <span class="ml-auto text-xs text-muted-foreground">{{ e.matched_packages }} Paket(e) · {{ e.received_at }}</span>
+                                </summary>
+                                <pre class="mt-2 max-h-80 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-3 text-xs dark:border-sidebar-border">{{ pretty(e.payload) }}</pre>
+                            </details>
+                            <p v-if="props.audit.incoming.length === 0" class="text-sm text-muted-foreground">Noch keine eingehenden Ereignisse.</p>
+                        </div>
+                    </section>
+
+                    <section class="space-y-2">
+                        <h2 class="text-base font-semibold">Ausgehend (letzte {{ props.audit.outgoing.length }})</h2>
+                        <div class="space-y-2">
+                            <details v-for="d in props.audit.outgoing" :key="d.id" class="rounded-lg border border-sidebar-border/70 px-3 py-2 text-sm dark:border-sidebar-border">
+                                <summary class="flex cursor-pointer flex-wrap items-center gap-2">
+                                    <span :class="cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', d.success ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-destructive/30 bg-destructive/15 text-destructive')">
+                                        {{ d.status_code ?? '—' }}
+                                    </span>
+                                    <span>{{ eventLabel(d.event) }}</span>
+                                    <span class="truncate font-mono text-xs text-muted-foreground">{{ d.url }}</span>
+                                    <span class="ml-auto text-xs text-muted-foreground">Versuch {{ d.attempts }} · {{ d.delivered_at }}</span>
+                                </summary>
+                                <p v-if="d.error" class="mt-2 text-xs text-destructive">{{ d.error }}</p>
+                                <pre class="mt-2 max-h-80 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-3 text-xs dark:border-sidebar-border">{{ pretty(d.payload) }}</pre>
+                            </details>
+                            <p v-if="props.audit.outgoing.length === 0" class="text-sm text-muted-foreground">Noch keine ausgehenden Zustellungen.</p>
+                        </div>
+                    </section>
+                </TabsContent>
+            </Tabs>
         </div>
 
+        <!-- Outgoing dialog -->
         <Dialog v-model:open="dialogOpen">
             <DialogContent>
                 <DialogHeader>
@@ -272,12 +398,7 @@ function copyToClipboard(value: string) {
                         <Label>Events</Label>
                         <div class="space-y-2">
                             <label v-for="option in eventOptions" :key="option.value" class="flex items-center gap-2 text-sm">
-                                <input
-                                    type="checkbox"
-                                    :checked="form.events.includes(option.value)"
-                                    class="size-4 rounded border-input"
-                                    @change="toggleEvent(option.value, ($event.target as HTMLInputElement).checked)"
-                                />
+                                <input type="checkbox" :checked="form.events.includes(option.value)" class="size-4 rounded border-input" @change="toggleEvent(option.value, ($event.target as HTMLInputElement).checked)" />
                                 {{ option.label }}
                             </label>
                         </div>
@@ -287,6 +408,43 @@ function copyToClipboard(value: string) {
                     <DialogFooter>
                         <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
                         <Button type="submit" :disabled="form.processing">Anlegen</Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Incoming dialog -->
+        <Dialog v-model:open="incomingDialogOpen">
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Eingehenden Endpunkt anlegen</DialogTitle>
+                </DialogHeader>
+
+                <form class="space-y-4" @submit.prevent="submitIncoming">
+                    <div class="grid gap-2">
+                        <Label for="incoming_name">Name</Label>
+                        <Input id="incoming_name" v-model="incomingForm.name" placeholder="GitHub – acme/tools" autocomplete="off" />
+                        <InputError :message="incomingForm.errors.name" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="incoming_provider">Provider</Label>
+                        <select id="incoming_provider" v-model="incomingForm.provider" :class="selectClass">
+                            <option value="github">GitHub</option>
+                            <option value="gitlab">GitLab</option>
+                            <option value="gitea">Gitea</option>
+                            <option value="bitbucket">Bitbucket</option>
+                        </select>
+                        <InputError :message="incomingForm.errors.provider" />
+                    </div>
+
+                    <p class="text-xs text-muted-foreground">
+                        Nach dem Anlegen werden URL und Secret einmalig angezeigt — trage beides im Git-Host als Webhook ein.
+                    </p>
+
+                    <DialogFooter>
+                        <Button type="button" variant="outline" @click="incomingDialogOpen = false">Abbrechen</Button>
+                        <Button type="submit" :disabled="incomingForm.processing">Anlegen</Button>
                     </DialogFooter>
                 </form>
             </DialogContent>
