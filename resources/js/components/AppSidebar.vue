@@ -2,6 +2,7 @@
 import NavFooter from '@/components/NavFooter.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
+import ScopeSwitcher from '@/components/kontorfix/ScopeSwitcher.vue';
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from '@/components/ui/sidebar';
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
@@ -11,10 +12,12 @@ import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
 
-// Only actual members see exclusively the portal navigation. If the role is
-// missing/unknown, we behave like admin/maintainer so no empty nav results.
-const isMember = computed(() => page.props.auth.user?.role === 'member');
-const isAdmin = computed(() => page.props.auth.user?.role === 'admin');
+// The navigation follows the server-computed capabilities:
+//   - console: any organization admin/maintainer — sees the scoped registry surface.
+//   - super:   the global super-admin — additionally sees instance-wide administration.
+// Anyone without console access (a plain member) sees only the portal.
+const canConsole = computed(() => page.props.auth.can?.console ?? false);
+const isSuper = computed(() => page.props.auth.can?.super ?? false);
 const appVersion = computed(() => page.props.appVersion ?? null);
 
 interface NavSection {
@@ -24,18 +27,19 @@ interface NavSection {
 
 // Grouped into thematic sections (instead of one long flat list).
 const navSections = computed<NavSection[]>(() => {
-    // Customers see exclusively the portal.
-    if (isMember.value) {
+    // Anyone without console access (plain members) sees exclusively the portal.
+    if (!canConsole.value) {
         return [{ label: 'Portal', items: [{ title: 'Registries', href: route('portal.registries.index'), icon: Boxes }] }];
     }
 
-    // Operators & maintainers.
+    // Organization admins & maintainers.
     const sections: NavSection[] = [
         {
             label: 'Übersicht',
             items: [
                 { title: 'Dashboard', href: '/dashboard', icon: LayoutGrid },
-                { title: 'Status', href: '/admin/status', icon: Activity },
+                // Instance health is a super-admin surface.
+                ...(isSuper.value ? [{ title: 'Status', href: '/admin/status', icon: Activity }] : []),
             ],
         },
         {
@@ -51,13 +55,14 @@ const navSections = computed<NavSection[]>(() => {
             label: 'Zugriff',
             items: [
                 { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
-                { title: 'Webhooks', href: '/admin/webhooks', icon: Webhook },
+                // Outgoing webhooks are instance-wide config — super-admin only.
+                ...(isSuper.value ? [{ title: 'Webhooks', href: '/admin/webhooks', icon: Webhook }] : []),
             ],
         },
     ];
 
-    // Admins only: security-/infrastructure-critical settings (role:admin routes).
-    if (isAdmin.value) {
+    // Super-admin only: instance-wide, security-/infrastructure-critical administration.
+    if (isSuper.value) {
         sections.push({
             label: 'Verwaltung',
             items: [
@@ -98,8 +103,9 @@ const footerNavItems = computed<NavItem[]>(() => {
 
     // Horizon and the API browser are their own (non-Inertia) pages → real browser
     // links in the footer. Only reachable while authenticated (the app shell requires
-    // a session) and gated server-side to operator admins.
-    if (isAdmin.value) {
+    // a session) and gated server-side. Both surface instance internals, so they are
+    // shown to the super-admin only.
+    if (isSuper.value) {
         items.unshift(
             {
                 title: 'API-Browser',
@@ -133,6 +139,7 @@ const footerNavItems = computed<NavItem[]>(() => {
         </SidebarHeader>
 
         <SidebarContent>
+            <ScopeSwitcher v-if="canConsole" />
             <NavMain v-for="section in navSections" :key="section.label" :label="section.label" :items="section.items" />
         </SidebarContent>
 

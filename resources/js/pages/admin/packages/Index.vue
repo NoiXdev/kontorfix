@@ -105,7 +105,7 @@ function applyStatus(p: PackagePayload) {
     }
 }
 
-const isOperator = page.props.auth.user.role !== 'member';
+const isOperator = page.props.auth.can?.console ?? false;
 if (isOperator) {
     useOperatorChannel({
         onSynced: (p) => {

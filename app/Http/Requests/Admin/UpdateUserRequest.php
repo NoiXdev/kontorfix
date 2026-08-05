@@ -3,9 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\UserRole;
-use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -16,6 +14,15 @@ class UpdateUserRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        // Only normalise the super-admin flag when the form actually submits it, so a
+        // role-only dropdown change doesn't silently clear it.
+        if ($this->has('is_super_admin')) {
+            $this->merge(['is_super_admin' => $this->boolean('is_super_admin')]);
+        }
+    }
+
     /**
      * @return array<string, array<int, mixed>>
      */
@@ -24,6 +31,8 @@ class UpdateUserRequest extends FormRequest
         $user = $this->route('user');
         $userId = $user instanceof User ? $user->id : null;
 
+        // Roles are per-organization — no operator-org restriction. Global reach is the
+        // separate super-admin flag.
         return [
             // `sometimes` keeps partial updates working (e.g. a role-only change from a
             // dropdown) while the full edit form still validates name/email/home org.
@@ -33,30 +42,8 @@ class UpdateUserRequest extends FormRequest
                 Rule::unique('users', 'email')->ignore($userId),
             ],
             'role' => ['required', Rule::enum(UserRole::class)],
+            'is_super_admin' => ['sometimes', 'boolean'],
             'organization_id' => ['sometimes', 'required', 'uuid', 'exists:organizations,id'],
         ];
-    }
-
-    public function withValidator(Validator $validator): void
-    {
-        $validator->after(function (Validator $validator): void {
-            $role = $this->input('role');
-
-            if (! in_array($role, [UserRole::Admin->value, UserRole::Maintainer->value], true)) {
-                return;
-            }
-
-            // Admin/Maintainer only make sense inside the operator organization. Check
-            // against the org the edit assigns the user to, or — for a role-only update
-            // that doesn't touch the home org — against the user's current org.
-            $user = $this->route('user');
-            $targetOrgId = $this->input('organization_id')
-                ?? ($user instanceof User ? $user->organization_id : null);
-            $organization = $targetOrgId !== null ? Organization::find($targetOrgId) : null;
-
-            if ($organization !== null && ! $organization->is_operator) {
-                $validator->errors()->add('role', 'Admin/Maintainer sind nur in der Betreiber-Organisation erlaubt.');
-            }
-        });
     }
 }

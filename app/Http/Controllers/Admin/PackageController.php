@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\PackageType;
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Jobs\SyncPackage;
@@ -21,6 +22,8 @@ use Inertia\Response;
 
 class PackageController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     public function index(Request $request): Response
     {
         $q = trim((string) $request->query('q', ''));
@@ -28,7 +31,7 @@ class PackageController extends Controller
         $status = $request->query('status');
         $group = $request->query('group');
 
-        $packages = Package::query()
+        $packages = $this->scopePackageQuery(Package::query())
             ->withCount('groups')
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
             ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('type', $type))
@@ -49,13 +52,15 @@ class PackageController extends Controller
 
         return Inertia::render('admin/packages/Index', [
             'packages' => $packages,
-            'groups' => Group::orderBy('name')->get(['id', 'name', 'slug']),
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'slug']),
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
         ]);
     }
 
     public function show(Package $package, PackageDependencies $deps): Response
     {
+        $this->assertCanTouchPackage($package);
+
         $package->load(['versions', 'groups:id,name,slug']);
 
         return Inertia::render('admin/packages/Show', [
@@ -101,8 +106,15 @@ class PackageController extends Controller
 
     public function store(StorePackageRequest $request): RedirectResponse|JsonResponse
     {
+        // A package may only be attached to registries the user administers, so it can
+        // never be slipped into another organization's registry.
+        $groupIds = $request->validated('group_ids', []);
+        foreach ($groupIds as $groupId) {
+            $this->assertAdministersGroup(Group::findOrFail($groupId));
+        }
+
         $package = Package::create($request->safe()->except('group_ids'));
-        $package->groups()->sync($request->validated('group_ids', []));
+        $package->groups()->sync($groupIds);
         SyncPackage::dispatch($package);
 
         // The PackagePicker creates packages inline via fetch and needs the
@@ -120,6 +132,8 @@ class PackageController extends Controller
 
     public function destroy(Package $package): RedirectResponse
     {
+        $this->assertCanTouchPackage($package);
+
         $package->delete();
 
         return back()->with('success', 'Paket gelöscht.');

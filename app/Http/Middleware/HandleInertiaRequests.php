@@ -3,6 +3,8 @@
 namespace App\Http\Middleware;
 
 use App\Models\SystemSetting;
+use App\Models\User;
+use App\Services\Scope\OrgScope;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -39,6 +41,8 @@ class HandleInertiaRequests extends Middleware
     {
         [$message, $author] = str(Inspiring::quotes()->random())->explode('-');
 
+        $user = $request->user();
+
         return array_merge(parent::share($request), [
             ...parent::share($request),
             'name' => config('app.name'),
@@ -47,8 +51,18 @@ class HandleInertiaRequests extends Middleware
             // Lets the login page hide the "sign up" link when self-registration is off.
             'registrationEnabled' => fn (): bool => SystemSetting::current()->registration_enabled,
             'auth' => [
-                'user' => $request->user(),
+                'user' => $user,
+                // Drives the navigation: which surfaces to show. `console` = any org
+                // admin/maintainer (scoped registry surface); `super` = the global
+                // super-admin (instance-wide administration).
+                'can' => [
+                    'console' => $user instanceof User && $user->canAdministerConsole(),
+                    'super' => $user instanceof User && $user->isSuperAdmin(),
+                ],
             ],
+            // The sidebar organization scope switch. Null when not applicable (logged out
+            // or a single-org admin with nothing to switch between).
+            'scope' => fn () => $user instanceof User ? app(OrgScope::class)->share() : null,
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'plainTextToken' => fn () => $request->session()->get('plainTextToken'),

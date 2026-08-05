@@ -3,21 +3,28 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\TokenAbility;
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreTokenRequest;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
+use App\Services\Scope\OrgScope;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class TokenController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     public function index(): Response
     {
+        $orgIds = $this->scopedOrgIds();
+
         return Inertia::render('admin/tokens/Index', [
-            'tokens' => RegistryToken::with(['organization:id,name', 'group:id,name'])->latest()->get()
+            'tokens' => RegistryToken::with(['organization:id,name', 'group:id,name'])
+                ->whereIn('organization_id', $orgIds)->latest()->get()
                 ->map(fn (RegistryToken $t) => [
                     'id' => $t->id,
                     'name' => $t->name,
@@ -27,18 +34,20 @@ class TokenController extends Controller
                     'last_used_at' => $t->last_used_at?->diffForHumans(),
                     'expires_at' => $t->expires_at?->toDateString(),
                 ]),
-            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
-            'groups' => Group::orderBy('name')->get(['id', 'name', 'organization_id']),
+            // Only organizations (and their registries) the user may administer.
+            'organizations' => app(OrgScope::class)->organizations(),
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'organization_id']),
         ]);
     }
 
     public function store(StoreTokenRequest $request): RedirectResponse
     {
-        // TODO(multi-tenant): in the operator model, the operator creates tokens for customer
-        // orgs, so organization_id is deliberately freely selectable. Once customer admins
-        // create tokens themselves, this must be restricted to their own org.
+        // A token may only ever be issued for an organization the user administers; the
+        // group (when set) is validated by the request to belong to that same org.
+        $organizationId = $this->resolveCreationOrg($request->validated('organization_id'));
+
         [$token, $plain] = RegistryToken::issue(
-            Organization::findOrFail($request->validated('organization_id')),
+            Organization::findOrFail($organizationId),
             $request->validated('name'),
             $request->validated('group_id') ? Group::findOrFail($request->validated('group_id')) : null,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
@@ -49,7 +58,8 @@ class TokenController extends Controller
 
     public function destroy(RegistryToken $token): RedirectResponse
     {
-        // TODO(multi-tenant): restrict to tokens of the own org once customer admins exist.
+        $this->assertAdministersOrg($token->organization_id);
+
         $token->delete();
 
         return back()->with('success', 'Token widerrufen.');

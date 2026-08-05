@@ -8,12 +8,13 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Mail, Pencil, Plus, ScrollText, Trash2, X } from 'lucide-vue-next';
+import { Mail, Pencil, Plus, ScrollText, ShieldCheck, Trash2, X } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 interface Membership {
     id: string;
     name: string;
+    role: string;
 }
 
 interface UserRow {
@@ -21,6 +22,7 @@ interface UserRow {
     name: string;
     email: string | null;
     role: string;
+    is_super_admin: boolean;
     organization_id: string | null;
     organization: string | null;
     memberships: Membership[];
@@ -58,6 +60,7 @@ const form = useForm({
     email: '',
     organization_id: '',
     role: 'member',
+    is_super_admin: false,
     password: '',
 });
 
@@ -85,6 +88,9 @@ function submit() {
     });
 }
 
+// Role for a newly attached additional-org membership.
+const roleForNewMembership = ref('member');
+
 // --- Edit (name / email / role / home org) ---
 const editOpen = ref(false);
 const editUser = ref<UserRow | null>(null);
@@ -92,6 +98,7 @@ const editForm = useForm({
     name: '',
     email: '',
     role: 'member',
+    is_super_admin: false,
     organization_id: '',
 });
 const addOrgId = ref('');
@@ -102,8 +109,10 @@ function openEdit(user: UserRow) {
     editForm.name = user.name;
     editForm.email = user.email ?? '';
     editForm.role = user.role;
+    editForm.is_super_admin = user.is_super_admin;
     editForm.organization_id = user.organization_id ?? '';
     addOrgId.value = '';
+    roleForNewMembership.value = 'member';
     editOpen.value = true;
 }
 
@@ -134,11 +143,12 @@ function attachOrg() {
     }
     router.post(
         route('admin.users.organizations.store', editUser.value.id),
-        { organization_id: addOrgId.value },
+        { organization_id: addOrgId.value, role: roleForNewMembership.value },
         {
             preserveScroll: true,
             onSuccess: () => {
                 addOrgId.value = '';
+                roleForNewMembership.value = 'member';
                 editOpen.value = false;
             },
         },
@@ -207,7 +217,18 @@ function destroyUser(id: string) {
                             :key="user.id"
                             class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                         >
-                            <td class="px-4 py-3 font-medium">{{ user.name }}</td>
+                            <td class="px-4 py-3 font-medium">
+                                <span class="flex items-center gap-2">
+                                    {{ user.name }}
+                                    <span
+                                        v-if="user.is_super_admin"
+                                        class="inline-flex items-center gap-1 rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
+                                    >
+                                        <ShieldCheck class="size-3" />
+                                        Super-Admin
+                                    </span>
+                                </span>
+                            </td>
                             <td class="px-4 py-3 font-mono text-xs">{{ user.email ?? '—' }}</td>
                             <td class="px-4 py-3">{{ user.organization ?? '—' }}</td>
                             <td class="px-4 py-3">
@@ -218,6 +239,7 @@ function destroyUser(id: string) {
                                         class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
                                     >
                                         {{ m.name }}
+                                        <span class="rounded bg-copper/20 px-1 text-[10px] uppercase tracking-wide">{{ m.role }}</span>
                                         <button
                                             type="button"
                                             class="hover:text-destructive"
@@ -297,8 +319,20 @@ function destroyUser(id: string) {
                     <div class="grid gap-2">
                         <Label for="role">Rolle</Label>
                         <SearchableSelect id="role" v-model="form.role" :options="roleOptions" />
+                        <p class="text-xs text-muted-foreground">Rolle innerhalb der Heim-Organisation.</p>
                         <InputError :message="form.errors.role" />
                     </div>
+
+                    <label class="flex items-start gap-2 rounded-md border border-sidebar-border/70 p-3 text-sm dark:border-sidebar-border">
+                        <input type="checkbox" v-model="form.is_super_admin" class="mt-1" />
+                        <span>
+                            Super-Admin
+                            <span class="block text-xs text-muted-foreground">
+                                Voller Zugriff auf alle Organisationen und die Instanz-Verwaltung.
+                            </span>
+                        </span>
+                    </label>
+                    <InputError :message="form.errors.is_super_admin" />
 
                     <div class="grid gap-2">
                         <Label>Zugang</Label>
@@ -362,13 +396,25 @@ function destroyUser(id: string) {
                     <div class="grid gap-2">
                         <Label for="edit_role">Rolle</Label>
                         <SearchableSelect id="edit_role" v-model="editForm.role" :options="roleOptions" />
+                        <p class="text-xs text-muted-foreground">Rolle innerhalb der Heim-Organisation.</p>
                         <InputError :message="editForm.errors.role" />
                         <InputError :message="editForm.errors.user" />
                     </div>
 
+                    <label class="flex items-start gap-2 rounded-md border border-sidebar-border/70 p-3 text-sm dark:border-sidebar-border">
+                        <input type="checkbox" v-model="editForm.is_super_admin" class="mt-1" />
+                        <span>
+                            Super-Admin
+                            <span class="block text-xs text-muted-foreground">
+                                Voller Zugriff auf alle Organisationen und die Instanz-Verwaltung.
+                            </span>
+                        </span>
+                    </label>
+                    <InputError :message="editForm.errors.is_super_admin" />
+
                     <div v-if="editUser" class="grid gap-2 border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
                         <Label>Weitere Organisationen</Label>
-                        <p class="text-xs text-muted-foreground">Zusätzlicher Zugriff auf die Registries dieser Organisationen.</p>
+                        <p class="text-xs text-muted-foreground">Zusätzlicher Zugriff mit eigener Rolle je Organisation.</p>
                         <div class="flex flex-wrap gap-1">
                             <span
                                 v-for="m in editUser.memberships"
@@ -376,6 +422,7 @@ function destroyUser(id: string) {
                                 class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
                             >
                                 {{ m.name }}
+                                <span class="rounded bg-copper/20 px-1 text-[10px] uppercase tracking-wide">{{ m.role }}</span>
                                 <button type="button" class="hover:text-destructive" aria-label="Entfernen" @click="detachOrg(editUser.id, m.id)">
                                     <X class="size-3" />
                                 </button>
@@ -389,6 +436,7 @@ function destroyUser(id: string) {
                                 :options="assignableOrgs.map((o) => ({ value: o.id, label: o.name }))"
                                 placeholder="Organisation hinzufügen …"
                             />
+                            <SearchableSelect v-model="roleForNewMembership" class="w-40" :options="roleOptions" />
                             <Button type="button" variant="outline" :disabled="!addOrgId" @click="attachOrg">Hinzufügen</Button>
                         </div>
                     </div>

@@ -56,7 +56,7 @@ function showHint(message: string, failed: boolean) {
     hintTimer = setTimeout(() => (liveHint.value = null), 5000);
 }
 
-const isOperator = page.props.auth.user.role !== 'member';
+const isOperator = page.props.auth.can?.console ?? false;
 if (isOperator) {
     useOperatorChannel({
         onSynced: (p) => showHint(`Aktivität: ${p.name} synchronisiert`, false),

@@ -38,7 +38,7 @@ class User extends Authenticatable implements PasskeyUser
         // Deliberately never logs password / 2FA columns — only safe profile fields.
         return LogOptions::defaults()
             ->useLogName('user')
-            ->logOnly(['name', 'email', 'role', 'organization_id', 'account_type'])
+            ->logOnly(['name', 'email', 'role', 'is_super_admin', 'organization_id', 'account_type'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
     }
@@ -65,6 +65,7 @@ class User extends Authenticatable implements PasskeyUser
         'password',
         'organization_id',
         'role',
+        'is_super_admin',
         'account_type',
     ];
 
@@ -91,6 +92,7 @@ class User extends Authenticatable implements PasskeyUser
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'is_super_admin' => 'bool',
             'account_type' => AccountType::class,
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
@@ -116,7 +118,85 @@ class User extends Authenticatable implements PasskeyUser
      */
     public function organizations(): BelongsToMany
     {
-        return $this->belongsToMany(Organization::class)->withTimestamps();
+        return $this->belongsToMany(Organization::class)->withPivot('role')->withTimestamps();
+    }
+
+    /**
+     * Global super-admin: may do everything across every organization. The admin of the
+     * operator organization is grandfathered in (that account has always been the
+     * "can do everything" login), so existing installs keep working.
+     */
+    public function isSuperAdmin(): bool
+    {
+        return (bool) $this->is_super_admin
+            || ($this->role === UserRole::Admin && (bool) $this->organization?->is_operator);
+    }
+
+    /**
+     * The user's role within a specific organization: their home-org role for the home
+     * org, the membership role for an additional org, or null when they are not a member.
+     * A super-admin is treated as admin everywhere.
+     */
+    public function roleIn(?string $organizationId): ?UserRole
+    {
+        if ($organizationId === null) {
+            return null;
+        }
+
+        if ($this->isSuperAdmin()) {
+            return UserRole::Admin;
+        }
+
+        if ($organizationId === $this->organization_id) {
+            return $this->role;
+        }
+
+        $membership = $this->organizations->firstWhere('id', $organizationId)
+            ?? $this->organizations()->whereKey($organizationId)->first();
+
+        $pivotRole = $membership?->getRelationValue('pivot')?->getAttribute('role');
+
+        return $pivotRole !== null ? UserRole::from($pivotRole) : null;
+    }
+
+    /** Whether the user is admin/maintainer of the given organization (or super-admin). */
+    public function administers(?string $organizationId): bool
+    {
+        return in_array($this->roleIn($organizationId), [UserRole::Admin, UserRole::Maintainer], true);
+    }
+
+    /**
+     * Organizations the user may administer (admin or maintainer). A super-admin
+     * administers every organization.
+     *
+     * @return list<string>
+     */
+    public function administeredOrganizationIds(): array
+    {
+        if ($this->isSuperAdmin()) {
+            return Organization::query()->pluck('id')->all();
+        }
+
+        $ids = [];
+
+        if (in_array($this->role, [UserRole::Admin, UserRole::Maintainer], true) && $this->organization_id !== null) {
+            $ids[] = $this->organization_id;
+        }
+
+        foreach ($this->organizations as $org) {
+            $pivotRole = $org->getRelationValue('pivot')?->getAttribute('role');
+            if (in_array($pivotRole, [UserRole::Admin->value, UserRole::Maintainer->value], true)) {
+                $ids[] = $org->id;
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /** Whether the user may reach the admin console at all (super-admin or org admin/maintainer). */
+    public function canAdministerConsole(): bool
+    {
+        return $this->isSuperAdmin() || $this->administeredOrganizationIds() !== [];
     }
 
     /**

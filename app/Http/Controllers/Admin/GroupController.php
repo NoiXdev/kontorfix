@@ -2,17 +2,18 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Models\Domain;
 use App\Models\Group;
-use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Registry\SetupSnippetBuilder;
+use App\Services\Scope\OrgScope;
 use App\Support\ActivityPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,13 +22,16 @@ use Inertia\Response;
 
 class GroupController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     public function index(): Response
     {
-        // TODO(multi-tenant): restrict to the user's organization_id once customer admins exist.
+        // Only registries of organizations the user may administer (and within the
+        // active sidebar scope). A super-admin's scope spans every organization.
         return Inertia::render('admin/groups/Index', [
-            'groups' => Group::withCount('packages')
-                ->with(['domains:id,group_id,hostname', 'organization:id,name'])
-                ->orderBy('name')->get()
+            'groups' => $this->scopeGroupQuery(
+                Group::withCount('packages')->with(['domains:id,group_id,hostname', 'organization:id,name'])
+            )->orderBy('name')->get()
                 ->map(fn (Group $g) => [
                     'id' => $g->id,
                     'name' => $g->name,
@@ -38,12 +42,15 @@ class GroupController extends Controller
                     'domains' => $g->domains->pluck('hostname'),
                     'organization' => $g->organization?->name,
                 ]),
-            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
+            // The org picker only offers organizations the user may create registries in.
+            'organizations' => app(OrgScope::class)->organizations(),
         ]);
     }
 
     public function show(Group $group, SetupSnippetBuilder $snippets): Response
     {
+        $this->assertAdministersGroup($group);
+
         $group->load(['organization:id,name', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
 
         return Inertia::render('admin/groups/Show', [
@@ -90,12 +97,16 @@ class GroupController extends Controller
 
     public function store(StoreGroupRequest $request): RedirectResponse
     {
+        // The organization is the active scope (or, viewing "all", the explicitly chosen
+        // one) — always validated to be one the user may administer.
+        $organizationId = $this->resolveCreationOrg($request->validated('organization_id'));
+
         $group = Group::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
             'public' => $request->boolean('public'),
             'portal_enabled' => $request->boolean('portal_enabled'),
-            'organization_id' => $request->validated('organization_id') ?? $request->user()->organization_id,
+            'organization_id' => $organizationId,
         ]);
         $group->packages()->sync($request->validated('package_ids', []));
 
@@ -104,6 +115,8 @@ class GroupController extends Controller
 
     public function update(UpdateGroupRequest $request, Group $group): RedirectResponse
     {
+        $this->assertAdministersGroup($group);
+
         $group->update([
             'name' => $request->validated('name'),
             'public' => $request->boolean('public'),
@@ -115,6 +128,8 @@ class GroupController extends Controller
 
     public function attachPackages(Request $request, Group $group): RedirectResponse
     {
+        $this->assertAdministersGroup($group);
+
         $data = $request->validate([
             'package_ids' => ['required', 'array', 'min:1'],
             'package_ids.*' => ['uuid', 'exists:packages,id'],
@@ -128,6 +143,8 @@ class GroupController extends Controller
 
     public function detachPackage(Group $group, Package $package): RedirectResponse
     {
+        $this->assertAdministersGroup($group);
+
         $group->packages()->detach($package->id);
 
         return back()->with('success', 'Paket aus der Registry entfernt.');
@@ -135,6 +152,8 @@ class GroupController extends Controller
 
     public function destroy(Group $group): RedirectResponse
     {
+        $this->assertAdministersGroup($group);
+
         $group->delete();
 
         return back()->with('success', 'Gruppe gelöscht.');

@@ -43,16 +43,27 @@ it('refuses to delete yourself', function () {
     expect(User::find($this->admin->id))->not->toBeNull();
 });
 
-it('refuses to delete the last operator admin', function () {
-    // Allowed case: with two operator admins, one can be deleted.
-    $secondOperatorAdmin = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
-    $this->actingAs($this->admin)->delete("/admin/users/{$secondOperatorAdmin->id}")->assertRedirect();
-    expect(User::find($secondOperatorAdmin->id))->toBeNull();
+it('refuses to strip global access from the last super-admin', function () {
+    // $this->admin is the only super-admin — demoting them to member would lock everyone
+    // out of instance administration, so it is blocked.
+    $this->actingAs($this->admin)->put("/admin/users/{$this->admin->id}", ['role' => 'member'])
+        ->assertSessionHasErrors('user');
+    expect($this->admin->fresh()->role)->toBe(UserRole::Admin);
 
-    // Blocked case: now $this->admin is the last operator admin. An admin from another
-    // organization bypasses the self-deletion rule, but the count rule protects the last operator admin.
-    $foreignAdmin = User::factory()->operator()->create(['role' => UserRole::Admin]);
-    $this->actingAs($foreignAdmin)->delete("/admin/users/{$this->admin->id}")->assertSessionHasErrors();
+    // With a second super-admin present, the demotion is allowed.
+    $second = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
+    $this->actingAs($this->admin)->put("/admin/users/{$second->id}", ['role' => 'member'])->assertRedirect();
+    expect($second->fresh()->role)->toBe(UserRole::Member);
+});
+
+it('deletes a super-admin while another remains but never the last one', function () {
+    // Two super-admins: deleting one is allowed.
+    $second = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
+    $this->actingAs($this->admin)->delete("/admin/users/{$second->id}")->assertRedirect();
+    expect(User::find($second->id))->toBeNull();
+
+    // The sole remaining super-admin cannot delete themselves (self + last-super guard).
+    $this->actingAs($this->admin)->delete("/admin/users/{$this->admin->id}")->assertSessionHasErrors('user');
     expect(User::find($this->admin->id))->not->toBeNull();
 });
 

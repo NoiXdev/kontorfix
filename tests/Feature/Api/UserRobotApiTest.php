@@ -32,18 +32,20 @@ it('creates a robot account and issues a key for it', function () {
     ])->assertCreated()->assertJsonPath('data.plain_text', fn ($v) => str_starts_with($v, 'kfxapi_'));
 });
 
-it('filters robots and enforces the operator role invariant', function () {
+it('filters robots and now allows per-org admins/maintainers in any org', function () {
     $this->withToken($this->plain)->getJson('/api/v1/users?account_type=robot')->assertOk();
 
-    // maintainer in a non-operator org is not allowed (invariant).
+    // Under per-organization roles, a maintainer in a customer org is valid.
     $customer = Organization::factory()->create(['is_operator' => false]);
     $this->withToken($this->plain)->postJson('/api/v1/users', [
         'name' => 'X', 'email' => 'x@acme.test', 'organization_id' => $customer->id, 'role' => 'maintainer',
-    ])->assertStatus(422);
+    ])->assertCreated();
+
+    expect(User::where('email', 'x@acme.test')->first()->role->value)->toBe('maintainer');
 });
 
-it('refuses to delete yourself or the last operator admin via api', function () {
-    // The sole operator admin must not be able to delete themselves.
+it('refuses to delete yourself or the last super-admin via api', function () {
+    // The sole super-admin must not be able to delete themselves.
     $this->withToken($this->plain)->deleteJson("/api/v1/users/{$this->admin->id}")
         ->assertStatus(422);
     expect(User::find($this->admin->id))->not->toBeNull();

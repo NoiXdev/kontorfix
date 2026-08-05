@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Http\Resources\Api\UserResource;
+use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -52,11 +53,11 @@ class UserController extends Controller
     {
         $validated = $request->validated();
 
-        if ($user->role === UserRole::Admin
-            && $user->organization->is_operator
-            && ($validated['role'] ?? null) !== UserRole::Admin->value
-            && $user->organization->users()->where('role', UserRole::Admin->value)->count() <= 1) {
-            throw ValidationException::withMessages(['role' => 'Der letzte Betreiber-Admin kann nicht herabgestuft werden.']);
+        // Never let the last remaining super-admin lose global access.
+        if ($user->isSuperAdmin()
+            && ! $this->wouldRemainSuperAdmin($user, $validated)
+            && $this->effectiveSuperAdminCount() <= 1) {
+            throw ValidationException::withMessages(['role' => 'Der letzte Super-Admin kann nicht herabgestuft werden.']);
         }
 
         $user->update($validated);
@@ -70,14 +71,41 @@ class UserController extends Controller
             throw ValidationException::withMessages(['user' => 'Du kannst dich nicht selbst löschen.']);
         }
 
-        if ($user->role === UserRole::Admin
-            && $user->organization->is_operator
-            && $user->organization->users()->where('role', UserRole::Admin->value)->count() <= 1) {
-            throw ValidationException::withMessages(['user' => 'Der letzte Betreiber-Admin kann nicht gelöscht werden.']);
+        if ($user->isSuperAdmin() && $this->effectiveSuperAdminCount() <= 1) {
+            throw ValidationException::withMessages(['user' => 'Der letzte Super-Admin kann nicht gelöscht werden.']);
         }
 
         $user->delete();
 
         return response()->json(status: 204);
+    }
+
+    /**
+     * Whether the user would still be an effective super-admin after applying the given
+     * validated changes (explicit flag, or admin of the operator organization).
+     *
+     * @param  array<string, mixed>  $validated
+     */
+    private function wouldRemainSuperAdmin(User $user, array $validated): bool
+    {
+        $flag = array_key_exists('is_super_admin', $validated)
+            ? (bool) $validated['is_super_admin']
+            : (bool) $user->is_super_admin;
+
+        if ($flag) {
+            return true;
+        }
+
+        $role = array_key_exists('role', $validated) ? $validated['role'] : $user->role->value;
+        $orgId = $validated['organization_id'] ?? $user->organization_id;
+        $org = $orgId === $user->organization_id ? $user->organization : Organization::find($orgId);
+
+        return $role === UserRole::Admin->value && (bool) $org?->is_operator;
+    }
+
+    /** Number of accounts that currently have effective super-admin reach. */
+    private function effectiveSuperAdminCount(): int
+    {
+        return User::with('organization')->get()->filter(fn (User $u) => $u->isSuperAdmin())->count();
     }
 }

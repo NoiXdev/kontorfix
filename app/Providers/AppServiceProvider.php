@@ -73,6 +73,10 @@ class AppServiceProvider extends ServiceProvider
         Scramble::configure()
             ->routes(fn (Route $route): bool => str_starts_with($route->uri(), 'api/v1'));
 
+        // A super-admin may do everything — short-circuit every policy/gate check.
+        // Returning null (not false) for everyone else lets the individual checks run.
+        Gate::before(fn (User $user) => $user->isSuperAdmin() ? true : null);
+
         // Access gate for the docs routes (/docs/api, /docs/api.json). Scramble's
         // RestrictedDocsAccess middleware evaluates this gate in all environments except
         // `local`. Only admins of an operator organization may view the API reference —

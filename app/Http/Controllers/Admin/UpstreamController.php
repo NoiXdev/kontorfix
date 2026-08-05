@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUpstreamRequest;
 use App\Models\Group;
@@ -12,10 +13,16 @@ use Inertia\Response;
 
 class UpstreamController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     public function index(): Response
     {
+        // Upstreams hang off registries — scope both the listing and the group picker to
+        // the registries of the organizations in the active scope.
+        $groupIds = $this->scopeGroupQuery(Group::query())->pluck('id');
+
         return Inertia::render('admin/upstreams/Index', [
-            'upstreams' => Upstream::with(['group:id,name', 'allowedPackages'])->latest()->get()
+            'upstreams' => Upstream::with(['group:id,name', 'allowedPackages'])->whereIn('group_id', $groupIds)->latest()->get()
                 ->map(fn (Upstream $u) => [
                     'id' => $u->id,
                     'group' => $u->group?->name,
@@ -28,7 +35,7 @@ class UpstreamController extends Controller
                     'has_auth' => (bool) $u->auth_token,
                     'allowed_packages' => $u->allowedPackages->pluck('name'),
                 ]),
-            'groups' => Group::orderBy('name')->get(['id', 'name']),
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -36,8 +43,11 @@ class UpstreamController extends Controller
     {
         $data = $request->validated();
 
+        $group = Group::findOrFail($data['group_id']);
+        $this->assertAdministersGroup($group);
+
         $upstream = Upstream::create([
-            'group_id' => $data['group_id'],
+            'group_id' => $group->id,
             'type' => $data['type'],
             'url' => $data['url'],
             'policy' => $data['policy'],
@@ -54,6 +64,8 @@ class UpstreamController extends Controller
 
     public function destroy(Upstream $upstream): RedirectResponse
     {
+        $this->assertAdministersOrg($upstream->group?->organization_id);
+
         $upstream->delete();
 
         return back()->with('success', 'Upstream gelöscht.');

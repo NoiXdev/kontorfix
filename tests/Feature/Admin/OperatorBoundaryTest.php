@@ -6,47 +6,49 @@ use App\Models\User;
 
 beforeEach(function () {
     $this->operator = Organization::factory()->create(['is_operator' => true]);
-    $this->operatorAdmin = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
+    // Admin of the operator org is grandfathered into the global super-admin role.
+    $this->superAdmin = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
 });
 
-it('denies a customer-org admin access to operator admin routes', function () {
+it('denies a customer-org admin the super-admin-only surfaces', function () {
     $custAdmin = User::factory()->for(Organization::factory()->create(['is_operator' => false]))->create(['role' => UserRole::Admin]);
 
-    foreach (['/admin/organizations', '/admin/users', '/admin/packages', '/admin/oidc', '/admin/storage'] as $url) {
+    foreach (['/admin/organizations', '/admin/users', '/admin/oidc', '/admin/storage', '/admin/system', '/admin/webhooks', '/admin/status'] as $url) {
         $this->actingAs($custAdmin)->get($url)->assertForbidden();
     }
 });
 
-it('allows the operator admin through', function () {
-    $this->actingAs($this->operatorAdmin)->get('/admin/organizations')->assertOk();
-    $this->actingAs($this->operatorAdmin)->get('/admin/users')->assertOk();
+it('lets a customer-org admin reach their own scoped registry surface', function () {
+    $custAdmin = User::factory()->for(Organization::factory()->create(['is_operator' => false]))->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($custAdmin)->get('/admin/packages')->assertOk();
+    $this->actingAs($custAdmin)->get('/admin/groups')->assertOk();
+    $this->actingAs($custAdmin)->get('/admin/tokens')->assertOk();
 });
 
-it('rejects creating an admin or maintainer in a customer org', function () {
+it('denies a plain member the console entirely', function () {
+    $member = User::factory()->for(Organization::factory())->create(['role' => UserRole::Member]);
+
+    $this->actingAs($member)->get('/admin/packages')->assertForbidden();
+    $this->actingAs($member)->get('/admin/groups')->assertForbidden();
+});
+
+it('allows the super-admin through the instance-wide surfaces', function () {
+    $this->actingAs($this->superAdmin)->get('/admin/organizations')->assertOk();
+    $this->actingAs($this->superAdmin)->get('/admin/users')->assertOk();
+});
+
+it('now allows creating an admin or maintainer in a customer org', function () {
     $cust = Organization::factory()->create(['is_operator' => false]);
 
-    $this->actingAs($this->operatorAdmin)->post('/admin/users', [
+    $this->actingAs($this->superAdmin)->post('/admin/users', [
         'name' => 'X', 'email' => 'x@x.test', 'organization_id' => $cust->id, 'role' => 'admin', 'password' => 'geheim-1234',
-    ])->assertSessionHasErrors('role');
-
-    $this->actingAs($this->operatorAdmin)->post('/admin/users', [
-        'name' => 'Y', 'email' => 'y@x.test', 'organization_id' => $cust->id, 'role' => 'maintainer', 'password' => 'geheim-1234',
-    ])->assertSessionHasErrors('role');
-
-    // Member in a customer org remains allowed
-    $this->actingAs($this->operatorAdmin)->post('/admin/users', [
-        'name' => 'Z', 'email' => 'z@x.test', 'organization_id' => $cust->id, 'role' => 'member', 'password' => 'geheim-1234',
     ])->assertSessionHasNoErrors();
-});
 
-it('refuses to demote the last operator admin via update', function () {
-    // operatorAdmin is the only admin of the operator org
-    $this->actingAs($this->operatorAdmin)->put("/admin/users/{$this->operatorAdmin->id}", ['role' => 'member'])
-        ->assertSessionHasErrors('user');
-    expect($this->operatorAdmin->fresh()->role)->toBe(UserRole::Admin);
+    $this->actingAs($this->superAdmin)->post('/admin/users', [
+        'name' => 'Y', 'email' => 'y@x.test', 'organization_id' => $cust->id, 'role' => 'maintainer', 'password' => 'geheim-1234',
+    ])->assertSessionHasNoErrors();
 
-    // With a second operator admin, the demotion is allowed
-    $second = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
-    $this->actingAs($this->operatorAdmin)->put("/admin/users/{$second->id}", ['role' => 'member'])->assertRedirect();
-    expect($second->fresh()->role)->toBe(UserRole::Member);
+    expect(User::where('email', 'x@x.test')->first()->role)->toBe(UserRole::Admin)
+        ->and(User::where('email', 'y@x.test')->first()->role)->toBe(UserRole::Maintainer);
 });

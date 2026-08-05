@@ -2,6 +2,21 @@ import type { LucideIcon } from 'lucide-vue-next';
 
 export interface Auth {
     user: User;
+    can?: {
+        console: boolean;
+        super: boolean;
+    };
+}
+
+export interface OrgScopeOption {
+    id: string;
+    name: string;
+}
+
+export interface OrgScope {
+    active: string | null;
+    organizations: OrgScopeOption[];
+    canSelectAll: boolean;
 }
 
 export interface BreadcrumbItem {
@@ -29,6 +44,7 @@ export interface SharedData {
     };
     registrationEnabled?: boolean;
     appVersion?: string;
+    scope?: OrgScope | null;
     ziggy: {
         location: string;
         url: string;
@@ -43,6 +59,7 @@ export interface User {
     name: string;
     email: string;
     role: 'admin' | 'maintainer' | 'member';
+    is_super_admin?: boolean;
     avatar?: string;
     email_verified_at: string | null;
     created_at: string;
