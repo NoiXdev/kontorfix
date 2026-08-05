@@ -1,4 +1,20 @@
-## [0.2.0](https://github.com/NoiXdev/kontorfix/compare/v0.1.1...v) (2026-08-05)
+## [0.3.0](https://github.com/NoiXdev/kontorfix/compare/v0.2.0...v) (2026-08-05)
+
+
+### Features
+
+* **admin:** multi-org users, user edit, registry UX, robots ([c37f86e](https://github.com/NoiXdev/kontorfix/commit/c37f86e83106d2abbcdb01abeacf78801adea457))
+* **admin:** system settings hub, toggleable registration, token-gated setup ([5c634f1](https://github.com/NoiXdev/kontorfix/commit/5c634f1f5a76854cdc35c2a305ff78ce65a1e03b))
+* **audit,docs:** activity log across the app + REST API ([281a4c2](https://github.com/NoiXdev/kontorfix/commit/281a4c28fd0e2c39576df31dd0a23f1cbcc1302f))
+* **packages:** preview a repository before creating a ([512f7cd](https://github.com/NoiXdev/kontorfix/commit/512f7cdfb5205d94dabe7418e5feecb6860fc892))
+* **roles:** org-detail membership roles + global/org-scoped ([eff9210](https://github.com/NoiXdev/kontorfix/commit/eff921077fe23b82c81d190e3b7681ba8abebd8c))
+* **roles:** per-organization roles + global super-admin + ([05e9ab8](https://github.com/NoiXdev/kontorfix/commit/05e9ab83d0e7094767a9017a69ecf41840a77966))
+* **stats:** per-package & per-registry download/storage ([d85c984](https://github.com/NoiXdev/kontorfix/commit/d85c9844bbfba9df8f5a8cdfe526fadbdebc31c2))
+* **ui:** search trigger, activity tabs, API browser ([3f417a5](https://github.com/NoiXdev/kontorfix/commit/3f417a57ea62e218199094b50699b6db9021051e))
+* **ui:** searchable, keyboard-navigable select replacing ([2a5fefd](https://github.com/NoiXdev/kontorfix/commit/2a5fefd08f7b52c4b05e13e6db4e538afb1ffd47))
+* **webhooks:** manageable incoming endpoints with ([b8b18f5](https://github.com/NoiXdev/kontorfix/commit/b8b18f5ac999885584d853cae257a4d62963a4d8))
+
+## [0.2.0](https://github.com/NoiXdev/kontorfix/compare/v0.1.1...v0.2.0) (2026-08-05)
 
 
 ### Features
