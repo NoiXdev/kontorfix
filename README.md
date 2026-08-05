@@ -36,6 +36,12 @@ Kontorfix is built to run on your own infrastructure and is shipped as a contain
 technical setup, local development and secure-operation notes live in the
 [developer and operations documentation](docs/development.md).
 
+## Automation & REST API
+
+Everything the admin UI does is available through a versioned REST API (OpenAPI schema
+at `/docs/api`). See the [REST API & automation guide](docs/rest-api.md) for
+authentication, endpoints and copy-paste examples.
+
 ## Security
 
 Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).

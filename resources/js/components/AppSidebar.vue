@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
+import { Activity, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -71,6 +71,7 @@ const navSections = computed<NavSection[]>(() => {
             label: 'System',
             items: [
                 { title: 'System', href: '/admin/system', icon: SettingsIcon },
+                { title: 'Aktivität', href: '/admin/activity', icon: ScrollText },
                 { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
                 { title: 'Storage', href: '/admin/storage', icon: Database },
             ],

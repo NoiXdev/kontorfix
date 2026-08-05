@@ -98,6 +98,13 @@ function detachMember(userId: string) {
                 >
                     {{ props.organization.is_operator ? 'Betreiber' : 'Kunde' }}
                 </span>
+                <button
+                    type="button"
+                    class="ml-auto text-sm text-muted-foreground underline-offset-4 hover:underline"
+                    @click="router.get(route('admin.activity.index'), { subject_type: 'Organization', subject_id: props.organization.id })"
+                >
+                    Aktivität ansehen
+                </button>
             </div>
 
             <section class="flex flex-col gap-3">

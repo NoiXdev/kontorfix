@@ -63,6 +63,9 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
     Route::put('system', [Admin\SystemController::class, 'update'])->name('system.update');
 
+    // Global audit log (Spatie activitylog). Scoped views are reached via query params.
+    Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');
+
     Route::get('storage', [Admin\StorageController::class, 'show'])->name('storage.show');
     Route::put('storage', [Admin\StorageController::class, 'update'])->name('storage.update');
     Route::post('storage/test', [Admin\StorageController::class, 'test'])->name('storage.test');

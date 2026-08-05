@@ -207,6 +207,13 @@ async function copyToken() {
                     >
                         Privat
                     </span>
+                    <button
+                        type="button"
+                        class="ml-auto text-sm text-muted-foreground underline-offset-4 hover:underline"
+                        @click="router.get(route('admin.activity.index'), { subject_type: 'Group', subject_id: props.group.id })"
+                    >
+                        Aktivität ansehen
+                    </button>
                 </div>
                 <p class="text-sm text-muted-foreground">
                     Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter

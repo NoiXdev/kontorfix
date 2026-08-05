@@ -18,6 +18,8 @@ use Illuminate\Support\Carbon;
 use Laravel\Passkeys\Contracts\PasskeyUser;
 use Laravel\Passkeys\Passkey;
 use Laravel\Passkeys\PasskeyAuthenticatable;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 /**
  * @property string|null $two_factor_secret
@@ -29,7 +31,17 @@ use Laravel\Passkeys\PasskeyAuthenticatable;
 class User extends Authenticatable implements PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, HasUuids, Notifiable, PasskeyAuthenticatable;
+    use HasFactory, HasUuids, LogsActivity, Notifiable, PasskeyAuthenticatable;
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        // Deliberately never logs password / 2FA columns — only safe profile fields.
+        return LogOptions::defaults()
+            ->useLogName('user')
+            ->logOnly(['name', 'email', 'role', 'organization_id', 'account_type'])
+            ->logOnlyDirty()
+            ->dontLogEmptyChanges();
+    }
 
     /**
      * Default values for new (not yet loaded from the DB) model instances.

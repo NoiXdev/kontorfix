@@ -8,7 +8,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Mail, Pencil, Plus, Trash2, X } from 'lucide-vue-next';
+import { Mail, Pencil, Plus, ScrollText, Trash2, X } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 interface Membership {
@@ -245,6 +245,14 @@ function destroyUser(id: string) {
                                     </Button>
                                     <Button variant="ghost" size="icon" @click="sendInvite(user.id)" aria-label="Einladung senden">
                                         <Mail class="size-4" />
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        aria-label="Aktivität ansehen"
+                                        @click="router.get(route('admin.activity.index'), { causer: user.id })"
+                                    >
+                                        <ScrollText class="size-4" />
                                     </Button>
                                     <Button variant="ghost" size="icon" @click="destroyUser(user.id)" aria-label="Nutzer löschen">
                                         <Trash2 class="size-4 text-destructive" />
