@@ -4,6 +4,14 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      # Inlined into the JS bundle at build time, so they belong here and not under
+      # `environment` — rebuild the image after changing them.
+      args:
+        VITE_APP_NAME: ${APP_NAME:-Kontorfix}
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY:-}
+        VITE_REVERB_HOST: ${REVERB_HOST:-}
+        VITE_REVERB_PORT: ${REVERB_PORT:-443}
+        VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
     ports: ['8080:8080']
     env_file: .env
     environment:

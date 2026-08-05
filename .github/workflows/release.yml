@@ -158,6 +158,14 @@ jobs:
           file: docker/Dockerfile
           platforms: linux/amd64
           push: ${{ inputs.dry_run == false }}
+          # Compiled into the JS bundle at build time — see docker/Dockerfile.
+          # Unset vars build an image without realtime updates, which is supported.
+          build-args: |
+            VITE_APP_NAME=${{ vars.VITE_APP_NAME || 'Kontorfix' }}
+            VITE_REVERB_APP_KEY=${{ vars.VITE_REVERB_APP_KEY }}
+            VITE_REVERB_HOST=${{ vars.VITE_REVERB_HOST }}
+            VITE_REVERB_PORT=${{ vars.VITE_REVERB_PORT || '443' }}
+            VITE_REVERB_SCHEME=${{ vars.VITE_REVERB_SCHEME || 'https' }}
           provenance: mode=max
           sbom: true
           tags: ${{ steps.meta.outputs.tags }}

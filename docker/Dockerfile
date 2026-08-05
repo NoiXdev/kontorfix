@@ -14,6 +14,15 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
+# VITE_* values are inlined into the JS bundle by `vite build`, so they must be known
+# here — setting them on the running container has no effect. .env is dockerignored,
+# hence they come in as build args. Leaving the Reverb key empty is supported: the app
+# then runs without realtime updates (see resources/js/echo.ts).
+ARG VITE_APP_NAME=Kontorfix
+ARG VITE_REVERB_APP_KEY=
+ARG VITE_REVERB_HOST=
+ARG VITE_REVERB_PORT=443
+ARG VITE_REVERB_SCHEME=https
 RUN npm run build
 
 FROM dunglas/frankenphp:1-php8.4 AS app
