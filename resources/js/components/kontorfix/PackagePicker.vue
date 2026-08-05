@@ -32,6 +32,18 @@ const createForm = ref<{ name: string; type: 'composer' | 'npm'; repository_url:
 const createErrors = ref<Record<string, string>>({});
 const createSubmitting = ref(false);
 
+// Probe-first: the repository is checked and its metadata previewed before creation.
+interface ProbeResult {
+    ok: boolean;
+    error?: string;
+    name?: string | null;
+    description?: string | null;
+    default_branch?: string | null;
+    versions: string[];
+}
+const probing = ref(false);
+const probeResult = ref<ProbeResult | null>(null);
+
 watch(query, (value) => {
     if (debounceTimer) {
         clearTimeout(debounceTimer);
@@ -93,14 +105,73 @@ function removePackage(id: string) {
 }
 
 function startCreate() {
-    createForm.value = { name: query.value.trim(), type: 'composer', repository_url: '' };
+    createForm.value = { name: '', type: 'composer', repository_url: '' };
     createErrors.value = {};
+    probeResult.value = null;
     creating.value = true;
 }
 
 function cancelCreate() {
     creating.value = false;
     createErrors.value = {};
+    probeResult.value = null;
+}
+
+// Any edit to type/url invalidates a previous probe — the metadata no longer applies.
+function resetProbe() {
+    probeResult.value = null;
+}
+
+async function probeRepository() {
+    if (probing.value || createForm.value.repository_url.trim() === '') {
+        return;
+    }
+    probing.value = true;
+    createErrors.value = {};
+    probeResult.value = null;
+
+    try {
+        const response = await fetch('/admin/packages/probe', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ type: createForm.value.type, repository_url: createForm.value.repository_url }),
+        });
+
+        if (response.status === 422) {
+            const body = await response.json();
+            const errors: Record<string, string> = {};
+            for (const [key, messages] of Object.entries((body.errors ?? {}) as Record<string, string[]>)) {
+                errors[key] = Array.isArray(messages) ? messages[0] : String(messages);
+            }
+            createErrors.value = errors;
+            return;
+        }
+
+        if (!response.ok) {
+            createErrors.value = { general: 'Prüfung fehlgeschlagen — bitte erneut versuchen.' };
+            return;
+        }
+
+        const result: ProbeResult = await response.json();
+        probeResult.value = result;
+
+        // Adopt the discovered package name; fall back to the current search term.
+        if (result.ok && result.name) {
+            createForm.value.name = result.name;
+        } else if (createForm.value.name.trim() === '') {
+            createForm.value.name = query.value.trim();
+        }
+    } catch {
+        createErrors.value = { general: 'Prüfung fehlgeschlagen — bitte erneut versuchen.' };
+    } finally {
+        probing.value = false;
+    }
 }
 
 // Laravel expects the decrypted CSRF token as an X-XSRF-TOKEN header
@@ -148,6 +219,7 @@ async function createPackage() {
         const pkg: Pkg = await response.json();
         selected.value = [...selected.value, pkg];
         creating.value = false;
+        probeResult.value = null;
         query.value = '';
         results.value = [];
     } catch {
@@ -188,11 +260,9 @@ onUnmounted(() => {
         </div>
 
         <div v-if="creating" class="space-y-3 rounded-md border border-input p-3">
-            <div class="grid gap-2">
-                <Label for="new-package-name">Name</Label>
-                <Input id="new-package-name" v-model="createForm.name" type="text" placeholder="vendor/paket" autocomplete="off" class="font-mono" />
-                <InputError :message="createErrors.name" />
-            </div>
+            <p class="text-xs text-muted-foreground">
+                Typ und Repository-URL angeben, prüfen lassen — dann bestätigen. HTTPS und SSH werden unterstützt (SSH erfordert einen Deploy-Key).
+            </p>
 
             <div class="grid gap-2">
                 <Label>Typ</Label>
@@ -209,7 +279,7 @@ onUnmounted(() => {
                                     : 'border-input text-muted-foreground hover:bg-muted/50',
                             )
                         "
-                        @click="createForm.type = option"
+                        @click="((createForm.type = option), resetProbe())"
                     >
                         {{ option }}
                     </button>
@@ -219,22 +289,60 @@ onUnmounted(() => {
 
             <div class="grid gap-2">
                 <Label for="new-package-url">Repository-URL</Label>
-                <Input
-                    id="new-package-url"
-                    v-model="createForm.repository_url"
-                    type="text"
-                    placeholder="https://git.example.com/vendor/paket.git"
-                    autocomplete="off"
-                    class="font-mono"
-                />
+                <div class="flex gap-2">
+                    <Input
+                        id="new-package-url"
+                        v-model="createForm.repository_url"
+                        type="text"
+                        placeholder="https://git.example.com/vendor/paket.git"
+                        autocomplete="off"
+                        class="font-mono"
+                        @update:model-value="resetProbe"
+                        @keyup.enter="probeRepository"
+                    />
+                    <Button type="button" variant="outline" size="sm" :disabled="probing || createForm.repository_url.trim() === ''" @click="probeRepository">
+                        {{ probing ? 'Prüfe…' : 'Prüfen' }}
+                    </Button>
+                </div>
                 <InputError :message="createErrors.repository_url" />
+            </div>
+
+            <!-- Probe failed to reach / read the repo -->
+            <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
+            </div>
+
+            <!-- Probe succeeded: preview discovered metadata before confirming -->
+            <div v-if="probeResult && probeResult.ok" class="space-y-3 rounded-md border border-verdigris/30 bg-verdigris/10 p-3">
+                <p class="text-sm font-medium text-verdigris">Repository erreichbar</p>
+
+                <div class="grid gap-2">
+                    <Label for="new-package-name">Name{{ probeResult.name ? ' (gefunden)' : ' (nicht gefunden — bitte angeben)' }}</Label>
+                    <Input id="new-package-name" v-model="createForm.name" type="text" placeholder="vendor/paket" autocomplete="off" class="font-mono" />
+                    <InputError :message="createErrors.name" />
+                </div>
+
+                <p v-if="probeResult.description" class="text-sm text-muted-foreground">{{ probeResult.description }}</p>
+
+                <div v-if="probeResult.versions.length > 0" class="text-xs text-muted-foreground">
+                    <span class="font-medium">{{ probeResult.versions.length }} Version(en):</span>
+                    {{ probeResult.versions.slice(0, 8).join(', ') }}{{ probeResult.versions.length > 8 ? ' …' : '' }}
+                </div>
+                <p v-else class="text-xs text-muted-foreground">Keine Tags gefunden — nach dem Anlegen wird trotzdem synchronisiert.</p>
             </div>
 
             <InputError :message="createErrors.general" />
 
             <div class="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" @click="cancelCreate">Abbrechen</Button>
-                <Button type="button" size="sm" :disabled="createSubmitting" @click="createPackage">Anlegen & zuweisen</Button>
+                <Button
+                    type="button"
+                    size="sm"
+                    :disabled="createSubmitting || !probeResult?.ok || createForm.name.trim() === ''"
+                    @click="createPackage"
+                >
+                    Anlegen bestätigen
+                </Button>
             </div>
         </div>
 

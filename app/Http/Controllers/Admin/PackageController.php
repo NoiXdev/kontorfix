@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Jobs\SyncPackage;
@@ -9,9 +10,11 @@ use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Services\Package\PackageDependencies;
+use App\Services\Vcs\RepositoryProbe;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -73,6 +76,18 @@ class PackageController extends Controller
             ]),
             'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
         ]);
+    }
+
+    public function probe(Request $request, RepositoryProbe $probe): JsonResponse
+    {
+        $data = $request->validate([
+            'type' => ['required', Rule::enum(PackageType::class)],
+            'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+        ]);
+
+        $result = $probe->probe(PackageType::from($data['type']), $data['repository_url']);
+
+        return response()->json($result);
     }
 
     public function store(StorePackageRequest $request): RedirectResponse|JsonResponse

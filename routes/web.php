@@ -34,6 +34,8 @@ Route::get('dashboard', [DashboardController::class, 'index'])
 
 Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
+    // Preview a repository (reachability + discovered name/description/versions) before creating.
+    Route::post('packages/probe', [Admin\PackageController::class, 'probe'])->name('packages.probe');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
