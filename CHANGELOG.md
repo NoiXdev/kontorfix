@@ -1,4 +1,11 @@
-## 0.1.0 (2026-07-28)
+## [0.1.1](https://github.com/NoiXdev/kontorfix/compare/v0.1.0...v) (2026-08-05)
+
+
+### Features
+
+* fix blank page ([02a3bd9](https://github.com/NoiXdev/kontorfix/commit/02a3bd9e6babc8d53a80e74dee10e6aa354884f0))
+
+## [0.1.0](https://github.com/NoiXdev/kontorfix/compare/322ff8bcf31e28c1278e3140a5c066527d436651...v0.1.0) (2026-07-28)
 
 
 ### Features
