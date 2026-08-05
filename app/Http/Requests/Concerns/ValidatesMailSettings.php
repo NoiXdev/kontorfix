@@ -22,18 +22,23 @@ trait ValidatesMailSettings
             'from_address' => ['nullable', 'email'],
             'from_name' => ['nullable', 'string', 'max:255'],
 
-            'smtp_host' => ['required_if:mailer,smtp', 'nullable', 'string'],
-            'smtp_port' => ['required_if:mailer,smtp', 'nullable', 'integer', 'between:1,65535'],
-            'smtp_username' => ['nullable', 'string'],
-            'smtp_password' => ['nullable', 'string'],
-            'smtp_encryption' => ['nullable', 'in:tls,ssl'],
+            // `exclude_unless` drops these from validation AND from validated() when
+            // the mailer isn't the matching one — so a stale value left in a now-hidden
+            // field (e.g. an invalid smtp_host after switching back to 'log') can never
+            // trip the `url`/`in:` rules and produce an error on an invisible field.
+            'smtp_host' => ['exclude_unless:mailer,smtp', 'required', 'string'],
+            'smtp_port' => ['exclude_unless:mailer,smtp', 'required', 'integer', 'between:1,65535'],
+            'smtp_username' => ['exclude_unless:mailer,smtp', 'nullable', 'string'],
+            'smtp_password' => ['exclude_unless:mailer,smtp', 'nullable', 'string'],
+            'smtp_encryption' => ['exclude_unless:mailer,smtp', 'nullable', 'in:tls,ssl'],
 
-            'postal_domain' => ['required_if:mailer,postal', 'nullable', 'url'],
+            'postal_domain' => ['exclude_unless:mailer,postal', 'required', 'url'],
             // Required only while no credential is stored yet — an empty field then
             // means "keep the stored one" rather than "clear it". During the wizard
             // nothing is stored, so this correctly resolves to required.
             'postal_key' => [
-                Rule::requiredIf(fn () => $this->input('mailer') === 'postal' && blank(MailSetting::current()->postal_key)),
+                'exclude_unless:mailer,postal',
+                Rule::requiredIf(fn () => blank(MailSetting::current()->postal_key)),
                 'nullable',
                 'string',
             ],

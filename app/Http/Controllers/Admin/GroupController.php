@@ -13,6 +13,7 @@ use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -30,6 +31,7 @@ class GroupController extends Controller
                     'name' => $g->name,
                     'slug' => $g->slug,
                     'public' => $g->public,
+                    'portal_enabled' => $g->portal_enabled,
                     'packages_count' => $g->packages_count,
                     'domains' => $g->domains->pluck('hostname'),
                     'organization' => $g->organization?->name,
@@ -48,6 +50,7 @@ class GroupController extends Controller
                 'name' => $group->name,
                 'slug' => $group->slug,
                 'public' => $group->public,
+                'portal_enabled' => $group->portal_enabled,
                 'organization' => $group->organization?->name,
                 'organization_id' => $group->organization_id,
             ],
@@ -67,6 +70,7 @@ class GroupController extends Controller
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
             'public' => $request->boolean('public'),
+            'portal_enabled' => $request->boolean('portal_enabled'),
             'organization_id' => $request->validated('organization_id') ?? $request->user()->organization_id,
         ]);
         $group->packages()->sync($request->validated('package_ids', []));
@@ -76,9 +80,33 @@ class GroupController extends Controller
 
     public function update(UpdateGroupRequest $request, Group $group): RedirectResponse
     {
-        $group->update(['name' => $request->validated('name'), 'public' => $request->boolean('public')]);
+        $group->update([
+            'name' => $request->validated('name'),
+            'public' => $request->boolean('public'),
+            'portal_enabled' => $request->boolean('portal_enabled'),
+        ]);
 
         return back()->with('success', 'Registry aktualisiert.');
+    }
+
+    public function attachPackages(Request $request, Group $group): RedirectResponse
+    {
+        $data = $request->validate([
+            'package_ids' => ['required', 'array', 'min:1'],
+            'package_ids.*' => ['uuid', 'exists:packages,id'],
+        ]);
+
+        // syncWithoutDetaching keeps the packages already in the group.
+        $group->packages()->syncWithoutDetaching($data['package_ids']);
+
+        return back()->with('success', 'Pakete zur Registry hinzugefügt.');
+    }
+
+    public function detachPackage(Group $group, Package $package): RedirectResponse
+    {
+        $group->packages()->detach($package->id);
+
+        return back()->with('success', 'Paket aus der Registry entfernt.');
     }
 
     public function destroy(Group $group): RedirectResponse

@@ -14,8 +14,8 @@ class RegistryTokenPolicy
             return true;
         }
 
-        // Never a different org.
-        if ($user->organization_id === null || $token->organization_id !== $user->organization_id) {
+        // Never an organization the user is not a member of.
+        if (! $user->belongsToOrganization($token->organization_id)) {
             return false;
         }
 

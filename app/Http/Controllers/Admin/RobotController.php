@@ -35,9 +35,9 @@ class RobotController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        // A robot is a service account — no mailbox, hence no email is collected.
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:190'],
-            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
             'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
             'role' => ['required', Rule::enum(UserRole::class)],
         ]);
@@ -50,12 +50,13 @@ class RobotController extends Controller
 
         $robot = User::create([
             'name' => $validated['name'],
-            'email' => $validated['email'],
+            'email' => null,
             'organization_id' => $validated['organization_id'],
             'role' => $validated['role'],
             'account_type' => AccountType::Robot,
             'password' => null,
         ]);
+        // No mailbox to verify, but keep the account out of any "unverified" state.
         $robot->forceFill(['email_verified_at' => now()])->save();
 
         return back()->with('success', "Robot {$robot->name} angelegt.");

@@ -10,7 +10,7 @@ import { Copy, KeyRound, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
-    robots: { id: string; name: string; email: string; role: string; organization: string | null; keys_count: number }[];
+    robots: { id: string; name: string; role: string; organization: string | null; keys_count: number }[];
     organizations: { id: string; name: string }[];
 }>();
 
@@ -52,7 +52,6 @@ const roleOptions = [
 
 const createForm = useForm({
     name: '',
-    email: '',
     organization_id: '',
     role: 'member',
 });
@@ -138,19 +137,13 @@ function roleLabel(role: string) {
             </div>
 
             <form
-                class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_1fr_1fr_auto_auto] sm:items-end dark:border-sidebar-border"
+                class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end dark:border-sidebar-border"
                 @submit.prevent="submitCreate"
             >
                 <div class="grid gap-2">
                     <Label for="robot_name">Name</Label>
                     <Input id="robot_name" v-model="createForm.name" placeholder="CI-Runner" autocomplete="off" />
                     <InputError :message="createForm.errors.name" />
-                </div>
-
-                <div class="grid gap-2">
-                    <Label for="robot_email">E-Mail</Label>
-                    <Input id="robot_email" type="email" v-model="createForm.email" placeholder="ci@kunde.de" autocomplete="off" />
-                    <InputError :message="createForm.errors.email" />
                 </div>
 
                 <div class="grid gap-2">
@@ -189,7 +182,6 @@ function roleLabel(role: string) {
                     <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
                         <tr>
                             <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">E-Mail</th>
                             <th class="px-4 py-3 font-medium">Rolle</th>
                             <th class="px-4 py-3 font-medium">Organisation</th>
                             <th class="px-4 py-3 font-medium">Keys</th>
@@ -200,7 +192,6 @@ function roleLabel(role: string) {
                         <template v-for="robot in props.robots" :key="robot.id">
                             <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
                                 <td class="px-4 py-3 font-medium">{{ robot.name }}</td>
-                                <td class="px-4 py-3 font-mono text-xs">{{ robot.email }}</td>
                                 <td class="px-4 py-3">{{ roleLabel(robot.role) }}</td>
                                 <td class="px-4 py-3">{{ robot.organization ?? '—' }}</td>
                                 <td class="px-4 py-3 text-muted-foreground">{{ robot.keys_count }}</td>
@@ -217,7 +208,7 @@ function roleLabel(role: string) {
                                 </td>
                             </tr>
                             <tr v-if="openKeyForm === robot.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
-                                <td colspan="6" class="px-4 py-3">
+                                <td colspan="5" class="px-4 py-3">
                                     <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitKey(robot.id)">
                                         <div class="grid gap-2">
                                             <Label :for="`key_name_${robot.id}`">Key-Name</Label>
@@ -243,7 +234,7 @@ function roleLabel(role: string) {
                             </tr>
                         </template>
                         <tr v-if="props.robots.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
+                            <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
                         </tr>
                     </tbody>
                 </table>

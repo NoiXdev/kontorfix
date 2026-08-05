@@ -21,13 +21,19 @@ class UserController extends Controller
     public function index(): Response
     {
         return Inertia::render('admin/users/Index', [
-            'users' => User::with('organization:id,name')->orderBy('name')->get()
+            'users' => User::with(['organization:id,name', 'organizations:id,name'])->orderBy('name')->get()
                 ->map(fn (User $user) => [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
                     'role' => $user->role->value,
+                    'organization_id' => $user->organization_id,
                     'organization' => $user->organization?->name,
+                    // Additional memberships beyond the home org.
+                    'memberships' => $user->organizations->map(fn (Organization $org) => [
+                        'id' => $org->id,
+                        'name' => $org->name,
+                    ])->values(),
                 ]),
             'organizations' => Organization::orderBy('name')->get(['id', 'name'])
                 ->map(fn (Organization $org) => [
@@ -81,6 +87,32 @@ class UserController extends Controller
         $user->update($validated);
 
         return back()->with('success', "Nutzer {$user->name} aktualisiert.");
+    }
+
+    public function attachOrganization(Request $request, User $user): RedirectResponse
+    {
+        $data = $request->validate([
+            'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
+        ]);
+
+        // The home org is already an implicit membership — attaching it again would be
+        // a redundant (and confusing) pivot row.
+        if ($data['organization_id'] === $user->organization_id) {
+            throw ValidationException::withMessages([
+                'organization_id' => 'Das ist bereits die Heim-Organisation des Nutzers.',
+            ]);
+        }
+
+        $user->organizations()->syncWithoutDetaching([$data['organization_id']]);
+
+        return back()->with('success', 'Organisation zugewiesen.');
+    }
+
+    public function detachOrganization(User $user, Organization $organization): RedirectResponse
+    {
+        $user->organizations()->detach($organization->id);
+
+        return back()->with('success', 'Organisation entfernt.');
     }
 
     public function destroy(Request $request, User $user): RedirectResponse

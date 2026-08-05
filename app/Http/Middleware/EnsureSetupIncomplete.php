@@ -17,7 +17,9 @@ class EnsureSetupIncomplete
     public function handle(Request $request, Closure $next): Response
     {
         if (app(SetupStatus::class)->isComplete()) {
-            return redirect()->route('login');
+            // Setup done — the wizard no longer exists as a destination; send visitors
+            // to the app index, which itself routes to login or the dashboard.
+            return redirect()->route('home');
         }
 
         return $next($request);

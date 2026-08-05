@@ -13,7 +13,10 @@ class UpdateGroupRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->merge(['public' => $this->boolean('public')]);
+        $this->merge([
+            'public' => $this->boolean('public'),
+            'portal_enabled' => $this->boolean('portal_enabled'),
+        ]);
     }
 
     /**
@@ -24,6 +27,7 @@ class UpdateGroupRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:190'],
             'public' => ['boolean'],
+            'portal_enabled' => ['boolean'],
         ];
     }
 }

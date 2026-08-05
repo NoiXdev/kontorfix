@@ -12,6 +12,7 @@ interface GroupRow {
     name: string;
     slug: string;
     public: boolean;
+    portal_enabled: boolean;
     packages_count: number;
     domains: string[];
     organization: string | null;
@@ -54,10 +55,15 @@ function destroyGroup(id: string) {
             </div>
 
             <div class="flex items-center justify-between">
-                <h1 class="text-xl font-semibold">Gruppen</h1>
+                <div>
+                    <h1 class="text-xl font-semibold">Gruppen = Registries</h1>
+                    <p class="text-sm text-muted-foreground">
+                        Jede Gruppe ist eine Registry mit eigenem <code class="font-mono">/r/&lt;slug&gt;</code>-Endpunkt.
+                    </p>
+                </div>
                 <Button @click="sheetOpen = true">
                     <Plus class="size-4" />
-                    Neue Gruppe
+                    Neue Registry
                 </Button>
             </div>
 
@@ -101,6 +107,13 @@ function destroyGroup(id: string) {
                                     class="inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
                                 >
                                     Privat
+                                </span>
+                                <span
+                                    v-if="!group.portal_enabled"
+                                    class="ml-1 inline-flex items-center rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
+                                    title="Reine Paketsammlung, im Kundenportal ausgeblendet"
+                                >
+                                    Sammlung
                                 </span>
                             </td>
                             <td class="px-4 py-3">

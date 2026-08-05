@@ -38,6 +38,9 @@ Route::middleware(['auth', 'operator', 'role:admin,maintainer'])->prefix('admin'
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');
+    // Assign/remove packages directly from the registry (group) view.
+    Route::post('groups/{group}/packages', [Admin\GroupController::class, 'attachPackages'])->name('groups.packages.store');
+    Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
@@ -60,9 +63,15 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
     Route::post('mail/test', [Admin\MailController::class, 'test'])->name('mail.test');
 
     Route::resource('organizations', Admin\OrganizationController::class)->only(['index', 'show', 'store', 'destroy'])->parameters(['organizations' => 'organization']);
+    // Grant/revoke additional organization access from the organization view.
+    Route::post('organizations/{organization}/members', [Admin\OrganizationController::class, 'attachMember'])->name('organizations.members.store');
+    Route::delete('organizations/{organization}/members/{user}', [Admin\OrganizationController::class, 'detachMember'])->name('organizations.members.destroy');
 
     Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::post('users/{user}/invite', [Admin\UserController::class, 'invite'])->name('users.invite');
+    // Grant/revoke additional organization access from the user view.
+    Route::post('users/{user}/organizations', [Admin\UserController::class, 'attachOrganization'])->name('users.organizations.store');
+    Route::delete('users/{user}/organizations/{organization}', [Admin\UserController::class, 'detachOrganization'])->name('users.organizations.destroy');
 
     Route::get('robots', [Admin\RobotController::class, 'index'])->name('robots.index');
     Route::post('robots', [Admin\RobotController::class, 'store'])->name('robots.store');

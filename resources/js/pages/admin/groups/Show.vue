@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ interface GroupInfo {
     name: string;
     slug: string;
     public: boolean;
+    portal_enabled: boolean;
     organization: string | null;
     organization_id: string | null;
 }
@@ -71,10 +73,34 @@ const breadcrumbs: BreadcrumbItem[] = [
 const form = useForm({
     name: props.group.name,
     public: props.group.public,
+    portal_enabled: props.group.portal_enabled,
 });
 
 function save() {
     form.put(route('admin.groups.update', props.group.id), { preserveScroll: true });
+}
+
+// --- Package assignment (add existing/quick-created packages to this registry) ---
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' }[]>([]);
+
+function addPackages() {
+    if (packagesToAdd.value.length === 0) {
+        return;
+    }
+    router.post(
+        route('admin.groups.packages.store', props.group.id),
+        { package_ids: packagesToAdd.value.map((p) => p.id) },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                packagesToAdd.value = [];
+            },
+        },
+    );
+}
+
+function removePackage(packageId: string) {
+    router.delete(route('admin.groups.packages.destroy', [props.group.id, packageId]), { preserveScroll: true });
 }
 
 const newDomain = ref('');
@@ -181,8 +207,16 @@ async function copyToken() {
                         Privat
                     </span>
                 </div>
-                <p v-if="props.group.organization" class="text-sm text-muted-foreground">
-                    Kunde / Org: {{ props.group.organization }}
+                <p class="text-sm text-muted-foreground">
+                    Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter
+                    <code class="font-mono">/r/{{ props.group.slug }}</code
+                    ><template v-if="props.group.organization"> · Kunde / Org: {{ props.group.organization }}</template>
+                </p>
+                <p
+                    v-if="!props.group.portal_enabled"
+                    class="inline-flex w-fit items-center rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                    Portal deaktiviert — reine Paketsammlung, im Kundenportal ausgeblendet
                 </p>
             </div>
 
@@ -215,6 +249,17 @@ async function copyToken() {
                                 Öffentlich (ohne Token lesbar)
                             </label>
 
+                            <label class="flex items-start gap-2 text-sm">
+                                <input v-model="form.portal_enabled" type="checkbox" class="mt-1 size-4 rounded border-input" />
+                                <span>
+                                    Im Kundenportal als Registry anzeigen
+                                    <span class="block text-xs text-muted-foreground">
+                                        Deaktivieren, wenn die Gruppe nur eine Paketsammlung ist, deren Pakete anderen
+                                        Registries derselben Organisation zugewiesen werden.
+                                    </span>
+                                </span>
+                            </label>
+
                             <div class="flex flex-col gap-1.5">
                                 <span class="text-sm font-medium">Slug</span>
                                 <p class="font-mono text-sm text-muted-foreground">/r/{{ props.group.slug }}</p>
@@ -231,35 +276,64 @@ async function copyToken() {
                 </TabsContent>
 
                 <TabsContent value="pakete">
-                    <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <table class="w-full text-left text-sm">
-                            <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                                <tr>
-                                    <th class="px-4 py-3 font-medium">Name</th>
-                                    <th class="px-4 py-3 font-medium">Typ</th>
-                                    <th class="px-4 py-3 font-medium">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="pkg in props.packages"
-                                    :key="pkg.id"
-                                    class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                                >
-                                    <td class="px-4 py-3 font-mono">
-                                        <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
-                                            {{ pkg.name }}
-                                        </Link>
-                                    </td>
-                                    <td class="px-4 py-3">{{ pkg.type }}</td>
-                                    <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
-                                </tr>
-                                <tr v-if="props.packages.length === 0">
-                                    <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <section class="flex flex-col gap-4">
+                        <div class="flex flex-col gap-3 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                            <div>
+                                <h2 class="text-sm font-medium">Pakete zuweisen</h2>
+                                <p class="text-xs text-muted-foreground">
+                                    Vorhandenes Paket suchen oder direkt neu anlegen, dann dieser Registry hinzufügen.
+                                </p>
+                            </div>
+                            <PackagePicker v-model="packagesToAdd" />
+                            <div>
+                                <Button type="button" :disabled="packagesToAdd.length === 0" @click="addPackages">
+                                    <Plus class="size-4" />
+                                    {{ packagesToAdd.length > 0 ? `${packagesToAdd.length} Paket(e) hinzufügen` : 'Hinzufügen' }}
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                            <table class="w-full text-left text-sm">
+                                <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                                    <tr>
+                                        <th class="px-4 py-3 font-medium">Name</th>
+                                        <th class="px-4 py-3 font-medium">Typ</th>
+                                        <th class="px-4 py-3 font-medium">Status</th>
+                                        <th class="px-4 py-3 font-medium">Aktionen</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="pkg in props.packages"
+                                        :key="pkg.id"
+                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                    >
+                                        <td class="px-4 py-3 font-mono">
+                                            <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
+                                                {{ pkg.name }}
+                                            </Link>
+                                        </td>
+                                        <td class="px-4 py-3">{{ pkg.type }}</td>
+                                        <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
+                                        <td class="px-4 py-3">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                aria-label="Paket aus Registry entfernen"
+                                                @click="removePackage(pkg.id)"
+                                            >
+                                                <Trash2 class="size-4 text-destructive" />
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="props.packages.length === 0">
+                                        <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
                 </TabsContent>
 
                 <TabsContent value="domains">

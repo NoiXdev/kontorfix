@@ -23,8 +23,10 @@ class TokenController extends Controller
             $this->authorize('view', $group);
         }
 
+        // Tie the token to the target group's organization (which may be an org the
+        // user only has additional membership in), falling back to the home org.
         [$token, $plain] = RegistryToken::issue(
-            $request->user()->organization,
+            $group !== null ? $group->organization : $request->user()->organization,
             $request->validated('name'),
             $group,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,

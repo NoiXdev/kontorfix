@@ -31,9 +31,8 @@ class AccessTokenController extends Controller
                     'last_used_at' => $t->last_used_at?->diffForHumans(),
                     'expires_at' => $t->expires_at?->toDateString(),
                 ]),
-            'groups' => $user->organization_id
-                ? Group::where('organization_id', $user->organization_id)->orderBy('name')->get(['id', 'name'])
-                : [],
+            'groups' => Group::whereIn('organization_id', $user->accessibleOrganizationIds())
+                ->orderBy('name')->get(['id', 'name']),
         ]);
     }
 
@@ -42,11 +41,13 @@ class AccessTokenController extends Controller
         $user = $request->user();
 
         $group = $request->validated('group_id')
-            ? Group::where('organization_id', $user->organization_id)->findOrFail($request->validated('group_id'))
+            ? Group::whereIn('organization_id', $user->accessibleOrganizationIds())->findOrFail($request->validated('group_id'))
             : null;
 
+        // Tie the token to the group's organization (possibly an additional-membership
+        // org), falling back to the home org for an org-wide token.
         [$token, $plain] = RegistryToken::issue(
-            $user->organization,
+            $group !== null ? $group->organization : $user->organization,
             $request->validated('name'),
             $group,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,

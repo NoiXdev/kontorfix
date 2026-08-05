@@ -12,11 +12,13 @@ it('lets an operator admin create a robot and issue a key', function () {
     $admin = User::factory()->create(['organization_id' => $op->id, 'role' => 'admin']);
 
     $this->actingAs($admin)->post('/admin/robots', [
-        'name' => 'CI', 'email' => 'ci@acme.test', 'organization_id' => $op->id, 'role' => 'maintainer',
+        'name' => 'CI', 'organization_id' => $op->id, 'role' => 'maintainer',
     ])->assertRedirect();
 
-    $robot = User::firstWhere('email', 'ci@acme.test');
+    // Robots are service accounts and carry no email.
+    $robot = User::firstWhere('name', 'CI');
     expect($robot->account_type)->toBe(AccountType::Robot);
+    expect($robot->email)->toBeNull();
 
     $this->actingAs($admin)->post("/admin/robots/{$robot->id}/keys", ['name' => 'k', 'permission' => 'write'])
         ->assertRedirect()->assertSessionHas('plainApiKey');

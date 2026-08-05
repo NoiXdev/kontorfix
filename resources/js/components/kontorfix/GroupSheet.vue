@@ -37,6 +37,7 @@ const form = useForm({
     name: '',
     slug: '',
     public: false,
+    portal_enabled: true,
     organization_id: '',
     package_ids: [] as string[],
 });
@@ -92,7 +93,8 @@ function close() {
     <Sheet v-model:open="open">
         <SheetContent side="right" class="w-full overflow-y-auto sm:max-w-lg" @escape-key-down="close" @pointer-down-outside="close">
             <SheetHeader>
-                <SheetTitle>Neue Gruppe</SheetTitle>
+                <SheetTitle>Neue Registry (Gruppe)</SheetTitle>
+                <p class="text-sm text-muted-foreground">Jede Gruppe ist eine Registry mit eigenem <span class="font-mono">/r/&lt;slug&gt;</span>-Endpunkt.</p>
             </SheetHeader>
 
             <form class="mt-6 space-y-5" @submit.prevent="submit">
@@ -129,6 +131,17 @@ function close() {
                     <Label for="group-public" class="font-normal">Öffentlich zugänglich</Label>
                 </div>
                 <InputError :message="form.errors.public" />
+
+                <div class="flex items-start gap-2">
+                    <Checkbox id="group-portal" v-model:model-value="form.portal_enabled" class="mt-1" />
+                    <Label for="group-portal" class="font-normal">
+                        Im Kundenportal als Registry anzeigen
+                        <span class="block text-xs text-muted-foreground">
+                            Deaktivieren für eine reine Paketsammlung, die anderen Registries derselben Organisation zugewiesen wird.
+                        </span>
+                    </Label>
+                </div>
+                <InputError :message="form.errors.portal_enabled" />
 
                 <div class="grid gap-2">
                     <Label>Pakete</Label>

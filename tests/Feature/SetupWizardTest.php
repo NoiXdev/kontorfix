@@ -111,10 +111,10 @@ it('blocks the register POST so the first account cannot bypass the wizard', fun
 it('seals the wizard once a user exists', function () {
     User::factory()->create();
 
-    $this->get('/setup')->assertRedirect(route('login'));
+    $this->get('/setup')->assertRedirect(route('home'));
 
     $this->post('/setup', setupPayload(['admin_email' => 'second@example.com']))
-        ->assertRedirect(route('login'));
+        ->assertRedirect(route('home'));
 
     // No second admin, no second organization.
     expect(User::query()->count())->toBe(1);
@@ -173,7 +173,7 @@ it('seals the wizard test-mail endpoint once a user exists', function () {
     User::factory()->create();
 
     $this->post('/setup/mail-test', ['mailer' => 'log', 'recipient' => 'admin@acme.test'])
-        ->assertRedirect(route('login'));
+        ->assertRedirect(route('home'));
 });
 
 it('accepts an empty smtp encryption as "no encryption"', function () {
@@ -186,6 +186,18 @@ it('accepts an empty smtp encryption as "no encryption"', function () {
     ]))->assertRedirect(route('dashboard'));
 
     expect(MailSetting::sole()->smtp_encryption)->toBeNull();
+});
+
+it('does not error on stale s3 values when the local driver is chosen', function () {
+    // Reproduces the reported bug: pick s3, type a (here deliberately invalid) endpoint,
+    // switch back to local. The hidden s3 fields must not fail validation.
+    $this->post('/setup', setupPayload([
+        'storage_driver' => 'local',
+        'storage_endpoint' => 'not-a-valid-url',
+        'storage_bucket' => '',
+    ]))->assertRedirect(route('dashboard'))->assertSessionHasNoErrors();
+
+    expect(StorageSetting::sole()->driver)->toBe('local');
 });
 
 it('leaves the health check reachable during setup', function () {

@@ -25,7 +25,10 @@ class RegistryController extends Controller
 
     public function index(Request $request): Response
     {
-        $groups = Group::where('organization_id', $request->user()->organization_id)
+        // Show registries from every organization the user belongs to (home org plus
+        // any additional memberships), not just their home org.
+        $groups = Group::whereIn('organization_id', $request->user()->accessibleOrganizationIds())
+            ->where('portal_enabled', true)
             ->with('domains')
             ->withCount('packages')
             ->orderBy('name')

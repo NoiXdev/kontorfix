@@ -45,13 +45,16 @@ class StoreSetupRequest extends FormRequest
             // Mail rules are shared with the admin settings screen and the test probe.
             ...$this->mailSettingRules(),
 
+            // `exclude_unless` keeps switching back to the local driver from erroring
+            // on a stale, now-hidden S3 field (e.g. a half-typed endpoint): the S3
+            // fields are dropped from validation entirely unless the driver is s3.
             'storage_driver' => ['required', 'in:local,s3'],
-            'storage_key' => ['required_if:storage_driver,s3', 'nullable', 'string'],
-            'storage_secret' => ['required_if:storage_driver,s3', 'nullable', 'string'],
-            'storage_region' => ['required_if:storage_driver,s3', 'nullable', 'string'],
-            'storage_bucket' => ['required_if:storage_driver,s3', 'nullable', 'string'],
-            'storage_endpoint' => ['nullable', 'url'],
-            'storage_url' => ['nullable', 'url'],
+            'storage_key' => ['exclude_unless:storage_driver,s3', 'required', 'string'],
+            'storage_secret' => ['exclude_unless:storage_driver,s3', 'required', 'string'],
+            'storage_region' => ['exclude_unless:storage_driver,s3', 'required', 'string'],
+            'storage_bucket' => ['exclude_unless:storage_driver,s3', 'required', 'string'],
+            'storage_endpoint' => ['exclude_unless:storage_driver,s3', 'nullable', 'url'],
+            'storage_url' => ['exclude_unless:storage_driver,s3', 'nullable', 'url'],
             'storage_use_path_style' => ['boolean'],
         ];
     }

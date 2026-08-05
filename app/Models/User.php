@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -87,11 +88,45 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * The user's home organization — anchors role and operator status.
+     *
      * @return BelongsTo<Organization, $this>
      */
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    /**
+     * Additional organizations the user was granted access to, beyond the home org.
+     *
+     * @return BelongsToMany<Organization, $this>
+     */
+    public function organizations(): BelongsToMany
+    {
+        return $this->belongsToMany(Organization::class)->withTimestamps();
+    }
+
+    /**
+     * All organization ids the user can see registries of: the home org plus every
+     * additional membership. This is the set portal visibility and token scoping
+     * are built on.
+     *
+     * @return list<string>
+     */
+    public function accessibleOrganizationIds(): array
+    {
+        return collect([$this->organization_id])
+            ->merge($this->organizations()->pluck('organizations.id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function belongsToOrganization(string $organizationId): bool
+    {
+        return in_array($organizationId, $this->accessibleOrganizationIds(), true);
     }
 
     /**

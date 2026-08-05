@@ -20,12 +20,18 @@ class Group extends Model
         'name',
         'slug',
         'public',
+        'portal_enabled',
+    ];
+
+    protected $attributes = [
+        'portal_enabled' => true,
     ];
 
     protected function casts(): array
     {
         return [
             'public' => 'bool',
+            'portal_enabled' => 'bool',
         ];
     }
 

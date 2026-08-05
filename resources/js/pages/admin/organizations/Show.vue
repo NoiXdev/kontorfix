@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/vue3';
+import { Head, router } from '@inertiajs/vue3';
+import { Trash2 } from 'lucide-vue-next';
+import { ref } from 'vue';
 
 interface RegistryRow {
     id: string;
@@ -15,8 +18,14 @@ interface RegistryRow {
 interface UserRow {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     role: string;
+}
+
+interface MemberRow {
+    id: string;
+    name: string;
+    email: string | null;
 }
 
 interface TokenRow {
@@ -35,6 +44,8 @@ const props = defineProps<{
     };
     registries: RegistryRow[];
     users: UserRow[];
+    members: MemberRow[];
+    assignableUsers: MemberRow[];
     tokens: TokenRow[];
 }>();
 
@@ -42,6 +53,28 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Kunden', href: '/admin/organizations' },
     { title: props.organization.name, href: route('admin.organizations.show', props.organization.id) },
 ];
+
+const addUserId = ref('');
+
+function attachMember() {
+    if (!addUserId.value) {
+        return;
+    }
+    router.post(
+        route('admin.organizations.members.store', props.organization.id),
+        { user_id: addUserId.value },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                addUserId.value = '';
+            },
+        },
+    );
+}
+
+function detachMember(userId: string) {
+    router.delete(route('admin.organizations.members.destroy', [props.organization.id, userId]), { preserveScroll: true });
+}
 </script>
 
 <template>
@@ -115,11 +148,63 @@ const breadcrumbs: BreadcrumbItem[] = [
                                 class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                             >
                                 <td class="px-4 py-3">{{ user.name }}</td>
-                                <td class="px-4 py-3">{{ user.email }}</td>
+                                <td class="px-4 py-3">{{ user.email ?? '—' }}</td>
                                 <td class="px-4 py-3">{{ user.role }}</td>
                             </tr>
                             <tr v-if="props.users.length === 0">
                                 <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">Keine Nutzer.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="flex flex-col gap-3">
+                <div>
+                    <h2 class="text-lg font-medium">Weitere Mitglieder</h2>
+                    <p class="text-sm text-muted-foreground">
+                        Nutzer anderer Organisationen, die zusätzlich Zugriff auf die Registries dieser Organisation haben.
+                    </p>
+                </div>
+
+                <form class="flex flex-wrap items-end gap-2" @submit.prevent="attachMember">
+                    <select
+                        v-model="addUserId"
+                        class="flex h-10 min-w-64 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                        <option value="">Nutzer hinzufügen …</option>
+                        <option v-for="u in props.assignableUsers" :key="u.id" :value="u.id">
+                            {{ u.name }}<template v-if="u.email"> ({{ u.email }})</template>
+                        </option>
+                    </select>
+                    <Button type="submit" variant="outline" :disabled="!addUserId">Hinzufügen</Button>
+                </form>
+
+                <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                    <table class="w-full text-left text-sm">
+                        <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">Name</th>
+                                <th class="px-4 py-3 font-medium">E-Mail</th>
+                                <th class="px-4 py-3 font-medium">Aktionen</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="member in props.members"
+                                :key="member.id"
+                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                            >
+                                <td class="px-4 py-3">{{ member.name }}</td>
+                                <td class="px-4 py-3">{{ member.email ?? '—' }}</td>
+                                <td class="px-4 py-3">
+                                    <Button variant="ghost" size="icon" aria-label="Zugriff entziehen" @click="detachMember(member.id)">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </td>
+                            </tr>
+                            <tr v-if="props.members.length === 0">
+                                <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">Keine weiteren Mitglieder.</td>
                             </tr>
                         </tbody>
                     </table>

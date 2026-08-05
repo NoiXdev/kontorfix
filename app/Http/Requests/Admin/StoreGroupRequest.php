@@ -15,6 +15,8 @@ class StoreGroupRequest extends FormRequest
     {
         $this->merge([
             'public' => $this->boolean('public'),
+            // Default a newly created group to portal-visible unless explicitly disabled.
+            'portal_enabled' => $this->has('portal_enabled') ? $this->boolean('portal_enabled') : true,
         ]);
     }
 
@@ -27,6 +29,7 @@ class StoreGroupRequest extends FormRequest
             'name' => ['required', 'string', 'max:190'],
             'slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', 'unique:groups,slug'],
             'public' => ['boolean'],
+            'portal_enabled' => ['boolean'],
             'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'package_ids' => ['array'],
             'package_ids.*' => ['uuid', 'exists:packages,id'],

@@ -191,6 +191,18 @@ function submit() {
             </ol>
 
             <form class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
+                <!-- Submission errors are otherwise invisible when they land on a field
+                     of a hidden conditional block, so surface every message here. -->
+                <div
+                    v-if="form.hasErrors"
+                    class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                    <p class="font-medium">Die Einrichtung konnte nicht abgeschlossen werden.</p>
+                    <ul class="mt-1 list-inside list-disc space-y-0.5">
+                        <li v-for="(message, key) in form.errors" :key="key">{{ message }}</li>
+                    </ul>
+                </div>
+
                 <!-- Step 1: administrator -->
                 <template v-if="step === 0">
                     <div class="grid gap-2">

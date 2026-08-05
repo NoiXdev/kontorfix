@@ -23,7 +23,7 @@ class StoreAccessTokenRequest extends FormRequest
             'group_id' => [
                 'nullable',
                 'uuid',
-                Rule::exists('groups', 'id')->where('organization_id', $this->user()->organization_id),
+                Rule::exists('groups', 'id')->whereIn('organization_id', $this->user()->accessibleOrganizationIds()),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],
         ];
