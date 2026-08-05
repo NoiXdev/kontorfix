@@ -65,6 +65,13 @@ return [
             'transport' => 'resend',
         ],
 
+        // Transport registered by synergitech/laravel-postal. Credentials live in
+        // config/postal.php and are overridden at runtime from the DB-backed mail
+        // settings (see App\Providers\MailServiceProvider).
+        'postal' => [
+            'transport' => 'postal',
+        ],
+
         'sendmail' => [
             'transport' => 'sendmail',
             'path' => env('MAIL_SENDMAIL_PATH', '/usr/sbin/sendmail -bs -i'),

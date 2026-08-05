@@ -13,6 +13,10 @@ class DashboardTest extends TestCase
 
     public function test_guests_are_redirected_to_the_login_page()
     {
+        // Without this the instance is still un-set-up, and RequireSetup sends the
+        // guest to the wizard instead of the login page.
+        $this->instanceAlreadySetUp();
+
         $response = $this->get('/dashboard');
         $response->assertRedirect('/login');
     }

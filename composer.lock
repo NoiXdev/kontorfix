@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "31de90cf2cf56c90738cbc9fc079350e",
+    "content-hash": "ea5b4f89c1fc28472d6be3b103673852",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -4269,6 +4269,65 @@
                 "source": "https://github.com/phpstan/phpdoc-parser/tree/2.3.2"
             },
             "time": "2026-01-25T14:56:51+00:00"
+        },
+        {
+            "name": "postal/postal",
+            "version": "v2.0.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/postalserver/postal-php.git",
+                "reference": "b0bcfd96d127d2d4ec69142797e9fa61cdf84bb5"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/postalserver/postal-php/zipball/b0bcfd96d127d2d4ec69142797e9fa61cdf84bb5",
+                "reference": "b0bcfd96d127d2d4ec69142797e9fa61cdf84bb5",
+                "shasum": ""
+            },
+            "require": {
+                "guzzlehttp/guzzle": "^6 || ^7",
+                "php": "^7.4 || ^8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^1.10",
+                "phpunit/phpunit": "^9.6",
+                "symplify/easy-coding-standard": "^12.3"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Postal\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Adam Cooke",
+                    "email": "me@adamcooke.io"
+                },
+                {
+                    "name": "Josh Grant",
+                    "email": "josh@grantj.io"
+                },
+                {
+                    "name": "William Hall",
+                    "email": "william.hall@synergitech.co.uk"
+                }
+            ],
+            "description": "Postal for PHP library.",
+            "homepage": "https://github.com/atech/postal",
+            "keywords": [
+                "mail",
+                "postal"
+            ],
+            "support": {
+                "issues": "https://github.com/postalserver/postal-php/issues",
+                "source": "https://github.com/postalserver/postal-php/tree/v2.0.3"
+            },
+            "time": "2025-08-04T10:25:31+00:00"
         },
         {
             "name": "pragmarx/google2fa",
@@ -8891,6 +8950,62 @@
             "time": "2026-06-08T20:24:16+00:00"
         },
         {
+            "name": "synergitech/laravel-postal",
+            "version": "v5.0.4",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/SynergiTech/laravel-postal.git",
+                "reference": "5fb03468a392fae6c2bad38896880ebe70ab2ae8"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/SynergiTech/laravel-postal/zipball/5fb03468a392fae6c2bad38896880ebe70ab2ae8",
+                "reference": "5fb03468a392fae6c2bad38896880ebe70ab2ae8",
+                "shasum": ""
+            },
+            "require": {
+                "laravel/framework": "^9.0.1|^10.0|^11.0|^12.0|^13.0",
+                "php": "^8.0",
+                "postal/postal": "^2.0.1"
+            },
+            "require-dev": {
+                "larastan/larastan": "^3.0",
+                "orchestra/testbench": "^8.0|^9.0|^10.0|^11.0",
+                "phpstan/extension-installer": "^1.4",
+                "phpunit/phpunit": "^10.0|^11.0"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "SynergiTech\\Postal\\PostalServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "SynergiTech\\Postal\\": "src",
+                    "SynergiTech\\Postal\\Tests\\": "tests"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "This library integrates Postal with the standard Laravel mail framework.",
+            "homepage": "https://github.com/synergitech/laravel-postal",
+            "keywords": [
+                "email",
+                "laravel",
+                "postal"
+            ],
+            "support": {
+                "issues": "https://github.com/SynergiTech/laravel-postal/issues",
+                "source": "https://github.com/SynergiTech/laravel-postal/tree/v5.0.4"
+            },
+            "time": "2026-03-17T15:49:14+00:00"
+        },
+        {
             "name": "tightenco/ziggy",
             "version": "v2.6.3",
             "source": {
@@ -12572,5 +12687,5 @@
         "php": "^8.2"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.6.0"
 }

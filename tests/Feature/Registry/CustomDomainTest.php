@@ -68,6 +68,8 @@ it('still serves the slug route unchanged after the domain-resolution refactor',
 });
 
 it('does not shadow the main app routes with the registry catch-all', function () {
+    $this->instanceAlreadySetUp();
+
     // /login is a real web route and must not be hijacked by the npm-{package} catch-all.
     $this->get('/login')->assertOk();
 });

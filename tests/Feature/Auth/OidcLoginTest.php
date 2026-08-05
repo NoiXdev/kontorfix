@@ -29,6 +29,10 @@ function primeSession($test, OidcProvider $provider): void
 }
 
 beforeEach(function () {
+    // SSO login is a post-installation flow; on an instance with no account at all
+    // the setup wizard takes precedence over every other web route.
+    $this->instanceAlreadySetUp();
+
     $this->provider = OidcProvider::factory()->create([
         'slug' => 'authentik', 'enabled' => true, 'issuer' => 'https://idp.test', 'client_id' => 'client-abc',
         'authorization_endpoint' => 'https://idp.test/authorize', 'token_endpoint' => 'https://idp.test/token', 'jwks_uri' => 'https://idp.test/jwks',

@@ -4,8 +4,21 @@ use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
+use App\Http\Controllers\SetupController;
+use App\Http\Middleware\EnsureSetupIncomplete;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+
+// First-run wizard. Sealed off by EnsureSetupIncomplete the moment any user exists,
+// and throttled because it is an unauthenticated account-creating endpoint.
+Route::middleware(EnsureSetupIncomplete::class)->group(function () {
+    Route::get('setup', [SetupController::class, 'show'])->name('setup.show');
+    Route::post('setup', [SetupController::class, 'store'])
+        ->middleware('throttle:10,1')->name('setup.store');
+    // Tighter limit than the wizard submit: this one actually sends mail.
+    Route::post('setup/mail-test', [SetupController::class, 'testMail'])
+        ->middleware('throttle:5,1')->name('setup.mail-test');
+});
 
 Route::get('/', function () {
     // Logged-in users don't see the marketing landing page, but their workspace.
@@ -41,6 +54,10 @@ Route::middleware(['auth', 'operator', 'role:admin'])->prefix('admin')->name('ad
     Route::get('storage', [Admin\StorageController::class, 'show'])->name('storage.show');
     Route::put('storage', [Admin\StorageController::class, 'update'])->name('storage.update');
     Route::post('storage/test', [Admin\StorageController::class, 'test'])->name('storage.test');
+
+    Route::get('mail', [Admin\MailController::class, 'show'])->name('mail.show');
+    Route::put('mail', [Admin\MailController::class, 'update'])->name('mail.update');
+    Route::post('mail/test', [Admin\MailController::class, 'test'])->name('mail.test');
 
     Route::resource('organizations', Admin\OrganizationController::class)->only(['index', 'show', 'store', 'destroy'])->parameters(['organizations' => 'organization']);
 

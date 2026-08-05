@@ -7,8 +7,10 @@ use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RejectRobotWebSession;
+use App\Http\Middleware\RequireSetup;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -50,11 +52,25 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $middleware->web(append: [
+            // Runs across the whole web group on purpose — while no user exists, the
+            // wizard is the only reachable route. Anything narrower (e.g. only the
+            // GET pages) would leave POST /register open, which would both hand the
+            // instance to whoever posts first and permanently seal the wizard.
+            RequireSetup::class,
             HandleInertiaRequests::class,
             SecurityHeaders::class,
             RejectRobotWebSession::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);
+
+        // Without this, priority sorting pulls `auth` ahead of RequireSetup, so an
+        // auth-protected route on a fresh instance would bounce via /login before
+        // reaching the wizard. Deciding "is this instance set up at all?" belongs
+        // before "is this visitor logged in?".
+        $middleware->prependToPriorityList(
+            before: AuthenticatesRequests::class,
+            prepend: RequireSetup::class,
+        );
 
         $middleware->alias([
             'registry.auth' => AuthenticateRegistry::class,

@@ -11,6 +11,8 @@ class ExampleTest extends TestCase
 
     public function test_returns_a_successful_response()
     {
+        $this->instanceAlreadySetUp();
+
         $response = $this->get('/');
 
         $response->assertStatus(200);

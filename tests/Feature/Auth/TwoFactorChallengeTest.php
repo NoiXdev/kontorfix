@@ -61,6 +61,8 @@ it('rejects an invalid code and stays on the challenge', function () {
 });
 
 it('redirects to login when hitting the challenge without a pending login', function () {
+    $this->instanceAlreadySetUp();
+
     $this->get('/two-factor-challenge')->assertRedirect(route('login'));
 });
 

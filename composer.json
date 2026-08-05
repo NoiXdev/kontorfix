@@ -25,6 +25,7 @@
         "laravel/tinker": "^2.10.1",
         "league/flysystem-aws-s3-v3": "^3.0",
         "pragmarx/google2fa-qrcode": "^4.0",
+        "synergitech/laravel-postal": "^5.0",
         "tightenco/ziggy": "^2.4"
     },
     "require-dev": {
