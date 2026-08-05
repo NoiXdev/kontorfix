@@ -16,6 +16,10 @@ interface Pkg {
 
 const selected = defineModel<Pkg[]>({ default: () => [] });
 
+// When set, a persistent "Neues Paket anlegen" button is shown (not only when a search
+// yields no results) — used on the registry package tab for an obvious quick-add.
+withDefaults(defineProps<{ createButton?: boolean }>(), { createButton: false });
+
 const query = ref('');
 const failed = ref(false);
 const results = ref<Pkg[]>([]);
@@ -238,7 +242,10 @@ onUnmounted(() => {
 
 <template>
     <div class="space-y-3">
-        <Input v-model="query" type="text" placeholder="Paket suchen…" autocomplete="off" />
+        <div class="flex items-center gap-2">
+            <Input v-model="query" type="text" placeholder="Paket suchen…" autocomplete="off" class="flex-1" />
+            <Button v-if="createButton && !creating" type="button" variant="outline" size="sm" @click="startCreate">Neu anlegen</Button>
+        </div>
 
         <div v-if="query.trim() !== '' && !creating" class="space-y-1 rounded-md border border-input">
             <button

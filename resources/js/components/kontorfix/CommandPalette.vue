@@ -182,10 +182,13 @@ function openHit(hit: FlatHit) {
 
 onMounted(() => {
     window.addEventListener('keydown', onKeydown);
+    // Lets a visible trigger (e.g. the header search button) open the palette.
+    window.addEventListener('kfx:open-search', openPalette);
 });
 
 onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeydown);
+    window.removeEventListener('kfx:open-search', openPalette);
     if (debounceTimer) {
         clearTimeout(debounceTimer);
     }

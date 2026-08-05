@@ -2,10 +2,18 @@
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
+import { Search } from 'lucide-vue-next';
 
 defineProps<{
     breadcrumbs?: BreadcrumbItemType[];
 }>();
+
+// Detect the platform modifier for the keyboard hint (⌘ on macOS, otherwise Ctrl).
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+function openSearch() {
+    window.dispatchEvent(new CustomEvent('kfx:open-search'));
+}
 </script>
 
 <template>
@@ -34,5 +42,16 @@ defineProps<{
                 </Breadcrumb>
             </template>
         </div>
+
+        <button
+            type="button"
+            class="ml-auto inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted/50"
+            aria-label="Suche öffnen"
+            @click="openSearch"
+        >
+            <Search class="size-4" />
+            <span class="hidden sm:inline">Suchen</span>
+            <kbd class="hidden rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-xs sm:inline">{{ isMac ? '⌘' : 'Ctrl' }} K</kbd>
+        </button>
     </header>
 </template>

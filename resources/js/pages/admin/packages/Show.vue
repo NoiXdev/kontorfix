@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ActivityList from '@/components/kontorfix/ActivityList.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -27,6 +28,19 @@ interface GroupRow {
     slug: string;
 }
 
+interface ActivityRow {
+    id: number;
+    log_name: string | null;
+    event: string | null;
+    description: string;
+    subject_type: string | null;
+    subject_label: string | null;
+    causer: string | null;
+    changes: Record<string, unknown>;
+    created_at: string | null;
+    created_at_exact: string | null;
+}
+
 const props = defineProps<{
     package: {
         id: string;
@@ -40,6 +54,7 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     groups: GroupRow[];
+    activities: ActivityRow[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -117,6 +132,7 @@ if (isOperator) {
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
                     <TabsTrigger value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
+                    <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="installation">
@@ -213,7 +229,14 @@ if (isOperator) {
                         </div>
                     </section>
                 </TabsContent>
+
+                <TabsContent value="aktivitaet">
+                    <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                        <ActivityList :activities="props.activities" />
+                    </div>
+                </TabsContent>
             </Tabs>
         </div>
     </AppLayout>
 </template>
+

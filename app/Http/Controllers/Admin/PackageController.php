@@ -11,6 +11,7 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Services\Package\PackageDependencies;
 use App\Services\Vcs\RepositoryProbe;
+use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -75,6 +76,7 @@ class PackageController extends Controller
                 'dependencies' => $deps->for($package->type, $v->metadata ?? []),
             ]),
             'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
+            'activities' => ActivityPresenter::recentFor($package),
         ]);
     }
 

@@ -5,6 +5,7 @@ import { computed } from 'vue';
 
 const page = usePage();
 const user = computed(() => page.props.auth?.user ?? null);
+const registrationEnabled = computed(() => page.props.registrationEnabled === true);
 
 const features = [
     {
@@ -66,6 +67,7 @@ const features = [
                     <template v-else>
                         <Link :href="route('login')" class="rounded-md px-4 py-2 font-medium text-paper/80 transition-colors hover:text-paper"> Anmelden </Link>
                         <Link
+                            v-if="registrationEnabled"
                             :href="route('register')"
                             class="rounded-md bg-copper px-4 py-2 font-medium text-ink transition-colors hover:bg-copper-hi"
                         >

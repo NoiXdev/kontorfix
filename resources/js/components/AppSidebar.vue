@@ -6,7 +6,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
+import { Activity, BookOpen, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -95,13 +95,22 @@ const footerNavItems = computed<NavItem[]>(() => {
         },
     ];
 
-    // Horizon is its own SPA (not Inertia) → as a real browser link in the footer.
+    // Horizon and the API browser are their own (non-Inertia) pages → real browser
+    // links in the footer. Only reachable while authenticated (the app shell requires
+    // a session) and gated server-side to operator admins.
     if (isAdmin.value) {
-        items.unshift({
-            title: 'Queue (Horizon)',
-            href: '/horizon',
-            icon: Gauge,
-        });
+        items.unshift(
+            {
+                title: 'API-Browser',
+                href: '/docs/api',
+                icon: BookOpen,
+            },
+            {
+                title: 'Queue (Horizon)',
+                href: '/horizon',
+                icon: Gauge,
+            },
+        );
     }
 
     return items;

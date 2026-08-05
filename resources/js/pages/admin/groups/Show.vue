@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import ActivityList from '@/components/kontorfix/ActivityList.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -56,6 +57,19 @@ interface Setup {
     npm: string;
 }
 
+interface ActivityRow {
+    id: number;
+    log_name: string | null;
+    event: string | null;
+    description: string;
+    subject_type: string | null;
+    subject_label: string | null;
+    causer: string | null;
+    changes: Record<string, unknown>;
+    created_at: string | null;
+    created_at_exact: string | null;
+}
+
 const props = defineProps<{
     group: GroupInfo;
     packages: PackageRow[];
@@ -63,6 +77,7 @@ const props = defineProps<{
     upstreams: UpstreamRow[];
     tokens: TokenRow[];
     setup: Setup;
+    activities: ActivityRow[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -236,6 +251,7 @@ async function copyToken() {
                     <TabsTrigger value="upstreams">Upstreams</TabsTrigger>
                     <TabsTrigger value="tokens">Tokens</TabsTrigger>
                     <TabsTrigger value="einrichtung">Einrichtung</TabsTrigger>
+                    <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="bearbeiten">
@@ -292,7 +308,7 @@ async function copyToken() {
                                     Vorhandenes Paket suchen oder direkt neu anlegen, dann dieser Registry hinzufügen.
                                 </p>
                             </div>
-                            <PackagePicker v-model="packagesToAdd" />
+                            <PackagePicker v-model="packagesToAdd" create-button />
                             <div>
                                 <Button type="button" :disabled="packagesToAdd.length === 0" @click="addPackages">
                                     <Plus class="size-4" />
@@ -539,6 +555,12 @@ async function copyToken() {
                         :store-payload="{ organization_id: props.group.organization_id, group_id: props.group.id }"
                         :personal-tokens="props.tokens"
                     />
+                </TabsContent>
+
+                <TabsContent value="aktivitaet">
+                    <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                        <ActivityList :activities="props.activities" />
+                    </div>
                 </TabsContent>
             </Tabs>
         </div>

@@ -142,6 +142,9 @@ return [
 
     'middleware' => [
         'web',
+        // Require an authenticated session for the API browser in every environment
+        // (RestrictedDocsAccess additionally gates it to operator admins outside local).
+        'auth',
         RestrictedDocsAccess::class,
     ],
 

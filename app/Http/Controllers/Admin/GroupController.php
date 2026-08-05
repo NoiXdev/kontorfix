@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Registry\SetupSnippetBuilder;
+use App\Support\ActivityPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -61,6 +62,7 @@ class GroupController extends Controller
             'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => $u->url, 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
             'setup' => $snippets->for($group),
+            'activities' => ActivityPresenter::recentFor($group),
         ]);
     }
 
