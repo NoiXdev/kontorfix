@@ -26,6 +26,7 @@ class RobotController extends Controller
                     'name' => $u->name,
                     'email' => $u->email,
                     'role' => $u->role->value,
+                    'is_super_admin' => (bool) $u->is_super_admin,
                     'organization' => $u->organization?->name,
                     'keys_count' => $u->api_keys_count,
                 ]),
@@ -35,24 +36,22 @@ class RobotController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        // A robot is a service account — no mailbox, hence no email is collected.
+        // A robot is a service account — no mailbox, hence no email is collected. Its reach
+        // is either a single organization (the home org + its per-org role) or global via
+        // the super-admin flag, mirroring human accounts.
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:190'],
             'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
             'role' => ['required', Rule::enum(UserRole::class)],
+            'is_super_admin' => ['boolean'],
         ]);
-
-        // Operator invariant: privileged roles only in the operator org.
-        $org = Organization::findOrFail($validated['organization_id']);
-        if (in_array($validated['role'], [UserRole::Admin->value, UserRole::Maintainer->value], true) && ! $org->is_operator) {
-            return back()->withErrors(['role' => 'Admin/Maintainer sind nur in der Betreiber-Organisation erlaubt.']);
-        }
 
         $robot = User::create([
             'name' => $validated['name'],
             'email' => null,
             'organization_id' => $validated['organization_id'],
             'role' => $validated['role'],
+            'is_super_admin' => $request->boolean('is_super_admin'),
             'account_type' => AccountType::Robot,
             'password' => null,
         ]);

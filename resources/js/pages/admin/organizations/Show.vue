@@ -21,12 +21,14 @@ interface UserRow {
     name: string;
     email: string | null;
     role: string;
+    is_super_admin?: boolean;
 }
 
 interface MemberRow {
     id: string;
     name: string;
     email: string | null;
+    role?: string;
 }
 
 interface TokenRow {
@@ -55,7 +57,14 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: props.organization.name, href: route('admin.organizations.show', props.organization.id) },
 ];
 
+const roleOptions = [
+    { value: 'admin', label: 'Admin' },
+    { value: 'maintainer', label: 'Maintainer' },
+    { value: 'member', label: 'Member' },
+];
+
 const addUserId = ref('');
+const addRole = ref('member');
 
 function attachMember() {
     if (!addUserId.value) {
@@ -63,11 +72,12 @@ function attachMember() {
     }
     router.post(
         route('admin.organizations.members.store', props.organization.id),
-        { user_id: addUserId.value },
+        { user_id: addUserId.value, role: addRole.value },
         {
             preserveScroll: true,
             onSuccess: () => {
                 addUserId.value = '';
+                addRole.value = 'member';
             },
         },
     );
@@ -155,7 +165,17 @@ function detachMember(userId: string) {
                                 :key="user.id"
                                 class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                             >
-                                <td class="px-4 py-3">{{ user.name }}</td>
+                                <td class="px-4 py-3">
+                                    <span class="flex items-center gap-2">
+                                        {{ user.name }}
+                                        <span
+                                            v-if="user.is_super_admin"
+                                            class="inline-flex items-center rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
+                                        >
+                                            Super-Admin
+                                        </span>
+                                    </span>
+                                </td>
                                 <td class="px-4 py-3">{{ user.email ?? '—' }}</td>
                                 <td class="px-4 py-3">{{ user.role }}</td>
                             </tr>
@@ -182,6 +202,7 @@ function detachMember(userId: string) {
                         placeholder="Nutzer hinzufügen …"
                         :options="props.assignableUsers.map((u) => ({ value: u.id, label: u.email ? `${u.name} (${u.email})` : u.name }))"
                     />
+                    <SearchableSelect v-model="addRole" class="w-40" :options="roleOptions" />
                     <Button type="submit" variant="outline" :disabled="!addUserId">Hinzufügen</Button>
                 </form>
 
@@ -191,6 +212,7 @@ function detachMember(userId: string) {
                             <tr>
                                 <th class="px-4 py-3 font-medium">Name</th>
                                 <th class="px-4 py-3 font-medium">E-Mail</th>
+                                <th class="px-4 py-3 font-medium">Rolle</th>
                                 <th class="px-4 py-3 font-medium">Aktionen</th>
                             </tr>
                         </thead>
@@ -202,6 +224,7 @@ function detachMember(userId: string) {
                             >
                                 <td class="px-4 py-3">{{ member.name }}</td>
                                 <td class="px-4 py-3">{{ member.email ?? '—' }}</td>
+                                <td class="px-4 py-3">{{ member.role ?? 'member' }}</td>
                                 <td class="px-4 py-3">
                                     <Button variant="ghost" size="icon" aria-label="Zugriff entziehen" @click="detachMember(member.id)">
                                         <Trash2 class="size-4 text-destructive" />
@@ -209,7 +232,7 @@ function detachMember(userId: string) {
                                 </td>
                             </tr>
                             <tr v-if="props.members.length === 0">
-                                <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">Keine weiteren Mitglieder.</td>
+                                <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Keine weiteren Mitglieder.</td>
                             </tr>
                         </tbody>
                     </table>

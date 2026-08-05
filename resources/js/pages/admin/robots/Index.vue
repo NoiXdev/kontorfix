@@ -11,7 +11,7 @@ import { Copy, KeyRound, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
 const props = defineProps<{
-    robots: { id: string; name: string; role: string; organization: string | null; keys_count: number }[];
+    robots: { id: string; name: string; role: string; is_super_admin: boolean; organization: string | null; keys_count: number }[];
     organizations: { id: string; name: string }[];
 }>();
 
@@ -55,6 +55,7 @@ const createForm = useForm({
     name: '',
     organization_id: '',
     role: 'member',
+    is_super_admin: false,
 });
 
 function submitCreate() {
@@ -168,6 +169,18 @@ function roleLabel(role: string) {
                     <Plus class="size-4" />
                     Robot anlegen
                 </Button>
+
+                <label class="flex items-start gap-2 text-sm sm:col-span-full">
+                    <input type="checkbox" v-model="createForm.is_super_admin" class="mt-1" />
+                    <span>
+                        Global (Super-Admin)
+                        <span class="block text-xs text-muted-foreground">
+                            Statt auf die gewählte Organisation begrenzt, erhält der Robot vollen Zugriff auf alle
+                            Organisationen und die Instanz-Verwaltung.
+                        </span>
+                    </span>
+                </label>
+                <InputError :message="createForm.errors.is_super_admin" class="sm:col-span-full" />
             </form>
 
             <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
@@ -176,6 +189,7 @@ function roleLabel(role: string) {
                         <tr>
                             <th class="px-4 py-3 font-medium">Name</th>
                             <th class="px-4 py-3 font-medium">Rolle</th>
+                            <th class="px-4 py-3 font-medium">Scope</th>
                             <th class="px-4 py-3 font-medium">Organisation</th>
                             <th class="px-4 py-3 font-medium">Keys</th>
                             <th class="px-4 py-3 font-medium">Aktionen</th>
@@ -186,6 +200,15 @@ function roleLabel(role: string) {
                             <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
                                 <td class="px-4 py-3 font-medium">{{ robot.name }}</td>
                                 <td class="px-4 py-3">{{ roleLabel(robot.role) }}</td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        v-if="robot.is_super_admin"
+                                        class="inline-flex items-center rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
+                                    >
+                                        Global
+                                    </span>
+                                    <span v-else class="text-xs text-muted-foreground">Organisation</span>
+                                </td>
                                 <td class="px-4 py-3">{{ robot.organization ?? '—' }}</td>
                                 <td class="px-4 py-3 text-muted-foreground">{{ robot.keys_count }}</td>
                                 <td class="px-4 py-3">
@@ -201,7 +224,7 @@ function roleLabel(role: string) {
                                 </td>
                             </tr>
                             <tr v-if="openKeyForm === robot.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
-                                <td colspan="5" class="px-4 py-3">
+                                <td colspan="6" class="px-4 py-3">
                                     <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitKey(robot.id)">
                                         <div class="grid gap-2">
                                             <Label :for="`key_name_${robot.id}`">Key-Name</Label>
@@ -227,7 +250,7 @@ function roleLabel(role: string) {
                             </tr>
                         </template>
                         <tr v-if="props.robots.length === 0">
-                            <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
+                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
                         </tr>
                     </tbody>
                 </table>

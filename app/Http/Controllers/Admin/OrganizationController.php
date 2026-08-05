@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreOrganizationRequest;
 use App\Models\Domain;
@@ -11,6 +12,7 @@ use App\Models\RegistryToken;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -49,19 +51,22 @@ class OrganizationController extends Controller
                     'packages_count' => $group->packages_count,
                     'domains' => $group->domains->map(fn (Domain $domain) => $domain->hostname)->values(),
                 ]),
-            'users' => $organization->users()->get(['id', 'name', 'email', 'role'])
+            'users' => $organization->users()->get(['id', 'name', 'email', 'role', 'is_super_admin'])
                 ->map(fn (User $user) => [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
                     'role' => $user->role->value,
+                    'is_super_admin' => (bool) $user->is_super_admin,
                 ]),
-            // Users with additional (non-home) access to this organization.
+            // Users with additional (non-home) access to this organization, each with the
+            // per-organization role their membership grants.
             'members' => $organization->members()->get(['users.id', 'name', 'email'])
                 ->map(fn (User $user) => [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'role' => $user->getRelationValue('pivot')?->getAttribute('role') ?? UserRole::Member->value,
                 ]),
             // Candidates for granting additional access: everyone whose home org is a
             // different one and who is not already an additional member here.
@@ -97,6 +102,7 @@ class OrganizationController extends Controller
     {
         $data = $request->validate([
             'user_id' => ['required', 'uuid', 'exists:users,id'],
+            'role' => ['nullable', Rule::enum(UserRole::class)],
         ]);
 
         $user = User::findOrFail($data['user_id']);
@@ -107,7 +113,9 @@ class OrganizationController extends Controller
             ]);
         }
 
-        $organization->members()->syncWithoutDetaching([$user->id]);
+        // The per-organization role this membership grants (defaults to member).
+        $role = $data['role'] ?? UserRole::Member->value;
+        $organization->members()->syncWithoutDetaching([$user->id => ['role' => $role]]);
 
         return back()->with('success', "{$user->name} hinzugefügt.");
     }

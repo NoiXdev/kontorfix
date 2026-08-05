@@ -97,6 +97,21 @@ it('adds and removes members from the organization view', function () {
     expect($org->members()->whereKey($user->id)->exists())->toBeFalse();
 });
 
+it('attaches a member with a per-organization role from the organization view', function () {
+    $admin = opAdmin();
+    $org = Organization::factory()->create();
+    $user = User::factory()->create(['role' => UserRole::Member]);
+
+    $this->actingAs($admin)->post("/admin/organizations/{$org->id}/members", [
+        'user_id' => $user->id, 'role' => 'admin',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    // The membership carries the chosen role, granting admin reach to that org only.
+    $fresh = $user->fresh();
+    expect($fresh->administers($org->id))->toBeTrue()
+        ->and($fresh->roleIn($org->id))->toBe(UserRole::Admin);
+});
+
 it('shows registries of additional organizations in the portal', function () {
     $home = Organization::factory()->create();
     $other = Organization::factory()->create();
