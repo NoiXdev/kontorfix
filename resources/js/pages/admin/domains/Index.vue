@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -120,14 +121,12 @@ function destroyDomain(id: string) {
                 <form class="space-y-4" @submit.prevent="submit">
                     <div class="grid gap-2">
                         <Label for="group_id">Gruppe</Label>
-                        <select
+                        <SearchableSelect
                             id="group_id"
                             v-model="form.group_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="" disabled>Bitte wählen</option>
-                            <option v-for="group in props.groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                        </select>
+                            placeholder="Bitte wählen"
+                            :options="props.groups.map((g) => ({ value: g.id, label: g.name }))"
+                        />
                         <InputError :message="form.errors.group_id" />
                     </div>
 

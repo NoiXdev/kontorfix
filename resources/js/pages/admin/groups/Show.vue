@@ -2,6 +2,7 @@
 import InputError from '@/components/InputError.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -405,14 +406,15 @@ async function copyToken() {
                         <form class="flex flex-wrap items-end gap-3" @submit.prevent="addUpstream">
                             <div class="flex flex-col gap-1.5">
                                 <label for="new-upstream-type" class="text-sm font-medium">Typ</label>
-                                <select
+                                <SearchableSelect
                                     id="new-upstream-type"
                                     v-model="newUpstream.type"
-                                    class="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-                                >
-                                    <option value="composer">composer</option>
-                                    <option value="npm">npm</option>
-                                </select>
+                                    class="min-w-40"
+                                    :options="[
+                                        { value: 'composer', label: 'composer' },
+                                        { value: 'npm', label: 'npm' },
+                                    ]"
+                                />
                             </div>
                             <div class="flex flex-col gap-1.5">
                                 <label for="new-upstream-url" class="text-sm font-medium">URL</label>
@@ -426,14 +428,15 @@ async function copyToken() {
                             </div>
                             <div class="flex flex-col gap-1.5">
                                 <label for="new-upstream-policy" class="text-sm font-medium">Policy</label>
-                                <select
+                                <SearchableSelect
                                     id="new-upstream-policy"
                                     v-model="newUpstream.policy"
-                                    class="rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
-                                >
-                                    <option value="proxy">proxy</option>
-                                    <option value="strict">strict</option>
-                                </select>
+                                    class="min-w-40"
+                                    :options="[
+                                        { value: 'proxy', label: 'proxy' },
+                                        { value: 'strict', label: 'strict' },
+                                    ]"
+                                />
                             </div>
                             <Button type="submit">Hinzufügen</Button>
                         </form>
@@ -473,14 +476,14 @@ async function copyToken() {
 
                             <div class="grid gap-2">
                                 <Label for="token_ability">Recht</Label>
-                                <select
+                                <SearchableSelect
                                     id="token_ability"
                                     v-model="tokenForm.ability"
-                                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                >
-                                    <option value="read">Lesen</option>
-                                    <option value="publish">Veröffentlichen</option>
-                                </select>
+                                    :options="[
+                                        { value: 'read', label: 'Lesen' },
+                                        { value: 'publish', label: 'Veröffentlichen' },
+                                    ]"
+                                />
                                 <InputError :message="tokenForm.errors.ability" />
                             </div>
 

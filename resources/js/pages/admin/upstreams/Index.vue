@@ -187,27 +187,25 @@ function destroyUpstream(id: string) {
                 <form class="space-y-4" @submit.prevent="submit">
                     <div class="grid gap-2">
                         <Label for="group_id">Gruppe</Label>
-                        <select
+                        <SearchableSelect
                             id="group_id"
                             v-model="form.group_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="" disabled>Bitte wählen</option>
-                            <option v-for="group in props.groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                        </select>
+                            placeholder="Bitte wählen"
+                            :options="props.groups.map((g) => ({ value: g.id, label: g.name }))"
+                        />
                         <InputError :message="form.errors.group_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <select
+                        <SearchableSelect
                             id="type"
                             v-model="form.type"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="composer">composer</option>
-                            <option value="npm">npm</option>
-                        </select>
+                            :options="[
+                                { value: 'composer', label: 'composer' },
+                                { value: 'npm', label: 'npm' },
+                            ]"
+                        />
                         <InputError :message="form.errors.type" />
                     </div>
 
@@ -219,14 +217,14 @@ function destroyUpstream(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="policy">Policy</Label>
-                        <select
+                        <SearchableSelect
                             id="policy"
                             v-model="form.policy"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="proxy">Proxy</option>
-                            <option value="strict">Strict</option>
-                        </select>
+                            :options="[
+                                { value: 'proxy', label: 'Proxy' },
+                                { value: 'strict', label: 'Strict' },
+                            ]"
+                        />
                         <InputError :message="form.errors.policy" />
                     </div>
 

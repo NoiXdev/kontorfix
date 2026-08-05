@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -156,9 +157,6 @@ function regenerateIncoming(id: string) {
 function destroyIncoming(id: string) {
     router.delete(route('admin.incoming-webhooks.destroy', id), { preserveScroll: true, onBefore: () => confirm('Eingehenden Webhook wirklich löschen?') });
 }
-
-const selectClass =
-    'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
 </script>
 
 <template>
@@ -429,12 +427,16 @@ const selectClass =
 
                     <div class="grid gap-2">
                         <Label for="incoming_provider">Provider</Label>
-                        <select id="incoming_provider" v-model="incomingForm.provider" :class="selectClass">
-                            <option value="github">GitHub</option>
-                            <option value="gitlab">GitLab</option>
-                            <option value="gitea">Gitea</option>
-                            <option value="bitbucket">Bitbucket</option>
-                        </select>
+                        <SearchableSelect
+                            id="incoming_provider"
+                            v-model="incomingForm.provider"
+                            :options="[
+                                { value: 'github', label: 'GitHub' },
+                                { value: 'gitlab', label: 'GitLab' },
+                                { value: 'gitea', label: 'Gitea' },
+                                { value: 'bitbucket', label: 'Bitbucket' },
+                            ]"
+                        />
                         <InputError :message="incomingForm.errors.provider" />
                     </div>
 

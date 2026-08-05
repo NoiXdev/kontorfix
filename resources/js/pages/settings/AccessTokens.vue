@@ -4,6 +4,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -119,27 +120,24 @@ function destroyToken(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="token_group">Geltungsbereich</Label>
-                        <select
+                        <SearchableSelect
                             id="token_group"
                             v-model="form.group_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="">Global (alle Registries)</option>
-                            <option v-for="g in props.groups" :key="g.id" :value="g.id">{{ g.name }}</option>
-                        </select>
+                            :options="[{ value: '', label: 'Global (alle Registries)' }, ...props.groups.map((g) => ({ value: g.id, label: g.name }))]"
+                        />
                         <InputError :message="form.errors.group_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="token_ability">Recht</Label>
-                        <select
+                        <SearchableSelect
                             id="token_ability"
                             v-model="form.ability"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="read">Lesen</option>
-                            <option value="publish">Veröffentlichen</option>
-                        </select>
+                            :options="[
+                                { value: 'read', label: 'Lesen' },
+                                { value: 'publish', label: 'Veröffentlichen' },
+                            ]"
+                        />
                         <InputError :message="form.errors.ability" />
                     </div>
 

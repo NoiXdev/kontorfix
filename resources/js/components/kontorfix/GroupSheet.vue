@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useForm } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
@@ -115,14 +116,11 @@ function close() {
 
                 <div class="grid gap-2">
                     <Label for="group-organization">Kunde / Organisation</Label>
-                    <select
+                    <SearchableSelect
                         id="group-organization"
                         v-model="form.organization_id"
-                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="">Standard (Betreiber)</option>
-                        <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                    </select>
+                        :options="[{ value: '', label: 'Standard (Betreiber)' }, ...props.organizations.map((o) => ({ value: o.id, label: o.name }))]"
+                    />
                     <InputError :message="form.errors.organization_id" />
                 </div>
 

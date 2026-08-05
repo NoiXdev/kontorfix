@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -148,26 +149,18 @@ function roleLabel(role: string) {
 
                 <div class="grid gap-2">
                     <Label for="robot_org">Organisation</Label>
-                    <select
+                    <SearchableSelect
                         id="robot_org"
                         v-model="createForm.organization_id"
-                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="" disabled>Bitte wählen</option>
-                        <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                    </select>
+                        placeholder="Bitte wählen"
+                        :options="props.organizations.map((o) => ({ value: o.id, label: o.name }))"
+                    />
                     <InputError :message="createForm.errors.organization_id" />
                 </div>
 
                 <div class="grid gap-2">
                     <Label for="robot_role">Rolle</Label>
-                    <select
-                        id="robot_role"
-                        v-model="createForm.role"
-                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                    </select>
+                    <SearchableSelect id="robot_role" v-model="createForm.role" :options="roleOptions" />
                     <InputError :message="createForm.errors.role" />
                 </div>
 
@@ -217,14 +210,14 @@ function roleLabel(role: string) {
                                         </div>
                                         <div class="grid gap-2">
                                             <Label :for="`key_perm_${robot.id}`">Recht</Label>
-                                            <select
+                                            <SearchableSelect
                                                 :id="`key_perm_${robot.id}`"
                                                 v-model="keyForm.permission"
-                                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                            >
-                                                <option value="read">Lesen</option>
-                                                <option value="write">Schreiben</option>
-                                            </select>
+                                                :options="[
+                                                    { value: 'read', label: 'Lesen' },
+                                                    { value: 'write', label: 'Schreiben' },
+                                                ]"
+                                            />
                                             <InputError :message="keyForm.errors.permission" />
                                         </div>
                                         <Button type="submit" :disabled="keyForm.processing">Key erstellen</Button>

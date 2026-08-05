@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, useForm, usePage } from '@inertiajs/vue3';
@@ -121,14 +122,14 @@ async function testConnection() {
             <form class="max-w-2xl space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
                 <div class="grid gap-2">
                     <Label for="driver">Treiber</Label>
-                    <select
+                    <SearchableSelect
                         id="driver"
                         v-model="form.driver"
-                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="local">Lokal (Server-Dateisystem)</option>
-                        <option value="s3">S3 / S3-kompatibel (z. B. MinIO)</option>
-                    </select>
+                        :options="[
+                            { value: 'local', label: 'Lokal (Server-Dateisystem)' },
+                            { value: 's3', label: 'S3 / S3-kompatibel (z. B. MinIO)' },
+                        ]"
+                    />
                     <InputError :message="form.errors.driver" />
                 </div>
 

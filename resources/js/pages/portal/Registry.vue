@@ -4,6 +4,7 @@ import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -170,15 +171,16 @@ const breadcrumbs: BreadcrumbItem[] = [
                         class="h-10 w-full sm:w-64"
                         aria-label="Nach Name suchen"
                     />
-                    <select
+                    <SearchableSelect
                         v-model="filterType"
-                        aria-label="Nach Typ filtern"
-                        class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="">Alle Typen</option>
-                        <option value="composer">composer</option>
-                        <option value="npm">npm</option>
-                    </select>
+                        class="w-40"
+                        placeholder="Alle Typen"
+                        :options="[
+                            { value: '', label: 'Alle Typen' },
+                            { value: 'composer', label: 'composer' },
+                            { value: 'npm', label: 'npm' },
+                        ]"
+                    />
                     <button
                         v-if="hasActiveFilters"
                         type="button"
@@ -256,14 +258,14 @@ const breadcrumbs: BreadcrumbItem[] = [
 
                     <div class="grid gap-2">
                         <Label for="token_ability">Recht</Label>
-                        <select
+                        <SearchableSelect
                             id="token_ability"
                             v-model="tokenForm.ability"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="read">Lesen</option>
-                            <option value="publish">Veröffentlichen</option>
-                        </select>
+                            :options="[
+                                { value: 'read', label: 'Lesen' },
+                                { value: 'publish', label: 'Veröffentlichen' },
+                            ]"
+                        />
                         <InputError :message="tokenForm.errors.ability" />
                     </div>
 

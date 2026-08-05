@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { type SharedData } from '@/types';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
@@ -141,14 +142,15 @@ function selectSession(value: string) {
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="setup_token_ability">Recht</Label>
-                    <select
+                    <SearchableSelect
                         id="setup_token_ability"
                         v-model="form.ability"
-                        class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="read">Lesen</option>
-                        <option value="publish">Veröffentlichen</option>
-                    </select>
+                        class="min-w-40"
+                        :options="[
+                            { value: 'read', label: 'Lesen' },
+                            { value: 'publish', label: 'Veröffentlichen' },
+                        ]"
+                    />
                 </div>
                 <Button type="submit" :disabled="form.processing || !form.name">Erstellen &amp; einsetzen</Button>
             </form>

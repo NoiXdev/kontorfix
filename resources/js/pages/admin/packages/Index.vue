@@ -7,6 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -192,34 +193,34 @@ function destroyPackage(id: string) {
                     class="h-10 w-full sm:w-64"
                     aria-label="Nach Name suchen"
                 />
-                <select
+                <SearchableSelect
                     v-model="filterType"
-                    aria-label="Nach Typ filtern"
-                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                    <option value="">Alle Typen</option>
-                    <option value="composer">composer</option>
-                    <option value="npm">npm</option>
-                </select>
-                <select
+                    class="w-40"
+                    placeholder="Alle Typen"
+                    :options="[
+                        { value: '', label: 'Alle Typen' },
+                        { value: 'composer', label: 'composer' },
+                        { value: 'npm', label: 'npm' },
+                    ]"
+                />
+                <SearchableSelect
                     v-model="filterStatus"
-                    aria-label="Nach Status filtern"
-                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                    <option value="">Alle Status</option>
-                    <option value="pending">pending</option>
-                    <option value="syncing">syncing</option>
-                    <option value="synced">synced</option>
-                    <option value="failed">failed</option>
-                </select>
-                <select
+                    class="w-40"
+                    placeholder="Alle Status"
+                    :options="[
+                        { value: '', label: 'Alle Status' },
+                        { value: 'pending', label: 'pending' },
+                        { value: 'syncing', label: 'syncing' },
+                        { value: 'synced', label: 'synced' },
+                        { value: 'failed', label: 'failed' },
+                    ]"
+                />
+                <SearchableSelect
                     v-model="filterGroup"
-                    aria-label="Nach Registry filtern"
-                    class="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                    <option value="">Alle Registries</option>
-                    <option v-for="group in props.groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                </select>
+                    class="w-52"
+                    placeholder="Alle Registries"
+                    :options="[{ value: '', label: 'Alle Registries' }, ...props.groups.map((g) => ({ value: g.id, label: g.name }))]"
+                />
                 <button
                     v-if="hasActiveFilters"
                     type="button"
@@ -282,14 +283,14 @@ function destroyPackage(id: string) {
                 <form class="space-y-4" @submit.prevent="submit">
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <select
+                        <SearchableSelect
                             id="type"
                             v-model="form.type"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="composer">composer</option>
-                            <option value="npm">npm</option>
-                        </select>
+                            :options="[
+                                { value: 'composer', label: 'composer' },
+                                { value: 'npm', label: 'npm' },
+                            ]"
+                        />
                         <InputError :message="form.errors.type" />
                     </div>
 

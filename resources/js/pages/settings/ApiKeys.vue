@@ -4,6 +4,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -115,14 +116,14 @@ function destroyApiKey(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="api_key_permission">Berechtigung</Label>
-                        <select
+                        <SearchableSelect
                             id="api_key_permission"
                             v-model="form.permission"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="read">Lesen</option>
-                            <option value="write">Schreiben</option>
-                        </select>
+                            :options="[
+                                { value: 'read', label: 'Lesen' },
+                                { value: 'write', label: 'Schreiben' },
+                            ]"
+                        />
                         <InputError :message="form.errors.permission" />
                     </div>
 

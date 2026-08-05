@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -201,40 +202,35 @@ function destroyToken(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="organization_id">Organisation</Label>
-                        <select
+                        <SearchableSelect
                             id="organization_id"
                             v-model="form.organization_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="" disabled>Bitte wählen</option>
-                            <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                        </select>
+                            placeholder="Bitte wählen"
+                            :options="props.organizations.map((o) => ({ value: o.id, label: o.name }))"
+                        />
                         <InputError :message="form.errors.organization_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="group_id">Gruppe</Label>
-                        <select
+                        <SearchableSelect
                             id="group_id"
                             v-model="form.group_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="">Alle Gruppen</option>
-                            <option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                        </select>
+                            :options="[{ value: '', label: 'Alle Gruppen' }, ...filteredGroups.map((g) => ({ value: g.id, label: g.name }))]"
+                        />
                         <InputError :message="form.errors.group_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="ability">Recht</Label>
-                        <select
+                        <SearchableSelect
                             id="ability"
                             v-model="form.ability"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="read">Lesen</option>
-                            <option value="publish">Veröffentlichen</option>
-                        </select>
+                            :options="[
+                                { value: 'read', label: 'Lesen' },
+                                { value: 'publish', label: 'Veröffentlichen' },
+                            ]"
+                        />
                         <InputError :message="form.errors.ability" />
                     </div>
 

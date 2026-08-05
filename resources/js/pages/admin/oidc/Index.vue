@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -286,28 +287,25 @@ const badgeClasses = (on: boolean) =>
 
                     <div class="grid gap-2">
                         <Label for="default_organization_id">Standard-Organisation (optional)</Label>
-                        <select
+                        <SearchableSelect
                             id="default_organization_id"
                             v-model="form.default_organization_id"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="">Keine</option>
-                            <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                        </select>
+                            :options="[{ value: '', label: 'Keine' }, ...props.organizations.map((o) => ({ value: o.id, label: o.name }))]"
+                        />
                         <InputError :message="form.errors.default_organization_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="default_role">Standard-Rolle</Label>
-                        <select
+                        <SearchableSelect
                             id="default_role"
                             v-model="form.default_role"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="member">Member</option>
-                            <option value="maintainer">Maintainer</option>
-                            <option value="admin">Admin</option>
-                        </select>
+                            :options="[
+                                { value: 'member', label: 'Member' },
+                                { value: 'maintainer', label: 'Maintainer' },
+                                { value: 'admin', label: 'Admin' },
+                            ]"
+                        />
                         <InputError :message="form.errors.default_role" />
                     </div>
 

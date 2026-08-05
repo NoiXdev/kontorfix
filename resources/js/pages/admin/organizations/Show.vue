@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -168,15 +169,12 @@ function detachMember(userId: string) {
                 </div>
 
                 <form class="flex flex-wrap items-end gap-2" @submit.prevent="attachMember">
-                    <select
+                    <SearchableSelect
                         v-model="addUserId"
-                        class="flex h-10 min-w-64 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="">Nutzer hinzufügen …</option>
-                        <option v-for="u in props.assignableUsers" :key="u.id" :value="u.id">
-                            {{ u.name }}<template v-if="u.email"> ({{ u.email }})</template>
-                        </option>
-                    </select>
+                        class="min-w-64"
+                        placeholder="Nutzer hinzufügen …"
+                        :options="props.assignableUsers.map((u) => ({ value: u.id, label: u.email ? `${u.name} (${u.email})` : u.name }))"
+                    />
                     <Button type="submit" variant="outline" :disabled="!addUserId">Hinzufügen</Button>
                 </form>
 

@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, useForm, usePage } from '@inertiajs/vue3';
@@ -130,15 +131,15 @@ async function sendTest() {
             <form class="max-w-2xl space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
                 <div class="grid gap-2">
                     <Label for="mailer">Treiber</Label>
-                    <select
+                    <SearchableSelect
                         id="mailer"
                         v-model="form.mailer"
-                        class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    >
-                        <option value="log">Log (kein Versand, nur Logfile)</option>
-                        <option value="smtp">SMTP</option>
-                        <option value="postal">Postal</option>
-                    </select>
+                        :options="[
+                            { value: 'log', label: 'Log (kein Versand, nur Logfile)' },
+                            { value: 'smtp', label: 'SMTP' },
+                            { value: 'postal', label: 'Postal' },
+                        ]"
+                    />
                     <InputError :message="form.errors.mailer" />
                 </div>
 
@@ -169,15 +170,15 @@ async function sendTest() {
 
                     <div class="grid gap-2">
                         <Label for="smtp_encryption">Verschlüsselung</Label>
-                        <select
+                        <SearchableSelect
                             id="smtp_encryption"
                             v-model="form.smtp_encryption"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                            <option value="tls">STARTTLS (Port 587)</option>
-                            <option value="ssl">Implizites TLS (Port 465)</option>
-                            <option value="">Keine (unverschlüsselt)</option>
-                        </select>
+                            :options="[
+                                { value: 'tls', label: 'STARTTLS (Port 587)' },
+                                { value: 'ssl', label: 'Implizites TLS (Port 465)' },
+                                { value: '', label: 'Keine (unverschlüsselt)' },
+                            ]"
+                        />
                         <InputError :message="form.errors.smtp_encryption" />
                     </div>
 

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -46,8 +47,7 @@ const roleOptions = [
     { value: 'member', label: 'Member' },
 ];
 
-const selectClass =
-    'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
+const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
 // --- Create ---
 const dialogOpen = ref(false);
@@ -231,14 +231,11 @@ function destroyUser(id: string) {
                                 </div>
                             </td>
                             <td class="px-4 py-3">
-                                <select
-                                    :value="user.role"
-                                    @change="changeRole(user.id, ($event.target as HTMLSelectElement).value)"
-                                    class="flex h-9 w-full rounded-md border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                    aria-label="Rolle ändern"
-                                >
-                                    <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                                </select>
+                                <SearchableSelect
+                                    :model-value="user.role"
+                                    :options="roleOptions"
+                                    @update:model-value="(v) => changeRole(user.id, String(v))"
+                                />
                             </td>
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-1">
@@ -285,18 +282,13 @@ function destroyUser(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="organization_id">Organisation</Label>
-                        <select id="organization_id" v-model="form.organization_id" :class="selectClass">
-                            <option value="" disabled>Bitte wählen</option>
-                            <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                        </select>
+                        <SearchableSelect id="organization_id" v-model="form.organization_id" :options="orgOptions" placeholder="Bitte wählen" />
                         <InputError :message="form.errors.organization_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="role">Rolle</Label>
-                        <select id="role" v-model="form.role" :class="selectClass">
-                            <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                        </select>
+                        <SearchableSelect id="role" v-model="form.role" :options="roleOptions" />
                         <InputError :message="form.errors.role" />
                     </div>
 
@@ -355,17 +347,13 @@ function destroyUser(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="edit_org">Heim-Organisation</Label>
-                        <select id="edit_org" v-model="editForm.organization_id" :class="selectClass">
-                            <option v-for="org in props.organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
-                        </select>
+                        <SearchableSelect id="edit_org" v-model="editForm.organization_id" :options="orgOptions" />
                         <InputError :message="editForm.errors.organization_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="edit_role">Rolle</Label>
-                        <select id="edit_role" v-model="editForm.role" :class="selectClass">
-                            <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-                        </select>
+                        <SearchableSelect id="edit_role" v-model="editForm.role" :options="roleOptions" />
                         <InputError :message="editForm.errors.role" />
                         <InputError :message="editForm.errors.user" />
                     </div>
@@ -387,10 +375,12 @@ function destroyUser(id: string) {
                             <span v-if="editUser.memberships.length === 0" class="text-xs text-muted-foreground">Keine weiteren.</span>
                         </div>
                         <div class="flex items-center gap-2">
-                            <select v-model="addOrgId" :class="selectClass">
-                                <option value="">Organisation hinzufügen …</option>
-                                <option v-for="org in assignableOrgs" :key="org.id" :value="org.id">{{ org.name }}</option>
-                            </select>
+                            <SearchableSelect
+                                v-model="addOrgId"
+                                class="flex-1"
+                                :options="assignableOrgs.map((o) => ({ value: o.id, label: o.name }))"
+                                placeholder="Organisation hinzufügen …"
+                            />
                             <Button type="button" variant="outline" :disabled="!addOrgId" @click="attachOrg">Hinzufügen</Button>
                         </div>
                     </div>
