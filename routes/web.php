@@ -41,6 +41,8 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Preview a repository (reachability + discovered name/description/versions) before creating.
     Route::post('packages/probe', [Admin\PackageController::class, 'probe'])->name('packages.probe');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
+    // Edit a package's repository source (URL, private-repo credential/token).
+    Route::put('packages/{package}', [Admin\PackageController::class, 'update'])->name('packages.update');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');

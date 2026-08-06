@@ -34,6 +34,25 @@ it('creates an upstream with optional strict allowlist', function () {
         ->and($up->allowedPackages()->pluck('name')->all())->toContain('symfony/console', 'psr/log');
 });
 
+it('creates a proxy upstream with a priority and an encrypted auth token', function () {
+    $group = Group::factory()->create();
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
+        ->post('/admin/upstreams', [
+            'group_id' => $group->id,
+            'type' => 'python',
+            'url' => 'https://pypi.org/simple',
+            'policy' => 'proxy',
+            'auth_token' => 'mirror-secret',
+            'priority' => 5,
+        ])->assertRedirect();
+
+    $up = Upstream::where('group_id', $group->id)->firstOrFail();
+    expect($up->type)->toBe(PackageType::Python)
+        ->and($up->policy)->toBe(UpstreamPolicy::Proxy)
+        ->and($up->priority)->toBe(5)
+        ->and($up->auth_token)->toBe('mirror-secret');
+});
+
 it('validates the upstream url must be http/https', function () {
     $group = Group::factory()->create();
     $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))

@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
@@ -16,7 +17,7 @@ interface UpstreamRow {
     id: string;
     group: string | null;
     group_id: string;
-    type: 'composer' | 'npm';
+    type: 'composer' | 'npm' | 'python';
     url: string;
     policy: 'proxy' | 'strict';
     priority: number;
@@ -42,9 +43,13 @@ const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const dialogOpen = ref(false);
 
+// Upstream types are the registry types — from the single source of truth.
+const { options: registryTypeOptions } = useRegistryTypes();
+const typeOptions = computed(() => registryTypeOptions());
+
 const form = useForm({
     group_id: '',
-    type: 'composer' as 'composer' | 'npm',
+    type: 'composer' as 'composer' | 'npm' | 'python',
     url: '',
     policy: 'proxy' as 'proxy' | 'strict',
     auth_token: '',
@@ -198,14 +203,7 @@ function destroyUpstream(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <SearchableSelect
-                            id="type"
-                            v-model="form.type"
-                            :options="[
-                                { value: 'composer', label: 'composer' },
-                                { value: 'npm', label: 'npm' },
-                            ]"
-                        />
+                        <SearchableSelect id="type" v-model="form.type" :options="typeOptions" />
                         <InputError :message="form.errors.type" />
                     </div>
 

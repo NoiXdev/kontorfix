@@ -85,10 +85,16 @@ class PackageController extends Controller
                 'name' => $package->name,
                 'description' => $package->description,
                 'repository_url' => $package->repository_url,
+                'git_credential_id' => $package->git_credential_id,
+                'has_repository_token' => $package->repository_token !== null,
                 'sync_status' => $package->sync_status->value,
                 'sync_error' => $package->sync_error,
                 'synced_at' => $package->synced_at?->diffForHumans(),
             ],
+            // Managed credentials assignable to this package (never exposes the token).
+            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
+                ->orderBy('name')->get(['id', 'name', 'provider'])
+                ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
@@ -183,6 +189,42 @@ class PackageController extends Controller
         }
 
         return back()->with('success', "Paket {$package->name} angelegt — Sync gestartet.");
+    }
+
+    public function update(Request $request, Package $package): RedirectResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        $data = $request->validate([
+            'repository_url' => ['nullable', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_token' => ['nullable', 'string', 'max:500'],
+            'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
+            'remove_token' => ['sometimes', 'boolean'],
+        ]);
+
+        if (! empty($data['git_credential_id'])) {
+            $this->assertAdministersOrg(GitCredential::findOrFail($data['git_credential_id'])->organization_id);
+        }
+
+        $update = [
+            'repository_url' => $data['repository_url'] ?? $package->repository_url,
+            // An absent/empty credential clears the assignment.
+            'git_credential_id' => $data['git_credential_id'] ?? null,
+        ];
+        if (! empty($data['repository_token'])) {
+            $update['repository_token'] = $data['repository_token'];
+        } elseif (! empty($data['remove_token'])) {
+            $update['repository_token'] = null;
+        }
+
+        $package->update($update);
+
+        // Re-sync git-based packages so a changed URL/token takes effect immediately.
+        if (! $package->type->isPublishBased() && $package->repository_url !== null) {
+            SyncPackage::dispatch($package);
+        }
+
+        return back()->with('success', 'Paket aktualisiert.');
     }
 
     public function destroy(Package $package): RedirectResponse

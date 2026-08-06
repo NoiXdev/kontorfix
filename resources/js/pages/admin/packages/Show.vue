@@ -2,13 +2,18 @@
 import ActivityList from '@/components/kontorfix/ActivityList.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, usePage } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 interface Dependencies {
     runtime: Record<string, string>;
@@ -73,12 +78,15 @@ const props = defineProps<{
         name: string;
         description: string | null;
         repository_url: string | null;
+        git_credential_id: string | null;
+        has_repository_token: boolean;
         sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
         sync_error: string | null;
         synced_at: string | null;
     };
     versions: VersionRow[];
     pythonDists: PythonDistRow[];
+    gitCredentials: { id: string; name: string; provider: string }[];
     groups: GroupRow[];
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
@@ -97,6 +105,37 @@ const installCommand = {
 
 function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
+}
+
+// --- Edit repository source (git-synced types only) ---
+const { isPublishBased } = useRegistryTypes();
+const isGitSourced = computed(() => !isPublishBased(props.package.type));
+
+const credentialOptions = computed(() => [
+    { value: '', label: 'Kein Token / öffentlich' },
+    ...props.gitCredentials.map((c) => ({ value: c.id, label: `${c.name} (${c.provider})` })),
+]);
+
+const sourceForm = useForm({
+    repository_url: props.package.repository_url ?? '',
+    is_private: props.package.git_credential_id !== null || props.package.has_repository_token,
+    git_credential_id: props.package.git_credential_id ?? '',
+    repository_token: '',
+});
+
+function saveSource() {
+    sourceForm
+        .transform((d) => ({
+            repository_url: d.repository_url,
+            git_credential_id: d.is_private ? d.git_credential_id || null : null,
+            repository_token: d.is_private && !d.git_credential_id ? d.repository_token || null : null,
+            // Switching to public (or to a managed credential) clears any inline token.
+            remove_token: !d.is_private || !!d.git_credential_id,
+        }))
+        .put(route('admin.packages.update', props.package.id), {
+            preserveScroll: true,
+            onSuccess: () => (sourceForm.repository_token = ''),
+        });
 }
 
 // Live update of the sync status for the currently displayed package.
@@ -177,6 +216,7 @@ if (isOperator) {
                 <TabsList>
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
+                    <TabsTrigger v-if="isGitSourced" value="quelle">Quelle</TabsTrigger>
                     <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
@@ -219,6 +259,40 @@ if (isOperator) {
                             </table>
                         </div>
                     </section>
+                </TabsContent>
+
+                <TabsContent v-if="isGitSourced" value="quelle">
+                    <form class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border" @submit.prevent="saveSource">
+                        <div class="grid gap-2">
+                            <Label for="src_url">Repository-URL</Label>
+                            <Input id="src_url" v-model="sourceForm.repository_url" placeholder="https://git.example.com/vendor/paket.git" autocomplete="off" class="font-mono" />
+                            <p v-if="sourceForm.errors.repository_url" class="text-sm text-destructive">{{ sourceForm.errors.repository_url }}</p>
+                        </div>
+
+                        <label class="flex items-center gap-2 text-sm">
+                            <input type="checkbox" v-model="sourceForm.is_private" class="size-4 rounded border-input" />
+                            Privates Repository (Token nötig)
+                        </label>
+
+                        <template v-if="sourceForm.is_private">
+                            <div v-if="props.gitCredentials.length" class="grid gap-2">
+                                <Label for="src_cred">Gespeicherter Token</Label>
+                                <SearchableSelect id="src_cred" v-model="sourceForm.git_credential_id" :options="credentialOptions" />
+                            </div>
+                            <div v-if="!sourceForm.git_credential_id" class="grid gap-2">
+                                <Label for="src_token">Token einfügen{{ props.package.has_repository_token ? ' (leer = unverändert)' : '' }}</Label>
+                                <Input id="src_token" v-model="sourceForm.repository_token" type="password" placeholder="z. B. GitHub PAT (ghp_…)" autocomplete="off" class="font-mono" />
+                                <p class="text-xs text-muted-foreground">
+                                    {{ props.package.has_repository_token ? 'Ein Token ist hinterlegt.' : 'Kein Token hinterlegt.' }}
+                                    Wird verschlüsselt gespeichert.
+                                </p>
+                            </div>
+                        </template>
+
+                        <div>
+                            <Button type="submit" :disabled="sourceForm.processing">Speichern & neu synchronisieren</Button>
+                        </div>
+                    </form>
                 </TabsContent>
 
                 <TabsContent v-if="props.package.type === 'python'" value="dists">

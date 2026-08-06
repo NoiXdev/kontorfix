@@ -133,10 +133,20 @@ const form = useForm({
     type: 'composer' as 'composer' | 'npm' | 'python',
     name: '',
     repository_url: '',
+    is_private: false,
     repository_token: '',
     git_credential_id: '',
     group_ids: [] as string[],
 });
+
+// Clearing the private toggle discards any entered token/credential.
+function onPrivateToggle() {
+    if (!form.is_private) {
+        form.repository_token = '';
+        form.git_credential_id = '';
+        resetProbe();
+    }
+}
 
 const credentialOptions = computed(() => [
     { value: '', label: 'Kein Token / öffentlich' },
@@ -401,29 +411,38 @@ function destroyPackage(id: string) {
                             <InputError :message="form.errors.repository_url" />
                         </div>
 
-                        <div v-if="props.gitCredentials.length" class="grid gap-2">
-                            <Label for="git_credential_id">Gespeicherter Token <span class="text-muted-foreground">(optional)</span></Label>
-                            <SearchableSelect
-                                id="git_credential_id"
-                                v-model="form.git_credential_id"
-                                :options="credentialOptions"
-                                @update:model-value="resetProbe"
-                            />
-                            <p class="text-xs text-muted-foreground">Verwaltete Git-Tokens unter „Git-Tokens". Alternativ unten ein Einmal-Token eingeben.</p>
-                        </div>
+                        <label class="flex items-center gap-2 text-sm">
+                            <input type="checkbox" v-model="form.is_private" class="size-4 rounded border-input" @change="onPrivateToggle" />
+                            Privates Repository (Token nötig)
+                        </label>
 
-                        <div v-if="!form.git_credential_id" class="grid gap-2">
-                            <Label for="repository_token">Zugriffs-Token <span class="text-muted-foreground">(privates Repo, optional)</span></Label>
-                            <Input
-                                id="repository_token"
-                                v-model="form.repository_token"
-                                type="password"
-                                placeholder="z. B. GitHub PAT (ghp_…)"
-                                autocomplete="off"
-                                @update:model-value="resetProbe"
-                            />
-                            <p class="text-xs text-muted-foreground">Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.</p>
-                        </div>
+                        <template v-if="form.is_private">
+                            <div v-if="props.gitCredentials.length" class="grid gap-2">
+                                <Label for="git_credential_id">Gespeicherter Token</Label>
+                                <SearchableSelect
+                                    id="git_credential_id"
+                                    v-model="form.git_credential_id"
+                                    :options="credentialOptions"
+                                    @update:model-value="resetProbe"
+                                />
+                                <p class="text-xs text-muted-foreground">
+                                    Verwaltete Git-Tokens unter „Git-Tokens" (org-weit wiederverwendbar). Oder unten ein Einmal-Token einfügen.
+                                </p>
+                            </div>
+
+                            <div v-if="!form.git_credential_id" class="grid gap-2">
+                                <Label for="repository_token">Token einfügen</Label>
+                                <Input
+                                    id="repository_token"
+                                    v-model="form.repository_token"
+                                    type="password"
+                                    placeholder="z. B. GitHub PAT (ghp_…)"
+                                    autocomplete="off"
+                                    @update:model-value="resetProbe"
+                                />
+                                <p class="text-xs text-muted-foreground">Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.</p>
+                            </div>
+                        </template>
 
                         <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                             {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}

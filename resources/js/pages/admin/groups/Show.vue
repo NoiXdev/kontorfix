@@ -162,16 +162,25 @@ const newUpstream = ref({
     type: 'composer' as 'composer' | 'npm' | 'python',
     url: '',
     policy: 'proxy' as 'proxy' | 'strict',
+    auth_token: '',
+    priority: 0,
 });
 
 function addUpstream() {
     router.post(
         route('admin.upstreams.store'),
-        { group_id: props.group.id, type: newUpstream.value.type, url: newUpstream.value.url, policy: newUpstream.value.policy },
+        {
+            group_id: props.group.id,
+            type: newUpstream.value.type,
+            url: newUpstream.value.url,
+            policy: newUpstream.value.policy,
+            auth_token: newUpstream.value.auth_token || null,
+            priority: newUpstream.value.priority,
+        },
         {
             preserveScroll: true,
             onSuccess: () => {
-                newUpstream.value = { type: 'composer', url: '', policy: 'proxy' };
+                newUpstream.value = { type: 'composer', url: '', policy: 'proxy', auth_token: '', priority: 0 };
             },
         },
     );
@@ -496,6 +505,27 @@ async function copyToken() {
                                         { value: 'proxy', label: 'proxy' },
                                         { value: 'strict', label: 'strict' },
                                     ]"
+                                />
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="new-upstream-priority" class="text-sm font-medium">Priorität</label>
+                                <input
+                                    id="new-upstream-priority"
+                                    v-model.number="newUpstream.priority"
+                                    type="number"
+                                    min="0"
+                                    class="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                />
+                            </div>
+                            <div class="flex flex-col gap-1.5">
+                                <label for="new-upstream-token" class="text-sm font-medium">Auth-Token (optional)</label>
+                                <input
+                                    id="new-upstream-token"
+                                    v-model="newUpstream.auth_token"
+                                    type="password"
+                                    autocomplete="off"
+                                    placeholder="für private Upstreams"
+                                    class="w-full min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
                                 />
                             </div>
                             <Button type="submit">Hinzufügen</Button>
