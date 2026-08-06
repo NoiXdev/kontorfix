@@ -1,4 +1,22 @@
-## [0.3.0](https://github.com/NoiXdev/kontorfix/compare/v0.2.0...v) (2026-08-05)
+## [0.4.0](https://github.com/NoiXdev/kontorfix/compare/v0.3.0...v) (2026-08-06)
+
+
+### Features
+
+* **api:** per-rights scoping for the whole v1 API + status ([c8b884b](https://github.com/NoiXdev/kontorfix/commit/c8b884b1301e7cabc18213be2066cff7c04a4df4))
+* **dashboard:** failed-packages widget + coverage lift ([6c1f047](https://github.com/NoiXdev/kontorfix/commit/6c1f047deef0e23d993248b4cebfb58e21257051))
+* **pypi:** pip/twine setup instructions in portal, package ([5022de1](https://github.com/NoiXdev/kontorfix/commit/5022de10fc932bb49eace181c9406e77b2d0a0b7))
+* **registry:** add pypi-registry ([07dd382](https://github.com/NoiXdev/kontorfix/commit/07dd382fee01943713e28367f1a10634d2e72b15))
+* **registry:** enable/disable registry types (global ceiling ([145351f](https://github.com/NoiXdev/kontorfix/commit/145351f638de4137c8281520bc03b3e48cda998d))
+* **sidebar:** collapsible navigation sections ([2f5ebc0](https://github.com/NoiXdev/kontorfix/commit/2f5ebc0792e66e1528d04aa17fa05c6ae7ed036b))
+
+
+### Bug Fixes
+
+* **api:** restrict the v1 management API to super-admins ([64942e3](https://github.com/NoiXdev/kontorfix/commit/64942e30d3263a95e9ba8691b2b0653c63bd99f2))
+* **ui:** keep tall dialogs inside the viewport with an ([c3f2ba5](https://github.com/NoiXdev/kontorfix/commit/c3f2ba54f895b165ed01ab5d47b18f528e9331e9))
+
+## [0.3.0](https://github.com/NoiXdev/kontorfix/compare/v0.2.0...v0.3.0) (2026-08-05)
 
 
 ### Features
