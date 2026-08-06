@@ -244,6 +244,12 @@ async function probeRepository() {
 const canSubmit = computed(() => form.name.trim() !== '' && (!isGitMode.value || probeResult.value?.ok === true));
 
 function submit() {
+    // Enforce the probe-first gate here too — not only via the disabled button — so a
+    // git-sourced package (Composer, or an npm/Python git mirror) can never be created by
+    // pressing Enter before „Prüfen" succeeded.
+    if (!canSubmit.value) {
+        return;
+    }
     form.post(route('admin.packages.store'), {
         onSuccess: () => {
             dialogOpen.value = false;

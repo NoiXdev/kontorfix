@@ -199,6 +199,11 @@ async function createPackage() {
     if (createSubmitting.value) {
         return;
     }
+    // Same probe-first gate as the disabled button, enforced here so Enter can't bypass it:
+    // git-sourced types (Composer) require a successful probe before creation.
+    if (createForm.value.name.trim() === '' || (!isPublishType.value && !probeResult.value?.ok)) {
+        return;
+    }
     createSubmitting.value = true;
     createErrors.value = {};
 
