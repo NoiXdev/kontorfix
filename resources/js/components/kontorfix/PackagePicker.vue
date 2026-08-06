@@ -277,8 +277,11 @@ onUnmounted(() => {
         </div>
 
         <div v-if="creating" class="space-y-3 rounded-md border border-input p-3">
-            <p class="text-xs text-muted-foreground">
+            <p v-if="!isPublishType" class="text-xs text-muted-foreground">
                 Typ und Repository-URL angeben, prüfen lassen — dann bestätigen. HTTPS und SSH werden unterstützt (SSH erfordert einen Deploy-Key).
+            </p>
+            <p v-else class="text-xs text-muted-foreground">
+                Typ wählen und den reservierten Paketnamen angeben — Versionen kommen später per Upload.
             </p>
 
             <div class="grid gap-2">
@@ -304,11 +307,21 @@ onUnmounted(() => {
                 <InputError :message="createErrors.type" />
             </div>
 
-            <!-- Publish-based (Python): no git repository, just a name. -->
+            <!-- Publish-based (npm/Python): no git repository, just the reserved name. -->
             <div v-if="isPublishType" class="grid gap-2">
                 <Label for="new-package-name-py">Name</Label>
-                <Input id="new-package-name-py" v-model="createForm.name" type="text" placeholder="projektname" autocomplete="off" class="font-mono" />
-                <p class="text-xs text-muted-foreground">Publish-basiert — Distributionen werden nach dem Anlegen per <code>twine upload</code> hochgeladen.</p>
+                <Input
+                    id="new-package-name-py"
+                    v-model="createForm.name"
+                    type="text"
+                    :placeholder="createForm.type === 'npm' ? '@scope/name' : 'projektname'"
+                    autocomplete="off"
+                    class="font-mono"
+                />
+                <p class="text-xs text-muted-foreground">
+                    Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen/Daten entstehen beim
+                    Upload (<code>{{ createForm.type === 'npm' ? 'npm publish' : 'twine upload' }}</code>) — kein Repository.
+                </p>
                 <InputError :message="createErrors.name" />
             </div>
 

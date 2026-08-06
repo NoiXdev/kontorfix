@@ -384,13 +384,22 @@ function destroyPackage(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="name">Name</Label>
-                        <Input id="name" v-model="form.name" :placeholder="form.type === 'python' ? 'projektname' : 'vendor/paket'" autocomplete="off" />
+                        <Input
+                            id="name"
+                            v-model="form.name"
+                            :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname' }[form.type]"
+                            autocomplete="off"
+                        />
+                        <p v-if="!isPublishType" class="text-xs text-muted-foreground">Wird beim „Prüfen" automatisch aus dem Repository übernommen.</p>
                         <InputError :message="form.errors.name" />
                     </div>
 
-                    <!-- Publish-based (Python): no git repository — distributions arrive via twine. -->
+                    <!-- Publish-based (npm/Python): no git repo — the name is the reserved
+                         identifier; versions/metadata arrive with each upload. -->
                     <p v-if="isPublishType" class="text-xs text-muted-foreground">
-                        Publish-basiert — Distributionen werden per <code>twine upload</code> hochgeladen (kein Repository nötig).
+                        Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten
+                        entstehen beim Upload (<code>{{ form.type === 'npm' ? 'npm publish' : 'twine upload' }}</code>) —
+                        kein Repository nötig.
                     </p>
                     <template v-else>
                         <div class="grid gap-2">
