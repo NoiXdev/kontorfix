@@ -34,9 +34,11 @@ Route::prefix('v1')
         Route::post('me/api-keys', [ApiKeyController::class, 'store'])->name('me.api-keys.store');
         Route::delete('me/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('me.api-keys.destroy');
 
-        // Package management is an operator concern: only orgs with is_operator and
-        // role admin/maintainer may create/modify — the same gates as the GUI.
-        Route::middleware(['operator', 'role:admin,maintainer'])->group(function () {
+        // The v1 management surface operates instance-wide and its controllers are not
+        // organization-scoped, so it is reserved for the global super-admin — the same
+        // posture as the instance-wide admin console. Per-organization admins manage
+        // their registries through the scoped web console, not this API.
+        Route::middleware('super')->group(function () {
             Route::get('packages', [PackageController::class, 'index'])->name('packages.index');
             Route::post('packages', [PackageController::class, 'store'])->name('packages.store');
             Route::get('packages/{package}', [PackageController::class, 'show'])->name('packages.show');
@@ -79,9 +81,8 @@ Route::prefix('v1')
             Route::get('status', [StatusController::class, 'show'])->name('status');
         });
 
-        // Organization management (customer tenants) is stricter than the
-        // operator resources above: admin only, not maintainer.
-        Route::middleware(['operator', 'role:admin'])->group(function () {
+        // Organization, user and robot management — likewise super-admin only.
+        Route::middleware('super')->group(function () {
             Route::get('organizations', [OrganizationController::class, 'index'])->name('organizations.index');
             Route::post('organizations', [OrganizationController::class, 'store'])->name('organizations.store');
             Route::get('organizations/{organization}', [OrganizationController::class, 'show'])->name('organizations.show');
