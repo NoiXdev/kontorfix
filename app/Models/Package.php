@@ -57,6 +57,17 @@ class Package extends Model
     }
 
     /**
+     * Python distribution files (sdists/wheels) served over the PEP 503 simple API.
+     * Only ever populated for PackageType::Python.
+     *
+     * @return HasMany<PythonDist, $this>
+     */
+    public function pythonDists(): HasMany
+    {
+        return $this->hasMany(PythonDist::class);
+    }
+
+    /**
      * @return BelongsToMany<Group, $this, GroupPackage>
      */
     public function groups(): BelongsToMany

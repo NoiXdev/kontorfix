@@ -10,6 +10,7 @@ use App\Jobs\SyncPackage;
 use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use App\Models\PythonDist;
 use App\Services\Package\PackageDependencies;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
@@ -63,6 +64,11 @@ class PackageController extends Controller
 
         $package->load(['versions', 'groups:id,name,slug']);
 
+        // Python is file-centric (multiple dists per version), so its "versions" and stats
+        // come from the python_dists table rather than package_versions.
+        $isPython = $package->type === PackageType::Python;
+        $dists = $isPython ? $package->pythonDists()->orderByDesc('uploaded_at')->get() : collect();
+
         return Inertia::render('admin/packages/Show', [
             'package' => [
                 'id' => $package->id,
@@ -82,8 +88,21 @@ class PackageController extends Controller
                 'download_count' => $v->download_count,
                 'dist_size' => $v->dist_size,
             ]),
+            // Python distribution files (empty for other types).
+            'pythonDists' => $dists->map(fn (PythonDist $d) => [
+                'filename' => $d->filename,
+                'version' => $d->version,
+                'filetype' => $d->filetype,
+                'size' => $d->size,
+                'download_count' => $d->download_count,
+                'uploaded_at' => $d->uploaded_at?->toDateString(),
+            ]),
             'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
-            'stats' => [
+            'stats' => $isPython ? [
+                'downloads' => (int) $dists->sum('download_count'),
+                'storage_bytes' => (int) $dists->sum('size'),
+                'versions' => $dists->pluck('version')->unique()->count(),
+            ] : [
                 'downloads' => (int) $package->versions->sum('download_count'),
                 'storage_bytes' => (int) $package->versions->sum('dist_size'),
                 'versions' => $package->versions->count(),
@@ -115,7 +134,12 @@ class PackageController extends Controller
 
         $package = Package::create($request->safe()->except('group_ids'));
         $package->groups()->sync($groupIds);
-        SyncPackage::dispatch($package);
+
+        // Publish-based packages (npm, Python) without a repository are filled by pushing
+        // artifacts, so there is nothing to sync from git — skip the (doomed) sync job.
+        if ($package->repository_url !== null) {
+            SyncPackage::dispatch($package);
+        }
 
         // The PackagePicker creates packages inline via fetch and needs the
         // created package back to add it directly to the selection.

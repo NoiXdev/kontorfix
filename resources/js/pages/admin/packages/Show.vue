@@ -57,10 +57,19 @@ interface ActivityRow {
     created_at_exact: string | null;
 }
 
+interface PythonDistRow {
+    filename: string;
+    version: string;
+    filetype: string;
+    size: number;
+    download_count: number;
+    uploaded_at: string | null;
+}
+
 const props = defineProps<{
     package: {
         id: string;
-        type: 'composer' | 'npm';
+        type: 'composer' | 'npm' | 'python';
         name: string;
         description: string | null;
         repository_url: string | null;
@@ -69,6 +78,7 @@ const props = defineProps<{
         synced_at: string | null;
     };
     versions: VersionRow[];
+    pythonDists: PythonDistRow[];
     groups: GroupRow[];
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
@@ -79,8 +89,11 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: props.package.name, href: route('admin.packages.show', props.package.id) },
 ];
 
-const installCommand =
-    props.package.type === 'composer' ? `composer require ${props.package.name}` : `npm install ${props.package.name}`;
+const installCommand = {
+    composer: `composer require ${props.package.name}`,
+    npm: `npm install ${props.package.name}`,
+    python: `pip install ${props.package.name}`,
+}[props.package.type];
 
 function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
@@ -164,7 +177,8 @@ if (isOperator) {
                 <TabsList>
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
-                    <TabsTrigger value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
+                    <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
+                    <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
                 </TabsList>
 
@@ -207,7 +221,47 @@ if (isOperator) {
                     </section>
                 </TabsContent>
 
-                <TabsContent value="versionen">
+                <TabsContent v-if="props.package.type === 'python'" value="dists">
+                    <section class="flex flex-col gap-3">
+                        <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                            <table class="w-full text-left text-sm">
+                                <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                                    <tr>
+                                        <th class="px-4 py-3 font-medium">Datei</th>
+                                        <th class="px-4 py-3 font-medium">Version</th>
+                                        <th class="px-4 py-3 font-medium">Typ</th>
+                                        <th class="px-4 py-3 font-medium">Größe</th>
+                                        <th class="px-4 py-3 font-medium">Downloads</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="dist in props.pythonDists"
+                                        :key="dist.filename"
+                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                    >
+                                        <td class="px-4 py-3 font-mono text-xs">{{ dist.filename }}</td>
+                                        <td class="px-4 py-3">{{ dist.version }}</td>
+                                        <td class="px-4 py-3">
+                                            <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                                {{ dist.filetype === 'bdist_wheel' ? 'wheel' : 'sdist' }}
+                                            </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-muted-foreground">{{ formatBytes(dist.size) }}</td>
+                                        <td class="px-4 py-3 text-muted-foreground">{{ dist.download_count.toLocaleString('de-DE') }}</td>
+                                    </tr>
+                                    <tr v-if="props.pythonDists.length === 0">
+                                        <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">
+                                            Noch keine Distributionen hochgeladen (via <code>twine upload</code>).
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </TabsContent>
+
+                <TabsContent v-else value="versionen">
                     <section class="flex flex-col gap-3">
                         <div
                             v-if="props.versions.length === 0"

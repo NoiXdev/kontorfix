@@ -17,7 +17,7 @@ import { computed, ref, watch } from 'vue';
 
 interface PackageRow {
     id: string;
-    type: 'composer' | 'npm';
+    type: 'composer' | 'npm' | 'python';
     name: string;
     sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
     sync_error: string | null;
@@ -122,7 +122,7 @@ if (isOperator) {
 const dialogOpen = ref(false);
 
 const form = useForm({
-    type: 'composer' as 'composer' | 'npm',
+    type: 'composer' as 'composer' | 'npm' | 'python',
     name: '',
     repository_url: '',
     group_ids: [] as string[],
@@ -201,6 +201,7 @@ function destroyPackage(id: string) {
                         { value: '', label: 'Alle Typen' },
                         { value: 'composer', label: 'composer' },
                         { value: 'npm', label: 'npm' },
+                        { value: 'python', label: 'python' },
                     ]"
                 />
                 <SearchableSelect
@@ -289,6 +290,7 @@ function destroyPackage(id: string) {
                             :options="[
                                 { value: 'composer', label: 'composer' },
                                 { value: 'npm', label: 'npm' },
+                                { value: 'python', label: 'python' },
                             ]"
                         />
                         <InputError :message="form.errors.type" />
@@ -296,11 +298,12 @@ function destroyPackage(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="name">Name</Label>
-                        <Input id="name" v-model="form.name" placeholder="vendor/paket" autocomplete="off" />
+                        <Input id="name" v-model="form.name" :placeholder="form.type === 'python' ? 'projektname' : 'vendor/paket'" autocomplete="off" />
                         <InputError :message="form.errors.name" />
                     </div>
 
-                    <div class="grid gap-2">
+                    <!-- Publish-based (Python): no git repository — distributions arrive via twine. -->
+                    <div v-if="form.type !== 'python'" class="grid gap-2">
                         <Label for="repository_url">Repository-URL</Label>
                         <Input
                             id="repository_url"
@@ -310,6 +313,9 @@ function destroyPackage(id: string) {
                         />
                         <InputError :message="form.errors.repository_url" />
                     </div>
+                    <p v-else class="text-xs text-muted-foreground">
+                        Publish-basiert — Distributionen werden per <code>twine upload</code> hochgeladen (kein Repository nötig).
+                    </p>
 
                     <div class="grid gap-2">
                         <Label>Gruppen</Label>

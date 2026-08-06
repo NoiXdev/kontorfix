@@ -49,7 +49,12 @@ class PackageController extends Controller
 
         $package = Package::create($request->safe()->except('group_ids'));
         $package->groups()->sync($groupIds);
-        SyncPackage::dispatch($package);
+
+        // Publish-based packages (npm, Python) without a repository have nothing to sync
+        // from git — they are filled by pushing artifacts.
+        if ($package->repository_url !== null) {
+            SyncPackage::dispatch($package);
+        }
 
         // sync_status comes from a DB default (migration) that Eloquent doesn't
         // automatically load into the model after a plain INSERT — without refresh()

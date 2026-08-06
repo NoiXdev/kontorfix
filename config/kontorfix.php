@@ -16,6 +16,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | PyPI upload limits
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound for a single uploaded Python distribution (sdist or wheel),
+    | against memory/disk exhaustion by publish-token holders. In bytes.
+    |
+    */
+
+    'python_max_dist_bytes' => (int) env('KONTORFIX_PYTHON_MAX_DIST_BYTES', 200 * 1024 * 1024),
+
+    /*
+    |--------------------------------------------------------------------------
     | Upstream cache TTL
     |--------------------------------------------------------------------------
     |

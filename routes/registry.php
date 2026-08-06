@@ -3,6 +3,7 @@
 use App\Http\Controllers\Registry\ComposerController;
 use App\Http\Controllers\Registry\NpmController;
 use App\Http\Controllers\Registry\ProxyDownloadController;
+use App\Http\Controllers\Registry\PypiController;
 use Illuminate\Support\Facades\Route;
 
 // Registry endpoints are defined ONCE and registered under two access paths:
@@ -26,6 +27,16 @@ $registryEndpoints = function () {
         ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
     Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
         ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+
+    // PyPI (Python) — registered before the greedy npm catch-all so `/simple` and
+    // `/pypi/...` are not swallowed by the bare packument route. twine uploads land on
+    // the registry root via POST.
+    Route::post('/', [PypiController::class, 'upload']);
+    Route::get('/simple', [PypiController::class, 'simpleRoot']);
+    Route::get('/simple/{project}', [PypiController::class, 'simpleProject'])
+        ->where(['project' => '[A-Za-z0-9._-]+']);
+    Route::get('/pypi/files/{package}/{filename}', [PypiController::class, 'download'])
+        ->where(['package' => '[0-9a-fA-F-]{36}', 'filename' => '[A-Za-z0-9][A-Za-z0-9._+-]*\.(whl|tar\.gz|zip)']);
 
     // npm — after the Composer routes (first match protects packages.json/p2/dists).
     // The `/-/` tarball path doesn't collide with any Composer route, so the tarball
