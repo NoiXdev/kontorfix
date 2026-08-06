@@ -15,8 +15,8 @@ class TestMailRequest extends FormRequest
     use ValidatesMailSettings;
 
     /**
-     * Reachability is decided by middleware: `role:admin` + `operator` for the admin
-     * route, EnsureSetupIncomplete for the wizard route.
+     * Reachability is decided by middleware: `super` for the admin route,
+     * EnsureSetupIncomplete for the wizard route.
      */
     public function authorize(): bool
     {

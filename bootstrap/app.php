@@ -5,7 +5,6 @@ use App\Http\Middleware\AuthenticateApiKey;
 use App\Http\Middleware\AuthenticateRegistry;
 use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureSuperAdmin;
-use App\Http\Middleware\EnsureUserRole;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
@@ -78,7 +77,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'registry.context' => ResolveRegistryContext::class,
             'operator' => EnsureOperator::class,
             'super' => EnsureSuperAdmin::class,
-            'role' => EnsureUserRole::class,
             'api.auth' => AuthenticateApiKey::class,
         ]);
     })

@@ -86,6 +86,21 @@ class DashboardController extends Controller
                     'status' => $p->sync_status->value,
                     'synced_at' => $p->synced_at?->diffForHumans(),
                 ]),
+            // The failed-packages widget: the most recently broken syncs in scope, with
+            // the error so the cause is visible without opening each package.
+            'failedPackages' => Package::query()
+                ->whereKey($packageIds)
+                ->where('sync_status', SyncStatus::Failed->value)
+                ->latest('synced_at')
+                ->limit(6)
+                ->get(['id', 'name', 'type', 'sync_error', 'synced_at'])
+                ->map(fn (Package $p) => [
+                    'id' => $p->id,
+                    'name' => $p->name,
+                    'type' => $p->type->value,
+                    'error' => $p->sync_error,
+                    'synced_at' => $p->synced_at?->diffForHumans(),
+                ]),
         ]);
     }
 }

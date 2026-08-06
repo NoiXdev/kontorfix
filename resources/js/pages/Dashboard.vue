@@ -3,7 +3,7 @@ import { useOperatorChannel } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, usePage } from '@inertiajs/vue3';
-import { AlertTriangle, Boxes, CloudDownload, Globe, KeyRound, Layers, Package } from 'lucide-vue-next';
+import { AlertTriangle, Boxes, CheckCircle2, CloudDownload, Globe, KeyRound, Layers, Package } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 interface Stats {
@@ -19,9 +19,18 @@ interface Stats {
     sync: { synced: number; syncing: number; pending: number; failed: number };
 }
 
+interface FailedPackage {
+    id: string;
+    name: string;
+    type: string;
+    error: string | null;
+    synced_at: string | null;
+}
+
 const props = defineProps<{
     stats: Stats;
     recent: Array<{ name: string; type: string; status: string; synced_at: string | null }>;
+    failedPackages: FailedPackage[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Dashboard', href: '/dashboard' }];
@@ -112,6 +121,49 @@ if (isOperator) {
                     <div class="mt-1 text-xs text-muted-foreground">Zur Statusseite</div>
                 </Link>
             </div>
+
+            <!-- Failed packages widget -->
+            <section
+                class="rounded-xl border p-5"
+                :class="failedPackages.length ? 'border-destructive/40 bg-destructive/5' : 'border-sidebar-border/70 bg-card dark:border-sidebar-border'"
+            >
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <AlertTriangle v-if="failedPackages.length" class="size-5 text-destructive" :stroke-width="1.75" />
+                        <CheckCircle2 v-else class="size-5 text-[#6CBF8B]" :stroke-width="1.75" />
+                        <h2 class="font-display text-lg font-bold">Fehlgeschlagene Pakete</h2>
+                        <span
+                            v-if="failedPackages.length"
+                            class="rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-semibold text-destructive tabular-nums"
+                        >
+                            {{ stats.sync.failed }}
+                        </span>
+                    </div>
+                    <Link v-if="failedPackages.length" href="/admin/packages?status=failed" class="text-sm text-muted-foreground underline-offset-4 hover:underline">
+                        Alle ansehen
+                    </Link>
+                </div>
+
+                <div v-if="failedPackages.length" class="mt-4 flex flex-col divide-y divide-destructive/15">
+                    <Link
+                        v-for="p in failedPackages"
+                        :key="p.id"
+                        :href="`/admin/packages/${p.id}`"
+                        class="group flex items-start gap-3 py-2.5 transition-colors hover:bg-destructive/5"
+                    >
+                        <span class="mt-1 size-2 shrink-0 rounded-full bg-destructive" />
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2">
+                                <span class="truncate font-mono text-sm">{{ p.name }}</span>
+                                <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ p.type }}</span>
+                                <span v-if="p.synced_at" class="ml-auto shrink-0 text-xs text-muted-foreground">{{ p.synced_at }}</span>
+                            </div>
+                            <p v-if="p.error" class="mt-0.5 truncate text-xs text-destructive/90" :title="p.error">{{ p.error }}</p>
+                        </div>
+                    </Link>
+                </div>
+                <p v-else class="mt-2 text-sm text-muted-foreground">Alle Pakete sind synchron — keine Fehler.</p>
+            </section>
 
             <div class="grid flex-1 gap-4 lg:grid-cols-[1.1fr_0.9fr]">
                 <!-- Sync status + last activity -->

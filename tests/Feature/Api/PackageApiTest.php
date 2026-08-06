@@ -5,6 +5,7 @@ use App\Jobs\SyncPackage;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PackageVersion;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -20,15 +21,18 @@ function operatorWriteToken(): string
     return $plain;
 }
 
-it('lists and shows packages', function () {
+it('lists and shows packages, including their versions', function () {
     $plain = operatorWriteToken();
     $package = Package::factory()->create(['name' => 'acme/widget']);
+    PackageVersion::factory()->for($package)->create(['version_pretty' => 'v1.2.3']);
 
     $this->withToken($plain)->getJson('/api/v1/packages')
         ->assertOk()->assertJsonPath('data.0.name', 'acme/widget');
 
     $this->withToken($plain)->getJson("/api/v1/packages/{$package->id}")
-        ->assertOk()->assertJsonPath('data.name', 'acme/widget');
+        ->assertOk()
+        ->assertJsonPath('data.name', 'acme/widget')
+        ->assertJsonPath('data.versions.0.version', 'v1.2.3');
 });
 
 it('creates a package and dispatches a sync', function () {
