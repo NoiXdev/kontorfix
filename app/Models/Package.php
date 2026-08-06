@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Enums\GitProvider;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
 use Database\Factories\PackageFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
@@ -33,6 +35,7 @@ class Package extends Model
         'description',
         'repository_url',
         'repository_token',
+        'git_credential_id',
         'sync_status',
         'sync_error',
         'synced_at',
@@ -87,5 +90,32 @@ class Package extends Model
         return $this->belongsToMany(Group::class)
             ->using(GroupPackage::class)
             ->withPivot('version_constraint', 'available_until');
+    }
+
+    /**
+     * @return BelongsTo<GitCredential, $this>
+     */
+    public function gitCredential(): BelongsTo
+    {
+        return $this->belongsTo(GitCredential::class);
+    }
+
+    /**
+     * Effective git authentication for syncing this package's repository. Prefers an
+     * assigned managed credential (with its provider), else the inline per-package token
+     * (treated as a GitHub token).
+     *
+     * @return array{token: ?string, provider: GitProvider, username: ?string}
+     */
+    public function gitAuth(): array
+    {
+        $credential = $this->gitCredential;
+        if ($credential !== null) {
+            $credential->forceFill(['last_used_at' => now()])->saveQuietly();
+
+            return ['token' => $credential->token, 'provider' => $credential->provider, 'username' => $credential->username];
+        }
+
+        return ['token' => $this->repository_token, 'provider' => GitProvider::GitHub, 'username' => null];
     }
 }

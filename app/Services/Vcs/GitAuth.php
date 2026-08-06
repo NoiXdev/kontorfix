@@ -2,9 +2,12 @@
 
 namespace App\Services\Vcs;
 
+use App\Enums\GitProvider;
+
 /**
  * Builds the git environment that authenticates HTTPS access to a private repository
- * using a token (e.g. a GitHub personal access token).
+ * using a token (e.g. a GitHub PAT, a GitLab/Bitbucket token). The provider determines
+ * the Basic-auth username convention; the token is always the password.
  *
  * The token is passed as an HTTP Authorization header via git's environment-based config
  * (GIT_CONFIG_*), NOT on the command line and NOT baked into the clone URL — so it never
@@ -15,7 +18,7 @@ class GitAuth
     /**
      * @return array<string, string> environment for Process::env(), empty when no token applies
      */
-    public static function env(string $url, ?string $token): array
+    public static function env(string $url, ?string $token, ?GitProvider $provider = null, ?string $username = null): array
     {
         $token = $token !== null ? trim($token) : '';
 
@@ -24,9 +27,12 @@ class GitAuth
             return [];
         }
 
-        // GitHub (and other Basic-auth git hosts) accept the token as the password with a
-        // throwaway username. "x-access-token" works for both PATs and App tokens.
-        $header = 'Authorization: Basic '.base64_encode('x-access-token:'.$token);
+        // Username per provider convention (overridable by a stored credential's username).
+        $user = $username !== null && $username !== ''
+            ? $username
+            : ($provider ?? GitProvider::GitHub)->basicUsername();
+
+        $header = 'Authorization: Basic '.base64_encode($user.':'.$token);
 
         return [
             'GIT_CONFIG_COUNT' => '1',

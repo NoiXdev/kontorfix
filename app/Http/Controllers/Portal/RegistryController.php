@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Portal;
 
-use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\Package;
@@ -98,12 +97,7 @@ class RegistryController extends Controller
 
         $package->load(['versions' => fn ($q) => $q->orderByDesc('released_at')]);
 
-        $name = $package->name;
-        $install = match ($package->type) {
-            PackageType::Npm => "npm install {$name}",
-            PackageType::Python => "pip install {$name}",
-            PackageType::Composer => "composer require {$name}",
-        };
+        $install = $package->type->installHint($package->name);
 
         return Inertia::render('portal/Package', [
             'registry' => [

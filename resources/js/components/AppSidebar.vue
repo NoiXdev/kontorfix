@@ -7,7 +7,7 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, BookOpen, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
+import { Activity, BookOpen, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, GitBranch, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -55,6 +55,7 @@ const navSections = computed<NavSection[]>(() => {
             label: 'Zugriff',
             items: [
                 { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
+                { title: 'Git-Tokens', href: '/admin/git-credentials', icon: GitBranch },
                 // Outgoing webhooks are instance-wide config — super-admin only.
                 ...(isSuper.value ? [{ title: 'Webhooks', href: '/admin/webhooks', icon: Webhook }] : []),
             ],

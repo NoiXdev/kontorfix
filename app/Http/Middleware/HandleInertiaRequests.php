@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\PackageType;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\Scope\OrgScope;
@@ -47,6 +48,8 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'name' => config('app.name'),
             'appVersion' => config('app.version'),
+            // Single source of truth for registry-type metadata (labels, publish-based).
+            'registryTypeMeta' => PackageType::metadata(),
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             // Lets the login page hide the "sign up" link when self-registration is off.
             'registrationEnabled' => fn (): bool => SystemSetting::current()->registration_enabled,

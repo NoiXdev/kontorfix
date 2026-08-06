@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-vue-next';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { computed, onUnmounted, ref, watch } from 'vue';
 
 interface Pkg {
@@ -35,8 +36,9 @@ const createForm = ref<{ name: string; type: 'composer' | 'npm' | 'python'; repo
     repository_token: '',
 });
 
-// Python is publish-based (twine) — no git repository to probe, just a name.
-const isPublishType = computed(() => createForm.value.type === 'python');
+// Publish-based types (npm, python) have no git repository to probe, just a name.
+const { isPublishBased } = useRegistryTypes();
+const isPublishType = computed(() => isPublishBased(createForm.value.type));
 const createErrors = ref<Record<string, string>>({});
 const createSubmitting = ref(false);
 

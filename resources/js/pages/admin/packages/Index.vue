@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
@@ -50,12 +51,15 @@ const props = defineProps<{
     groups: GroupOption[];
     filters: Filters;
     registryTypes: string[];
+    gitCredentials: { id: string; name: string; provider: string }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
 
+// Type metadata (labels, publish-based) comes from the shared single source.
+const { isPublishBased, options: typeOptionsFor } = useRegistryTypes();
 // Only instance-enabled types are offered in the create dialog and the filter.
-const typeOptions = computed(() => props.registryTypes.map((t) => ({ value: t, label: t })));
+const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
 
 const filterQ = ref(props.filters.q ?? '');
 const filterType = ref(props.filters.type ?? '');
@@ -130,11 +134,17 @@ const form = useForm({
     name: '',
     repository_url: '',
     repository_token: '',
+    git_credential_id: '',
     group_ids: [] as string[],
 });
 
-// Python is publish-based (twine) — no git repository to probe.
-const isPublishType = computed(() => form.type === 'python');
+const credentialOptions = computed(() => [
+    { value: '', label: 'Kein Token / öffentlich' },
+    ...props.gitCredentials.map((c) => ({ value: c.id, label: `${c.name} (${c.provider})` })),
+]);
+
+// Publish-based types (npm, python) have no git repository to probe.
+const isPublishType = computed(() => isPublishBased(form.type));
 
 // Probe-first for git types: check the repository (and read its manifest) before creating.
 interface ProbeResult {
@@ -174,7 +184,12 @@ async function probeRepository() {
                 'X-XSRF-TOKEN': xsrfToken(),
             },
             credentials: 'same-origin',
-            body: JSON.stringify({ type: form.type, repository_url: form.repository_url, repository_token: form.repository_token }),
+            body: JSON.stringify({
+                type: form.type,
+                repository_url: form.repository_url,
+                repository_token: form.repository_token,
+                git_credential_id: form.git_credential_id || null,
+            }),
         });
 
         if (!response.ok) {
@@ -386,7 +401,18 @@ function destroyPackage(id: string) {
                             <InputError :message="form.errors.repository_url" />
                         </div>
 
-                        <div class="grid gap-2">
+                        <div v-if="props.gitCredentials.length" class="grid gap-2">
+                            <Label for="git_credential_id">Gespeicherter Token <span class="text-muted-foreground">(optional)</span></Label>
+                            <SearchableSelect
+                                id="git_credential_id"
+                                v-model="form.git_credential_id"
+                                :options="credentialOptions"
+                                @update:model-value="resetProbe"
+                            />
+                            <p class="text-xs text-muted-foreground">Verwaltete Git-Tokens unter „Git-Tokens". Alternativ unten ein Einmal-Token eingeben.</p>
+                        </div>
+
+                        <div v-if="!form.git_credential_id" class="grid gap-2">
                             <Label for="repository_token">Zugriffs-Token <span class="text-muted-foreground">(privates Repo, optional)</span></Label>
                             <Input
                                 id="repository_token"

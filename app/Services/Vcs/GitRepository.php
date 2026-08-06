@@ -2,6 +2,7 @@
 
 namespace App\Services\Vcs;
 
+use App\Enums\GitProvider;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
@@ -15,14 +16,19 @@ class GitRepository
     /** @var array<string, string> */
     private array $authEnv;
 
-    public function __construct(private readonly string $url, string $storageKey, ?string $token = null)
-    {
+    public function __construct(
+        private readonly string $url,
+        string $storageKey,
+        ?string $token = null,
+        ?GitProvider $provider = null,
+        ?string $username = null,
+    ) {
         if (! preg_match('/^[A-Za-z0-9._-]+$/', $storageKey) || str_contains($storageKey, '..')) {
             throw new InvalidArgumentException('Invalid storage key.');
         }
 
         $this->mirrorPath = storage_path('app/vcs/'.$storageKey.'.git');
-        $this->authEnv = GitAuth::env($url, $token);
+        $this->authEnv = GitAuth::env($url, $token, $provider, $username);
     }
 
     public function sync(): void

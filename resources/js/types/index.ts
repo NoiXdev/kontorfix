@@ -13,6 +13,12 @@ export interface OrgScopeOption {
     name: string;
 }
 
+export interface RegistryTypeMeta {
+    value: string;
+    label: string;
+    publish_based: boolean;
+}
+
 export interface OrgScope {
     active: string | null;
     organizations: OrgScopeOption[];
@@ -45,6 +51,7 @@ export interface SharedData {
     registrationEnabled?: boolean;
     appVersion?: string;
     scope?: OrgScope | null;
+    registryTypeMeta?: RegistryTypeMeta[];
     ziggy: {
         location: string;
         url: string;

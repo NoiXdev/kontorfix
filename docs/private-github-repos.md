@@ -23,7 +23,22 @@ Any host that accepts HTTP Basic auth with the token as the password works:
 - **GitLab**: a project *Deploy token* or a PAT with `read_repository`.
 - **Bitbucket**: an *App password* with *Repositories: Read*.
 
-## 2. Add the package with its token
+## 2. Store the token — inline or as a reusable credential
+
+There are two ways to provide the token:
+
+- **Reusable credential (recommended for more than one repo)**: admin console →
+  **Git-Tokens** → *Token hinterlegen*. Pick the **Provider** (GitHub / GitLab /
+  Bitbucket / generic — this sets the correct auth username), optionally a username,
+  and paste the token. Use **Testen** with a repository URL to confirm it works. The
+  credential is organization-scoped and can be assigned to many packages. When adding
+  a package you then just pick it under *Gespeicherter Token*.
+- **Inline (quick, one-off)**: paste the token directly into the package's
+  *Zugriffs-Token* field (treated as a GitHub token).
+
+An assigned credential always takes precedence over an inline token.
+
+## 3. Add the package with its token
 
 In the admin console → **Pakete → Paket hinzufügen** (or the quick-add on a registry's
 *Pakete* tab):
@@ -31,12 +46,13 @@ In the admin console → **Pakete → Paket hinzufügen** (or the quick-add on a
 1. **Typ**: `composer` (or `npm`).
 2. **Repository-URL**: the **HTTPS** clone URL, e.g. `https://github.com/acme/private.git`.
    (Token auth only applies to HTTPS. For SSH URLs use a deploy key on the server instead.)
-3. **Zugriffs-Token**: paste the token from step 1.
+3. **Gespeicherter Token**: pick a reusable credential, **or** paste a one-off token
+   into *Zugriffs-Token*.
 4. Click **Prüfen** — Kontorfix uses the token to reach the repo and preview its
    name and versions. A green "Repository erreichbar" confirms the token works.
 5. **Anlegen** — the package is created and synced with the token.
 
-## 3. How it is stored and used
+## 4. How it is stored and used
 
 - The token is **encrypted at rest** and never returned to the browser or API
   (it is write-only from the UI's perspective).

@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Jobs\SyncPackage;
+use App\Models\GitCredential;
 use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
@@ -18,6 +19,7 @@ use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -58,6 +60,10 @@ class PackageController extends Controller
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
+            // Managed git credentials the user may assign (never exposes the token).
+            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
+                ->orderBy('name')->get(['id', 'name', 'provider'])
+                ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
         ]);
     }
 
@@ -120,9 +126,24 @@ class PackageController extends Controller
             'type' => ['required', Rule::enum(PackageType::class)],
             'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
             'repository_token' => ['nullable', 'string', 'max:500'],
+            'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
         ]);
 
-        $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $data['repository_token'] ?? null);
+        // A managed credential (if referenced and administered) takes precedence over an
+        // inline token; otherwise the inline token is treated as a GitHub token.
+        $token = $data['repository_token'] ?? null;
+        $provider = null;
+        $username = null;
+        if (! empty($data['git_credential_id'])) {
+            $credential = GitCredential::find($data['git_credential_id']);
+            if ($credential !== null && Auth::user()?->administers($credential->organization_id)) {
+                $token = $credential->token;
+                $provider = $credential->provider;
+                $username = $credential->username;
+            }
+        }
+
+        $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $token, $provider, $username);
 
         return response()->json($result);
     }
@@ -134,6 +155,12 @@ class PackageController extends Controller
         $groupIds = $request->validated('group_ids', []);
         foreach ($groupIds as $groupId) {
             $this->assertAdministersGroup(Group::findOrFail($groupId));
+        }
+
+        // A referenced credential must belong to an organization the user administers.
+        if ($request->filled('git_credential_id')) {
+            $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
+            $this->assertAdministersOrg($credential->organization_id);
         }
 
         $package = Package::create($request->safe()->except('group_ids'));

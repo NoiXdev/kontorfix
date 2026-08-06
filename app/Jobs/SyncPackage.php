@@ -47,7 +47,14 @@ class SyncPackage implements ShouldQueue
         $this->package->update(['sync_status' => SyncStatus::Syncing]);
 
         try {
-            $repo = new GitRepository($this->package->repository_url, $this->package->id, $this->package->repository_token);
+            $auth = $this->package->gitAuth();
+            $repo = new GitRepository(
+                $this->package->repository_url,
+                $this->package->id,
+                $auth['token'],
+                $auth['provider'],
+                $auth['username'],
+            );
             $repo->sync();
             $parser = new VersionParser;
 

@@ -2,6 +2,7 @@
 
 namespace App\Services\Vcs;
 
+use App\Enums\GitProvider;
 use App\Enums\PackageType;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
@@ -17,9 +18,9 @@ class RepositoryProbe
     /**
      * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>}
      */
-    public function probe(PackageType $type, string $url, ?string $token = null): array
+    public function probe(PackageType $type, string $url, ?string $token = null, ?GitProvider $provider = null, ?string $username = null): array
     {
-        $env = GitAuth::env($url, $token);
+        $env = GitAuth::env($url, $token, $provider, $username);
 
         // ls-remote confirms reachability + auth without a full clone and lists refs.
         $ls = Process::env($env)->timeout(30)->run([
@@ -79,7 +80,8 @@ class RepositoryProbe
      */
     private function readManifest(PackageType $type, string $url, ?string $branch, array $env = []): array
     {
-        $manifest = $type === PackageType::Npm ? 'package.json' : 'composer.json';
+        // Manifest filename comes from the type enum (the single source of truth).
+        $manifest = $type->manifestFile() ?? 'composer.json';
         $dir = rtrim(sys_get_temp_dir(), '/').'/kfx-probe-'.Str::random(12);
 
         try {
