@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Http\Requests\Admin\UpdateGroupRequest;
@@ -13,25 +14,31 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class GroupController extends Controller
 {
+    use ScopesApiToUser;
+
     public function index(Request $request): AnonymousResourceCollection
     {
         return GroupResource::collection(
-            Group::orderBy('name')->paginate(min((int) $request->query('per_page', 25), 100))
+            $this->scopeGroupRead(Group::query())->orderBy('name')->paginate(min((int) $request->query('per_page', 25), 100))
         );
     }
 
     public function show(Group $group): GroupResource
     {
+        $this->assertCanReadGroup($group);
+
         return new GroupResource($group);
     }
 
     public function store(StoreGroupRequest $request): JsonResponse
     {
+        $organizationId = $this->resolveWriteOrg($request->validated('organization_id'));
+
         $group = Group::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
             'public' => $request->boolean('public'),
-            'organization_id' => $request->validated('organization_id') ?? $request->user()->organization_id,
+            'organization_id' => $organizationId,
         ]);
         $group->packages()->sync($request->validated('package_ids', []));
 
@@ -40,6 +47,8 @@ class GroupController extends Controller
 
     public function update(UpdateGroupRequest $request, Group $group): GroupResource
     {
+        $this->assertCanWriteGroup($group);
+
         $group->update(['name' => $request->validated('name'), 'public' => $request->boolean('public')]);
 
         return new GroupResource($group);
@@ -47,6 +56,8 @@ class GroupController extends Controller
 
     public function destroy(Group $group): JsonResponse
     {
+        $this->assertCanWriteGroup($group);
+
         $group->delete();
 
         return response()->json(status: 204);

@@ -53,10 +53,16 @@ it('triggers a resync', function () {
     Queue::assertPushed(SyncPackage::class);
 });
 
-it('denies members without operator role', function () {
+it('lets a member read (scoped) but not write packages', function () {
     $org = Organization::factory()->create(['is_operator' => false]);
     $member = User::factory()->create(['organization_id' => $org->id, 'role' => 'member']);
     [, $plain] = ApiKey::issue($member, 'w', ApiKeyPermission::Write);
 
-    $this->withToken($plain)->getJson('/api/v1/packages')->assertForbidden();
+    // Read is allowed but scoped to the member's own organizations (none here → empty).
+    $this->withToken($plain)->getJson('/api/v1/packages')->assertOk()->assertJsonCount(0, 'data');
+
+    // Writes require an admin/maintainer role — a member is denied.
+    $this->withToken($plain)->postJson('/api/v1/packages', [
+        'type' => 'composer', 'name' => 'acme/x', 'repository_url' => 'https://github.com/acme/x.git',
+    ])->assertForbidden();
 });
