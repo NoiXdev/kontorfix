@@ -13,6 +13,8 @@ interface Snippets {
     composer: string;
     auth: string;
     npm: string;
+    pip: string;
+    twine: string;
 }
 
 interface PersonalToken {
@@ -26,6 +28,8 @@ const props = defineProps<{
     storeRoute: string;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
+    // Which ecosystems to show setup steps for. Omitted → all.
+    types?: string[];
 }>();
 
 const PLACEHOLDER = '<dein-token>';
@@ -70,18 +74,31 @@ function createAndInsert() {
 
 const substituted = computed<Snippets>(() => {
     const t = activeToken.value;
-    if (!t) {
-        return props.snippets;
-    }
-    const sub = (s: string) => s.split(PLACEHOLDER).join(t);
-    return { composer: sub(props.snippets.composer), auth: sub(props.snippets.auth), npm: sub(props.snippets.npm) };
+    const sub = (s: string) => (t ? s.split(PLACEHOLDER).join(t) : s);
+    return {
+        composer: sub(props.snippets.composer),
+        auth: sub(props.snippets.auth),
+        npm: sub(props.snippets.npm),
+        pip: sub(props.snippets.pip),
+        twine: sub(props.snippets.twine),
+    };
 });
 
-const steps = computed(() => [
-    { key: 'composer', title: 'Composer einrichten', content: substituted.value.composer },
-    { key: 'auth', title: 'Zugang einrichten', content: substituted.value.auth },
-    { key: 'npm', title: 'npm einrichten', content: substituted.value.npm },
-]);
+// Each step belongs to an ecosystem so it can be shown only for the registry's types.
+const stepDefs = [
+    { key: 'composer', eco: 'composer', title: 'Composer einrichten' },
+    { key: 'auth', eco: 'composer', title: 'Composer-Zugang (auth.json)' },
+    { key: 'npm', eco: 'npm', title: 'npm einrichten' },
+    { key: 'pip', eco: 'python', title: 'pip einrichten' },
+    { key: 'twine', eco: 'python', title: 'Veröffentlichen mit twine' },
+] as const;
+
+const steps = computed(() => {
+    const show = props.types && props.types.length ? props.types : ['composer', 'npm', 'python'];
+    return stepDefs
+        .filter((s) => show.includes(s.eco))
+        .map((s) => ({ key: s.key, title: s.title, content: substituted.value[s.key] }));
+});
 
 const copiedKey = ref<string | null>(null);
 

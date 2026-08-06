@@ -58,7 +58,7 @@ class RegistryController extends Controller
         // Qualify columns because of the belongsToMany join (packages.*), to avoid ambiguity.
         $packages = $group->packages()
             ->when($q !== '', fn ($query) => $query->where('packages.name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
-            ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('packages.type', $type))
+            ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('packages.type', $type))
             ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
             ->orderBy('packages.name')
             ->get();
@@ -99,9 +99,11 @@ class RegistryController extends Controller
         $package->load(['versions' => fn ($q) => $q->orderByDesc('released_at')]);
 
         $name = $package->name;
-        $install = $package->type === PackageType::Npm
-            ? "npm install {$name}"
-            : "composer require {$name}";
+        $install = match ($package->type) {
+            PackageType::Npm => "npm install {$name}",
+            PackageType::Python => "pip install {$name}",
+            PackageType::Composer => "composer require {$name}",
+        };
 
         return Inertia::render('portal/Package', [
             'registry' => [

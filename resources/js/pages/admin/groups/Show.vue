@@ -55,6 +55,8 @@ interface Setup {
     composer: string;
     auth: string;
     npm: string;
+    pip: string;
+    twine: string;
 }
 
 interface ActivityRow {
@@ -112,7 +114,10 @@ function save() {
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
-const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' }[]>([]);
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' }[]>([]);
+
+// Which ecosystems this registry actually hosts — drives the setup snippets shown.
+const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
 
 function addPackages() {
     if (packagesToAdd.value.length === 0) {
@@ -154,7 +159,7 @@ function removeDomain(id: string) {
 }
 
 const newUpstream = ref({
-    type: 'composer' as 'composer' | 'npm',
+    type: 'composer' as 'composer' | 'npm' | 'python',
     url: '',
     policy: 'proxy' as 'proxy' | 'strict',
 });
@@ -467,6 +472,7 @@ async function copyToken() {
                                     :options="[
                                         { value: 'composer', label: 'composer' },
                                         { value: 'npm', label: 'npm' },
+                                        { value: 'python', label: 'python' },
                                     ]"
                                 />
                             </div>
@@ -582,6 +588,7 @@ async function copyToken() {
                 <TabsContent value="einrichtung">
                     <RegistrySetup
                         :snippets="props.setup"
+                        :types="registryTypes"
                         store-route="admin.tokens.store"
                         :store-payload="{ organization_id: props.group.organization_id, group_id: props.group.id }"
                         :personal-tokens="props.tokens"

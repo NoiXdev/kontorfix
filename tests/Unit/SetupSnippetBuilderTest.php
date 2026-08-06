@@ -22,3 +22,16 @@ it('builds composer, auth and npm snippets for a slug-based registry', function 
     expect($snips['npm'])->toContain('registry=https://reg.example.test/r/acme/')
         ->toContain('//reg.example.test/r/acme/:_authToken=<dein-token>');
 });
+
+it('builds pip and twine snippets for the Python registry', function () {
+    $group = Group::factory()->create(['slug' => 'acme']);
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['pip'])
+        ->toContain('--index-url')
+        ->toContain('https://token:<dein-token>@reg.example.test/r/acme/simple/');
+    expect($snips['twine'])
+        ->toContain('[distutils]')
+        ->toContain('repository = https://reg.example.test/r/acme/')
+        ->toContain('username = token');
+});

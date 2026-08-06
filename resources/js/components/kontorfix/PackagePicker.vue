@@ -11,7 +11,7 @@ import { onUnmounted, ref, watch } from 'vue';
 interface Pkg {
     id: string;
     name: string;
-    type: 'composer' | 'npm';
+    type: 'composer' | 'npm' | 'python';
 }
 
 const selected = defineModel<Pkg[]>({ default: () => [] });

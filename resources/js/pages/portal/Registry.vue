@@ -23,6 +23,8 @@ interface Snippets {
     composer: string;
     auth: string;
     npm: string;
+    pip: string;
+    twine: string;
 }
 
 interface PackageRow {
@@ -52,6 +54,9 @@ const filterQ = ref(props.filters?.q ?? '');
 const filterType = ref(props.filters?.type ?? '');
 
 const hasActiveFilters = computed(() => filterQ.value !== '' || filterType.value !== '');
+
+// Ecosystems present in this registry — drives which setup snippets are shown.
+const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
 
 function applyFilters() {
     router.get(
@@ -155,6 +160,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                 <TabsContent value="einrichtung">
                     <RegistrySetup
                         :snippets="props.snippets"
+                        :types="registryTypes"
                         store-route="portal.tokens.store"
                         :store-payload="{ group_id: props.registry.id }"
                         :personal-tokens="props.tokens"
@@ -179,6 +185,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                             { value: '', label: 'Alle Typen' },
                             { value: 'composer', label: 'composer' },
                             { value: 'npm', label: 'npm' },
+                            { value: 'python', label: 'python' },
                         ]"
                     />
                     <button
