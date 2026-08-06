@@ -107,6 +107,33 @@ class GitRepository
     }
 
     /**
+     * Builds a gzipped-tar archive of the ref with an internal path prefix (npm expects a
+     * `package/` root; a Python sdist expects `{name}-{version}/`). The prefix is built by
+     * the caller from validated data — never from an untrusted tag. The caller must delete
+     * the returned file.
+     */
+    public function archiveTarGz(string $ref, string $prefix): string
+    {
+        if (! preg_match('#^[A-Za-z0-9._/+-]+/$#', $prefix)) {
+            throw new InvalidArgumentException('Invalid archive prefix.');
+        }
+
+        $stub = tempnam(sys_get_temp_dir(), 'kfx-dist-');
+        $tgz = $stub.'.tar.gz';
+
+        try {
+            $this->run(['git', 'archive', '--format=tar.gz', '--prefix='.$prefix, '-o', $tgz, '--end-of-options', $ref]);
+        } catch (Throwable $e) {
+            @unlink($tgz);
+            throw $e;
+        } finally {
+            @unlink($stub);
+        }
+
+        return $tgz;
+    }
+
+    /**
      * @param  list<string>  $command
      */
     private function run(array $command): ProcessResult

@@ -38,6 +38,51 @@ class FixtureRepo
         return $dir;
     }
 
+    /**
+     * Creates a local git repo with a package.json and tags v1.0.0 + v1.1.0 (npm
+     * git-mirror fixture). Returns the absolute path.
+     */
+    public static function makeNpm(string $packageName = '@acme/widget'): string
+    {
+        $dir = sys_get_temp_dir().'/kfx-fixture-npm-'.uniqid();
+        mkdir($dir, 0775, true);
+        self::git($dir, 'git init -b main .');
+
+        foreach (['1.0.0', '1.1.0'] as $v) {
+            file_put_contents($dir.'/package.json', json_encode([
+                'name' => $packageName,
+                'version' => $v,
+                'description' => "Widget {$v}",
+            ], JSON_PRETTY_PRINT));
+            file_put_contents($dir.'/index.js', "module.exports = '{$v}';\n");
+            self::git($dir, 'git add .');
+            self::git($dir, 'git -c user.email=test@kontorfix.test -c user.name=kontorfix commit -m "'.$v.'"');
+            self::git($dir, "git tag v{$v}");
+        }
+
+        return $dir;
+    }
+
+    /**
+     * Creates a local git repo with a pyproject.toml and tags v1.0.0 + v1.1.0 (Python
+     * git-mirror fixture). Returns the absolute path.
+     */
+    public static function makePython(string $projectName = 'acme-lib'): string
+    {
+        $dir = sys_get_temp_dir().'/kfx-fixture-py-'.uniqid();
+        mkdir($dir, 0775, true);
+        self::git($dir, 'git init -b main .');
+
+        foreach (['1.0.0', '1.1.0'] as $v) {
+            file_put_contents($dir.'/pyproject.toml', "[project]\nname = \"{$projectName}\"\nversion = \"{$v}\"\n");
+            self::git($dir, 'git add .');
+            self::git($dir, 'git -c user.email=test@kontorfix.test -c user.name=kontorfix commit -m "'.$v.'"');
+            self::git($dir, "git tag v{$v}");
+        }
+
+        return $dir;
+    }
+
     private static function git(string $dir, string $command): void
     {
         Process::path($dir)->run($command)->throw();

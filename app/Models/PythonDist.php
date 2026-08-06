@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
  * @property string $filename
  * @property string $filetype
  * @property string $path
+ * @property string|null $source_reference
  * @property string $sha256
  * @property int $size
  * @property string|null $requires_python
@@ -37,6 +38,7 @@ class PythonDist extends Model
         'filename',
         'filetype',
         'path',
+        'source_reference',
         'sha256',
         'size',
         'requires_python',

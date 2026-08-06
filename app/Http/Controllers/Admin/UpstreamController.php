@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\UpstreamPolicy;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUpstreamRequest;
+use App\Http\Requests\Admin\UpdateUpstreamRequest;
 use App\Models\Group;
 use App\Models\Upstream;
 use Illuminate\Http\RedirectResponse;
@@ -60,6 +62,42 @@ class UpstreamController extends Controller
         }
 
         return back()->with('success', 'Upstream erstellt.');
+    }
+
+    public function update(UpdateUpstreamRequest $request, Upstream $upstream): RedirectResponse
+    {
+        $this->assertAdministersOrg($upstream->group?->organization_id);
+
+        $data = $request->validated();
+
+        $update = [
+            'type' => $data['type'],
+            'url' => $data['url'],
+            'policy' => $data['policy'],
+            'priority' => $data['priority'] ?? 0,
+        ];
+        if (array_key_exists('enabled', $data)) {
+            $update['enabled'] = (bool) $data['enabled'];
+        }
+        // Token: a value replaces it, `remove_auth_token` clears it, blank keeps it —
+        // so editing an upstream never forces re-entering the mirror credential.
+        if (! empty($data['auth_token'])) {
+            $update['auth_token'] = $data['auth_token'];
+        } elseif (! empty($data['remove_auth_token'])) {
+            $update['auth_token'] = null;
+        }
+
+        $upstream->update($update);
+
+        // Replace the allowlist wholesale (only meaningful in strict mode).
+        $upstream->allowedPackages()->delete();
+        if (($data['policy'] ?? null) === UpstreamPolicy::Strict->value) {
+            foreach ($data['allowed_packages'] ?? [] as $name) {
+                $upstream->allowedPackages()->create(['name' => $name]);
+            }
+        }
+
+        return back()->with('success', 'Upstream aktualisiert.');
     }
 
     public function destroy(Upstream $upstream): RedirectResponse

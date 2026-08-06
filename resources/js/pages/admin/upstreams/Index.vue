@@ -10,7 +10,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Pencil, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
 interface UpstreamRow {
@@ -42,6 +42,10 @@ const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const dialogOpen = ref(false);
+// null = create mode; a row id = editing that upstream.
+const editingId = ref<string | null>(null);
+// True once the edited upstream already had a stored token — enables the "remove" option.
+const editingHasAuth = ref(false);
 
 // Upstream types are the registry types — from the single source of truth.
 const { options: registryTypeOptions } = useRegistryTypes();
@@ -53,9 +57,33 @@ const form = useForm({
     url: '',
     policy: 'proxy' as 'proxy' | 'strict',
     auth_token: '',
+    remove_auth_token: false,
     priority: 0,
     allowed_packages_text: '',
 });
+
+function openCreate() {
+    editingId.value = null;
+    editingHasAuth.value = false;
+    form.reset();
+    form.clearErrors();
+    dialogOpen.value = true;
+}
+
+function openEdit(row: UpstreamRow) {
+    editingId.value = row.id;
+    editingHasAuth.value = row.has_auth;
+    form.clearErrors();
+    form.group_id = row.group_id;
+    form.type = row.type;
+    form.url = row.url;
+    form.policy = row.policy;
+    form.auth_token = '';
+    form.remove_auth_token = false;
+    form.priority = row.priority;
+    form.allowed_packages_text = row.allowed_packages.join('\n');
+    dialogOpen.value = true;
+}
 
 function submit() {
     form.transform((data) => ({
@@ -64,6 +92,7 @@ function submit() {
         url: data.url,
         policy: data.policy,
         auth_token: data.auth_token || null,
+        remove_auth_token: data.remove_auth_token,
         priority: data.priority,
         allowed_packages:
             data.policy === 'strict'
@@ -72,12 +101,19 @@ function submit() {
                       .map((n) => n.trim())
                       .filter((n) => n.length > 0)
                 : [],
-    })).post(route('admin.upstreams.store'), {
-        onSuccess: () => {
-            dialogOpen.value = false;
-            form.reset();
-        },
-    });
+    }));
+
+    const onSuccess = () => {
+        dialogOpen.value = false;
+        editingId.value = null;
+        form.reset();
+    };
+
+    if (editingId.value !== null) {
+        form.put(route('admin.upstreams.update', editingId.value), { onSuccess });
+    } else {
+        form.post(route('admin.upstreams.store'), { onSuccess });
+    }
 }
 
 function policyLabel(policy: 'proxy' | 'strict') {
@@ -111,7 +147,7 @@ function destroyUpstream(id: string) {
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Upstreams</h1>
-                <Button @click="dialogOpen = true">
+                <Button @click="openCreate">
                     <Plus class="size-4" />
                     Upstream hinzufügen
                 </Button>
@@ -170,9 +206,14 @@ function destroyUpstream(id: string) {
                                 <span v-else class="text-muted-foreground">—</span>
                             </td>
                             <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" @click="destroyUpstream(upstream.id)" aria-label="Upstream löschen">
-                                    <Trash2 class="size-4 text-destructive" />
-                                </Button>
+                                <div class="flex items-center gap-1">
+                                    <Button variant="ghost" size="icon" @click="openEdit(upstream)" aria-label="Upstream bearbeiten">
+                                        <Pencil class="size-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" @click="destroyUpstream(upstream.id)" aria-label="Upstream löschen">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </div>
                             </td>
                         </tr>
                         <tr v-if="props.upstreams.length === 0">
@@ -186,7 +227,7 @@ function destroyUpstream(id: string) {
         <Dialog v-model:open="dialogOpen">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>Upstream hinzufügen</DialogTitle>
+                    <DialogTitle>{{ editingId ? 'Upstream bearbeiten' : 'Upstream hinzufügen' }}</DialogTitle>
                 </DialogHeader>
 
                 <form class="space-y-4" @submit.prevent="submit">
@@ -196,6 +237,7 @@ function destroyUpstream(id: string) {
                             id="group_id"
                             v-model="form.group_id"
                             placeholder="Bitte wählen"
+                            :disabled="editingId !== null"
                             :options="props.groups.map((g) => ({ value: g.id, label: g.name }))"
                         />
                         <InputError :message="form.errors.group_id" />
@@ -228,7 +270,17 @@ function destroyUpstream(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="auth_token">Auth-Token (optional)</Label>
-                        <Input id="auth_token" v-model="form.auth_token" type="password" autocomplete="off" />
+                        <Input
+                            id="auth_token"
+                            v-model="form.auth_token"
+                            type="password"
+                            autocomplete="off"
+                            :placeholder="editingHasAuth ? 'Leer lassen, um den bestehenden Token zu behalten' : 'für private Upstreams'"
+                        />
+                        <label v-if="editingHasAuth" class="flex items-center gap-2 text-sm text-muted-foreground">
+                            <input v-model="form.remove_auth_token" type="checkbox" class="rounded border-input" />
+                            Gespeicherten Token entfernen
+                        </label>
                         <InputError :message="form.errors.auth_token" />
                     </div>
 
@@ -252,7 +304,7 @@ function destroyUpstream(id: string) {
 
                     <DialogFooter>
                         <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="form.processing">Anlegen</Button>
+                        <Button type="submit" :disabled="form.processing">{{ editingId ? 'Speichern' : 'Anlegen' }}</Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

@@ -39,6 +39,7 @@ it('returns the created package as json for inline picker creation', function ()
         ->postJson('/admin/packages', [
             'type' => 'npm',
             'name' => '@acme/widget',
+            'source_mode' => 'git',
             'repository_url' => 'https://git.example.com/acme/widget.git',
         ])
         ->assertCreated()

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\GitProvider;
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
 use Database\Factories\PackageFactory;
@@ -31,6 +32,7 @@ class Package extends Model
 
     protected $fillable = [
         'type',
+        'source_mode',
         'name',
         'description',
         'repository_url',
@@ -55,12 +57,28 @@ class Package extends Model
     {
         return [
             'type' => PackageType::class,
+            'source_mode' => PackageSourceMode::class,
             'sync_status' => SyncStatus::class,
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',
         ];
+    }
+
+    /**
+     * Whether this package is populated by mirroring a git repository's tags. Composer is
+     * always git-sourced; npm/Python are git-sourced only when explicitly configured.
+     */
+    public function isGitSourced(): bool
+    {
+        return $this->type === PackageType::Composer || $this->source_mode === PackageSourceMode::Git;
+    }
+
+    /** Whether this package is populated by pushing artifacts (npm publish / twine upload). */
+    public function isPublishSourced(): bool
+    {
+        return ! $this->isGitSourced();
     }
 
     /**

@@ -19,6 +19,7 @@ import { computed, ref, watch } from 'vue';
 interface PackageRow {
     id: string;
     type: 'composer' | 'npm' | 'python';
+    source_mode: 'publish' | 'git';
     name: string;
     sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
     sync_error: string | null;
@@ -52,6 +53,7 @@ const props = defineProps<{
     filters: Filters;
     registryTypes: string[];
     gitCredentials: { id: string; name: string; provider: string }[];
+    sourceModes: { value: string; label: string }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
@@ -131,6 +133,7 @@ const dialogOpen = ref(false);
 
 const form = useForm({
     type: 'composer' as 'composer' | 'npm' | 'python',
+    source_mode: 'publish' as 'publish' | 'git',
     name: '',
     repository_url: '',
     is_private: false,
@@ -148,13 +151,32 @@ function onPrivateToggle() {
     }
 }
 
+// Composer is always git; npm/python default to publish and may opt into git-mirror.
+const canChooseSource = computed(() => isPublishBased(form.type));
+const isGitMode = computed(() => form.type === 'composer' || form.source_mode === 'git');
+
+// Switching type resets the source mode (composer → git implicitly) and the probe.
+function onTypeChange() {
+    form.source_mode = 'publish';
+    onSourceModeChange();
+}
+
+// Leaving git-mirror mode discards the repository config so a publish package isn't
+// created with stale git fields.
+function onSourceModeChange() {
+    if (!isGitMode.value) {
+        form.repository_url = '';
+        form.is_private = false;
+        form.repository_token = '';
+        form.git_credential_id = '';
+    }
+    resetProbe();
+}
+
 const credentialOptions = computed(() => [
     { value: '', label: 'Kein Token / öffentlich' },
     ...props.gitCredentials.map((c) => ({ value: c.id, label: `${c.name} (${c.provider})` })),
 ]);
-
-// Publish-based types (npm, python) have no git repository to probe.
-const isPublishType = computed(() => isPublishBased(form.type));
 
 // Probe-first for git types: check the repository (and read its manifest) before creating.
 interface ProbeResult {
@@ -219,7 +241,7 @@ async function probeRepository() {
     }
 }
 
-const canSubmit = computed(() => form.name.trim() !== '' && (isPublishType.value || probeResult.value?.ok === true));
+const canSubmit = computed(() => form.name.trim() !== '' && (!isGitMode.value || probeResult.value?.ok === true));
 
 function submit() {
     form.post(route('admin.packages.store'), {
@@ -377,9 +399,26 @@ function destroyPackage(id: string) {
                             id="type"
                             v-model="form.type"
                             :options="typeOptions"
-                            @update:model-value="resetProbe"
+                            @update:model-value="onTypeChange"
                         />
                         <InputError :message="form.errors.type" />
+                    </div>
+
+                    <!-- npm/Python can either receive pushed artifacts (publish) or mirror a
+                         git repository's tags (git). Composer is always git. -->
+                    <div v-if="canChooseSource" class="grid gap-2">
+                        <Label for="source_mode">Quelle</Label>
+                        <SearchableSelect
+                            id="source_mode"
+                            v-model="form.source_mode"
+                            :options="props.sourceModes"
+                            @update:model-value="onSourceModeChange"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                            <strong>Publish (Push):</strong> Versionen entstehen beim Upload.
+                            <strong>Git-Mirror:</strong> Versionen werden aus den Tags eines Repositories gespiegelt
+                            (keine Build-/Prepare-Skripte).
+                        </p>
                     </div>
 
                     <div class="grid gap-2">
@@ -390,13 +429,13 @@ function destroyPackage(id: string) {
                             :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname' }[form.type]"
                             autocomplete="off"
                         />
-                        <p v-if="!isPublishType" class="text-xs text-muted-foreground">Wird beim „Prüfen" automatisch aus dem Repository übernommen.</p>
+                        <p v-if="isGitMode" class="text-xs text-muted-foreground">Wird beim „Prüfen" automatisch aus dem Repository übernommen.</p>
                         <InputError :message="form.errors.name" />
                     </div>
 
-                    <!-- Publish-based (npm/Python): no git repo — the name is the reserved
-                         identifier; versions/metadata arrive with each upload. -->
-                    <p v-if="isPublishType" class="text-xs text-muted-foreground">
+                    <!-- Publish-based: no git repo — the name is the reserved identifier;
+                         versions/metadata arrive with each upload. -->
+                    <p v-if="!isGitMode" class="text-xs text-muted-foreground">
                         Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten
                         entstehen beim Upload (<code>{{ form.type === 'npm' ? 'npm publish' : 'twine upload' }}</code>) —
                         kein Repository nötig.

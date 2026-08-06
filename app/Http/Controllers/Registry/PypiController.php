@@ -58,6 +58,8 @@ class PypiController extends Controller
         $pkg = $this->pythonPackagesOfGroup($group)
             ->first(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
         abort_if($pkg === null, 404, 'Unknown project for this registry.');
+        // A git-mirror project derives its files from tags — reject uploads into it.
+        abort_if($pkg->isGitSourced(), 409, 'This project mirrors a git repository and cannot be uploaded to.');
 
         $file = $request->file('content');
         abort_if(! $file instanceof UploadedFile || ! $file->isValid(), 400, 'Missing distribution file.');

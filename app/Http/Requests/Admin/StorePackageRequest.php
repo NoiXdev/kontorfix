@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Services\Registry\RegistryTypeService;
 use Illuminate\Contracts\Validation\Validator;
@@ -25,16 +26,20 @@ class StorePackageRequest extends FormRequest
         $type = PackageType::tryFrom((string) $this->input('type'));
         $nameRegex = $type?->nameRegex() ?? '/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/';
 
-        // Git-synced types (Composer) require a repository; publish-based types (npm,
-        // Python) are filled by pushing artifacts, so the repository is optional.
-        $repositoryRule = $type !== null && $type->isPublishBased()
-            ? ['nullable', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://']
-            // Only real Git remotes over https/ssh — no file:// or gopher:// etc., which
-            // would otherwise be passed to the git subprocess as an SSRF surface.
-            : ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'];
+        // A repository is required whenever the package is git-sourced: always for
+        // Composer, and for npm/Python when the chosen source mode is "git" (mirror).
+        // Only real Git remotes over https/ssh — no file:// or gopher:// etc., which
+        // would otherwise be passed to the git subprocess as an SSRF surface.
+        $repositoryRequired = $this->effectiveSourceMode($type) === PackageSourceMode::Git;
+        $repositoryRule = array_merge(
+            [$repositoryRequired ? 'required' : 'nullable'],
+            ['string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+        );
 
         return [
             'type' => ['required', Rule::enum(PackageType::class)],
+            // Composer is always git; npm/Python default to publish but may mirror git.
+            'source_mode' => ['nullable', Rule::enum(PackageSourceMode::class)],
             'name' => [
                 'required',
                 'string',
@@ -51,6 +56,19 @@ class StorePackageRequest extends FormRequest
             'group_ids' => ['array'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
         ];
+    }
+
+    /**
+     * The source mode the package will be created with: Composer is always Git; npm/Python
+     * honour the submitted mode, defaulting to Publish.
+     */
+    public function effectiveSourceMode(?PackageType $type): PackageSourceMode
+    {
+        if ($type === PackageType::Composer) {
+            return PackageSourceMode::Git;
+        }
+
+        return PackageSourceMode::tryFrom((string) $this->input('source_mode')) ?? PackageSourceMode::Publish;
     }
 
     public function withValidator(Validator $validator): void

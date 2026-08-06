@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
-import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
@@ -75,6 +74,8 @@ const props = defineProps<{
     package: {
         id: string;
         type: 'composer' | 'npm' | 'python';
+        source_mode: 'publish' | 'git';
+        is_git_sourced: boolean;
         name: string;
         description: string | null;
         repository_url: string | null;
@@ -107,9 +108,9 @@ function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
 }
 
-// --- Edit repository source (git-synced types only) ---
-const { isPublishBased } = useRegistryTypes();
-const isGitSourced = computed(() => !isPublishBased(props.package.type));
+// --- Edit repository source (git-sourced packages only) ---
+// Composer is always git-sourced; npm/Python only when created in git-mirror mode.
+const isGitSourced = computed(() => props.package.is_git_sourced);
 
 const credentialOptions = computed(() => [
     { value: '', label: 'Kein Token / öffentlich' },

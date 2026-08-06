@@ -52,7 +52,7 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
-    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
     // Reusable git access tokens (for syncing private repositories), org-scoped.
     Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'store', 'update', 'destroy']);

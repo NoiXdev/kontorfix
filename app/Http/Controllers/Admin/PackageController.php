@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
@@ -38,7 +39,7 @@ class PackageController extends Controller
         $packages = $this->scopePackageQuery(Package::query())
             ->withCount('groups')
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
-            ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('type', $type))
+            ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('type', $type))
             ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
             ->when(is_string($group) && $group !== '', fn ($query) => $query->whereHas('groups', fn ($g) => $g->whereKey($group)))
             ->latest()
@@ -47,6 +48,7 @@ class PackageController extends Controller
             ->through(fn (Package $p) => [
                 'id' => $p->id,
                 'type' => $p->type,
+                'source_mode' => $p->source_mode->value,
                 'name' => $p->name,
                 'sync_status' => $p->sync_status,
                 'sync_error' => $p->sync_error,
@@ -60,6 +62,8 @@ class PackageController extends Controller
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
+            // Source-mode options (publish vs git-mirror) for the create dialog.
+            'sourceModes' => PackageSourceMode::metadata(),
             // Managed git credentials the user may assign (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
@@ -82,6 +86,8 @@ class PackageController extends Controller
             'package' => [
                 'id' => $package->id,
                 'type' => $package->type->value,
+                'source_mode' => $package->source_mode->value,
+                'is_git_sourced' => $package->isGitSourced(),
                 'name' => $package->name,
                 'description' => $package->description,
                 'repository_url' => $package->repository_url,
@@ -169,12 +175,17 @@ class PackageController extends Controller
             $this->assertAdministersOrg($credential->organization_id);
         }
 
-        $package = Package::create($request->safe()->except('group_ids'));
+        // The source mode is authoritative (Composer is always git; npm/Python honour the
+        // submitted mode) so the stored column is truthful regardless of what was sent.
+        $attributes = $request->safe()->except('group_ids');
+        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+
+        $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Publish-based packages (npm, Python) without a repository are filled by pushing
-        // artifacts, so there is nothing to sync from git — skip the (doomed) sync job.
-        if ($package->repository_url !== null) {
+        // Only git-sourced packages have something to sync; publish-based packages (npm,
+        // Python) are filled by pushing artifacts — skip the (doomed) sync job.
+        if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
         }
 
@@ -219,8 +230,8 @@ class PackageController extends Controller
 
         $package->update($update);
 
-        // Re-sync git-based packages so a changed URL/token takes effect immediately.
-        if (! $package->type->isPublishBased() && $package->repository_url !== null) {
+        // Re-sync git-sourced packages so a changed URL/token takes effect immediately.
+        if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
         }
 

@@ -71,6 +71,62 @@ it('never exposes the auth token in the index payload', function () {
         ));
 });
 
+it('updates an upstream and keeps the token when the field is left blank', function () {
+    $up = Upstream::factory()->create(['type' => 'composer', 'policy' => 'proxy', 'priority' => 0, 'auth_token' => 'keep-me']);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)->put("/admin/upstreams/{$up->id}", [
+        'type' => 'npm',
+        'url' => 'https://registry.npmjs.org',
+        'policy' => 'proxy',
+        'priority' => 7,
+        'auth_token' => '',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $up->refresh();
+    expect($up->type)->toBe(PackageType::Npm)
+        ->and($up->url)->toBe('https://registry.npmjs.org')
+        ->and($up->priority)->toBe(7)
+        ->and($up->auth_token)->toBe('keep-me');
+});
+
+it('replaces the token when provided and removes it on request', function () {
+    $up = Upstream::factory()->create(['auth_token' => 'old', 'policy' => 'proxy']);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)->put("/admin/upstreams/{$up->id}", [
+        'type' => $up->type->value, 'url' => $up->url, 'policy' => 'proxy', 'auth_token' => 'new-secret',
+    ])->assertRedirect();
+    expect($up->fresh()->auth_token)->toBe('new-secret');
+
+    $this->actingAs($admin)->put("/admin/upstreams/{$up->id}", [
+        'type' => $up->type->value, 'url' => $up->url, 'policy' => 'proxy', 'remove_auth_token' => true,
+    ])->assertRedirect();
+    expect($up->fresh()->auth_token)->toBeNull();
+});
+
+it('rewrites the strict allowlist on update', function () {
+    $up = Upstream::factory()->create(['policy' => 'strict']);
+    $up->allowedPackages()->create(['name' => 'old/pkg']);
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)->put("/admin/upstreams/{$up->id}", [
+        'type' => $up->type->value, 'url' => $up->url, 'policy' => 'strict',
+        'allowed_packages' => ['new/one', 'new/two'],
+    ])->assertRedirect();
+
+    expect($up->fresh()->allowedPackages()->pluck('name')->all())
+        ->toEqualCanonicalizing(['new/one', 'new/two']);
+});
+
+it('forbids editing an upstream in a foreign organization', function () {
+    $up = Upstream::factory()->create();
+    $this->actingAs(User::factory()->create(['role' => UserRole::Admin]))
+        ->put("/admin/upstreams/{$up->id}", [
+            'type' => 'composer', 'url' => 'https://repo.packagist.org', 'policy' => 'proxy',
+        ])->assertForbidden();
+});
+
 it('deletes an upstream', function () {
     $up = Upstream::factory()->create();
     $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))

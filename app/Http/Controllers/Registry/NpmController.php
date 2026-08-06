@@ -143,6 +143,10 @@ class NpmController extends Controller
         $pkg = Package::where('type', PackageType::Npm)->where('name', $name)->first();
         abort_if($pkg === null || ! $this->access->packageBelongsToGroup($group, $pkg), 404);
 
+        // A git-mirror package derives its versions from tags — publishing into it would
+        // collide with the next sync, so reject it.
+        abort_if($pkg->isGitSourced(), 409, 'This package mirrors a git repository and cannot be published to.');
+
         try {
             $this->publisher->publish($pkg, $request->json()->all());
         } catch (VersionConflictException) {

@@ -7,13 +7,12 @@ use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
 use App\Models\Package;
 use App\Services\Vcs\GitRepository;
+use App\Services\Vcs\GitSourceImporter;
 use Composer\Semver\Semver;
-use Composer\Semver\VersionParser;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Throwable;
-use UnexpectedValueException;
 
 class SyncPackage implements ShouldQueue
 {
@@ -56,35 +55,10 @@ class SyncPackage implements ShouldQueue
                 $auth['username'],
             );
             $repo->sync();
-            $parser = new VersionParser;
 
-            foreach ($repo->tags() as $tag) {
-                try {
-                    $normalized = $parser->normalize($tag);
-                } catch (UnexpectedValueException) {
-                    continue; // not a version tag
-                }
-
-                try {
-                    $composerJson = json_decode($repo->fileAtRef($tag, 'composer.json'), true);
-                } catch (Throwable) {
-                    continue; // Tag without composer.json — skip it, don't abort the whole sync
-                }
-
-                if (! is_array($composerJson)) {
-                    continue;
-                }
-
-                $this->package->versions()->updateOrCreate(
-                    ['version' => $normalized],
-                    [
-                        'version_pretty' => $tag,
-                        'source_reference' => $repo->commitFor($tag),
-                        'metadata' => $composerJson,
-                        'released_at' => $repo->committedAt($tag), // stable commit date, not now()
-                    ],
-                );
-            }
+            // Per-type version import (Composer manifest, npm packument + tarball,
+            // Python sdist) lives in one place, driven by the package type.
+            app(GitSourceImporter::class)->import($this->package, $repo);
 
             $this->package->update([
                 'sync_status' => SyncStatus::Synced,
