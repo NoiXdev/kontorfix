@@ -32,10 +32,20 @@ class Package extends Model
         'name',
         'description',
         'repository_url',
+        'repository_token',
         'sync_status',
         'sync_error',
         'synced_at',
         'dist_tags',
+    ];
+
+    /**
+     * Never serialise the git access token — it must not reach the frontend or API.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'repository_token',
     ];
 
     protected function casts(): array
@@ -45,6 +55,8 @@ class Package extends Model
             'sync_status' => SyncStatus::class,
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
+            // Encrypted at rest; decrypted transparently when building git auth.
+            'repository_token' => 'encrypted',
         ];
     }
 

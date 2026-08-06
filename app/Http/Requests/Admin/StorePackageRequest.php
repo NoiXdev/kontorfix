@@ -47,6 +47,9 @@ class StorePackageRequest extends FormRequest
                 Rule::unique('packages')->where('type', $this->input('type')),
             ],
             'repository_url' => $repositoryRule,
+            // Optional access token for a private git repository (e.g. a GitHub PAT).
+            // Only meaningful for git-synced types; ignored for publish-based ones.
+            'repository_token' => ['nullable', 'string', 'max:500'],
             'group_ids' => ['array'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
         ];

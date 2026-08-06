@@ -119,9 +119,10 @@ class PackageController extends Controller
         $data = $request->validate([
             'type' => ['required', Rule::enum(PackageType::class)],
             'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_token' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $result = $probe->probe(PackageType::from($data['type']), $data['repository_url']);
+        $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $data['repository_token'] ?? null);
 
         return response()->json($result);
     }

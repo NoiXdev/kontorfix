@@ -17,15 +17,17 @@ class RepositoryProbe
     /**
      * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>}
      */
-    public function probe(PackageType $type, string $url): array
+    public function probe(PackageType $type, string $url, ?string $token = null): array
     {
+        $env = GitAuth::env($url, $token);
+
         // ls-remote confirms reachability + auth without a full clone and lists refs.
-        $ls = Process::timeout(30)->run([
+        $ls = Process::env($env)->timeout(30)->run([
             'git', 'ls-remote', '--tags', '--symref', '--end-of-options', $url, 'HEAD',
         ]);
 
         if (! $ls->successful()) {
-            return ['ok' => false, 'error' => $this->readableGitError($ls->errorOutput()), 'versions' => []];
+            return ['ok' => false, 'error' => $this->readableGitError(GitAuth::scrub($ls->errorOutput())), 'versions' => []];
         }
 
         $versions = $this->parseTags($ls->output());
@@ -33,7 +35,7 @@ class RepositoryProbe
 
         // Read the manifest from the default branch via a blobless shallow clone — small
         // and quick, and enough to extract name/description.
-        [$name, $description] = $this->readManifest($type, $url, $defaultBranch);
+        [$name, $description] = $this->readManifest($type, $url, $defaultBranch, $env);
 
         return [
             'ok' => true,
@@ -72,15 +74,16 @@ class RepositoryProbe
     }
 
     /**
+     * @param  array<string, string>  $env
      * @return array{0: string|null, 1: string|null} [name, description]
      */
-    private function readManifest(PackageType $type, string $url, ?string $branch): array
+    private function readManifest(PackageType $type, string $url, ?string $branch, array $env = []): array
     {
         $manifest = $type === PackageType::Npm ? 'package.json' : 'composer.json';
         $dir = rtrim(sys_get_temp_dir(), '/').'/kfx-probe-'.Str::random(12);
 
         try {
-            $clone = Process::timeout(60)->run(array_filter([
+            $clone = Process::env($env)->timeout(60)->run(array_filter([
                 'git', 'clone', '--depth', '1', '--filter=blob:none', '--no-checkout', '--quiet',
                 $branch ? '--branch' : null, $branch ?: null,
                 '--end-of-options', $url, $dir,

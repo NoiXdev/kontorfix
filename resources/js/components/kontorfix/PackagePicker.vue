@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { X } from 'lucide-vue-next';
-import { onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 
 interface Pkg {
     id: string;
@@ -28,11 +28,15 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let requestToken = 0;
 
 const creating = ref(false);
-const createForm = ref<{ name: string; type: 'composer' | 'npm'; repository_url: string }>({
+const createForm = ref<{ name: string; type: 'composer' | 'npm' | 'python'; repository_url: string; repository_token: string }>({
     name: '',
     type: 'composer',
     repository_url: '',
+    repository_token: '',
 });
+
+// Python is publish-based (twine) — no git repository to probe, just a name.
+const isPublishType = computed(() => createForm.value.type === 'python');
 const createErrors = ref<Record<string, string>>({});
 const createSubmitting = ref(false);
 
@@ -109,7 +113,7 @@ function removePackage(id: string) {
 }
 
 function startCreate() {
-    createForm.value = { name: '', type: 'composer', repository_url: '' };
+    createForm.value = { name: '', type: 'composer', repository_url: '', repository_token: '' };
     createErrors.value = {};
     probeResult.value = null;
     creating.value = true;
@@ -144,7 +148,11 @@ async function probeRepository() {
                 'X-XSRF-TOKEN': xsrfToken(),
             },
             credentials: 'same-origin',
-            body: JSON.stringify({ type: createForm.value.type, repository_url: createForm.value.repository_url }),
+            body: JSON.stringify({
+                type: createForm.value.type,
+                repository_url: createForm.value.repository_url,
+                repository_token: createForm.value.repository_token,
+            }),
         });
 
         if (response.status === 422) {
@@ -275,7 +283,7 @@ onUnmounted(() => {
                 <Label>Typ</Label>
                 <div class="inline-flex gap-2">
                     <button
-                        v-for="option in ['composer', 'npm'] as const"
+                        v-for="option in ['composer', 'npm', 'python'] as const"
                         :key="option"
                         type="button"
                         :class="
@@ -294,49 +302,73 @@ onUnmounted(() => {
                 <InputError :message="createErrors.type" />
             </div>
 
-            <div class="grid gap-2">
-                <Label for="new-package-url">Repository-URL</Label>
-                <div class="flex gap-2">
+            <!-- Publish-based (Python): no git repository, just a name. -->
+            <div v-if="isPublishType" class="grid gap-2">
+                <Label for="new-package-name-py">Name</Label>
+                <Input id="new-package-name-py" v-model="createForm.name" type="text" placeholder="projektname" autocomplete="off" class="font-mono" />
+                <p class="text-xs text-muted-foreground">Publish-basiert — Distributionen werden nach dem Anlegen per <code>twine upload</code> hochgeladen.</p>
+                <InputError :message="createErrors.name" />
+            </div>
+
+            <template v-else>
+                <div class="grid gap-2">
+                    <Label for="new-package-url">Repository-URL</Label>
+                    <div class="flex gap-2">
+                        <Input
+                            id="new-package-url"
+                            v-model="createForm.repository_url"
+                            type="text"
+                            placeholder="https://git.example.com/vendor/paket.git"
+                            autocomplete="off"
+                            class="font-mono"
+                            @update:model-value="resetProbe"
+                            @keyup.enter="probeRepository"
+                        />
+                        <Button type="button" variant="outline" size="sm" :disabled="probing || createForm.repository_url.trim() === ''" @click="probeRepository">
+                            {{ probing ? 'Prüfe…' : 'Prüfen' }}
+                        </Button>
+                    </div>
+                    <InputError :message="createErrors.repository_url" />
+                </div>
+
+                <div class="grid gap-2">
+                    <Label for="new-package-token">Zugriffs-Token <span class="text-muted-foreground">(privates Repo, optional)</span></Label>
                     <Input
-                        id="new-package-url"
-                        v-model="createForm.repository_url"
-                        type="text"
-                        placeholder="https://git.example.com/vendor/paket.git"
+                        id="new-package-token"
+                        v-model="createForm.repository_token"
+                        type="password"
+                        placeholder="z. B. GitHub PAT (ghp_…)"
                         autocomplete="off"
                         class="font-mono"
                         @update:model-value="resetProbe"
-                        @keyup.enter="probeRepository"
                     />
-                    <Button type="button" variant="outline" size="sm" :disabled="probing || createForm.repository_url.trim() === ''" @click="probeRepository">
-                        {{ probing ? 'Prüfe…' : 'Prüfen' }}
-                    </Button>
-                </div>
-                <InputError :message="createErrors.repository_url" />
-            </div>
-
-            <!-- Probe failed to reach / read the repo -->
-            <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
-            </div>
-
-            <!-- Probe succeeded: preview discovered metadata before confirming -->
-            <div v-if="probeResult && probeResult.ok" class="space-y-3 rounded-md border border-verdigris/30 bg-verdigris/10 p-3">
-                <p class="text-sm font-medium text-verdigris">Repository erreichbar</p>
-
-                <div class="grid gap-2">
-                    <Label for="new-package-name">Name{{ probeResult.name ? ' (gefunden)' : ' (nicht gefunden — bitte angeben)' }}</Label>
-                    <Input id="new-package-name" v-model="createForm.name" type="text" placeholder="vendor/paket" autocomplete="off" class="font-mono" />
-                    <InputError :message="createErrors.name" />
+                    <p class="text-xs text-muted-foreground">Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.</p>
                 </div>
 
-                <p v-if="probeResult.description" class="text-sm text-muted-foreground">{{ probeResult.description }}</p>
-
-                <div v-if="probeResult.versions.length > 0" class="text-xs text-muted-foreground">
-                    <span class="font-medium">{{ probeResult.versions.length }} Version(en):</span>
-                    {{ probeResult.versions.slice(0, 8).join(', ') }}{{ probeResult.versions.length > 8 ? ' …' : '' }}
+                <!-- Probe failed to reach / read the repo -->
+                <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
                 </div>
-                <p v-else class="text-xs text-muted-foreground">Keine Tags gefunden — nach dem Anlegen wird trotzdem synchronisiert.</p>
-            </div>
+
+                <!-- Probe succeeded: preview discovered metadata before confirming -->
+                <div v-if="probeResult && probeResult.ok" class="space-y-3 rounded-md border border-verdigris/30 bg-verdigris/10 p-3">
+                    <p class="text-sm font-medium text-verdigris">Repository erreichbar</p>
+
+                    <div class="grid gap-2">
+                        <Label for="new-package-name">Name{{ probeResult.name ? ' (gefunden)' : ' (nicht gefunden — bitte angeben)' }}</Label>
+                        <Input id="new-package-name" v-model="createForm.name" type="text" placeholder="vendor/paket" autocomplete="off" class="font-mono" />
+                        <InputError :message="createErrors.name" />
+                    </div>
+
+                    <p v-if="probeResult.description" class="text-sm text-muted-foreground">{{ probeResult.description }}</p>
+
+                    <div v-if="probeResult.versions.length > 0" class="text-xs text-muted-foreground">
+                        <span class="font-medium">{{ probeResult.versions.length }} Version(en):</span>
+                        {{ probeResult.versions.slice(0, 8).join(', ') }}{{ probeResult.versions.length > 8 ? ' …' : '' }}
+                    </div>
+                    <p v-else class="text-xs text-muted-foreground">Keine Tags gefunden — nach dem Anlegen wird trotzdem synchronisiert.</p>
+                </div>
+            </template>
 
             <InputError :message="createErrors.general" />
 
@@ -345,7 +377,7 @@ onUnmounted(() => {
                 <Button
                     type="button"
                     size="sm"
-                    :disabled="createSubmitting || !probeResult?.ok || createForm.name.trim() === ''"
+                    :disabled="createSubmitting || createForm.name.trim() === '' || (!isPublishType && !probeResult?.ok)"
                     @click="createPackage"
                 >
                     Anlegen bestätigen

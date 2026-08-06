@@ -129,14 +129,79 @@ const form = useForm({
     type: 'composer' as 'composer' | 'npm' | 'python',
     name: '',
     repository_url: '',
+    repository_token: '',
     group_ids: [] as string[],
 });
+
+// Python is publish-based (twine) — no git repository to probe.
+const isPublishType = computed(() => form.type === 'python');
+
+// Probe-first for git types: check the repository (and read its manifest) before creating.
+interface ProbeResult {
+    ok: boolean;
+    error?: string;
+    name?: string | null;
+    description?: string | null;
+    versions: string[];
+}
+const probing = ref(false);
+const probeResult = ref<ProbeResult | null>(null);
+
+function resetProbe() {
+    probeResult.value = null;
+}
+
+function xsrfToken(): string {
+    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+async function probeRepository() {
+    if (probing.value || form.repository_url.trim() === '') {
+        return;
+    }
+    probing.value = true;
+    probeResult.value = null;
+    form.clearErrors();
+
+    try {
+        const response = await fetch('/admin/packages/probe', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ type: form.type, repository_url: form.repository_url, repository_token: form.repository_token }),
+        });
+
+        if (!response.ok) {
+            probeResult.value = { ok: false, error: 'Prüfung fehlgeschlagen — bitte erneut versuchen.', versions: [] };
+            return;
+        }
+
+        const result: ProbeResult = await response.json();
+        probeResult.value = result;
+        if (result.ok && result.name) {
+            form.name = result.name;
+        }
+    } catch {
+        probeResult.value = { ok: false, error: 'Prüfung fehlgeschlagen — bitte erneut versuchen.', versions: [] };
+    } finally {
+        probing.value = false;
+    }
+}
+
+const canSubmit = computed(() => form.name.trim() !== '' && (isPublishType.value || probeResult.value?.ok === true));
 
 function submit() {
     form.post(route('admin.packages.store'), {
         onSuccess: () => {
             dialogOpen.value = false;
             form.reset();
+            probeResult.value = null;
         },
     });
 }
@@ -287,6 +352,7 @@ function destroyPackage(id: string) {
                             id="type"
                             v-model="form.type"
                             :options="typeOptions"
+                            @update:model-value="resetProbe"
                         />
                         <InputError :message="form.errors.type" />
                     </div>
@@ -298,19 +364,53 @@ function destroyPackage(id: string) {
                     </div>
 
                     <!-- Publish-based (Python): no git repository — distributions arrive via twine. -->
-                    <div v-if="form.type !== 'python'" class="grid gap-2">
-                        <Label for="repository_url">Repository-URL</Label>
-                        <Input
-                            id="repository_url"
-                            v-model="form.repository_url"
-                            placeholder="https://git.example.com/vendor/paket.git"
-                            autocomplete="off"
-                        />
-                        <InputError :message="form.errors.repository_url" />
-                    </div>
-                    <p v-else class="text-xs text-muted-foreground">
+                    <p v-if="isPublishType" class="text-xs text-muted-foreground">
                         Publish-basiert — Distributionen werden per <code>twine upload</code> hochgeladen (kein Repository nötig).
                     </p>
+                    <template v-else>
+                        <div class="grid gap-2">
+                            <Label for="repository_url">Repository-URL</Label>
+                            <div class="flex gap-2">
+                                <Input
+                                    id="repository_url"
+                                    v-model="form.repository_url"
+                                    placeholder="https://git.example.com/vendor/paket.git"
+                                    autocomplete="off"
+                                    @update:model-value="resetProbe"
+                                    @keyup.enter.prevent="probeRepository"
+                                />
+                                <Button type="button" variant="outline" :disabled="probing || form.repository_url.trim() === ''" @click="probeRepository">
+                                    {{ probing ? 'Prüfe…' : 'Prüfen' }}
+                                </Button>
+                            </div>
+                            <InputError :message="form.errors.repository_url" />
+                        </div>
+
+                        <div class="grid gap-2">
+                            <Label for="repository_token">Zugriffs-Token <span class="text-muted-foreground">(privates Repo, optional)</span></Label>
+                            <Input
+                                id="repository_token"
+                                v-model="form.repository_token"
+                                type="password"
+                                placeholder="z. B. GitHub PAT (ghp_…)"
+                                autocomplete="off"
+                                @update:model-value="resetProbe"
+                            />
+                            <p class="text-xs text-muted-foreground">Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.</p>
+                        </div>
+
+                        <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                            {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
+                        </div>
+                        <div v-else-if="probeResult && probeResult.ok" class="rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
+                            <span class="font-medium text-verdigris">Repository erreichbar.</span>
+                            <span v-if="probeResult.versions.length" class="text-muted-foreground">
+                                {{ probeResult.versions.length }} Version(en) gefunden.
+                            </span>
+                            <span v-else class="text-muted-foreground">Keine Tags gefunden — Sync läuft nach dem Anlegen trotzdem.</span>
+                        </div>
+                        <p v-else class="text-xs text-muted-foreground">Repository zuerst „Prüfen", dann anlegen.</p>
+                    </template>
 
                     <div class="grid gap-2">
                         <Label>Gruppen</Label>
@@ -330,7 +430,7 @@ function destroyPackage(id: string) {
 
                     <DialogFooter>
                         <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="form.processing">Anlegen</Button>
+                        <Button type="submit" :disabled="form.processing || !canSubmit">Anlegen</Button>
                     </DialogFooter>
                 </form>
             </DialogContent>

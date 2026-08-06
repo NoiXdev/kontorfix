@@ -12,19 +12,29 @@ class GitRepository
 {
     private string $mirrorPath;
 
-    public function __construct(private readonly string $url, string $storageKey)
+    /** @var array<string, string> */
+    private array $authEnv;
+
+    public function __construct(private readonly string $url, string $storageKey, ?string $token = null)
     {
         if (! preg_match('/^[A-Za-z0-9._-]+$/', $storageKey) || str_contains($storageKey, '..')) {
             throw new InvalidArgumentException('Invalid storage key.');
         }
 
         $this->mirrorPath = storage_path('app/vcs/'.$storageKey.'.git');
+        $this->authEnv = GitAuth::env($url, $token);
     }
 
     public function sync(): void
     {
         if (is_dir($this->mirrorPath)) {
-            $this->run(['git', 'fetch', '--prune', '--tags', 'origin']);
+            // fetch needs the auth header too (the mirror's stored URL is token-free).
+            $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(120)
+                ->run(['git', 'fetch', '--prune', '--tags', 'origin']);
+
+            if (! $result->successful()) {
+                throw new RuntimeException('git fetch failed: '.GitAuth::scrub($result->errorOutput()));
+            }
 
             return;
         }
@@ -33,12 +43,12 @@ class GitRepository
             mkdir(dirname($this->mirrorPath), 0775, true);
         }
 
-        $result = Process::timeout(300)->run([
+        $result = Process::env($this->authEnv)->timeout(300)->run([
             'git', 'clone', '--mirror', '-c', 'protocol.file.allow=always', $this->url, $this->mirrorPath,
         ]);
 
         if (! $result->successful()) {
-            throw new RuntimeException('git clone failed: '.$result->errorOutput());
+            throw new RuntimeException('git clone failed: '.GitAuth::scrub($result->errorOutput()));
         }
     }
 
