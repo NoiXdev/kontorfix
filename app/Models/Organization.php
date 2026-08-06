@@ -25,11 +25,15 @@ class Organization extends Model
             ->dontLogEmptyChanges();
     }
 
-    protected $fillable = ['name', 'slug', 'is_operator'];
+    protected $fillable = ['name', 'slug', 'is_operator', 'enabled_registry_types'];
 
     protected function casts(): array
     {
-        return ['is_operator' => 'bool'];
+        return [
+            'is_operator' => 'bool',
+            // Null = inherit the instance-wide set; otherwise a restriction within it.
+            'enabled_registry_types' => 'array',
+        ];
     }
 
     /**

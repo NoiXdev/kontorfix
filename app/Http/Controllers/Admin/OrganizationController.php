@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\PackageType;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreOrganizationRequest;
@@ -10,6 +11,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
+use App\Services\Registry\RegistryTypeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -34,7 +36,7 @@ class OrganizationController extends Controller
         ]);
     }
 
-    public function show(Organization $organization): Response
+    public function show(Organization $organization, RegistryTypeService $types): Response
     {
         return Inertia::render('admin/organizations/Show', [
             'organization' => [
@@ -42,6 +44,13 @@ class OrganizationController extends Controller
                 'name' => $organization->name,
                 'slug' => $organization->slug,
                 'is_operator' => $organization->is_operator,
+            ],
+            // Registry-type availability: the instance ceiling, the org's effective set,
+            // and whether the org pins an explicit override (vs. inheriting the ceiling).
+            'registryTypes' => [
+                'global' => $types->globalTypes(),
+                'effective' => $types->effectiveFor($organization),
+                'overridden' => $organization->enabled_registry_types !== null,
             ],
             'registries' => $organization->groups()->withCount('packages')->with('domains:id,group_id,hostname')->get()
                 ->map(fn (Group $group) => [
@@ -86,6 +95,26 @@ class OrganizationController extends Controller
                     'group' => $token->group?->name,
                 ]),
         ]);
+    }
+
+    public function updateRegistryTypes(Request $request, Organization $organization, RegistryTypeService $types): RedirectResponse
+    {
+        $data = $request->validate([
+            'enabled_registry_types' => ['present', 'array'],
+            'enabled_registry_types.*' => [Rule::enum(PackageType::class)],
+        ]);
+
+        // Clamp to the instance ceiling — an org can only restrict, never widen.
+        $global = $types->globalTypes();
+        $selected = array_values(array_intersect($global, array_unique($data['enabled_registry_types'])));
+
+        // If the org permits everything the instance does, store null so it keeps
+        // inheriting future changes to the ceiling.
+        $organization->update([
+            'enabled_registry_types' => count($selected) === count($global) ? null : $selected,
+        ]);
+
+        return back()->with('success', 'Registry-Typen aktualisiert.');
     }
 
     public function store(StoreOrganizationRequest $request): RedirectResponse

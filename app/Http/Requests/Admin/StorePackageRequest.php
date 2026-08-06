@@ -3,6 +3,8 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageType;
+use App\Services\Registry\RegistryTypeService;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -48,6 +50,16 @@ class StorePackageRequest extends FormRequest
             'group_ids' => ['array'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $type = PackageType::tryFrom((string) $this->input('type'));
+            if ($type !== null && ! app(RegistryTypeService::class)->isGloballyEnabled($type)) {
+                $validator->errors()->add('type', 'Dieser Registry-Typ ist instanzweit deaktiviert.');
+            }
+        });
     }
 
     /**

@@ -9,7 +9,9 @@ import { computed } from 'vue';
 const props = defineProps<{
     settings: {
         registration_enabled: boolean;
+        enabled_registry_types: string[];
     };
+    registryTypes: string[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'System', href: '/admin/system' }];
@@ -19,7 +21,14 @@ const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const form = useForm({
     registration_enabled: props.settings.registration_enabled,
+    enabled_registry_types: [...props.settings.enabled_registry_types],
 });
+
+function toggleType(type: string, on: boolean) {
+    form.enabled_registry_types = on
+        ? [...new Set([...form.enabled_registry_types, type])]
+        : form.enabled_registry_types.filter((t) => t !== type);
+}
 
 function save() {
     form.put(route('admin.system.update'), { preserveScroll: true });
@@ -56,6 +65,26 @@ function save() {
                         </span>
                     </span>
                 </label>
+                <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                    <h2 class="text-sm font-medium">Registry-Typen</h2>
+                    <p class="mb-3 text-xs text-muted-foreground">
+                        Instanzweite Obergrenze: deaktivierte Typen liefern kein Protokoll aus (pull/push aus) und
+                        verschwinden aus Anlage-Dialogen. Organisationen können nur innerhalb der hier erlaubten Typen
+                        weiter einschränken.
+                    </p>
+                    <div class="flex flex-wrap gap-4">
+                        <label v-for="type in props.registryTypes" :key="type" class="flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                class="size-4 rounded border-input"
+                                :checked="form.enabled_registry_types.includes(type)"
+                                @change="toggleType(type, ($event.target as HTMLInputElement).checked)"
+                            />
+                            <span class="font-mono">{{ type }}</span>
+                        </label>
+                    </div>
+                </div>
+
                 <div>
                     <Button type="submit" :disabled="form.processing">Speichern</Button>
                 </div>

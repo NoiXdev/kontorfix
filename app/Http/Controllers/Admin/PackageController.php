@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Services\Package\PackageDependencies;
+use App\Services\Registry\RegistryTypeService;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
@@ -55,6 +56,8 @@ class PackageController extends Controller
             'packages' => $packages,
             'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'slug']),
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
+            // Only instance-enabled registry types are offered when creating a package.
+            'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
         ]);
     }
 

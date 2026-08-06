@@ -49,9 +49,13 @@ const props = defineProps<{
     packages: Paginated<PackageRow>;
     groups: GroupOption[];
     filters: Filters;
+    registryTypes: string[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
+
+// Only instance-enabled types are offered in the create dialog and the filter.
+const typeOptions = computed(() => props.registryTypes.map((t) => ({ value: t, label: t })));
 
 const filterQ = ref(props.filters.q ?? '');
 const filterType = ref(props.filters.type ?? '');
@@ -197,12 +201,7 @@ function destroyPackage(id: string) {
                     v-model="filterType"
                     class="w-40"
                     placeholder="Alle Typen"
-                    :options="[
-                        { value: '', label: 'Alle Typen' },
-                        { value: 'composer', label: 'composer' },
-                        { value: 'npm', label: 'npm' },
-                        { value: 'python', label: 'python' },
-                    ]"
+                    :options="[{ value: '', label: 'Alle Typen' }, ...typeOptions]"
                 />
                 <SearchableSelect
                     v-model="filterStatus"
@@ -287,11 +286,7 @@ function destroyPackage(id: string) {
                         <SearchableSelect
                             id="type"
                             v-model="form.type"
-                            :options="[
-                                { value: 'composer', label: 'composer' },
-                                { value: 'npm', label: 'npm' },
-                                { value: 'python', label: 'python' },
-                            ]"
+                            :options="typeOptions"
                         />
                         <InputError :message="form.errors.type" />
                     </div>

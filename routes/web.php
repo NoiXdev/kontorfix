@@ -86,6 +86,8 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::post('mail/test', [Admin\MailController::class, 'test'])->name('mail.test');
 
     Route::resource('organizations', Admin\OrganizationController::class)->only(['index', 'show', 'store', 'destroy'])->parameters(['organizations' => 'organization']);
+    // Per-organization registry-type availability (restrict within the instance ceiling).
+    Route::put('organizations/{organization}/registry-types', [Admin\OrganizationController::class, 'updateRegistryTypes'])->name('organizations.registry-types.update');
     // Grant/revoke additional organization access from the organization view.
     Route::post('organizations/{organization}/members', [Admin\OrganizationController::class, 'attachMember'])->name('organizations.members.store');
     Route::delete('organizations/{organization}/members/{user}', [Admin\OrganizationController::class, 'detachMember'])->name('organizations.members.destroy');

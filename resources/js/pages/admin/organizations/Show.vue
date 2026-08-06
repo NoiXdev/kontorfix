@@ -4,7 +4,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, router } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
 import { Trash2 } from 'lucide-vue-next';
 import { ref } from 'vue';
 
@@ -45,12 +45,28 @@ const props = defineProps<{
         slug: string;
         is_operator: boolean;
     };
+    registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
     users: UserRow[];
     members: MemberRow[];
     assignableUsers: MemberRow[];
     tokens: TokenRow[];
 }>();
+
+// Per-org registry types: start from the effective set, choose within the instance ceiling.
+const typesForm = useForm<{ enabled_registry_types: string[] }>({
+    enabled_registry_types: [...props.registryTypes.effective],
+});
+
+function toggleRegistryType(type: string, on: boolean) {
+    typesForm.enabled_registry_types = on
+        ? [...new Set([...typesForm.enabled_registry_types, type])]
+        : typesForm.enabled_registry_types.filter((t) => t !== type);
+}
+
+function saveRegistryTypes() {
+    typesForm.put(route('admin.organizations.registry-types.update', props.organization.id), { preserveScroll: true });
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Kunden', href: '/admin/organizations' },
@@ -116,6 +132,31 @@ function detachMember(userId: string) {
                     Aktivität ansehen
                 </button>
             </div>
+
+            <section class="flex flex-col gap-3">
+                <div>
+                    <h2 class="text-lg font-medium">Registry-Typen</h2>
+                    <p class="text-sm text-muted-foreground">
+                        Welche Registry-Typen diese Organisation anbietet — nur innerhalb der instanzweit erlaubten Typen.
+                        Deaktivierte Typen liefern für die Registries dieser Org kein Protokoll aus.
+                    </p>
+                </div>
+                <form class="flex flex-wrap items-center gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border" @submit.prevent="saveRegistryTypes">
+                    <label v-for="type in props.registryTypes.global" :key="type" class="flex items-center gap-2 text-sm">
+                        <input
+                            type="checkbox"
+                            class="size-4 rounded border-input"
+                            :checked="typesForm.enabled_registry_types.includes(type)"
+                            @change="toggleRegistryType(type, ($event.target as HTMLInputElement).checked)"
+                        />
+                        <span class="font-mono">{{ type }}</span>
+                    </label>
+                    <span v-if="props.registryTypes.global.length === 0" class="text-sm text-muted-foreground">
+                        Instanzweit sind aktuell keine Registry-Typen aktiviert.
+                    </span>
+                    <Button type="submit" :disabled="typesForm.processing" class="ml-auto">Speichern</Button>
+                </form>
+            </section>
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Registries</h2>

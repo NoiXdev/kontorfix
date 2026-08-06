@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property bool $registration_enabled
+ * @property list<string> $enabled_registry_types
  */
 class SystemSetting extends Model
 {
@@ -17,10 +18,12 @@ class SystemSetting extends Model
      */
     protected $fillable = [
         'registration_enabled',
+        'enabled_registry_types',
     ];
 
     protected $attributes = [
         'registration_enabled' => false,
+        'enabled_registry_types' => '["composer","npm","python"]',
     ];
 
     /**
@@ -30,6 +33,7 @@ class SystemSetting extends Model
     {
         return [
             'registration_enabled' => 'bool',
+            'enabled_registry_types' => 'array',
         ];
     }
 
