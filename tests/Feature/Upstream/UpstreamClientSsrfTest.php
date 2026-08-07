@@ -77,3 +77,37 @@ it('keeps the upstream auth token on a same-host artifact redirect', function ()
 
     Http::assertSent(fn ($r) => str_contains($r->url(), 'cdn.test/final/b.zip') && $r->hasHeader('Authorization', 'Bearer secret-token'));
 });
+
+// A02: the mirror credential must never cross the network in cleartext. GitAuth already
+// refuses to attach a git token to a non-HTTPS remote; the upstream client did not.
+it('does not send the upstream auth token over cleartext http', function () {
+    Http::fake([
+        'repo.test/*' => Http::response(['ok' => true], 200),
+    ]);
+    $up = Upstream::factory()->create(['url' => 'http://repo.test', 'auth_token' => 'mirror-secret']);
+
+    app(UpstreamClient::class)->getJson($up, '/p2/acme/demo.json');
+
+    Http::assertSent(fn ($r) => str_contains($r->url(), 'repo.test') && ! $r->hasHeader('Authorization'));
+});
+
+it('does not send the upstream auth token on an http hop of an https upstream', function () {
+    Http::fake([
+        'cdn.test/a/*' => Http::response('', 302, ['Location' => 'http://cdn.test/final/b.zip']),
+        'cdn.test/final/*' => Http::response('zip-bytes', 200),
+    ]);
+    $up = Upstream::factory()->create(['url' => 'https://cdn.test', 'auth_token' => 'mirror-secret']);
+
+    expect(app(UpstreamClient::class)->getBytes($up, 'https://cdn.test/a/b.zip'))->toBe('zip-bytes');
+
+    Http::assertSent(fn ($r) => $r->url() === 'http://cdn.test/final/b.zip' && ! $r->hasHeader('Authorization'));
+});
+
+it('still sends the token to an https upstream', function () {
+    Http::fake(['repo.test/*' => Http::response(['ok' => true], 200)]);
+    $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => 'mirror-secret']);
+
+    app(UpstreamClient::class)->getJson($up, '/p2/acme/demo.json');
+
+    Http::assertSent(fn ($r) => $r->hasHeader('Authorization', 'Bearer mirror-secret'));
+});

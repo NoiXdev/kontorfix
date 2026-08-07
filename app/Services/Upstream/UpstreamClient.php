@@ -65,7 +65,8 @@ class UpstreamClient
                 throw new UpstreamException("Refusing unsafe upstream URL: {$url}.");
             }
 
-            $withAuth = $this->sameHost($url, $upstream->url);
+            // Same host AND an encrypted hop — see request().
+            $withAuth = $this->sameHost($url, $upstream->url) && $this->isEncrypted($url);
             $response = $configure($this->request($upstream, $withAuth))->withoutRedirecting()->get($url);
 
             if ($response->redirect()) {
@@ -92,6 +93,18 @@ class UpstreamClient
         }
 
         return $req;
+    }
+
+    /**
+     * The mirror credential is a bearer token: anyone who observes it can reuse it. Over
+     * plain http it travels in cleartext to every device on the path, so it is simply not
+     * attached — matching what GitAuth already does for a stored git token on a non-HTTPS
+     * remote. The upstream URL rules still permit http (an internal mirror without TLS is
+     * a legitimate setup); what is refused is pairing that with a secret.
+     */
+    private function isEncrypted(string $url): bool
+    {
+        return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https';
     }
 
     /**
