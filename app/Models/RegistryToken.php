@@ -33,6 +33,16 @@ class RegistryToken extends Model
         'expires_at',
     ];
 
+    /**
+     * The token is stored only as a sha256 hash (never reversible), but keep even that out
+     * of any serialised payload.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'token_hash',
+    ];
+
     protected function casts(): array
     {
         return [

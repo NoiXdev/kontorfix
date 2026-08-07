@@ -23,6 +23,15 @@ class Webhook extends Model
         'enabled',
     ];
 
+    /**
+     * Never serialise the signing secret — controllers expose only `has_secret`.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'secret',
+    ];
+
     protected function casts(): array
     {
         return [

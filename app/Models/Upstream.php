@@ -26,6 +26,15 @@ class Upstream extends Model
         'enabled',
     ];
 
+    /**
+     * Never serialise the mirror auth token — controllers expose only `has_auth`.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'auth_token',
+    ];
+
     protected function casts(): array
     {
         return [
