@@ -1,4 +1,17 @@
-## [0.5.0](https://github.com/NoiXdev/kontorfix/compare/v0.4.0...v) (2026-08-07)
+## [0.6.0](https://github.com/NoiXdev/kontorfix/compare/v0.5.0...v) (2026-08-07)
+
+
+### Features
+
+* **models:** mark encrypted/hashed secret columns as ([0958a2b](https://github.com/NoiXdev/kontorfix/commit/0958a2b9b018d836fe82c4b14546086f9f8f9e22))
+
+
+### Bug Fixes
+
+* **probe:** discover the package name from pyproject.toml ([c51014b](https://github.com/NoiXdev/kontorfix/commit/c51014b0e70bc6d32eeb973c5d4b525da344ef53))
+* **probe:** stop the ls-remote HEAD filter from hiding ([27a90fa](https://github.com/NoiXdev/kontorfix/commit/27a90fa1c0e4627ec59d18480646fac768f01eaa))
+
+## [0.5.0](https://github.com/NoiXdev/kontorfix/compare/v0.4.0...v0.5.0) (2026-08-07)
 
 
 ### Features
