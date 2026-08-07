@@ -68,14 +68,18 @@ const form = useForm({
     name: '',
     group_id: '',
     ability: 'read' as 'read' | 'publish',
+    expires_at: '',
 });
 
 function submit() {
-    form.transform((d) => ({ ...d, group_id: d.group_id || null })).post(route('tokens.store'), {
+    form.transform((d) => ({ ...d, group_id: d.group_id || null, expires_at: d.expires_at || null })).post(route('tokens.store'), {
         preserveScroll: true,
-        onSuccess: () => form.reset('name'),
+        onSuccess: () => form.reset('name', 'expires_at'),
     });
 }
+
+// Empty means open-ended; the earliest selectable expiry is tomorrow.
+const earliestExpiry = computed(() => new Date(Date.now() + 86400000).toISOString().slice(0, 10));
 
 function abilityLabel(ability: 'read' | 'publish') {
     return ability === 'publish' ? 'Veröffentlichen' : 'Lesen';
@@ -120,7 +124,7 @@ function destroyToken(id: string) {
                 </div>
 
                 <form
-                    class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end dark:border-sidebar-border"
+                    class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_1fr_auto_auto_auto] sm:items-end dark:border-sidebar-border"
                     @submit.prevent="submit"
                 >
                     <div class="grid gap-2">
@@ -147,6 +151,12 @@ function destroyToken(id: string) {
                             :options="abilityOptions"
                         />
                         <InputError :message="form.errors.ability" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="token_expires_at">Gültig bis</Label>
+                        <Input id="token_expires_at" v-model="form.expires_at" type="date" :min="earliestExpiry" />
+                        <InputError :message="form.errors.expires_at" />
                     </div>
 
                     <Button type="submit" :disabled="form.processing">

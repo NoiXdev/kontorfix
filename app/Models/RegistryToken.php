@@ -89,17 +89,71 @@ class RegistryToken extends Model
             'name' => $name,
             'token_hash' => hash('sha256', $plain),
             'ability' => $ability,
-            'expires_at' => $expiresAt,
+            'expires_at' => $expiresAt ?? static::defaultExpiry(),
         ]);
 
         return [$token, $plain];
     }
 
+    /**
+     * Instance-wide default lifetime for newly issued tokens when the caller does not
+     * pass one. Null — the shipped default — keeps tokens open-ended, so upgrading never
+     * expires a credential that is in use today. An operator who wants a rotation policy
+     * sets KONTORFIX_REGISTRY_TOKEN_TTL_DAYS; that applies to tokens issued from then on
+     * and never retroactively.
+     */
+    public static function defaultExpiry(): ?Carbon
+    {
+        $days = (int) config('kontorfix.registry_token_ttl_days', 0);
+
+        return $days > 0 ? now()->addDays($days) : null;
+    }
+
     public static function findByPlainText(string $plain): ?self
     {
-        return static::query()
+        $token = static::query()
             ->where('token_hash', hash('sha256', $plain))
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->first();
+
+        return $token?->ownerIsStillEntitled() ? $token : null;
+    }
+
+    /**
+     * Whether the account behind a personal token still holds the access the token was
+     * issued under. This is checked at resolution time (not only when a membership is
+     * removed) so that no lifecycle path — admin console, API, a direct pivot write or a
+     * future one — can leave a live credential behind for someone who has left.
+     *
+     * The rule:
+     *  - `user_id === null` is an organization-owned token (admin console / API). Its
+     *    lifecycle is the organization's, not a person's, so it is unaffected.
+     *  - a personal token dies with the owner's membership of the token's organization
+     *    (home organization or an additional membership) — a token for an organization
+     *    someone has left cannot be legitimate.
+     *  - a personal *publish* token additionally requires the owner to still administer
+     *    that organization, mirroring RegistryTokenPolicy::create: a token must never
+     *    grant more than its owner could obtain right now, so a maintainer demoted to
+     *    member cannot keep writing. A read token survives a demotion, because reading
+     *    is self-service for every member.
+     *
+     * There is deliberately no "deactivated" case: the schema has no such state. A
+     * deleted account is handled at the source — User::deleting removes the rows, since
+     * the FK is `nullOnDelete` and would otherwise silently promote a personal token
+     * into an ownerless organization token.
+     */
+    public function ownerIsStillEntitled(): bool
+    {
+        if ($this->user_id === null) {
+            return true;
+        }
+
+        $owner = $this->relationLoaded('user') ? $this->user : User::find($this->user_id);
+
+        if ($owner === null || ! $owner->belongsToOrganization($this->organization_id)) {
+            return false;
+        }
+
+        return $this->ability !== TokenAbility::Publish || $owner->administers($this->organization_id);
     }
 }

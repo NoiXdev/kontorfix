@@ -42,6 +42,7 @@ class RegistryTokenController extends Controller
             $request->validated('name'),
             $request->validated('group_id') ? Group::findOrFail($request->validated('group_id')) : null,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            $request->date('expires_at'),
         );
 
         $token->plain_text = $plain;

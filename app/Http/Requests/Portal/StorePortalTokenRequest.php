@@ -28,6 +28,8 @@ class StorePortalTokenRequest extends FormRequest
                 Rule::exists('groups', 'id')->whereIn('organization_id', $this->user()->accessibleOrganizationIds()),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],
+            // Optional lifetime. Omitting it keeps the token open-ended.
+            'expires_at' => ['nullable', 'date', 'after:now'],
         ];
     }
 }

@@ -26,6 +26,9 @@ class StoreAccessTokenRequest extends FormRequest
                 Rule::exists('groups', 'id')->whereIn('organization_id', $this->user()->accessibleOrganizationIds()),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],
+            // Optional lifetime. Omitting it keeps the token open-ended, which is what
+            // every token issued before this existed is.
+            'expires_at' => ['nullable', 'date', 'after:now'],
         ];
     }
 }

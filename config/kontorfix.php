@@ -28,6 +28,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Registry token default lifetime
+    |--------------------------------------------------------------------------
+    |
+    | Default lifetime in days for newly issued registry tokens when the issuer does
+    | not pick an expiry. 0 (the default) means open-ended, which is what every
+    | existing install has today — raising it never touches tokens that already exist,
+    | it only applies to tokens issued from then on.
+    |
+    */
+
+    'registry_token_ttl_days' => (int) env('KONTORFIX_REGISTRY_TOKEN_TTL_DAYS', 0),
+
+    /*
+    |--------------------------------------------------------------------------
     | Upstream cache TTL
     |--------------------------------------------------------------------------
     |

@@ -51,6 +51,7 @@ class TokenController extends Controller
             $request->validated('name'),
             $request->validated('group_id') ? Group::findOrFail($request->validated('group_id')) : null,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            $request->date('expires_at'),
         );
 
         return back()->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");

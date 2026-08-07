@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\UserInvitation;
+use App\Services\RegistryTokenLifecycleService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -19,6 +20,8 @@ use Inertia\Response;
 
 class UserController extends Controller
 {
+    public function __construct(private readonly RegistryTokenLifecycleService $tokenLifecycle) {}
+
     public function index(): Response
     {
         return Inertia::render('admin/users/Index', [
@@ -90,6 +93,10 @@ class UserController extends Controller
 
         $user->update($validated);
 
+        // A changed home organization or role can strip the access a personal registry
+        // token was issued under.
+        $this->tokenLifecycle->revokeUnentitled($user);
+
         return back()->with('success', "Nutzer {$user->name} aktualisiert.");
     }
 
@@ -118,6 +125,9 @@ class UserController extends Controller
     public function detachOrganization(User $user, Organization $organization): RedirectResponse
     {
         $user->organizations()->detach($organization->id);
+
+        // Personal tokens for an organization the user has left are dead credentials.
+        $this->tokenLifecycle->revokeUnentitled($user);
 
         return back()->with('success', 'Organisation entfernt.');
     }

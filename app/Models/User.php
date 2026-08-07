@@ -251,6 +251,29 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
         return $this->hasMany(ApiKey::class);
     }
 
+    /**
+     * Personal registry tokens issued by (and for) this account.
+     *
+     * @return HasMany<RegistryToken, $this>
+     */
+    public function registryTokens(): HasMany
+    {
+        return $this->hasMany(RegistryToken::class);
+    }
+
+    /**
+     * Deleting an account must take its personal registry tokens with it. The FK is
+     * `nullOnDelete`, so without this the row survives with `user_id = null` — silently
+     * promoting a departed person's personal credential into an ownerless organization
+     * token that nobody recognises as stale.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $user) {
+            $user->registryTokens()->delete();
+        });
+    }
+
     public function isRobot(): bool
     {
         return $this->account_type === AccountType::Robot;

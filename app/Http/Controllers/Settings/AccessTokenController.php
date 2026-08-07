@@ -58,7 +58,7 @@ class AccessTokenController extends Controller
             $request->validated('name'),
             $group,
             $ability,
-            null,
+            $request->date('expires_at'),
             $user,
         );
 

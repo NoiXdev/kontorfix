@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\Registry\RegistryTypeService;
+use App\Services\RegistryTokenLifecycleService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -152,6 +153,9 @@ class OrganizationController extends Controller
     public function detachMember(Organization $organization, User $user): RedirectResponse
     {
         $organization->members()->detach($user->id);
+
+        // Personal tokens for an organization the user has left are dead credentials.
+        app(RegistryTokenLifecycleService::class)->revokeUnentitled($user);
 
         return back()->with('success', "{$user->name} entfernt.");
     }

@@ -37,7 +37,7 @@ class TokenController extends Controller
             $request->validated('name'),
             $group,
             $ability,
-            null,
+            $request->date('expires_at'),
             $request->user(),
         );
 
