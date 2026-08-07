@@ -53,6 +53,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 Request::HEADER_X_FORWARDED_PROTO,
         );
 
+        // Global on purpose: the registry, webhook, API and health routes deliberately
+        // live outside the `web` group and would otherwise get no security headers at
+        // all. The middleware itself decides which headers suit which response.
+        $middleware->append(SecurityHeaders::class);
+
         $middleware->web(append: [
             // Runs across the whole web group on purpose — while no user exists, the
             // wizard is the only reachable route. Anything narrower (e.g. only the
@@ -67,7 +72,6 @@ return Application::configure(basePath: dirname(__DIR__))
             // predate it get the hash stored on their next request and are unaffected.
             AuthenticateSession::class,
             HandleInertiaRequests::class,
-            SecurityHeaders::class,
             RejectRobotWebSession::class,
             AddLinkHeadersForPreloadedAssets::class,
         ]);

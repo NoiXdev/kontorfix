@@ -70,8 +70,15 @@ production deployment:
   the proxy (network segmentation).
 - **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
 - **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
-- **`SECURITY_CSP_REPORT_ONLY=true`** — roll out the Content-Security-Policy in report-only
-  mode first, evaluate violations (Inertia/Vite compatibility), then switch to enforcement.
+- **`SECURITY_CSP=report`** — roll out the Content-Security-Policy in report-only mode first,
+  evaluate violations (Inertia/Vite compatibility), then switch to `SECURITY_CSP=enforce`.
+  Default `off`. The legacy `SECURITY_CSP_REPORT_ONLY=true` still selects `report`.
+  The policy is emitted only on HTML documents — JSON/API and registry download responses
+  get the universal headers (`X-Content-Type-Options`, `Referrer-Policy`, HSTS) but no CSP,
+  `X-Frame-Options` or `Permissions-Policy`, none of which mean anything on a tarball.
+  `@routes` (the one inline script in the layout) is nonced, so enforcement does not blank
+  the SPA; the policy allows `fonts.bunny.net` for the webfont stylesheet and `ws:`/`wss:`
+  for Reverb.
 - **`APP_DEBUG=false`** in production.
 
 ### Storage
