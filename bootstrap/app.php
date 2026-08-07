@@ -17,6 +17,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -58,6 +59,13 @@ return Application::configure(basePath: dirname(__DIR__))
             // GET pages) would leave POST /register open, which would both hand the
             // instance to whoever posts first and permanently seal the wizard.
             RequireSetup::class,
+            // Pins every web session to the password hash it was created under. Without
+            // it, changing or resetting the password evicts nobody: a stolen session
+            // cookie keeps working forever (SESSION_LIFETIME slides on every request).
+            // Laravel sorts it into the priority list via the AuthenticatesSessions
+            // contract, so it lands after StartSession and Authenticate. Sessions that
+            // predate it get the hash stored on their next request and are unaffected.
+            AuthenticateSession::class,
             HandleInertiaRequests::class,
             SecurityHeaders::class,
             RejectRobotWebSession::class,
