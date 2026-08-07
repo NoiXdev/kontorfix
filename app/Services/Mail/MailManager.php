@@ -22,9 +22,16 @@ class MailManager
      */
     public function configFor(MailSetting $s): array
     {
-        $config = [
-            'mail.default' => $s->mailer,
-        ];
+        $config = [];
+
+        // Same rule as the sender below: a blank mailer must not override the
+        // .env-configured default. Passing the blank through would put null into
+        // `mail.default`, and Laravel resolves every mailer through that key — so a
+        // single empty column takes down all mail with a TypeError from deep inside
+        // the framework, naming neither this setting nor a way to fix it.
+        if (filled($s->mailer)) {
+            $config['mail.default'] = $s->mailer;
+        }
 
         // Leave the .env-configured sender in place when the setting is blank,
         // otherwise Symfony rejects the message for lack of a From address.

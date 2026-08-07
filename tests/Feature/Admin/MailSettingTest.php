@@ -137,6 +137,35 @@ it('applies the persisted mailer to the running config', function () {
     expect(config('mail.from.address'))->toBe('noreply@acme.test');
 });
 
+it('keeps the configured default mailer when the setting carries no mailer', function () {
+    // A setting without a usable mailer is reachable in practice — a row left behind by
+    // an older schema, or one read before a pending migration has run. Writing that blank
+    // into `mail.default` hands Laravel's own MailManager a null driver name, which it
+    // rejects with a TypeError naming neither this setting nor this app, so every mail in
+    // the instance dies on an error that points nowhere near the cause.
+    config(['mail.default' => 'array']);
+
+    $config = app(MailManager::class)->configFor(new MailSetting);
+
+    expect($config)->not->toHaveKey('mail.default');
+
+    config($config);
+
+    expect(config('mail.default'))->toBe('array');
+});
+
+it('still resolves a mailer after applying a blank persisted mailer', function () {
+    config(['mail.default' => 'array']);
+    // forceFill bypasses the validation that keeps the column populated — the point is
+    // that whatever ends up stored, resolving a mailer must not take mail down.
+    MailSetting::current()->forceFill(['mailer' => ''])->save();
+
+    app(MailManager::class)->apply();
+
+    expect(config('mail.default'))->toBe('array');
+    expect(Mail::mailer())->not->toBeNull();
+});
+
 it('maps the postal setting onto the package config keys', function () {
     MailSetting::current()->update([
         'mailer' => 'postal',
