@@ -27,8 +27,19 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api',
         commands: __DIR__.'/../routes/console.php',
         channels: __DIR__.'/../routes/channels.php',
-        health: '/up',
+        // No `health:` here on purpose. Laravel's built-in /up renders a vendor Blade
+        // that pulls an unpinned @tailwindcss/browser build from jsDelivr (no SRI) plus
+        // a bunny.net stylesheet — third-party script executing on our own origin, where
+        // the XSRF-TOKEN cookie is readable. The Blade cannot be overridden (View::file()
+        // with an absolute path), so we register our own below.
         then: function () {
+            // Container healthcheck (`curl -fsS http://localhost:8080/up`). Registered
+            // statelessly like the routes below, and *before* them: registry.php ends in
+            // a root-level npm packument catch-all that would otherwise swallow /up on a
+            // custom-domain host. The status code is the whole contract — the deeper
+            // dependency checks live behind auth in the status endpoints.
+            Route::get('/up', fn () => response()->json(['status' => 'ok']))->name('health');
+
             // Registry routes are stateless (Composer client sends no cookies/CSRF) —
             // deliberately outside the `web` group, protected only by `registry.auth`.
             Route::group([], base_path('routes/registry.php'));
