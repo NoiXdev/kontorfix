@@ -67,7 +67,9 @@ production deployment:
   ranges. The `X-Forwarded-*` headers are only accepted from these addresses; with too broad
   a configuration the client IP (and thus IP-based rate limits as well as the host in
   generated URLs) could be spoofed. Also make sure the app port is reachable **only** through
-  the proxy (network segmentation).
+  the proxy (network segmentation) — the shipped `docker/compose.yaml` publishes no port on
+  the host for exactly that reason; attach the proxy's network and route to `app:8080`. For a
+  host-local deployment without a proxy, uncomment the loopback `ports:` line instead.
 - **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
 - **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
 - **`SECURITY_CSP=report`** — roll out the Content-Security-Policy in report-only mode first,

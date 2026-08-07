@@ -12,7 +12,19 @@ services:
         VITE_REVERB_HOST: ${REVERB_HOST:-}
         VITE_REVERB_PORT: ${REVERB_PORT:-443}
         VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
-    ports: ['8080:8080']
+    # Deliberately NOT published on the host. The documented deployment (see
+    # docs/development.md, "Deployment & hardening") puts Traefik in front, and Traefik
+    # reaches this service over the Docker network as `app:8080` — publishing the port
+    # as well would expose the app *around* the proxy. Docker installs its own iptables
+    # chain for published ports, which a ufw-style host firewall does not cover, so
+    # "the host is firewalled" is usually not true for them. A request arriving that way
+    # also comes from the Docker gateway, which TRUSTED_PROXIES trusts by default, so an
+    # arbitrary client could spoof X-Forwarded-For/-Host.
+    #
+    # Attach the proxy's network and route to `app:8080` (uncomment the `networks:` at
+    # the bottom of this file). For a host-local deployment without a proxy, publish on
+    # loopback only: ports: ['127.0.0.1:8080:8080']
+    expose: ['8080']
     env_file: .env
     environment:
       CONTAINER_ROLE: app
@@ -55,7 +67,9 @@ services:
     environment:
       CONTAINER_ROLE: reverb
     env_file: .env
-    ports: ['8081:8080']
+    # Same reasoning as the app service: the websocket goes through the proxy too
+    # (`reverb:8080`). Host-local alternative: ports: ['127.0.0.1:8081:8080']
+    expose: ['8080']
     depends_on:
       redis: { condition: service_healthy }
     restart: unless-stopped
@@ -90,3 +104,12 @@ volumes:
   pgdata:
   redisdata:
   artifacts:
+# Attach the reverse proxy's network so it can route to `app:8080` / `reverb:8080`
+# without any port being published on the host. Uncomment and name the proxy network:
+#
+# networks:
+#   default:
+#   proxy:
+#     external: true
+#
+# …then add `networks: [default, proxy]` to the `app` and `reverb` services.
