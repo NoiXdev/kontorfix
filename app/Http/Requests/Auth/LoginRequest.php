@@ -13,6 +13,12 @@ use Illuminate\Validation\ValidationException;
 
 class LoginRequest extends FormRequest
 {
+    /** Failed attempts allowed against one account, across every source address. */
+    private const ACCOUNT_MAX_ATTEMPTS = 20;
+
+    /** Window the account-scoped counter decays over. */
+    private const ACCOUNT_DECAY_SECONDS = 900;
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -52,6 +58,7 @@ class LoginRequest extends FormRequest
 
         if (! Hash::check((string) $this->string('password'), $hash) || ! $user) {
             RateLimiter::hit($this->throttleKey());
+            RateLimiter::hit($this->accountThrottleKey(), self::ACCOUNT_DECAY_SECONDS);
 
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
@@ -59,6 +66,7 @@ class LoginRequest extends FormRequest
         }
 
         RateLimiter::clear($this->throttleKey());
+        RateLimiter::clear($this->accountThrottleKey());
 
         return $user;
     }
@@ -66,24 +74,39 @@ class LoginRequest extends FormRequest
     /**
      * Ensure the login request is not rate limited.
      *
+     * Two counters. The per-address one is the usual burst brake. The account-scoped one
+     * exists because the first key contains the IP: an attacker with a pool of genuinely
+     * distinct source addresses stays under it forever and gets unlimited attempts against
+     * a single account. It is deliberately much looser (20 per 15 minutes, against 5 per
+     * minute) — it has to stay out of the way of a human mistyping their own password,
+     * and because it is keyed on the target account alone, a tight limit here would be an
+     * account-lockout DoS. The same model is already used by the 2FA challenge.
+     *
      * @throws ValidationException
      */
     public function ensureIsNotRateLimited(): void
     {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
-            return;
+        $limits = [
+            [$this->throttleKey(), 5],
+            [$this->accountThrottleKey(), self::ACCOUNT_MAX_ATTEMPTS],
+        ];
+
+        foreach ($limits as [$key, $maxAttempts]) {
+            if (! RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+                continue;
+            }
+
+            event(new Lockout($this));
+
+            $seconds = RateLimiter::availableIn($key);
+
+            throw ValidationException::withMessages([
+                'email' => trans('auth.throttle', [
+                    'seconds' => $seconds,
+                    'minutes' => ceil($seconds / 60),
+                ]),
+            ]);
         }
-
-        event(new Lockout($this));
-
-        $seconds = RateLimiter::availableIn($this->throttleKey());
-
-        throw ValidationException::withMessages([
-            'email' => trans('auth.throttle', [
-                'seconds' => $seconds,
-                'minutes' => ceil($seconds / 60),
-            ]),
-        ]);
     }
 
     /**
@@ -92,5 +115,14 @@ class LoginRequest extends FormRequest
     public function throttleKey(): string
     {
         return Str::transliterate(Str::lower($this->string('email')).'|'.$this->ip());
+    }
+
+    /**
+     * Account-scoped throttle key — carries no IP, so it cannot be reset by moving to a
+     * fresh source address.
+     */
+    public function accountThrottleKey(): string
+    {
+        return Str::transliterate('login-account|'.Str::lower($this->string('email')));
     }
 }
