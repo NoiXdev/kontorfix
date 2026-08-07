@@ -19,9 +19,17 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/password', [PasswordController::class, 'edit'])->name('password.edit');
     Route::put('settings/password', [PasswordController::class, 'update'])->name('password.update');
 
-    Route::get('settings/two-factor', [TwoFactorController::class, 'show'])->name('two-factor.show');
-    Route::post('settings/two-factor/enable', [TwoFactorController::class, 'enable'])->name('two-factor.enable');
-    Route::post('settings/two-factor/confirm', [TwoFactorController::class, 'confirm'])->name('two-factor.confirm');
+    // Enrolling a second factor decides who can log in from now on, so it is gated by
+    // `password.confirm` just like `settings/passkeys` — a stolen session alone must not
+    // be enough to enroll an attacker's authenticator and lock the owner out. `show` is
+    // included because it hands out the plaintext secret and the recovery codes.
+    // `disable` proves the password itself (DisableTwoFactorRequest) and needs no gate.
+    Route::middleware('password.confirm')->group(function () {
+        Route::get('settings/two-factor', [TwoFactorController::class, 'show'])->name('two-factor.show');
+        Route::post('settings/two-factor/enable', [TwoFactorController::class, 'enable'])->name('two-factor.enable');
+        Route::post('settings/two-factor/confirm', [TwoFactorController::class, 'confirm'])->name('two-factor.confirm');
+    });
+
     Route::delete('settings/two-factor', [TwoFactorController::class, 'disable'])->name('two-factor.disable');
 
     Route::get('settings/passkeys', [PasskeyController::class, 'index'])

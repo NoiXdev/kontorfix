@@ -7,8 +7,10 @@ it('runs the full enroll -> logout -> challenge -> login lifecycle', function ()
     $tfa = app(TwoFactorAuthenticator::class);
     $user = User::factory()->create();
 
-    // Set up + confirm
-    $this->actingAs($user)->post('/settings/two-factor/enable');
+    // Set up + confirm. Enrollment sits behind `password.confirm` (see
+    // TwoFactorPasswordConfirmationTest), so the session carries a fresh confirmation.
+    $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])
+        ->post('/settings/two-factor/enable');
     $secret = $user->fresh()->two_factor_secret;
     $this->actingAs($user)->post('/settings/two-factor/confirm', ['code' => $tfa->currentCode($secret)])
         ->assertSessionHasNoErrors();
