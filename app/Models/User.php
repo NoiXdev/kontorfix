@@ -200,6 +200,20 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * Whether the account carries privilege from *any* source: the global super-admin flag,
+     * an admin/maintainer role in the home organization, or an admin/maintainer role on a
+     * per-organization membership. Meant for guards that protect a credential path (such as
+     * federated auto-linking), so it deliberately errs wide — the home-org role column counts
+     * even for an account that currently administers no organization.
+     */
+    public function isPrivileged(): bool
+    {
+        return $this->isSuperAdmin()
+            || in_array($this->role, [UserRole::Admin, UserRole::Maintainer], true)
+            || $this->canAdministerConsole();
+    }
+
+    /**
      * All organization ids the user can see registries of: the home org plus every
      * additional membership. This is the set portal visibility and token scoping
      * are built on.

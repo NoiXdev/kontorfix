@@ -2,6 +2,7 @@
 
 use App\Enums\UserRole;
 use App\Models\OidcProvider;
+use App\Models\Organization;
 use App\Models\User;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Http;
@@ -49,9 +50,46 @@ it('refuses to auto-link a federated identity to a maintainer account by email',
     $this->assertGuest();
 });
 
+it('refuses to auto-link a federated identity to a global super-admin whose home role is member', function () {
+    $superAdmin = User::factory()->create([
+        'email' => 'root@firma.de',
+        'role' => UserRole::Member,
+        'is_super_admin' => true,
+    ]);
+    fakeIdpForRole($this->provider, 'root@firma.de');
+    $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
+
+    $this->get('/auth/oidc/authentik/callback?code=c&state=s')->assertRedirect(route('login'));
+
+    $this->assertGuest();
+    expect($this->provider->identities()->where('user_id', $superAdmin->id)->exists())->toBeFalse();
+});
+
+it('refuses to auto-link a federated identity to an account privileged only in a non-home organization', function () {
+    $user = User::factory()->create(['email' => 'orgadmin@firma.de', 'role' => UserRole::Member]);
+    $user->organizations()->attach(Organization::factory()->create()->id, ['role' => UserRole::Admin->value]);
+    fakeIdpForRole($this->provider, 'orgadmin@firma.de');
+    $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
+
+    $this->get('/auth/oidc/authentik/callback?code=c&state=s')->assertRedirect(route('login'));
+
+    $this->assertGuest();
+    expect($this->provider->identities()->where('user_id', $user->id)->exists())->toBeFalse();
+});
+
 it('still auto-links a regular member account by verified email', function () {
     $member = User::factory()->create(['email' => 'member@firma.de', 'role' => UserRole::Member]);
     fakeIdpForRole($this->provider, 'member@firma.de');
+    $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
+
+    $this->get('/auth/oidc/authentik/callback?code=c&state=s')->assertRedirect(route('dashboard', absolute: false));
+    $this->assertAuthenticatedAs($member);
+});
+
+it('still auto-links a member who holds a non-privileged membership in another organization', function () {
+    $member = User::factory()->create(['email' => 'guest@firma.de', 'role' => UserRole::Member]);
+    $member->organizations()->attach(Organization::factory()->create()->id, ['role' => UserRole::Member->value]);
+    fakeIdpForRole($this->provider, 'guest@firma.de');
     $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
 
     $this->get('/auth/oidc/authentik/callback?code=c&state=s')->assertRedirect(route('dashboard', absolute: false));

@@ -31,11 +31,14 @@ class OidcUserResolver
         if ($email !== '' && $emailVerified) {
             $user = User::where('email', $email)->first();
             if ($user !== null) {
-                // Do NOT automatically link privileged accounts (admin/maintainer) to a
-                // federated identity by email: an IdP that sets email_verified freely could
-                // otherwise take over an admin account. Such accounts must be linked
-                // deliberately (while logged in) — password/2FA/passkey remain their login path.
-                if (in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)) {
+                // Do NOT automatically link a privileged account to a federated identity by
+                // email: an IdP that sets email_verified freely could otherwise take over that
+                // account. Privilege is read from every source (super-admin flag, home-org role,
+                // per-organization membership role) — the home-org role column alone would miss
+                // a super-admin with role=member and an account that is admin elsewhere. Such
+                // accounts must be linked deliberately (while logged in) — password/2FA/passkey
+                // remain their login path.
+                if ($user->isPrivileged()) {
                     throw new RuntimeException('Automatische SSO-Verknüpfung für privilegierte Konten ist nicht erlaubt.');
                 }
 
