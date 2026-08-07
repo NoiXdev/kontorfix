@@ -3,10 +3,20 @@
 namespace App\Services\Upstream;
 
 use App\Models\Upstream;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class UpstreamCache
 {
+    /** Every proxied artifact lives under this prefix on the artifacts disk. */
+    private const PROXY_PREFIX = 'proxy';
+
+    /** Memoised total size of the proxy tree. */
+    private const USAGE_KEY = 'upstream-cache:proxy-bytes';
+
+    /** How long before the total is recounted from the disk. */
+    private const USAGE_TTL = 300;
+
     /**
      * @return array<string, mixed>|null null on miss or expiry
      */
@@ -38,12 +48,77 @@ class UpstreamCache
         return Storage::disk('artifacts')->exists($path);
     }
 
-    public function putArtifact(string $path, string $bytes): void
+    /**
+     * Caches a proxied artifact if it fits the budget, and reports whether it did.
+     *
+     * A false return is not an error: the caller still holds the bytes and serves them.
+     * Declining to cache is the whole point of the limit — refusing to SERVE a package
+     * because the cache is full would turn a disk-space policy into an outage.
+     */
+    public function putArtifact(string $path, string $bytes): bool
     {
+        $size = strlen($bytes);
+
+        $maxArtifact = (int) config('kontorfix.upstream_cache_max_artifact_bytes', 0);
+        if ($maxArtifact > 0 && $size > $maxArtifact) {
+            return false;
+        }
+
+        $budget = (int) config('kontorfix.upstream_cache_max_bytes', 0);
+        if ($budget > 0 && $this->usedBytes() + $size > $budget) {
+            return false;
+        }
+
         // Atomic: staging -> move.
         $disk = Storage::disk('artifacts');
         $staging = $path.'.'.uniqid().'.part';
         $disk->put($staging, $bytes);
         $disk->move($staging, $path);
+
+        Cache::increment(self::USAGE_KEY, $size);
+
+        return true;
+    }
+
+    /**
+     * Deletes proxy artifacts untouched for more than $days, and returns how many went.
+     * This is what brings a cache that has reached its budget back under it; without it
+     * the budget would be a one-way wall the operator could only clear by hand.
+     */
+    public function pruneArtifacts(int $days): int
+    {
+        $disk = Storage::disk('artifacts');
+        $cutoff = now()->subDays($days)->getTimestamp();
+        $deleted = 0;
+
+        foreach ($disk->allFiles(self::PROXY_PREFIX) as $file) {
+            if ($disk->lastModified($file) < $cutoff) {
+                $disk->delete($file);
+                $deleted++;
+            }
+        }
+
+        Cache::forget(self::USAGE_KEY);
+
+        return $deleted;
+    }
+
+    /**
+     * Bytes currently held by the proxy cache. Counting the tree is O(files), so the
+     * total is memoised and kept current by incrementing it on write; the periodic
+     * recount is what makes it self-correcting after a prune or an out-of-band deletion.
+     */
+    public function usedBytes(): int
+    {
+        return (int) Cache::remember(self::USAGE_KEY, self::USAGE_TTL, function (): int {
+            $disk = Storage::disk('artifacts');
+            $total = 0;
+
+            foreach ($disk->allFiles(self::PROXY_PREFIX) as $file) {
+                $total += $disk->size($file);
+            }
+
+            return $total;
+        });
     }
 }

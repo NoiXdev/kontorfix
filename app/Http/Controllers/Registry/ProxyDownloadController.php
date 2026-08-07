@@ -56,7 +56,11 @@ class ProxyDownloadController extends Controller
             $bytes = $this->client->getBytes($up, $originalUrl);
             abort_if($bytes === null, 404);
 
-            $this->cache->putArtifact($path, $bytes);
+            // A refused cache write means the budget is exhausted, not that the package
+            // is unavailable — serve the bytes we already hold.
+            if (! $this->cache->putArtifact($path, $bytes)) {
+                return $this->passThrough($bytes, "{$name}-{$version}.zip", 'application/zip');
+            }
         }
 
         return response()->streamDownload(
@@ -69,6 +73,21 @@ class ProxyDownloadController extends Controller
             },
             "{$name}-{$version}.zip",
             ['Content-Type' => 'application/zip'],
+        );
+    }
+
+    /**
+     * Streams an artifact that was fetched but deliberately not cached. Availability must
+     * not depend on there being room on the disk.
+     */
+    private function passThrough(string $bytes, string $filename, string $contentType): StreamedResponse
+    {
+        return response()->streamDownload(
+            function () use ($bytes) {
+                echo $bytes;
+            },
+            $filename,
+            ['Content-Type' => $contentType],
         );
     }
 
@@ -101,7 +120,9 @@ class ProxyDownloadController extends Controller
             $bytes = $this->client->getBytes($up, $originalUrl);
             abort_if($bytes === null, 404);
 
-            $this->cache->putArtifact($path, $bytes);
+            if (! $this->cache->putArtifact($path, $bytes)) {
+                return $this->passThrough($bytes, $file, 'application/octet-stream');
+            }
         }
 
         return response()->streamDownload(

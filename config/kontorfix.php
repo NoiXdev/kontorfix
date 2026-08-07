@@ -86,6 +86,36 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Upstream artifact cache budget
+    |--------------------------------------------------------------------------
+    |
+    | Proxied upstream artifacts are written to the shared `artifacts` disk, and the
+    | caller freely chooses which package and version to request — so without a bound,
+    | one tenant looping over an upstream's catalogue fills the volume for every tenant
+    | on the instance.
+    |
+    | The budget is instance-wide rather than per tenant, because the disk it protects is
+    | instance-wide: an operator sizes it against the volume, not against a customer. N
+    | per-tenant quotas would still add up to N times the disk.
+    |
+    | Reaching the budget stops the cache from GROWING; it never stops a package from
+    | being served. A proxied download past the limit is streamed straight through from
+    | the upstream, so a full cache costs latency, not availability. Both values are in
+    | bytes; 0 disables that particular limit.
+    |
+    | `upstream_cache_prune_days` drives `upstream-cache:prune`, scheduled daily, which
+    | is how the cache gets back under budget without an operator deleting files by hand.
+    |
+    */
+
+    'upstream_cache_max_bytes' => (int) env('KONTORFIX_UPSTREAM_CACHE_MAX_BYTES', 5 * 1024 * 1024 * 1024),
+
+    'upstream_cache_max_artifact_bytes' => (int) env('KONTORFIX_UPSTREAM_CACHE_MAX_ARTIFACT_BYTES', 100 * 1024 * 1024),
+
+    'upstream_cache_prune_days' => (int) env('KONTORFIX_UPSTREAM_CACHE_PRUNE_DAYS', 30),
+
+    /*
+    |--------------------------------------------------------------------------
     | Incoming webhook secret
     |--------------------------------------------------------------------------
     |
