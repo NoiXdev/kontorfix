@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\AccountType;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -28,7 +28,7 @@ use Spatie\Activitylog\Support\LogOptions;
  * @property int|null $two_factor_last_timestamp
  * @property-read Collection<int, Passkey> $passkeys
  */
-class User extends Authenticatable implements PasskeyUser
+class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, HasUuids, LogsActivity, Notifiable, PasskeyAuthenticatable;
@@ -254,6 +254,18 @@ class User extends Authenticatable implements PasskeyUser
     public function isRobot(): bool
     {
         return $this->account_type === AccountType::Robot;
+    }
+
+    /**
+     * A robot is a service account with no mailbox (RobotController stores a null email),
+     * so it can never complete an email verification. Every creation path already stamps
+     * `email_verified_at`, but short-circuiting here makes the guarantee independent of
+     * that column: a robot is never pushed into the verification flow, whatever the data
+     * says.
+     */
+    public function hasVerifiedEmail(): bool
+    {
+        return $this->isRobot() || parent::hasVerifiedEmail();
     }
 
     public function hasEnabledTwoFactor(): bool
