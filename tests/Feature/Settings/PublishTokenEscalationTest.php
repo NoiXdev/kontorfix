@@ -19,6 +19,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// The self-service credential pages sit behind `password.confirm`; this file is about the
+// role check behind that gate, so every request starts from a confirmed-password session.
+beforeEach(fn () => $this->withSession(['auth.password_confirmed_at' => time()]));
+
 it('forbids a member from minting an org-wide publish token via settings', function () {
     $org = Organization::factory()->create();
     $member = User::factory()->create(['organization_id' => $org->id, 'role' => UserRole::Member]);

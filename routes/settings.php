@@ -40,11 +40,18 @@ Route::middleware('auth')->group(function () {
         return Inertia::render('settings/Appearance');
     })->name('appearance');
 
-    Route::get('settings/tokens', [AccessTokenController::class, 'index'])->name('tokens.index');
-    Route::post('settings/tokens', [AccessTokenController::class, 'store'])->name('tokens.store');
-    Route::delete('settings/tokens/{token}', [AccessTokenController::class, 'destroy'])->name('tokens.destroy');
+    // Registry tokens and API keys are long-lived bearer credentials that outlive the
+    // session they were minted from, so the whole area re-proves the password like
+    // `settings/passkeys` does. Gating the index too (rather than only the POST) is
+    // what makes it usable: the prompt happens on the way into the page, so the create
+    // form is never submitted into a redirect that would discard it.
+    Route::middleware('password.confirm')->group(function () {
+        Route::get('settings/tokens', [AccessTokenController::class, 'index'])->name('tokens.index');
+        Route::post('settings/tokens', [AccessTokenController::class, 'store'])->name('tokens.store');
+        Route::delete('settings/tokens/{token}', [AccessTokenController::class, 'destroy'])->name('tokens.destroy');
 
-    Route::get('settings/api-keys', [ApiKeyController::class, 'index'])->name('api-keys.index');
-    Route::post('settings/api-keys', [ApiKeyController::class, 'store'])->name('api-keys.store');
-    Route::delete('settings/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('api-keys.destroy');
+        Route::get('settings/api-keys', [ApiKeyController::class, 'index'])->name('api-keys.index');
+        Route::post('settings/api-keys', [ApiKeyController::class, 'store'])->name('api-keys.store');
+        Route::delete('settings/api-keys/{apiKey}', [ApiKeyController::class, 'destroy'])->name('api-keys.destroy');
+    });
 });
