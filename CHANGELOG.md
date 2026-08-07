@@ -1,4 +1,20 @@
-## [0.4.0](https://github.com/NoiXdev/kontorfix/compare/v0.3.0...v) (2026-08-06)
+## [0.5.0](https://github.com/NoiXdev/kontorfix/compare/v0.4.0...v) (2026-08-07)
+
+
+### Features
+
+* **packages,upstreams:** editable git source on packages + ([48acde5](https://github.com/NoiXdev/kontorfix/commit/48acde5a69723b4d7d2030b917df2ac24257fcc8))
+* **registry:** git-mirror source mode for npm & Python + ([4964692](https://github.com/NoiXdev/kontorfix/commit/496469255ec2bd87338d8f3885af1f1c5222aaf4))
+* **vcs:** managed git credentials (multi-provider) + ([e69cf99](https://github.com/NoiXdev/kontorfix/commit/e69cf9948c2489014050f0d2b7ef407d583d2632))
+* **vcs:** private git repo sync via access token + ([79db0f9](https://github.com/NoiXdev/kontorfix/commit/79db0f9c7802e439775bc80e42807406c90a3df8))
+
+
+### Bug Fixes
+
+* **ui:** clearer create-dialog hints for publish-based vs ([ec2d9b4](https://github.com/NoiXdev/kontorfix/commit/ec2d9b4ba0f583c63e27125072c87d555501808c))
+* **ui:** enforce probe-first on submit, not just the ([22ded02](https://github.com/NoiXdev/kontorfix/commit/22ded02c27e1ed5b6144960d96b02c82af333934))
+
+## [0.4.0](https://github.com/NoiXdev/kontorfix/compare/v0.3.0...v0.4.0) (2026-08-06)
 
 
 ### Features
