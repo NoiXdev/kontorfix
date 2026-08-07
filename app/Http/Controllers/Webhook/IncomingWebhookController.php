@@ -10,6 +10,7 @@ use App\Services\Webhook\IncomingPayloadParser;
 use App\Services\Webhook\RepoUrlMatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class IncomingWebhookController extends Controller
 {
@@ -35,6 +36,12 @@ class IncomingWebhookController extends Controller
 
         // A per-record endpoint must match the record's provider and be enabled.
         if ($hookId !== null) {
+            // `incoming_webhooks.id` is a Postgres uuid column, so a non-uuid id makes the
+            // driver raise SQLSTATE[22P02] before the 404 below can run — an anonymous,
+            // signature-free 500. The id is not a bound route model here (this group runs
+            // without SubstituteBindings), so its shape is checked by hand.
+            abort_unless(Str::isUuid($hookId), 404);
+
             $hook = IncomingWebhook::find($hookId);
             abort_unless($hook !== null && $hook->provider === $provider && $hook->enabled, 404);
             $secret = $hook->secret;

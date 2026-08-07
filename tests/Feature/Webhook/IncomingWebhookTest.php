@@ -115,3 +115,13 @@ it('returns 422 for a valid signature but unparseable payload', function () {
         ->postJson('/webhooks/github', $payload)->assertStatus(422);
     Queue::assertNothingPushed();
 });
+
+// A05: an unauthenticated, signature-free request could reach a Postgres uuid column with
+// an arbitrary string, throwing SQLSTATE[22P02] before the intended 404 — an unauthenticated
+// 500 (and, with APP_DEBUG on, a query-text disclosure).
+it('returns 404 for a malformed hook id instead of a 500', function () {
+    foreach (['not-a-uuid', '------------------------------------', '1 OR 1=1', str_repeat('x', 200)] as $hookId) {
+        $this->postJson("/webhooks/github/{$hookId}", githubPush('https://github.com/acme/demo.git'))
+            ->assertNotFound();
+    }
+});
