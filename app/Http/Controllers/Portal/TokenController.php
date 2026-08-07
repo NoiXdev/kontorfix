@@ -25,11 +25,18 @@ class TokenController extends Controller
 
         // Tie the token to the target group's organization (which may be an org the
         // user only has additional membership in), falling back to the home org.
+        $organization = $group !== null ? $group->organization : $request->user()->organization;
+        $ability = $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read;
+
+        // A publish token writes into the organization's registries, so it is
+        // admin/maintainer-only — a member may only ever mint a read token.
+        $this->authorize('create', [RegistryToken::class, $organization?->id, $ability]);
+
         [$token, $plain] = RegistryToken::issue(
-            $group !== null ? $group->organization : $request->user()->organization,
+            $organization,
             $request->validated('name'),
             $group,
-            $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            $ability,
             null,
             $request->user(),
         );

@@ -81,6 +81,17 @@ function resetFilters() {
 const page = usePage<SharedData>();
 const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
 
+// Publish tokens are organization write credentials and are admin/maintainer-only on the
+// server (RegistryTokenPolicy::create). Do not offer the option to plain members.
+const abilityOptions = computed(() =>
+    page.props.auth.can?.console
+        ? [
+              { value: 'read', label: 'Lesen' },
+              { value: 'publish', label: 'Veröffentlichen' },
+          ]
+        : [{ value: 'read', label: 'Lesen' }],
+);
+
 const tokenCalloutDismissed = ref(false);
 watch(plainTextToken, (value) => {
     if (value) {
@@ -268,10 +279,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                         <SearchableSelect
                             id="token_ability"
                             v-model="tokenForm.ability"
-                            :options="[
-                                { value: 'read', label: 'Lesen' },
-                                { value: 'publish', label: 'Veröffentlichen' },
-                            ]"
+                            :options="abilityOptions"
                         />
                         <InputError :message="tokenForm.errors.ability" />
                     </div>
