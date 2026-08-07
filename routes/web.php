@@ -6,12 +6,17 @@ use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
 use App\Http\Controllers\SetupController;
 use App\Http\Middleware\EnsureSetupIncomplete;
+use App\Http\Middleware\EnsureSetupTokenPresented;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 // First-run wizard. Sealed off by EnsureSetupIncomplete the moment any user exists,
-// and throttled because it is an unauthenticated account-creating endpoint.
-Route::middleware(EnsureSetupIncomplete::class)->group(function () {
+// gated by EnsureSetupTokenPresented until the setup token has been presented, and
+// throttled because it is an unauthenticated account-creating endpoint. Both gates sit
+// on the group so that anything added here is closed by default; the order matters,
+// because "already set up" (redirect) must stay distinguishable from "token missing"
+// (403).
+Route::middleware([EnsureSetupIncomplete::class, EnsureSetupTokenPresented::class])->group(function () {
     Route::get('setup', [SetupController::class, 'show'])->name('setup.show');
     Route::post('setup', [SetupController::class, 'store'])
         ->middleware('throttle:10,1')->name('setup.store');

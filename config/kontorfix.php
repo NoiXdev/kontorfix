@@ -50,4 +50,24 @@ return [
 
     'incoming_webhook_secret' => env('KONTORFIX_INCOMING_WEBHOOK_SECRET'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | First-run setup
+    |--------------------------------------------------------------------------
+    |
+    | Whether the first-run wizard demands the setup token printed by
+    | `setup:token` at boot. The wizard creates the instance owner without
+    | authentication, so this must fail closed: null means "decide from the
+    | environment", which demands the token everywhere except local development
+    | and the test suite. Set it to false only for a deployment you accept
+    | anyone can claim.
+    |
+    */
+
+    'setup' => [
+        'require_token' => env('KONTORFIX_SETUP_REQUIRE_TOKEN') === null
+            ? null
+            : filter_var(env('KONTORFIX_SETUP_REQUIRE_TOKEN'), FILTER_VALIDATE_BOOL),
+    ],
+
 ];
