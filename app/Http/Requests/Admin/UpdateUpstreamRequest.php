@@ -4,6 +4,8 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageType;
 use App\Enums\UpstreamPolicy;
+use App\Models\Upstream;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,5 +34,49 @@ class UpdateUpstreamRequest extends FormRequest
             'allowed_packages' => ['array'],
             'allowed_packages.*' => ['string', 'max:190'],
         ];
+    }
+
+    /**
+     * The stored mirror credential belongs to the host it was entered for. Moving the
+     * upstream to a different host while keeping that token would hand the secret to the
+     * new host on the next metadata request — a credential nobody can read back through
+     * the application. Rather than clearing it silently (which turns an exfiltration
+     * attempt into an unexplained sync failure), the move is refused: the operator must
+     * supply a token for the new host or drop the old one explicitly.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $upstream = $this->route('upstream');
+            if (! $upstream instanceof Upstream || $upstream->auth_token === null) {
+                return;
+            }
+
+            $keepsToken = ! $this->filled('auth_token') && ! $this->boolean('remove_auth_token');
+            if ($keepsToken && ! $this->sameHost((string) $this->input('url'), (string) $upstream->url)) {
+                $validator->errors()->add(
+                    'auth_token',
+                    'Beim Wechsel des Upstream-Hosts muss der gespeicherte Token neu gesetzt oder entfernt werden.',
+                );
+            }
+        });
+    }
+
+    /**
+     * Host plus port, matching how UpstreamClient decides whether a request still
+     * belongs to the same upstream. The scheme is deliberately ignored so upgrading an
+     * existing upstream from http to https stays frictionless.
+     */
+    private function sameHost(string $a, string $b): bool
+    {
+        return $this->hostKey($a) === $this->hostKey($b);
+    }
+
+    private function hostKey(string $url): string
+    {
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $port = parse_url($url, PHP_URL_PORT);
+
+        return $port !== null ? $host.':'.$port : $host;
     }
 }
