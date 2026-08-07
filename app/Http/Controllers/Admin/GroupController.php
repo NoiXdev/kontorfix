@@ -101,6 +101,11 @@ class GroupController extends Controller
         // one) — always validated to be one the user may administer.
         $organizationId = $this->resolveCreationOrg($request->validated('organization_id'));
 
+        // Packages may only be pulled in from the caller's own reach — never out of
+        // another organization's registry.
+        $packageIds = $request->validated('package_ids', []);
+        $this->assertCanAttachPackages($packageIds);
+
         $group = Group::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
@@ -108,7 +113,7 @@ class GroupController extends Controller
             'portal_enabled' => $request->boolean('portal_enabled'),
             'organization_id' => $organizationId,
         ]);
-        $group->packages()->sync($request->validated('package_ids', []));
+        $group->packages()->sync($packageIds);
 
         return back()->with('success', "Gruppe {$group->name} erstellt.");
     }
@@ -134,6 +139,8 @@ class GroupController extends Controller
             'package_ids' => ['required', 'array', 'min:1'],
             'package_ids.*' => ['uuid', 'exists:packages,id'],
         ]);
+
+        $this->assertCanAttachPackages($data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.
         $group->packages()->syncWithoutDetaching($data['package_ids']);

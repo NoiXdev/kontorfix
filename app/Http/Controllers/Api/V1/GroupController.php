@@ -34,13 +34,17 @@ class GroupController extends Controller
     {
         $organizationId = $this->resolveWriteOrg($request->validated('organization_id'));
 
+        // Never let a registry be seeded with another organization's packages.
+        $packageIds = $request->validated('package_ids', []);
+        $this->assertCanAttachPackages($packageIds);
+
         $group = Group::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
             'public' => $request->boolean('public'),
             'organization_id' => $organizationId,
         ]);
-        $group->packages()->sync($request->validated('package_ids', []));
+        $group->packages()->sync($packageIds);
 
         return (new GroupResource($group))->response()->setStatusCode(201);
     }

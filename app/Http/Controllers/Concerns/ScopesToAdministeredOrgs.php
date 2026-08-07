@@ -90,6 +90,34 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
+     * Aborts 403 unless every submitted package may be attached by the current user.
+     *
+     * Packages carry no organization of their own — they belong to one through the
+     * registries they are attached to. "Attachable" therefore means: already reachable
+     * in the active scope, or not attached anywhere yet (a freshly created package, as
+     * the package picker produces when it creates one inline). A package that lives
+     * only in another organization's registries is refused outright — otherwise
+     * attaching it would hand the caller write access to it via assertCanTouchPackage().
+     *
+     * @param  array<int, string>  $packageIds
+     */
+    protected function assertCanAttachPackages(array $packageIds): void
+    {
+        if ($packageIds === [] || app(OrgScope::class)->spansAllOrganizations()) {
+            return;
+        }
+
+        $orgIds = $this->scopedOrgIds();
+
+        $foreign = Package::whereIn('id', $packageIds)
+            ->whereHas('groups')
+            ->whereDoesntHave('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds))
+            ->exists();
+
+        abort_if($foreign, 403);
+    }
+
+    /**
      * Resolves the organization a newly created object belongs to: the active scope
      * when one is selected, otherwise the explicitly provided id — validated to be one
      * the user may administer.
