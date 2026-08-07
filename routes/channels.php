@@ -3,8 +3,14 @@
 use App\Models\User;
 use Illuminate\Support\Facades\Broadcast;
 
-Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
-    return (int) $user->id === (int) $id;
+/**
+ * Private per-user channel (used by broadcast notifications). Compared as strings:
+ * every model uses UUIDv7 keys, and the scaffolded `(int)` cast — written for
+ * auto-increment ids — stopped at the first non-digit, collapsing every UUID to the
+ * same leading number and authorizing any user for any other user's channel.
+ */
+Broadcast::channel('App.Models.User.{id}', function (User $user, string $id) {
+    return hash_equals((string) $user->getKey(), $id);
 });
 
 /**
