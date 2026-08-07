@@ -42,6 +42,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Git transport and address policy
+    |--------------------------------------------------------------------------
+    |
+    | Applies to every outbound git operation (probe, clone, fetch). The clone URL is
+    | operator-supplied by design, so what is restricted is the transport and the
+    | address, not the repository.
+    |
+    | `allowed_schemes` is an allowlist because git's transport surface is open-ended:
+    | file:// reads the container filesystem, ext:: hands git an arbitrary shell command,
+    | git:// is unauthenticated cleartext. Only widen it deliberately.
+    |
+    | `allowed_hosts` is the escape hatch for a self-hosted git server that genuinely
+    | lives on a private network: hosts listed here (exact, or `*.suffix`) skip the
+    | private/reserved-address check. Empty by default — every other host must resolve
+    | to a public address, exactly as the upstream/OIDC/webhook fetchers already require.
+    |
+    */
+
+    'vcs' => [
+        'allowed_schemes' => array_values(array_filter(array_map(
+            fn (string $scheme): string => strtolower(trim($scheme)),
+            explode(',', (string) env('KONTORFIX_VCS_ALLOWED_SCHEMES', 'https,ssh')),
+        ))),
+
+        'allowed_hosts' => array_values(array_filter(array_map(
+            fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('KONTORFIX_VCS_ALLOWED_HOSTS', '')),
+        ))),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Upstream cache TTL
     |--------------------------------------------------------------------------
     |

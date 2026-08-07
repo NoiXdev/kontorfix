@@ -33,6 +33,14 @@ class GitRepository
 
     public function sync(): void
     {
+        // The only outbound operation on this class — every other method runs inside the
+        // local mirror. Guarding here covers the queued SyncPackage job, packages:resync,
+        // the incoming-webhook trigger and the registry dist path in one place.
+        $rejection = GitUrlSafety::reject($this->url);
+        if ($rejection !== null) {
+            throw new RuntimeException($rejection);
+        }
+
         if (is_dir($this->mirrorPath)) {
             // fetch needs the auth header too (the mirror's stored URL is token-free).
             $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(120)

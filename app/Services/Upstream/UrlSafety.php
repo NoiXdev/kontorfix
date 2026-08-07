@@ -55,11 +55,28 @@ class UrlSafety
             return false;
         }
 
-        $host = self::normalizeHost((string) parse_url((string) $url, PHP_URL_HOST));
-
         // isSafe() has already checked IP literals (including bracketed IPv6).
+        return self::hostIsPublic((string) parse_url((string) $url, PHP_URL_HOST));
+    }
+
+    /**
+     * Whether a bare host — an IP literal (optionally bracketed/zone-suffixed) or a
+     * hostname — points exclusively at public addresses. Hosts that do not resolve pass,
+     * on the same reasoning as isSafeResolving(): there is no internal target to reach.
+     *
+     * Public so callers outside the HTTP path (the git transports, which are neither
+     * http nor https and therefore cannot use isSafe()) share one address policy.
+     */
+    public static function hostIsPublic(string $host): bool
+    {
+        $host = self::normalizeHost($host);
+
+        if ($host === '' || strtolower($host) === 'localhost') {
+            return false;
+        }
+
         if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return true;
+            return self::ipIsPublic($host);
         }
 
         foreach (self::resolveIps($host) as $ip) {

@@ -20,6 +20,14 @@ class RepositoryProbe
      */
     public function probe(PackageType $type, string $url, ?string $token = null, ?GitProvider $provider = null, ?string $username = null): array
     {
+        // Address/transport policy first: nothing may reach git before this. The probe
+        // reports auth-failed / not-found / unreachable distinguishably and returns real
+        // repository metadata, so an unguarded probe is an internal-network oracle.
+        $rejection = GitUrlSafety::reject($url);
+        if ($rejection !== null) {
+            return ['ok' => false, 'error' => $rejection, 'versions' => []];
+        }
+
         $env = GitAuth::env($url, $token, $provider, $username);
 
         // ls-remote confirms reachability + auth without a full clone and lists refs.
