@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
 use Laravel\Passkeys\Contracts\PasskeyUser;
 use Laravel\Passkeys\Passkey;
 use Laravel\Passkeys\Passkeys;
@@ -44,6 +45,30 @@ class AppServiceProvider extends ServiceProvider
         // DB lookup). The fine-grained per-key limiter additionally runs in AuthenticateApiKey.
         RateLimiter::for('api', function (Request $request): Limit {
             return Limit::perMinute(240)->by($request->ip());
+        });
+
+        // The password-reset endpoints are unauthenticated and expensive: Laravel runs the
+        // token lookup inside a 200ms Timebox, so an unlimited endpoint pins every PHP
+        // worker for the price of a curl loop, and it sends mail, so it also mail-bombs any
+        // known address. Two counters, because they stop different attacks:
+        //
+        //  - per source address, for the worker-exhaustion angle. This is the real peer:
+        //    Traefik overwrites X-Forwarded-For and Symfony's trusted-proxy walk strips the
+        //    rest, so the attacker cannot rotate it with a header.
+        //  - per target account, so an attacker with a pool of addresses still cannot flood
+        //    one inbox — the same account-scoped model the 2FA challenge already uses.
+        //
+        // Six per minute matches the throttle already on the 2FA challenge and email
+        // verification; ten per hour and address is far above what a human ever needs
+        // (a user who did not receive the mail retries two or three times) while keeping
+        // the counter per-account rather than global, so one target cannot starve another.
+        RateLimiter::for('password-reset', function (Request $request): array {
+            $email = Str::lower((string) $request->input('email'));
+
+            return [
+                Limit::perMinute(6)->by('password-reset-ip:'.$request->ip()),
+                Limit::perHour(10)->by('password-reset-account:'.$email),
+            ];
         });
 
         // Deliberate security decision (v0.8): a passkey here strictly requires
