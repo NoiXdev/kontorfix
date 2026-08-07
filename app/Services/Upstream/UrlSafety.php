@@ -94,6 +94,13 @@ class UrlSafety
             return false;
         }
 
+        // filter_var's IPv4 reserved set has holes; close the ones that can address a
+        // real neighbour on the deployment network. Verified empirically to pass the
+        // filter_var check above on PHP 8.4/8.5.
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false && ! self::ipv4IsPublic($ip)) {
+            return false;
+        }
+
         // Explicit IPv6 addition: older PHP versions only cover these ranges
         // patchily with FILTER_FLAG_NO_RES_RANGE. Belt and suspenders.
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
@@ -116,6 +123,40 @@ class UrlSafety
 
             // fe80::/10 (Link-Local)
             if ($first === 0xFE && (ord($packed[1]) & 0xC0) === 0x80) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * IPv4 ranges that FILTER_FLAG_NO_PRIV_RANGE|NO_RES_RANGE lets through even though
+     * they are not globally routable unicast, and each of which can name a neighbour on
+     * a real deployment network:
+     *   - 100.64.0.0/10   shared address space / CGNAT (Tailscale, several managed CNIs)
+     *   - 198.18.0.0/15   benchmarking
+     *   - 224.0.0.0/4     multicast
+     *   - 192.0.0.0/24    IETF protocol assignments
+     */
+    private static function ipv4IsPublic(string $ip): bool
+    {
+        $long = ip2long($ip);
+        if ($long === false) {
+            return false;
+        }
+
+        // [network, prefix length] pairs, compared on the masked address.
+        $blocked = [
+            ['100.64.0.0', 10],
+            ['198.18.0.0', 15],
+            ['224.0.0.0', 4],
+            ['192.0.0.0', 24],
+        ];
+
+        foreach ($blocked as [$network, $bits]) {
+            $mask = -1 << (32 - $bits);
+            if ((($long & $mask) & 0xFFFFFFFF) === ((int) ip2long($network) & $mask & 0xFFFFFFFF)) {
                 return false;
             }
         }
