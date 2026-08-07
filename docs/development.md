@@ -83,6 +83,12 @@ production deployment:
   for Reverb.
 - **`APP_DEBUG=false`** in production.
 
+The application's own knobs (`KONTORFIX_*`, see `config/kontorfix.php`) are listed with
+their defaults in `.env.example` and `docker/.env.example`. Two of them fail closed and are
+worth reading before a rollout: **`KONTORFIX_VCS_ALLOWED_HOSTS`** (a git server on a private
+network must be named here or its syncs fail) and **`KONTORFIX_SETUP_REQUIRE_TOKEN`** (leave
+unset — an empty value parses as false and opens the first-run wizard).
+
 The container runs as **`www-data` (uid 33)**, not root. Everything the app writes
 (`storage`, `bootstrap/cache`, Caddy's `/data` and `/config`) is owned by that user in the
 image, and a freshly created `artifacts` volume inherits the ownership from it.
