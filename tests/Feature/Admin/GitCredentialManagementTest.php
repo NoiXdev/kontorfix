@@ -51,15 +51,34 @@ it('keeps the token on update when left blank and replaces it when provided', fu
     $cred = GitCredential::factory()->for($org)->create(['token' => 'old-token']);
 
     $this->actingAs(credAdmin($org))->put("/admin/git-credentials/{$cred->id}", [
-        'name' => 'renamed', 'provider' => 'gitlab', 'token' => '',
+        'name' => 'renamed', 'provider' => 'github', 'token' => '',
     ])->assertRedirect();
     expect($cred->fresh()->token)->toBe('old-token')
-        ->and($cred->fresh()->provider)->toBe(GitProvider::GitLab);
+        ->and($cred->fresh()->name)->toBe('renamed');
 
     $this->actingAs(credAdmin($org))->put("/admin/git-credentials/{$cred->id}", [
-        'name' => 'renamed', 'provider' => 'gitlab', 'token' => 'new-token',
+        'name' => 'renamed', 'provider' => 'github', 'token' => 'new-token',
     ])->assertRedirect();
     expect($cred->fresh()->token)->toBe('new-token');
+});
+
+it('refuses to move a credential to another host while keeping the stored token', function () {
+    $org = Organization::factory()->create();
+    $cred = GitCredential::factory()->for($org)->create(['provider' => GitProvider::GitHub, 'token' => 'old-token']);
+
+    // Switching the provider (and thus the host) would send the GitHub token to gitlab.com.
+    $this->actingAs(credAdmin($org))->put("/admin/git-credentials/{$cred->id}", [
+        'name' => 'moved', 'provider' => 'gitlab', 'token' => '',
+    ])->assertSessionHasErrors('host');
+    expect($cred->fresh()->provider)->toBe(GitProvider::GitHub);
+
+    // Supplying a token for the new host is the legitimate way to move it.
+    $this->actingAs(credAdmin($org))->put("/admin/git-credentials/{$cred->id}", [
+        'name' => 'moved', 'provider' => 'gitlab', 'token' => 'glpat-new',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($cred->fresh()->provider)->toBe(GitProvider::GitLab)
+        ->and($cred->fresh()->token)->toBe('glpat-new')
+        ->and($cred->fresh()->allowedHost())->toBe('gitlab.com');
 });
 
 it('tests a credential against a repository via ls-remote', function () {

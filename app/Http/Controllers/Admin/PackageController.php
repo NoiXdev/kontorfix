@@ -22,6 +22,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -149,6 +150,10 @@ class PackageController extends Controller
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::find($data['git_credential_id']);
             if ($credential !== null && Auth::user()?->administers($credential->organization_id)) {
+                // A stored token is bound to one host — refuse loudly rather than probe an
+                // unrelated host with someone else's credential.
+                $this->assertCredentialPermits($credential, $data['repository_url']);
+
                 $token = $credential->token;
                 $provider = $credential->provider;
                 $username = $credential->username;
@@ -169,10 +174,12 @@ class PackageController extends Controller
             $this->assertAdministersGroup(Group::findOrFail($groupId));
         }
 
-        // A referenced credential must belong to an organization the user administers.
+        // A referenced credential must belong to an organization the user administers,
+        // and may only be paired with a repository on the host it is bound to.
         if ($request->filled('git_credential_id')) {
             $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
             $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialPermits($credential, $request->validated('repository_url'));
         }
 
         // The source mode is authoritative (Composer is always git; npm/Python honour the
@@ -213,12 +220,28 @@ class PackageController extends Controller
             'remove_token' => ['sometimes', 'boolean'],
         ]);
 
+        $url = $data['repository_url'] ?? $package->repository_url;
+
         if (! empty($data['git_credential_id'])) {
-            $this->assertAdministersOrg(GitCredential::findOrFail($data['git_credential_id'])->organization_id);
+            $credential = GitCredential::findOrFail($data['git_credential_id']);
+            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialPermits($credential, $url);
+        }
+
+        // Moving the repository to another host while silently keeping the stored inline
+        // token would ship that token to the new host on the next sync. The operator must
+        // supply a token for the new host or drop the old one explicitly.
+        $keepsInlineToken = $package->repository_token !== null
+            && empty($data['repository_token'])
+            && empty($data['remove_token']);
+        if ($keepsInlineToken && ! $this->sameHost($url, $package->repository_url)) {
+            throw ValidationException::withMessages([
+                'repository_url' => 'Beim Wechsel des Repository-Hosts muss der gespeicherte Token neu gesetzt oder entfernt werden.',
+            ]);
         }
 
         $update = [
-            'repository_url' => $data['repository_url'] ?? $package->repository_url,
+            'repository_url' => $url,
             // An absent/empty credential clears the assignment.
             'git_credential_id' => $data['git_credential_id'] ?? null,
         ];
@@ -245,5 +268,24 @@ class PackageController extends Controller
         $package->delete();
 
         return back()->with('success', 'Paket gelöscht.');
+    }
+
+    /**
+     * A stored git token is bound to exactly one host — pairing it with a repository
+     * elsewhere would transmit the secret to that host as an Authorization header.
+     */
+    private function assertCredentialPermits(GitCredential $credential, ?string $url): void
+    {
+        if (! $credential->permits($url)) {
+            throw ValidationException::withMessages([
+                'repository_url' => $credential->hostMismatchMessage(),
+            ]);
+        }
+    }
+
+    private function sameHost(?string $a, ?string $b): bool
+    {
+        return strtolower((string) parse_url((string) $a, PHP_URL_HOST))
+            === strtolower((string) parse_url((string) $b, PHP_URL_HOST));
     }
 }

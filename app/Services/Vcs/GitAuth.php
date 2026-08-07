@@ -12,6 +12,11 @@ use App\Enums\GitProvider;
  * The token is passed as an HTTP Authorization header via git's environment-based config
  * (GIT_CONFIG_*), NOT on the command line and NOT baked into the clone URL — so it never
  * lands in `ps` output nor in the mirror's stored `.git/config`.
+ *
+ * The header is bound to the origin of the repository URL (`http.<origin>.extraHeader`),
+ * never configured globally: a global `http.extraHeader` would attach the credential to
+ * every host git contacts, so an operator-supplied repository URL pointing at a host they
+ * control would receive the stored token in cleartext.
  */
 class GitAuth
 {
@@ -27,6 +32,13 @@ class GitAuth
             return [];
         }
 
+        // Without a resolvable origin the header could not be bound to one — refuse
+        // rather than fall back to a global (leaking) configuration.
+        $origin = self::origin($url);
+        if ($origin === null) {
+            return [];
+        }
+
         // Username per provider convention (overridable by a stored credential's username).
         $user = $username !== null && $username !== ''
             ? $username
@@ -35,12 +47,39 @@ class GitAuth
         $header = 'Authorization: Basic '.base64_encode($user.':'.$token);
 
         return [
-            'GIT_CONFIG_COUNT' => '1',
-            'GIT_CONFIG_KEY_0' => 'http.extraHeader',
+            'GIT_CONFIG_COUNT' => '2',
+            // URL-scoped, so git only attaches the credential to this exact origin.
+            'GIT_CONFIG_KEY_0' => 'http.'.$origin.'.extraHeader',
             'GIT_CONFIG_VALUE_0' => $header,
+            // A redirect would carry the header to the redirect target, which the origin
+            // scoping cannot cover — so authenticated requests never follow redirects.
+            'GIT_CONFIG_KEY_1' => 'http.followRedirects',
+            'GIT_CONFIG_VALUE_1' => 'false',
             // Never prompt for credentials — fail fast instead of hanging on a bad token.
             'GIT_TERMINAL_PROMPT' => '0',
         ];
+    }
+
+    /**
+     * The scheme://host[:port] the credential is allowed to reach, normalised the way git
+     * matches `http.<url>.*` subsections: lowercase scheme and host, no userinfo, no path.
+     * Returns null when the URL has no host to bind to.
+     */
+    private static function origin(string $url): ?string
+    {
+        $parts = parse_url($url);
+        if ($parts === false || ! isset($parts['host']) || $parts['host'] === '') {
+            return null;
+        }
+
+        $scheme = strtolower($parts['scheme'] ?? 'https');
+        $origin = $scheme.'://'.strtolower($parts['host']);
+
+        if (isset($parts['port'])) {
+            $origin .= ':'.$parts['port'];
+        }
+
+        return $origin;
     }
 
     /**

@@ -129,6 +129,12 @@ class Package extends Model
     {
         $credential = $this->gitCredential;
         if ($credential !== null) {
+            // Last line of defence: a credential is bound to one host, so a repository URL
+            // that no longer matches gets no token rather than leaking it to that host.
+            if (! $credential->permits($this->repository_url)) {
+                return ['token' => null, 'provider' => $credential->provider, 'username' => $credential->username];
+            }
+
             $credential->forceFill(['last_used_at' => now()])->saveQuietly();
 
             return ['token' => $credential->token, 'provider' => $credential->provider, 'username' => $credential->username];

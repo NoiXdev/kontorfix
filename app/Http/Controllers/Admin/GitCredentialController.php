@@ -13,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -35,6 +36,7 @@ class GitCredentialController extends Controller
                     'id' => $c->id,
                     'name' => $c->name,
                     'provider' => $c->provider->value,
+                    'host' => $c->allowedHost(),
                     'username' => $c->username,
                     'organization' => $c->organization?->name,
                     'organization_id' => $c->organization_id,
@@ -52,6 +54,7 @@ class GitCredentialController extends Controller
             'name' => ['required', 'string', 'max:190'],
             'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'provider' => ['required', Rule::enum(GitProvider::class)],
+            'host' => $this->hostRules($request),
             'username' => ['nullable', 'string', 'max:190'],
             'token' => ['required', 'string', 'max:500'],
         ]);
@@ -60,6 +63,7 @@ class GitCredentialController extends Controller
             'organization_id' => $this->resolveCreationOrg($data['organization_id'] ?? null),
             'name' => $data['name'],
             'provider' => $data['provider'],
+            'host' => $this->resolveHost($data),
             'username' => $data['username'] ?? null,
             'token' => $data['token'],
         ]);
@@ -74,14 +78,26 @@ class GitCredentialController extends Controller
         $data = $request->validate([
             'name' => ['required', 'string', 'max:190'],
             'provider' => ['required', Rule::enum(GitProvider::class)],
+            'host' => $this->hostRules($request),
             'username' => ['nullable', 'string', 'max:190'],
             // Blank = keep the existing token.
             'token' => ['nullable', 'string', 'max:500'],
         ]);
 
+        // Retargeting a credential at a different host while keeping the stored token
+        // would hand that token to the new host — the secret must be re-entered, which
+        // only someone who already knows it can do.
+        $host = $this->resolveHost($data);
+        if ($host !== $gitCredential->allowedHost() && empty($data['token'])) {
+            throw ValidationException::withMessages([
+                'host' => 'Beim Wechsel des Hosts muss der Token neu eingegeben werden.',
+            ]);
+        }
+
         $gitCredential->fill([
             'name' => $data['name'],
             'provider' => $data['provider'],
+            'host' => $host,
             'username' => $data['username'] ?? null,
         ]);
         if (! empty($data['token'])) {
@@ -110,6 +126,13 @@ class GitCredentialController extends Controller
             'repository_url' => ['required', 'string', 'max:500', 'url:https', 'starts_with:https://'],
         ]);
 
+        // The token may only ever be sent to the host the credential is bound to.
+        if (! $gitCredential->permits($data['repository_url'])) {
+            throw ValidationException::withMessages([
+                'repository_url' => $gitCredential->hostMismatchMessage(),
+            ]);
+        }
+
         $result = $probe->probe(
             PackageType::Composer,
             $data['repository_url'],
@@ -119,5 +142,28 @@ class GitCredentialController extends Controller
         );
 
         return response()->json(['ok' => $result['ok'], 'error' => $result['error'] ?? null]);
+    }
+
+    /**
+     * A self-hosted ("generic") credential has no canonical host, so it must name one;
+     * for the known providers the host defaults to that provider's own.
+     *
+     * @return array<int, string>
+     */
+    private function hostRules(Request $request): array
+    {
+        $required = GitProvider::tryFrom((string) $request->input('provider')) === GitProvider::Generic;
+
+        return [$required ? 'required' : 'nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9._-]+$/'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveHost(array $data): ?string
+    {
+        $host = strtolower(trim((string) ($data['host'] ?? '')));
+
+        return $host !== '' ? $host : GitProvider::from((string) $data['provider'])->defaultHost();
     }
 }

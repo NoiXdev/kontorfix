@@ -39,13 +39,29 @@ enum GitProvider: string
     }
 
     /**
-     * @return list<array{value:string, label:string}>
+     * The canonical host a credential for this provider may authenticate against. Null
+     * for self-hosted installations, where the host must be stored explicitly — a token
+     * must never be transmitted to a host it was not issued for.
+     */
+    public function defaultHost(): ?string
+    {
+        return match ($this) {
+            self::GitHub => 'github.com',
+            self::GitLab => 'gitlab.com',
+            self::Bitbucket => 'bitbucket.org',
+            self::Generic => null,
+        };
+    }
+
+    /**
+     * @return list<array{value:string, label:string, default_host:string|null}>
      */
     public static function metadata(): array
     {
         return array_map(fn (self $p): array => [
             'value' => $p->value,
             'label' => $p->label(),
+            'default_host' => $p->defaultHost(),
         ], self::cases());
     }
 }
