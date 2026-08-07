@@ -7,11 +7,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Http\Resources\Api\PackageResource;
 use App\Jobs\SyncPackage;
+use App\Models\GitCredential;
 use App\Models\Group;
 use App\Models\Package;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Validation\ValidationException;
 
 class PackageController extends Controller
 {
@@ -45,6 +47,22 @@ class PackageController extends Controller
         $groupIds = $request->validated('group_ids', []);
         foreach ($groupIds as $groupId) {
             $this->assertCanWriteGroup(Group::findOrFail($groupId));
+        }
+
+        // A git credential is an organization-owned secret: referencing a foreign one
+        // would make the sync send that organization's decrypted token to the submitted
+        // repository host. Mirrors the check on the admin surface.
+        if ($request->filled('git_credential_id')) {
+            $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
+            $this->assertCanWriteOrg($credential->organization_id);
+
+            // …and it is bound to one host, so it may not be paired with a repository
+            // anywhere else (see GitCredential::permits).
+            if (! $credential->permits($request->validated('repository_url'))) {
+                throw ValidationException::withMessages([
+                    'repository_url' => $credential->hostMismatchMessage(),
+                ]);
+            }
         }
 
         $package = Package::create($request->safe()->except('group_ids'));

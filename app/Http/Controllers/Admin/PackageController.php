@@ -20,7 +20,6 @@ use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -148,16 +147,16 @@ class PackageController extends Controller
         $provider = null;
         $username = null;
         if (! empty($data['git_credential_id'])) {
-            $credential = GitCredential::find($data['git_credential_id']);
-            if ($credential !== null && Auth::user()?->administers($credential->organization_id)) {
-                // A stored token is bound to one host — refuse loudly rather than probe an
-                // unrelated host with someone else's credential.
-                $this->assertCredentialPermits($credential, $data['repository_url']);
+            $credential = GitCredential::findOrFail($data['git_credential_id']);
+            // Refuse loudly rather than silently probing without the credential: a
+            // reference to a foreign organization's secret is never a legitimate request.
+            $this->assertAdministersOrg($credential->organization_id);
+            // A stored token is bound to one host and may not be probed against another.
+            $this->assertCredentialPermits($credential, $data['repository_url']);
 
-                $token = $credential->token;
-                $provider = $credential->provider;
-                $username = $credential->username;
-            }
+            $token = $credential->token;
+            $provider = $credential->provider;
+            $username = $credential->username;
         }
 
         $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $token, $provider, $username);
