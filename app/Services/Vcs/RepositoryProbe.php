@@ -23,8 +23,12 @@ class RepositoryProbe
         $env = GitAuth::env($url, $token, $provider, $username);
 
         // ls-remote confirms reachability + auth without a full clone and lists refs.
+        // No positional ref pattern: a trailing "HEAD" would restrict the output to HEAD
+        // and suppress every tag (so `versions` was always empty) and the symref line
+        // (so the default branch was never detected). `--symref` still prints the HEAD
+        // symref among the full ref list.
         $ls = Process::env($env)->timeout(30)->run([
-            'git', 'ls-remote', '--tags', '--symref', '--end-of-options', $url, 'HEAD',
+            'git', 'ls-remote', '--symref', '--end-of-options', $url,
         ]);
 
         if (! $ls->successful()) {
