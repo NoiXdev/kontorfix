@@ -81,6 +81,18 @@ production deployment:
   for Reverb.
 - **`APP_DEBUG=false`** in production.
 
+The container runs as **`www-data` (uid 33)**, not root. Everything the app writes
+(`storage`, `bootstrap/cache`, Caddy's `/data` and `/config`) is owned by that user in the
+image, and a freshly created `artifacts` volume inherits the ownership from it.
+
+> **Upgrading an existing deployment:** a volume created while the container still ran as
+> root keeps its root-owned directories, and uploads/proxy caching will fail with
+> "Permission denied". Chown it once, then start normally:
+>
+> ```bash
+> docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data
+> ```
+
 ### Storage
 
 The artifact storage (`local` or S3/MinIO) is configured by the operator admin and is treated
