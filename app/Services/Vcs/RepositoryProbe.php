@@ -81,7 +81,7 @@ class RepositoryProbe
     private function readManifest(PackageType $type, string $url, ?string $branch, array $env = []): array
     {
         // Manifest filename comes from the type enum (the single source of truth).
-        $manifest = $type->manifestFile() ?? 'composer.json';
+        $manifest = $type->manifestFile();
         $dir = rtrim(sys_get_temp_dir(), '/').'/kfx-probe-'.Str::random(12);
 
         try {
@@ -100,21 +100,52 @@ class RepositoryProbe
                 return [null, null];
             }
 
-            /** @var array<string,mixed>|null $json */
-            $json = json_decode($show->output(), true);
-            if (! is_array($json)) {
-                return [null, null];
-            }
-
-            $name = isset($json['name']) && is_string($json['name']) ? $json['name'] : null;
-            $description = isset($json['description']) && is_string($json['description']) ? $json['description'] : null;
-
-            return [$name, $description];
+            // Composer/npm manifests are JSON; Python's pyproject.toml is TOML.
+            return $type === PackageType::Python
+                ? $this->parsePyproject($show->output())
+                : $this->parseJsonManifest($show->output());
         } catch (Throwable) {
             return [null, null];
         } finally {
             $this->deleteDir($dir);
         }
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null} [name, description]
+     */
+    private function parseJsonManifest(string $raw): array
+    {
+        /** @var array<string,mixed>|null $json */
+        $json = json_decode($raw, true);
+        if (! is_array($json)) {
+            return [null, null];
+        }
+
+        $name = isset($json['name']) && is_string($json['name']) ? $json['name'] : null;
+        $description = isset($json['description']) && is_string($json['description']) ? $json['description'] : null;
+
+        return [$name, $description];
+    }
+
+    /**
+     * Lightweight pyproject.toml reader: extract `name`/`description` without a full TOML
+     * parser. Matches both PEP 621 (`[project]`) and Poetry (`[tool.poetry]`) layouts, which
+     * both declare a top-level `name = "..."` / `description = "..."`.
+     *
+     * @return array{0: string|null, 1: string|null} [name, description]
+     */
+    private function parsePyproject(string $raw): array
+    {
+        $extract = static function (string $key) use ($raw): ?string {
+            if (preg_match('/(?:^|\n)[ \t]*'.$key.'[ \t]*=[ \t]*["\']([^"\']+)["\']/', $raw, $m) === 1) {
+                return trim($m[1]);
+            }
+
+            return null;
+        };
+
+        return [$extract('name'), $extract('description')];
     }
 
     private function readableGitError(string $stderr): string

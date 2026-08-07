@@ -37,13 +37,13 @@ enum PackageType: string
         };
     }
 
-    /** The manifest file read from a git repo to discover name/description (null = none). */
-    public function manifestFile(): ?string
+    /** The manifest file read from a git repo to discover name/description. */
+    public function manifestFile(): string
     {
         return match ($this) {
             self::Composer => 'composer.json',
             self::Npm => 'package.json',
-            self::Python => null,
+            self::Python => 'pyproject.toml',
         };
     }
 

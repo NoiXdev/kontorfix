@@ -39,6 +39,22 @@ it('previews a reachable repository with discovered name and versions', function
         ->assertJsonPath('versions', ['v1.1.0', 'v1.0.0']);
 });
 
+it('discovers the project name from a python pyproject.toml', function () {
+    Process::fake([
+        '*ls-remote*' => Process::result("ref: refs/heads/main\tHEAD\ndeadbeef\trefs/tags/v1.0.0\n"),
+        '*clone*' => Process::result(''),
+        '*show*' => Process::result("[project]\nname = \"acme-lib\"\ndescription = \"A handy lib\"\nversion = \"1.0.0\"\n"),
+    ]);
+
+    $this->actingAs(probeAdmin())->postJson('/admin/packages/probe', [
+        'type' => 'python',
+        'repository_url' => 'https://github.com/acme/lib.git',
+    ])->assertOk()
+        ->assertJsonPath('ok', true)
+        ->assertJsonPath('name', 'acme-lib')
+        ->assertJsonPath('description', 'A handy lib');
+});
+
 it('reports an unreachable repository', function () {
     Process::fake([
         'git ls-remote*' => Process::result(output: '', errorOutput: 'fatal: Could not resolve host: nope.invalid', exitCode: 128),
