@@ -13,6 +13,7 @@ use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
+use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Vcs\RepositoryProbe;
@@ -213,7 +214,7 @@ class PackageController extends Controller
         $this->assertCanTouchPackage($package);
 
         $data = $request->validate([
-            'repository_url' => ['nullable', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_url' => ['nullable', 'string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],

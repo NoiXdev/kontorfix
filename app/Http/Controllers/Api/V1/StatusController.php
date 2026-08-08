@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Models\Package;
 use App\Services\Health\HealthService;
+use App\Support\CredentialUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -52,7 +53,7 @@ class StatusController extends Controller
                 'name' => $p->name,
                 'type' => $p->type->value,
                 'error' => $p->sync_error,
-                'repository_url' => $p->repository_url,
+                'repository_url' => CredentialUrl::redact($p->repository_url),
                 'synced_at' => $p->synced_at?->toIso8601String(),
             ]);
 

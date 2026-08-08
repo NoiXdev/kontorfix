@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
+use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Registry\RegistryTypeService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -33,7 +34,7 @@ class StorePackageRequest extends FormRequest
         $repositoryRequired = $this->effectiveSourceMode($type) === PackageSourceMode::Git;
         $repositoryRule = array_merge(
             [$repositoryRequired ? 'required' : 'nullable'],
-            ['string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            ['string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
         );
 
         return [

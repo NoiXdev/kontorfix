@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Api;
 
 use App\Models\Package;
+use App\Support\CredentialUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -17,7 +18,10 @@ class PackageResource extends JsonResource
             'type' => $this->type->value,
             'name' => $this->name,
             'description' => $this->description,
-            'repository_url' => $this->repository_url,
+            // A git PAT is commonly written as userinfo instead of into the dedicated,
+            // encrypted `repository_token`. This endpoint is member-tier (scopePackageRead
+            // is membership, not administration), so the credential is withheld here.
+            'repository_url' => CredentialUrl::redact($this->repository_url),
             'sync_status' => $this->sync_status->value,
             'sync_error' => $this->sync_error,
             'synced_at' => $this->synced_at?->toIso8601String(),
