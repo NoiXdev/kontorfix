@@ -61,6 +61,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Interactive API browser
+    |--------------------------------------------------------------------------
+    |
+    | Whether `GET /docs/api` (and `GET /docs/api.json`) are registered at all.
+    |
+    | The browser is rendered from a vendor view that pulls Stoplight Elements from
+    | unpkg.com and executes it on this origin without subresource integrity, and
+    | its only permitted visitors are admins of the operator organization. Set this
+    | to false on an instance that does not need it: the supply-chain and privacy
+    | dependency on a third-party CDN then disappears with the route.
+    |
+    */
+
+    'api_docs_enabled' => filter_var(env('KONTORFIX_API_DOCS_ENABLED', true), FILTER_VALIDATE_BOOL),
+
+    /*
+    |--------------------------------------------------------------------------
     | Git transport and address policy
     |--------------------------------------------------------------------------
     |

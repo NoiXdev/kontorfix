@@ -38,6 +38,21 @@ class AppServiceProvider extends ServiceProvider
         // resolver through the container instead of a public static setter that
         // production code could also reach.
         $this->app->singleton(HostResolver::class, SystemHostResolver::class);
+
+        // The interactive API browser is a vendor view that loads Stoplight Elements from
+        // unpkg.com and runs it on this origin, un-SRI'd, with a `credentials: include`
+        // fetch wrapper already built in — and every visitor is by definition an admin of
+        // the operator organization. Whoever controls that delivery therefore executes
+        // script in the highest-privilege session on the instance.
+        //
+        // Scramble registers `docs/api` and `docs/api.json` unconditionally, so until now
+        // there was no way to decline that dependency at all. The default is unchanged
+        // (the browser stays on); an operator who does not need it can now switch it off
+        // and keep only the machine-readable spec they generate themselves. This must run
+        // in register(): ScrambleServiceProvider reads the flag in its own boot().
+        if (! (bool) config('kontorfix.api_docs_enabled', true)) {
+            Scramble::ignoreDefaultRoutes();
+        }
     }
 
     /**
