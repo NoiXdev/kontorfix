@@ -89,3 +89,101 @@ it('protects a real hook audit trail through the http endpoint', function () {
 
     expect(IncomingWebhookEvent::where('signature_valid', true)->count())->toBe(1);
 });
+
+// The partition was global across hooks, which left the URL of *any* hook a lever against
+// every other hook's evidence — and the rejected cap being the smaller of the two made it
+// cheap. The property: a flood against one hook cannot erase the record of a real event
+// on another.
+
+function recordFor(?IncomingWebhook $hook, bool $valid): IncomingWebhookEvent
+{
+    return IncomingWebhookEvent::record([
+        'incoming_webhook_id' => $hook?->id,
+        'provider' => 'github',
+        'repo_url' => $valid ? 'https://github.com/acme/demo.git' : null,
+        'signature_valid' => $valid,
+        'matched_packages' => 0,
+        'status_code' => $valid ? 200 : 401,
+        'ip' => '203.0.113.9',
+        'payload' => ['x' => 1],
+    ]);
+}
+
+function makeHook(string $name): IncomingWebhook
+{
+    return IncomingWebhook::create(['name' => $name, 'provider' => 'github', 'enabled' => true, 'secret' => 'topsecret-'.$name]);
+}
+
+it('does not let a flood against one hook evict another hook rejected records', function () {
+    $victim = makeHook('victim');
+    $target = makeHook('target');
+
+    // The victim's own evidence: someone tried an unsigned delivery against their hook.
+    $evidence = recordFor($victim, false);
+
+    // A flood against a different hook, far past the rejected cap.
+    foreach (range(1, IncomingWebhookEvent::REJECTED_RETENTION * 3) as $ignored) {
+        recordFor($target, false);
+    }
+
+    expect(IncomingWebhookEvent::find($evidence->id))->not->toBeNull()
+        ->and(IncomingWebhookEvent::where('incoming_webhook_id', $victim->id)->count())->toBe(1);
+});
+
+it('does not let a flood against one hook evict another hook verified deliveries', function () {
+    $victim = makeHook('victim');
+    $target = makeHook('target');
+
+    $delivered = collect(range(1, 5))->map(fn () => recordFor($victim, true));
+
+    foreach (range(1, IncomingWebhookEvent::RETENTION * 2) as $ignored) {
+        recordFor($target, false);
+    }
+    foreach (range(1, IncomingWebhookEvent::RETENTION + 20) as $ignored) {
+        recordFor($target, true);
+    }
+
+    expect(IncomingWebhookEvent::whereIn('id', $delivered->pluck('id'))->count())->toBe(5);
+});
+
+it('keeps the legacy shared endpoint as its own partition', function () {
+    $shared = recordFor(null, false);
+    $hook = makeHook('hookish');
+
+    foreach (range(1, IncomingWebhookEvent::REJECTED_RETENTION * 3) as $ignored) {
+        recordFor($hook, false);
+    }
+
+    expect(IncomingWebhookEvent::find($shared->id))->not->toBeNull();
+});
+
+it('still bounds one hook own rejected partition', function () {
+    $hook = makeHook('noisy');
+
+    foreach (range(1, IncomingWebhookEvent::REJECTED_RETENTION + 40) as $ignored) {
+        recordFor($hook, false);
+    }
+
+    expect(IncomingWebhookEvent::where('incoming_webhook_id', $hook->id)->count())
+        ->toBe(IncomingWebhookEvent::REJECTED_RETENTION);
+});
+
+it('keeps an excerpt of an oversized payload instead of throwing the record away', function () {
+    $event = IncomingWebhookEvent::record([
+        'provider' => 'github',
+        'signature_valid' => true,
+        'matched_packages' => 0,
+        'status_code' => 200,
+        'ip' => '203.0.113.9',
+        'payload' => ['head_commit' => ['message' => 'chore: bump'], 'blob' => str_repeat('A', IncomingWebhookEvent::MAX_PAYLOAD_BYTES + 1000)],
+    ]);
+
+    $stored = $event->fresh()->payload;
+
+    // A large but legitimate push must not leave an audit row that says only
+    // "there was something here".
+    expect($stored['_truncated'])->toBeTrue()
+        ->and($stored['_excerpt'])->toContain('chore: bump')
+        ->and(strlen($stored['_excerpt']))->toBe(IncomingWebhookEvent::PAYLOAD_EXCERPT_BYTES)
+        ->and(strlen((string) json_encode($stored)))->toBeLessThanOrEqual(IncomingWebhookEvent::MAX_PAYLOAD_BYTES);
+});
