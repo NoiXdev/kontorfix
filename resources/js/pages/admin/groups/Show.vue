@@ -191,6 +191,9 @@ function removeUpstream(id: string) {
 }
 
 const pageProps = usePage();
+// Attaching a hostname is operator-only server-side (routes/web.php) — a hostname is an
+// instance-wide, globally unique claim. Detaching stays with the owning organization.
+const canAttachDomain = computed(() => (pageProps.props.auth as { can?: { super?: boolean } } | undefined)?.can?.super === true);
 const plainTextToken = computed(() => (pageProps.props.flash as { plainTextToken?: string } | undefined)?.plainTextToken ?? null);
 const tokenCalloutDismissed = ref(false);
 watch(plainTextToken, (v) => {
@@ -260,8 +263,7 @@ async function copyToken() {
                     </button>
                 </div>
                 <p class="text-sm text-muted-foreground">
-                    Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter
-                    <code class="font-mono">/r/{{ props.group.slug }}</code
+                    Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter <code class="font-mono">/r/{{ props.group.slug }}</code
                     ><template v-if="props.group.organization"> · Kunde / Org: {{ props.group.organization }}</template>
                 </p>
                 <p
@@ -323,8 +325,8 @@ async function copyToken() {
                                 <span>
                                     Im Kundenportal als Registry anzeigen
                                     <span class="block text-xs text-muted-foreground">
-                                        Deaktivieren, wenn die Gruppe nur eine Paketsammlung ist, deren Pakete anderen
-                                        Registries derselben Organisation zugewiesen werden.
+                                        Deaktivieren, wenn die Gruppe nur eine Paketsammlung ist, deren Pakete anderen Registries derselben
+                                        Organisation zugewiesen werden.
                                     </span>
                                 </span>
                             </label>
@@ -332,9 +334,7 @@ async function copyToken() {
                             <div class="flex flex-col gap-1.5">
                                 <span class="text-sm font-medium">Slug</span>
                                 <p class="font-mono text-sm text-muted-foreground">/r/{{ props.group.slug }}</p>
-                                <p class="text-xs text-muted-foreground">
-                                    Der Slug ist der feste Registry-Endpunkt und kann nicht geändert werden.
-                                </p>
+                                <p class="text-xs text-muted-foreground">Der Slug ist der feste Registry-Endpunkt und kann nicht geändert werden.</p>
                             </div>
 
                             <div>
@@ -409,11 +409,7 @@ async function copyToken() {
                     <section class="flex flex-col gap-3">
                         <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                             <ul v-if="props.domains.length > 0" class="divide-y divide-sidebar-border/70 dark:divide-sidebar-border">
-                                <li
-                                    v-for="domain in props.domains"
-                                    :key="domain.id"
-                                    class="flex items-center justify-between gap-4 px-4 py-3"
-                                >
+                                <li v-for="domain in props.domains" :key="domain.id" class="flex items-center justify-between gap-4 px-4 py-3">
                                     <span class="font-mono text-sm">{{ domain.hostname }}</span>
                                     <Button variant="ghost" size="icon" aria-label="Domain entfernen" @click="removeDomain(domain.id)">
                                         <Trash2 class="size-4 text-destructive" />
@@ -422,7 +418,7 @@ async function copyToken() {
                             </ul>
                             <p v-else class="px-4 py-8 text-center text-sm text-muted-foreground">Keine Domains hinterlegt.</p>
                         </div>
-                        <form class="flex flex-wrap items-end gap-3" @submit.prevent="addDomain">
+                        <form v-if="canAttachDomain" class="flex flex-wrap items-end gap-3" @submit.prevent="addDomain">
                             <div class="flex flex-col gap-1.5">
                                 <label for="new-domain" class="text-sm font-medium">Hostname</label>
                                 <input
@@ -435,6 +431,9 @@ async function copyToken() {
                             </div>
                             <Button type="submit">Hinzufügen</Button>
                         </form>
+                        <p v-else class="text-sm text-muted-foreground">
+                            Neue Hostnamen werden vom Betreiber der Instanz eingetragen — ein Hostname gilt instanzweit.
+                        </p>
                     </section>
                 </TabsContent>
 
@@ -555,7 +554,7 @@ async function copyToken() {
                         </div>
 
                         <form
-                            class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end dark:border-sidebar-border"
+                            class="grid gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border sm:grid-cols-[1fr_auto_auto] sm:items-end"
                             @submit.prevent="submitToken"
                         >
                             <div class="grid gap-2">

@@ -64,7 +64,7 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::post('tokens', [Admin\TokenController::class, 'store'])
         ->middleware('password.confirm')->name('tokens.store');
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'update', 'destroy']);
-    Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('domains', Admin\DomainController::class)->only(['index', 'destroy']);
     // Reusable git access tokens (for syncing private repositories), org-scoped.
     Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::post('git-credentials/{gitCredential}/test', [Admin\GitCredentialController::class, 'test'])->name('git-credentials.test');
@@ -77,6 +77,15 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
 // per-organization dimension (or span all of them) — global system config, the user and
 // organization directories, robots, outgoing/incoming webhooks and instance health.
 Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(function () {
+    // Attaching a registry hostname is instance-wide, not per-organization: `domains.hostname`
+    // is globally unique and the row alone decides whose packages are served at that host
+    // (ResolveRegistryContext). The application cannot prove that a caller controls a DNS
+    // name, so a customer-org admin claiming one would permanently deny it to another tenant
+    // and — once that tenant's DNS points here — serve their own packages under it. Listing
+    // and DETACHING stay with the owning organization (routes/web.php above): removal must
+    // never be harder than creation, or a mistaken attachment needs an operator to undo.
+    Route::post('domains', [Admin\DomainController::class, 'store'])->name('domains.store');
+
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
     // Incoming webhook endpoints (per-source secret + URL) and audit.
     Route::post('incoming-webhooks', [Admin\WebhookController::class, 'storeIncoming'])->name('incoming-webhooks.store');
