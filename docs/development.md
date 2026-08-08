@@ -73,14 +73,24 @@ production deployment:
 - **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
 - **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
 - **`SECURITY_CSP=report`** — roll out the Content-Security-Policy in report-only mode first,
-  evaluate violations (Inertia/Vite compatibility), then switch to `SECURITY_CSP=enforce`.
-  Default `off`. The legacy `SECURITY_CSP_REPORT_ONLY=true` still selects `report`.
-  The policy is emitted only on HTML documents — JSON/API and registry download responses
-  get the universal headers (`X-Content-Type-Options`, `Referrer-Policy`, HSTS) but no CSP,
-  `X-Frame-Options` or `Permissions-Policy`, none of which mean anything on a tarball.
-  `@routes` (the one inline script in the layout) is nonced, so enforcement does not blank
-  the SPA; the policy allows `fonts.bunny.net` for the webfont stylesheet and `ws:`/`wss:`
-  for Reverb.
+  then switch to `SECURITY_CSP=enforce`. Default `off`. The legacy
+  `SECURITY_CSP_REPORT_ONLY=true` still selects `report`.
+  - **`SECURITY_CSP_REPORT_URI`** — set this *before* starting the rollout. Without a
+    collector the browser writes violations to the visiting user's own console and nothing
+    reaches the operator, so `report` mode cannot be evaluated. When set, the policy carries
+    `report-uri`/`report-to` and the response carries a matching `Reporting-Endpoints`
+    header.
+  - The policy is emitted only on HTML documents — JSON/API and registry download responses
+    get the universal headers (`X-Content-Type-Options`, `Referrer-Policy`, HSTS) but no CSP,
+    `X-Frame-Options` or `Permissions-Policy`, none of which mean anything on a tarball.
+  - Surfaces checked under `enforce`: the SPA (`@routes`, the one inline script in the
+    layout, is nonced; `fonts.bunny.net` is allowed for the webfont stylesheet and
+    `ws:`/`wss:` for Reverb), the PEP 503 index and Laravel's error pages — none of them
+    break. `/horizon` and `/docs/api` are rendered from vendor views whose inline scripts
+    cannot be nonced, so they are served a `script-src` of their own (`'unsafe-inline'`,
+    plus `unpkg.com` for the API browser's bundle) while keeping `frame-ancestors`,
+    `object-src`, `base-uri` and `form-action`. `npm run dev` HMR does not work under
+    `enforce`; leave the local default at `off`.
 - **`APP_DEBUG=false`** in production.
 
 The application's own knobs (`KONTORFIX_*`, see `config/kontorfix.php`) are listed with

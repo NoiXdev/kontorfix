@@ -12,4 +12,9 @@ return [
         'SECURITY_CSP',
         filter_var(env('SECURITY_CSP_REPORT_ONLY', false), FILTER_VALIDATE_BOOL) ? 'report' : 'off',
     ))),
+
+    // Where the browser posts CSP violation reports. Unset means violations only ever
+    // reach the individual visitor's console, which makes "report mode" unevaluable —
+    // set this before starting the rollout described in docs/development.md.
+    'csp_report_uri' => env('SECURITY_CSP_REPORT_URI'),
 ];

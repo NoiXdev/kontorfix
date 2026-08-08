@@ -47,10 +47,16 @@ class SecurityHeaders
         $response->headers->set('X-Frame-Options', 'DENY');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
 
-        if ($mode === 'report') {
-            $response->headers->set('Content-Security-Policy-Report-Only', $this->policy($nonce));
-        } elseif ($mode === 'enforce') {
-            $response->headers->set('Content-Security-Policy', $this->policy($nonce));
+        if ($mode !== 'off') {
+            $collector = $this->reportCollector();
+            if ($collector !== null) {
+                $response->headers->set('Reporting-Endpoints', 'csp-endpoint="'.$collector.'"');
+            }
+
+            $response->headers->set(
+                $mode === 'report' ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
+                $this->policy($nonce, $request, $collector),
+            );
         }
 
         return $response;
@@ -74,18 +80,26 @@ class SecurityHeaders
     /**
      * Kept in sync with what `resources/views/app.blade.php` actually loads — a policy
      * that blanks the SPA the moment it is enforced would be worse than none at all.
+     *
+     * Two documents this application renders but does not author need their own
+     * `script-src`, see vendorScriptSources(). Everything that does not depend on a
+     * page's own scripts — frame-ancestors, object-src, base-uri, form-action — is
+     * identical everywhere, because those are the directives worth having on a
+     * dashboard that can retry jobs and an API browser that can call the API.
      */
-    private function policy(?string $nonce): string
+    private function policy(?string $nonce, Request $request, ?string $collector): string
     {
-        return implode('; ', [
+        $vendor = $this->vendorScriptSources($request);
+
+        $directives = [
             "default-src 'self'",
             // The layout emits exactly one inline script (Ziggy's `@routes`), and it
             // carries this nonce. Everything else is a same-origin Vite bundle.
-            "script-src 'self'".($nonce !== null ? " 'nonce-{$nonce}'" : ''),
+            $vendor['script-src'] ?? "script-src 'self'".($nonce !== null ? " 'nonce-{$nonce}'" : ''),
             // Inertia's progress bar appends a <style> element and Vue writes style
             // attributes; neither can carry a nonce. fonts.bunny.net serves the webfont
             // stylesheet the layout links.
-            "style-src 'self' 'unsafe-inline' https://fonts.bunny.net",
+            $vendor['style-src'] ?? "style-src 'self' 'unsafe-inline' https://fonts.bunny.net",
             "font-src 'self' data: https://fonts.bunny.net",
             "img-src 'self' data: blob:",
             // Inertia XHR plus the Reverb websocket, which may run on its own host/port.
@@ -94,6 +108,56 @@ class SecurityHeaders
             "base-uri 'self'",
             "form-action 'self'",
             "object-src 'none'",
-        ]);
+        ];
+
+        if ($collector !== null) {
+            // `report-uri` is deprecated but still the only one Safari and older
+            // Chromium honour; `report-to` needs the Reporting-Endpoints header set
+            // alongside it. Without either, "report mode" only writes to the visitor's
+            // own console and the operator never sees a violation.
+            $directives[] = 'report-uri '.$collector;
+            $directives[] = 'report-to csp-endpoint';
+        }
+
+        return implode('; ', $directives);
+    }
+
+    /**
+     * Horizon inlines its entire dashboard as one un-nonced `<script type="module">`,
+     * and Scramble's API browser loads Stoplight Elements from unpkg plus its own inline
+     * bootstrap. Neither view is ours to nonce, so a nonce-only `script-src` blanks both
+     * the moment the documented `SECURITY_CSP=enforce` is set. They get `'unsafe-inline'`
+     * *without* a nonce — a nonce would make browsers ignore `'unsafe-inline'` and
+     * re-break the page — and keep every other directive.
+     *
+     * Matched on route name rather than path, so `HORIZON_PATH` cannot silently move a
+     * page out of its own exemption.
+     *
+     * @return array<string, string>
+     */
+    private function vendorScriptSources(Request $request): array
+    {
+        $name = (string) $request->route()?->getName();
+
+        if (str_starts_with($name, 'horizon.')) {
+            return ['script-src' => "script-src 'self' 'unsafe-inline'"];
+        }
+
+        if ($name === 'scramble.docs.ui') {
+            return [
+                'script-src' => "script-src 'self' 'unsafe-inline' https://unpkg.com",
+                'style-src' => "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://unpkg.com",
+            ];
+        }
+
+        return [];
+    }
+
+    /** Where violation reports go; null means "nowhere but the visitor's console". */
+    private function reportCollector(): ?string
+    {
+        $uri = trim((string) config('security.csp_report_uri', ''));
+
+        return $uri !== '' ? $uri : null;
     }
 }
