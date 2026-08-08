@@ -11,9 +11,20 @@ use Illuminate\Validation\Rule;
 
 class UpdateUpstreamRequest extends FormRequest
 {
+    /**
+     * Authorization cannot be left to the controller here, the way it is for every other
+     * request in this namespace: `withValidator()` below reads the route-bound upstream's
+     * `auth_token`, and Laravel resolves the FormRequest before the controller's
+     * `assertAdministersOrg` ever runs. A foreign tenant would get a 422 naming
+     * `auth_token` when the upstream holds a mirror credential and a 403 when it does
+     * not — one bit about someone else's upstream, for free.
+     */
     public function authorize(): bool
     {
-        return true;
+        $upstream = $this->route('upstream');
+
+        return $upstream instanceof Upstream
+            && $this->user()?->administers($upstream->group?->organization_id) === true;
     }
 
     /**
