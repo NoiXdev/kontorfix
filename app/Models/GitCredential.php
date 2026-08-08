@@ -70,6 +70,14 @@ class GitCredential extends Model
     /**
      * Whether this credential may be used against the given repository URL. Fails closed:
      * an unparseable URL or a credential without a known host is never authenticated.
+     *
+     * The comparison is on the whole authority, port included. Comparing the hostname alone
+     * left the binding open on exactly the axis it exists to close: `GitAuth::origin()` scopes
+     * the Authorization header to scheme://host:port, so a maintainer who set a package's
+     * repository_url to `https://gitlab.corp:9999/x` had their organization's PAT delivered to
+     * whatever listens on that port — a different service on the same self-hosted machine, or
+     * one they run themselves. "Where does this token get sent" must not be nominatable by the
+     * party the binding is meant to constrain.
      */
     public function permits(?string $url): bool
     {
@@ -78,9 +86,38 @@ class GitCredential extends Model
             return false;
         }
 
-        $host = parse_url($url, PHP_URL_HOST);
+        $parts = parse_url($url);
+        if (! is_array($parts) || ! is_string($parts['host'] ?? null) || $parts['host'] === '') {
+            return false;
+        }
 
-        return is_string($host) && strtolower($host) === $allowed;
+        $scheme = is_string($parts['scheme'] ?? null) ? $parts['scheme'] : 'https';
+
+        return self::authority($parts['host'], isset($parts['port']) ? (int) $parts['port'] : null, $scheme)
+            === self::authority($allowed, null, $scheme);
+    }
+
+    /**
+     * `host[:port]`, with the scheme's default port dropped so that `gitlab.corp` and
+     * `https://gitlab.corp:443/...` agree while `https://gitlab.corp:9999/...` does not.
+     * A port embedded in the stored host is parsed out of it the same way.
+     */
+    private static function authority(string $host, ?int $port, string $scheme): string
+    {
+        $host = strtolower(trim($host));
+
+        if ($port === null && str_contains($host, ':')) {
+            [$host, $rawPort] = explode(':', $host, 2);
+            $port = ctype_digit($rawPort) ? (int) $rawPort : null;
+        }
+
+        $default = match (strtolower($scheme)) {
+            'http' => 80,
+            'ssh', 'git+ssh' => 22,
+            default => 443,
+        };
+
+        return $port === null || $port === $default ? $host : $host.':'.$port;
     }
 
     /** Operator-facing explanation for a refused host, shared by every entry point. */
@@ -90,7 +127,8 @@ class GitCredential extends Model
 
         return $allowed === null
             ? 'Für dieses Git-Token ist kein Host hinterlegt — bitte den Host am Token ergänzen.'
-            : "Dieses Git-Token ist an {$allowed} gebunden und darf an keinen anderen Host gesendet werden.";
+            : "Dieses Git-Token ist an {$allowed} gebunden (Port inklusive) und darf an keine andere Adresse gesendet werden. "
+                .'Gehört das Repository dorthin, trage den Host — bei Bedarf mit Port, z. B. gitlab.example:8443 — am Token ein und gib das Token neu ein.';
     }
 
     /**

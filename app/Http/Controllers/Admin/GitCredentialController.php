@@ -154,7 +154,9 @@ class GitCredentialController extends Controller
     {
         $required = GitProvider::tryFrom((string) $request->input('provider')) === GitProvider::Generic;
 
-        return [$required ? 'required' : 'nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9._-]+$/'];
+        // An optional port is part of the binding: permits() compares the whole authority,
+        // so a self-hosted git server on a non-default port has to be nameable here.
+        return [$required ? 'required' : 'nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9._-]+(:\d{1,5})?$/'];
     }
 
     /**

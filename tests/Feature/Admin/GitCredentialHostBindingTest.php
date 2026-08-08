@@ -163,3 +163,49 @@ it('refuses to retarget a package that keeps its stored inline repository token'
     expect($package->fresh()->repository_token)->toBeNull()
         ->and($package->fresh()->repository_url)->toBe('https://evil.test/acme/lib.git');
 });
+
+// The binding exists so that the party who nominates a repository URL cannot nominate
+// where the organization's PAT is delivered. Comparing the hostname alone left that open
+// on the port: GitAuth scopes the Authorization header to scheme://host:port, so a
+// maintainer pointing a package at `https://gitlab.corp:9999/x` had the token handed to
+// whatever listens there.
+
+it('refuses a repository on a different port of the bound host', function () {
+    $credential = GitCredential::factory()->create([
+        'provider' => GitProvider::Generic,
+        'host' => 'gitlab.corp',
+    ]);
+
+    expect($credential->permits('https://gitlab.corp/acme/lib.git'))->toBeTrue()
+        ->and($credential->permits('https://gitlab.corp:443/acme/lib.git'))->toBeTrue()
+        ->and($credential->permits('https://gitlab.corp:9999/acme/lib.git'))->toBeFalse()
+        ->and($credential->permits('https://gitlab.corp:8443/acme/lib.git'))->toBeFalse();
+});
+
+it('lets an operator bind a credential to a host and port together', function () {
+    $credential = GitCredential::factory()->create([
+        'provider' => GitProvider::Generic,
+        'host' => 'gitlab.corp:8443',
+    ]);
+
+    expect($credential->permits('https://gitlab.corp:8443/acme/lib.git'))->toBeTrue()
+        ->and($credential->permits('https://gitlab.corp/acme/lib.git'))->toBeFalse()
+        ->and($credential->permits('https://gitlab.corp:9999/acme/lib.git'))->toBeFalse();
+});
+
+it('accepts a host with a port on the credential form', function () {
+    $org = Organization::factory()->create();
+    $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)->from('/admin/git-credentials')
+        ->withSession(['auth.password_confirmed_at' => time()])
+        ->post('/admin/git-credentials', [
+            'name' => 'self-hosted',
+            'provider' => 'generic',
+            'host' => 'gitlab.corp:8443',
+            'token' => 'glpat-secret',
+            'organization_id' => $org->id,
+        ])->assertSessionHasNoErrors();
+
+    expect(GitCredential::sole()->allowedHost())->toBe('gitlab.corp:8443');
+});
