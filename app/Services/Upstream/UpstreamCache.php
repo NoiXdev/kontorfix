@@ -17,6 +17,9 @@ class UpstreamCache
     /** How long before the total is recounted from the disk. */
     private const USAGE_TTL = 300;
 
+    /** Read granularity while relaying an artifact — this is the whole memory footprint. */
+    private const CHUNK_BYTES = 262144;
+
     /**
      * @return array<string, mixed>|null null on miss or expiry
      */
@@ -99,6 +102,92 @@ class UpstreamCache
         Cache::increment(self::USAGE_KEY, $size);
 
         return true;
+    }
+
+    /**
+     * Copies an upstream artifact to the caller's output, caching it on the way past when
+     * it fits, and returns how many bytes went.
+     *
+     * putArtifact() takes the artifact as a string, which means the whole thing is in PHP
+     * memory before its size is ever compared to the cap: on the shipped 128 M
+     * memory_limit an oversize artifact exhausted the worker instead of being declined, so
+     * the 100 MiB limit was unreachable by construction. Here the cap is applied as the
+     * bytes arrive.
+     *
+     * Two properties this deliberately keeps:
+     *
+     *  - the client is always served. Exceeding the cap stops the *caching*, never the
+     *    download — a storage policy must not turn into "this package cannot be installed".
+     *  - memory stays constant. The local copy exists only while it is still a cache
+     *    candidate; the moment the cap is passed it is dropped and the remainder is
+     *    relayed straight through, so nothing larger than the cap is ever held anywhere.
+     *
+     * @param  resource  $source
+     */
+    public function relayArtifact($source, string $path): int
+    {
+        $maxArtifact = (int) config('kontorfix.upstream_cache_max_artifact_bytes', 0);
+        $budget = (int) config('kontorfix.upstream_cache_max_bytes', 0);
+
+        // No room at all: relay without ever opening a local copy.
+        $local = ($budget > 0 && $this->usedBytes() >= $budget) ? null : tmpfile();
+        $size = 0;
+
+        try {
+            while (! feof($source)) {
+                $chunk = fread($source, self::CHUNK_BYTES);
+
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+
+                $size += strlen($chunk);
+                echo $chunk;
+
+                if ($local === null) {
+                    continue;
+                }
+
+                if ($maxArtifact > 0 && $size > $maxArtifact) {
+                    fclose($local);
+                    $local = null;
+
+                    continue;
+                }
+
+                fwrite($local, $chunk);
+            }
+        } finally {
+            if (is_resource($source)) {
+                fclose($source);
+            }
+        }
+
+        if ($local === null) {
+            return $size;
+        }
+
+        try {
+            if ($budget > 0 && $this->usedBytes() + $size > $budget) {
+                return $size;
+            }
+
+            rewind($local);
+
+            // Atomic: staging -> move, so a concurrent reader never sees a torn file.
+            $disk = Storage::disk('artifacts');
+            $staging = $path.'.'.uniqid().'.part';
+            $disk->writeStream($staging, $local);
+            $disk->move($staging, $path);
+
+            Cache::increment(self::USAGE_KEY, $size);
+        } finally {
+            if (is_resource($local)) {
+                fclose($local);
+            }
+        }
+
+        return $size;
     }
 
     /**

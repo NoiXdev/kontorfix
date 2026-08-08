@@ -33,6 +33,10 @@ it('downloads a composer artifact from the upstream, caches it and streams it', 
         ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk()->assertHeader('content-type', 'application/zip');
 
+    // The artifact is cached while it is relayed, so the body has to be consumed the way
+    // a real client consumes it before the cache write has happened.
+    expect($res->streamedContent())->toBe('zip-bytes');
+
     // cached on disk
     expect(Storage::disk('artifacts')->allFiles())->not->toBe([]);
 

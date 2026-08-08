@@ -59,14 +59,17 @@ class ProxyDownloadController extends Controller
                 $this->resolveComposerDistUrl($request, $group, $up, $packageName, $version)
             );
 
-            $bytes = $this->client->getBytes($up, $originalUrl);
-            abort_if($bytes === null, 404);
+            $source = $this->client->getStream($up, $originalUrl);
+            abort_if($source === null, 404);
 
-            // A refused cache write means the budget is exhausted, not that the package
-            // is unavailable — serve the bytes we already hold.
-            if (! $this->cache->putArtifact($path, $bytes)) {
-                return $this->passThrough($bytes, "{$name}-{$version}.zip", 'application/zip');
-            }
+            // Relayed to the client while it is cached, so the size cap is applied to the
+            // bytes as they arrive rather than to a string that had to fit in memory first.
+            // An artifact over the cap is still delivered; only the caching is declined.
+            return response()->streamDownload(
+                fn () => $this->cache->relayArtifact($source, $path),
+                "{$name}-{$version}.zip",
+                ['Content-Type' => 'application/zip'],
+            );
         }
 
         return response()->streamDownload(
@@ -79,21 +82,6 @@ class ProxyDownloadController extends Controller
             },
             "{$name}-{$version}.zip",
             ['Content-Type' => 'application/zip'],
-        );
-    }
-
-    /**
-     * Streams an artifact that was fetched but deliberately not cached. Availability must
-     * not depend on there being room on the disk.
-     */
-    private function passThrough(string $bytes, string $filename, string $contentType): StreamedResponse
-    {
-        return response()->streamDownload(
-            function () use ($bytes) {
-                echo $bytes;
-            },
-            $filename,
-            ['Content-Type' => $contentType],
         );
     }
 
@@ -127,12 +115,14 @@ class ProxyDownloadController extends Controller
                 $this->resolveNpmTarballUrl($request, $group, $up, $packageName, $file)
             );
 
-            $bytes = $this->client->getBytes($up, $originalUrl);
-            abort_if($bytes === null, 404);
+            $source = $this->client->getStream($up, $originalUrl);
+            abort_if($source === null, 404);
 
-            if (! $this->cache->putArtifact($path, $bytes)) {
-                return $this->passThrough($bytes, $file, 'application/octet-stream');
-            }
+            return response()->streamDownload(
+                fn () => $this->cache->relayArtifact($source, $path),
+                $file,
+                ['Content-Type' => 'application/octet-stream'],
+            );
         }
 
         return response()->streamDownload(

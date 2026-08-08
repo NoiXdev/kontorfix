@@ -78,6 +78,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Dist build lock
+    |--------------------------------------------------------------------------
+    |
+    | Seconds a request waits for another request that is already building the same
+    | Composer dist archive. The first request for a version clones the repository
+    | and zips it; without the wait, N concurrent requests for one cold version each
+    | run their own clone.
+    |
+    | Waiting is bounded and never refuses the download: when the wait runs out the
+    | request builds on its own, which is exactly the behaviour that predates the lock.
+    | Raise it on an instance with large repositories, lower it to 0 to opt out.
+    |
+    */
+
+    'dist_build_lock_wait' => (int) env('KONTORFIX_DIST_BUILD_LOCK_WAIT', 15),
+
+    /*
+    |--------------------------------------------------------------------------
     | Git transport and address policy
     |--------------------------------------------------------------------------
     |

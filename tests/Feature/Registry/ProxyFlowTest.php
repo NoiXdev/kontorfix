@@ -28,8 +28,11 @@ it('completes the composer proxy flow: metadata -> rewritten dist -> cached down
     $distPath = parse_url($version['dist']['url'], PHP_URL_PATH);
     expect($distPath)->toContain("/r/kadenz/proxy/composer/{$up->id}/acme/demo/");
 
-    // 2. Load via the proxy route (cache-on-first).
-    $this->withHeaders($headers)->get($distPath)->assertOk()->assertHeader('content-type', 'application/zip');
+    // 2. Load via the proxy route (cache-on-first). The body has to be consumed: the
+    // artifact is now cached while it is relayed, so the caching happens when a real
+    // client reads the stream, not before the first byte leaves.
+    $first = $this->withHeaders($headers)->get($distPath)->assertOk()->assertHeader('content-type', 'application/zip');
+    expect($first->streamedContent())->toBe('zip-bytes');
 
     // 3. Second pull from the cache — no further CDN call.
     Http::fake();

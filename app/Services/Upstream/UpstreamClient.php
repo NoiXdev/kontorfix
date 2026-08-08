@@ -47,6 +47,36 @@ class UpstreamClient
     }
 
     /**
+     * The artifact as a readable stream rather than a string.
+     *
+     * getBytes() materialises the whole artifact in PHP memory before anybody can look at
+     * its size, so the 100 MiB per-artifact cap could never be reached on the shipped
+     * 128 M memory_limit: an oversize artifact killed the worker instead of being declined.
+     * The cap belongs where the bytes arrive, and that needs a stream.
+     *
+     * @return resource|null null on 404
+     */
+    public function getStream(Upstream $upstream, string $absoluteUrl)
+    {
+        $response = $this->follow(
+            $upstream,
+            $absoluteUrl,
+            fn (PendingRequest $req) => $req->withOptions(['stream' => true]),
+        );
+
+        if ($response->status() === 404) {
+            return null;
+        }
+        if (! $response->successful()) {
+            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.");
+        }
+
+        $stream = $response->toPsrResponse()->getBody()->detach();
+
+        return is_resource($stream) ? $stream : null;
+    }
+
+    /**
      * Follow redirects manually (max 5) and re-check EACH hop against the SSRF
      * rules — Packagist dists legitimately point to GitHub, which redirects via 302
      * to another host (codeload/objects.githubusercontent); a malicious upstream must
