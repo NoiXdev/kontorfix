@@ -21,7 +21,7 @@ class RegistryTokenController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         // Registry tokens are organization credentials — only administered orgs are listed.
-        $query = RegistryToken::with(['organization:id,name', 'group:id,name'])->latest();
+        $query = RegistryToken::with(['organization:id,name', 'group:id,name'])->notRevoked()->latest();
         if (! $this->seesAllOrganizations()) {
             $query->whereIn('organization_id', $this->apiUser()->administeredOrganizationIds());
         }

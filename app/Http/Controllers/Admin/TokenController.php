@@ -24,7 +24,7 @@ class TokenController extends Controller
 
         return Inertia::render('admin/tokens/Index', [
             'tokens' => RegistryToken::with(['organization:id,name', 'group:id,name'])
-                ->whereIn('organization_id', $orgIds)->latest()->get()
+                ->notRevoked()->whereIn('organization_id', $orgIds)->latest()->get()
                 ->map(fn (RegistryToken $t) => [
                     'id' => $t->id,
                     'name' => $t->name,

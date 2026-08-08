@@ -20,6 +20,7 @@ class AccessTokenController extends Controller
 
         return Inertia::render('settings/AccessTokens', [
             'tokens' => RegistryToken::query()
+                ->notRevoked()
                 ->where('user_id', $user->id)
                 ->with('group:id,name')
                 ->latest()->get()

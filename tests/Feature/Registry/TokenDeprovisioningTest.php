@@ -76,8 +76,9 @@ it('keeps resolving an ownerless organization token', function () {
 });
 
 /**
- * Housekeeping half: resolution already refuses these tokens, but the rows must also go,
- * so the admin token list does not accumulate credentials that look live but are not.
+ * Housekeeping half: resolution already refuses these tokens, but a deprovisioning action
+ * must also mark them, so the admin token list does not accumulate credentials that look
+ * live but are not. Marking, not deleting — an operator action must not be unrecoverable.
  */
 it('revokes the personal tokens when an admin detaches the membership', function () {
     $operatorAdmin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
@@ -85,13 +86,14 @@ it('revokes the personal tokens when an admin detaches the membership', function
     $user = User::factory()->for(Organization::factory())->create(['role' => UserRole::Member]);
     $user->organizations()->attach($org->id, ['role' => UserRole::Member->value]);
 
-    [$token] = RegistryToken::issue($org, 'personal', null, TokenAbility::Read, null, $user);
+    [$token, $plain] = RegistryToken::issue($org, 'personal', null, TokenAbility::Read, null, $user);
 
     $this->actingAs($operatorAdmin)
         ->delete("/admin/organizations/{$org->id}/members/{$user->id}")
         ->assertRedirect();
 
-    expect(RegistryToken::whereKey($token->id)->exists())->toBeFalse();
+    expect(RegistryToken::findByPlainText($plain))->toBeNull()
+        ->and($token->refresh()->revoked_at)->not->toBeNull();
 });
 
 it('keeps the tokens of the organizations a detached user still belongs to', function () {
@@ -106,8 +108,46 @@ it('keeps the tokens of the organizations a detached user still belongs to', fun
 
     $this->actingAs($operatorAdmin)->delete("/admin/users/{$user->id}/organizations/{$extra->id}");
 
-    expect(RegistryToken::whereKey($homeToken->id)->exists())->toBeTrue()
-        ->and(RegistryToken::whereKey($extraToken->id)->exists())->toBeFalse();
+    expect($homeToken->refresh()->revoked_at)->toBeNull()
+        ->and($extraToken->refresh()->revoked_at)->not->toBeNull();
+});
+
+it('refuses a revoked token even while its owner is still fully entitled', function () {
+    $org = Organization::factory()->create();
+    $user = User::factory()->for($org)->create(['role' => UserRole::Maintainer]);
+
+    [$token, $plain] = RegistryToken::issue($org, 'ci', null, TokenAbility::Publish, null, $user);
+    $token->forceFill(['revoked_at' => now()])->save();
+
+    expect(RegistryToken::findByPlainText($plain))->toBeNull();
+});
+
+/**
+ * The deprovisioning rule must not fire on a routine edit. Role and home organization sit
+ * in the same admin form as the name and the email; a mistaken dropdown change is a
+ * one-click, high-frequency operator action, and entitlement is already enforced at
+ * resolution time, where it follows the role back up again.
+ */
+it('does not revoke a demoted maintainer publish token, and lets it work again on re-promotion', function () {
+    $operatorAdmin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
+    $org = Organization::factory()->create();
+    $user = User::factory()->for($org)->create(['role' => UserRole::Maintainer]);
+
+    [$token, $plain] = RegistryToken::issue($org, 'ci', null, TokenAbility::Publish, null, $user);
+
+    $this->actingAs($operatorAdmin)
+        ->patch("/admin/users/{$user->id}", ['role' => UserRole::Member->value])
+        ->assertRedirect();
+
+    // Inert while demoted ...
+    expect(RegistryToken::findByPlainText($plain))->toBeNull()
+        ->and($token->refresh()->revoked_at)->toBeNull();
+
+    // ... and alive again once the mistake is undone.
+    $this->actingAs($operatorAdmin)
+        ->patch("/admin/users/{$user->id}", ['role' => UserRole::Maintainer->value]);
+
+    expect(RegistryToken::findByPlainText($plain))->not->toBeNull();
 });
 
 it('lets a user set an expiry on a self-issued token', function () {

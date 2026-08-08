@@ -93,9 +93,14 @@ class UserController extends Controller
 
         $user->update($validated);
 
-        // A changed home organization or role can strip the access a personal registry
-        // token was issued under.
-        $this->tokenLifecycle->revokeUnentitled($user);
+        // Deliberately no revokeUnentitled() here. A role or home-organization change is
+        // a dropdown in the same form as the name and the email, and it is the one
+        // lifecycle event that happens to a *current* employee — an accidental
+        // Maintainer -> Member toggle must not permanently take that person's publish
+        // tokens away. It does not have to: RegistryToken::ownerIsStillEntitled() refuses
+        // such a token at resolution time and follows the role back up when the mistake
+        // is corrected. Revocation is reserved for actual deprovisioning (detaching a
+        // membership, deleting the account).
 
         return back()->with('success', "Nutzer {$user->name} aktualisiert.");
     }

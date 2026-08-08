@@ -88,7 +88,7 @@ class OrganizationController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                 ]),
-            'tokens' => $organization->registryTokens()->with('group:id,name')->get()
+            'tokens' => $organization->registryTokens()->notRevoked()->with('group:id,name')->get()
                 ->map(fn (RegistryToken $token) => [
                     'id' => $token->id,
                     'name' => $token->name,

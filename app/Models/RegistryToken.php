@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\TokenAbility;
 use Database\Factories\RegistryTokenFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +15,7 @@ use Illuminate\Support\Str;
 /**
  * @property Carbon|null $last_used_at
  * @property Carbon|null $expires_at
+ * @property Carbon|null $revoked_at
  * @property string|null $user_id
  * @property string|null $plain_text Only set directly after issue(), never persisted.
  */
@@ -49,7 +51,21 @@ class RegistryToken extends Model
             'ability' => TokenAbility::class,
             'last_used_at' => 'datetime',
             'expires_at' => 'datetime',
+            'revoked_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Tokens that have not been revoked. Revoked rows are kept — a lifecycle action must
+     * be inspectable and undoable — but they are dead for every purpose: resolution,
+     * every listing and the dashboard count.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeNotRevoked(Builder $query): Builder
+    {
+        return $query->whereNull('revoked_at');
     }
 
     /**
@@ -113,6 +129,7 @@ class RegistryToken extends Model
     {
         $token = static::query()
             ->where('token_hash', hash('sha256', $plain))
+            ->whereNull('revoked_at')
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->first();
 
@@ -137,10 +154,13 @@ class RegistryToken extends Model
      *    member cannot keep writing. A read token survives a demotion, because reading
      *    is self-service for every member.
      *
-     * There is deliberately no "deactivated" case: the schema has no such state. A
-     * deleted account is handled at the source — User::deleting removes the rows, since
-     * the FK is `nullOnDelete` and would otherwise silently promote a personal token
-     * into an ownerless organization token.
+     * This is entitlement only, and it is derived — it follows the account's current
+     * state in both directions, so a demotion makes a publish token inert immediately and
+     * undoing the demotion makes it work again. An explicit `revoked_at` (set by
+     * RegistryTokenLifecycleService on a real deprovisioning) is the separate, sticky
+     * decision and is applied by findByPlainText(). A deleted account is handled at the
+     * source — User::deleting removes the rows, since the FK is `nullOnDelete` and would
+     * otherwise silently promote a personal token into an ownerless organization token.
      */
     public function ownerIsStillEntitled(): bool
     {
