@@ -42,6 +42,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | API key maximum lifetime
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound in days on the expiry a caller may request for an API key.
+    | 0 (the default) means no ceiling, which is what every existing install has
+    | today. It is a ceiling, not a default: a caller may still ask for less, and
+    | keys that already exist are never touched.
+    |
+    | Independently of this knob, a key minted by presenting another key can never
+    | outlive its parent — see StoreApiKeyRequest. Without that rule, revoking a
+    | leaked key does not end the compromise, because its holder keeps re-growing
+    | the list.
+    |
+    */
+
+    'api_key_max_ttl_days' => (int) env('KONTORFIX_API_KEY_MAX_TTL_DAYS', 0),
+
+    /*
+    |--------------------------------------------------------------------------
     | Git transport and address policy
     |--------------------------------------------------------------------------
     |
