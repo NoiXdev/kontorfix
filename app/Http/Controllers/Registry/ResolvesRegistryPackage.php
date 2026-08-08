@@ -30,13 +30,27 @@ trait ResolvesRegistryPackage
         return $group;
     }
 
+    /**
+     * Absolute base for the URLs handed to package clients (Composer `dist.url`, npm
+     * `dist.tarball`, the PyPI index hrefs).
+     *
+     * Domain mode may use the request's host: ResolveRegistryContext has already matched
+     * it against the `domains` table and 404s anything else, so it is a host this
+     * instance answers to by definition. Slug mode may not — nothing there constrains
+     * the `Host` header, so an injected one would end up as the download URL in every
+     * client's lock file. It uses the configured application URL instead, which is the
+     * same value every other generated link is rooted at (URL::forceRootUrl in
+     * AppServiceProvider).
+     */
     protected function registryBaseUrl(Request $request, Group $group): string
     {
         if ($request->attributes->get('registryDomainMode') === true) {
             return $request->getSchemeAndHttpHost();
         }
 
-        return $request->getSchemeAndHttpHost().'/r/'.$group->slug;
+        $appUrl = rtrim((string) config('app.url'), '/');
+
+        return ($appUrl !== '' ? $appUrl : $request->getSchemeAndHttpHost()).'/r/'.$group->slug;
     }
 
     /**

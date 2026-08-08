@@ -16,6 +16,7 @@ use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Laravel\Passkeys\Contracts\PasskeyUser;
@@ -37,6 +38,20 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Pin every generated absolute URL to APP_URL instead of to the request's `Host`.
+        //
+        // The password-reset notification renders synchronously inside the request that
+        // asked for it, so without this a `Host: attacker.example.net` on
+        // POST /forgot-password produced a reset link on the attacker's domain — in the
+        // *victim's* mailbox. Same mechanism for the signed verification link and the
+        // invitation mail. trustHosts() in bootstrap/app.php refuses such a request in
+        // the first place; this is the half that does not depend on the allowlist being
+        // resolvable, and it is why an unset APP_URL can safely disable that allowlist.
+        $appUrl = (string) config('app.url');
+        if (parse_url($appUrl, PHP_URL_HOST) !== null) {
+            URL::forceRootUrl($appUrl);
+        }
+
         // One listener serves two event types — auto-discovery matches based on the
         // typed `handle` parameter and would therefore not reliably wire up both
         // methods. Hence explicit registration instead of discovery.

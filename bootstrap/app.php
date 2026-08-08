@@ -11,6 +11,7 @@ use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
+use App\Services\Http\TrustedHosts;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -50,6 +51,17 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Refuse a `Host` this instance does not answer to. Without an allowlist,
+        // getSchemeAndHttpHost() echoes whatever the client sent, and a proxy with a
+        // catch-all router — the natural shape once custom registry domains are in use —
+        // lets an anonymous caller put its own domain into the password-reset link that
+        // is then delivered to the victim. Complements, and does not replace,
+        // URL::forceRootUrl() in AppServiceProvider: this one also covers the consumers
+        // that build URLs from the request rather than from the URL generator.
+        // `subdomains: false` because TrustedHosts::patterns() already emits the
+        // subdomain pattern for the APP_URL host itself and would otherwise duplicate it.
+        $middleware->trustHosts(at: fn (): array => TrustedHosts::patterns(), subdomains: false);
+
         // Deployment runs behind a reverse proxy (Traefik/Portainer). Without this,
         // getSchemeAndHttpHost() would return the internal host and the generated
         // dist URLs in the Composer metadata would be wrong. The trusted

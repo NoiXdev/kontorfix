@@ -63,13 +63,29 @@ ddev exec npm run build                   # Frontend build
 Kontorfix runs behind a reverse proxy (e.g. Traefik). Set the following ENV values for a
 production deployment:
 
+- **`APP_URL`** — the single most load-bearing value here. Every absolute URL the
+  application generates is rooted at it (`URL::forceRootUrl` in `AppServiceProvider`), so a
+  password-reset, e-mail-verification or invitation link cannot be redirected to an
+  attacker's domain by a forged `Host` header. It also seeds the `Host` allowlist below. Set
+  it to the public URL, with scheme, before the first boot.
+- **Trusted hosts** — the application refuses (HTTP 400) any request whose `Host` is not the
+  `APP_URL` host or one of its subdomains, a loopback name (`localhost`, `127.0.0.1`, `::1`
+  — the container healthcheck and the host-local deployment need these), or a hostname
+  attached to a registry group in the admin UI. That list is assembled in
+  `App\Services\Http\TrustedHosts`; it needs no configuration, and it stands down entirely
+  when `APP_URL` names no host so a missing variable cannot lock an instance out of itself.
+  Attaching a domain in the UI takes effect immediately. Note this is a *different* control
+  from `TRUSTED_PROXIES`: the host allowlist bites even when no forwarded header is present
+  at all, so pinning the proxy IPs does not substitute for it and vice versa.
 - **`TRUSTED_PROXIES`** — pin to the **concrete proxy IP(s)**, not the broad default private
   ranges. The `X-Forwarded-*` headers are only accepted from these addresses; with too broad
-  a configuration the client IP (and thus IP-based rate limits as well as the host in
-  generated URLs) could be spoofed. Also make sure the app port is reachable **only** through
-  the proxy (network segmentation) — the shipped `docker/compose.yaml` publishes no port on
-  the host for exactly that reason; attach the proxy's network and route to `app:8080`. For a
-  host-local deployment without a proxy, uncomment the loopback `ports:` line instead.
+  a configuration the client IP (and thus IP-based rate limits) could be spoofed. Also make
+  sure the app port is reachable **only** through the proxy (network segmentation) — the
+  shipped `docker/compose.yaml` publishes no port on the host for exactly that reason; attach
+  the proxy's network and route to `app:8080`. For a host-local deployment without a proxy,
+  uncomment the loopback `ports:` line instead. Independently of this, give the proxy a
+  router rule that constrains the host (`Host(...)`, not `PathPrefix('/')`), so a forged
+  `Host` never reaches the container in the first place.
 - **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
 - **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
 - **`SECURITY_CSP=report`** — roll out the Content-Security-Policy in report-only mode first,
