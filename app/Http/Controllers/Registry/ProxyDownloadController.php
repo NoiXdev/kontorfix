@@ -15,6 +15,7 @@ use App\Services\Upstream\UrlSafety;
 use Composer\MetadataMinifier\MetadataMinifier;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProxyDownloadController extends Controller
@@ -162,6 +163,13 @@ class ProxyDownloadController extends Controller
 
     private function resolveUpstream(string $upstreamId, Group $group, PackageType $type, string $packageName): Upstream
     {
+        // The route pattern already refuses a non-UUID, but this lookup is a raw find()
+        // against a Postgres `uuid` column: anything malformed that ever reaches it
+        // raises SQLSTATE[22P02], which nothing renders, so the caller gets a 500 and
+        // the instance an unthrottled stack trace per request. Do not make that depend
+        // on a regex in a different file staying correct.
+        abort_unless(Str::isUuid($upstreamId), 404);
+
         $up = Upstream::find($upstreamId);
         abort_if($up === null || $up->group_id !== $group->id || $up->type !== $type || ! $up->enabled, 404);
 

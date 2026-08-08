@@ -10,9 +10,27 @@ use Illuminate\Support\Facades\Route;
 // via slug prefix (/r/{groupSlug}/...) and at the host root for custom domains.
 // Group resolution is handled exclusively by `registry.context` (see
 // ResolveRegistryContext) — controllers read the group from the request attributes.
-$registryEndpoints = function () {
+
+// Canonical UUID shape for the registry's own id parameters. These routes resolve
+// their ids with raw find()/whereKey() instead of route-model binding — deliberately,
+// so the group-ownership check stays explicit in the controller — and therefore get no
+// ModelNotFoundException from the binder when the value is not a UUID. Anything that
+// reaches Postgres' `uuid` comparison malformed raises SQLSTATE[22P02], which nothing
+// renders, so it becomes a 500 plus a stack trace in the log for every request.
+// `[0-9a-fA-F-]{36}` was not enough: 36 dashes satisfy it, as does any other mix of hex
+// digits and dashes of that length.
+//
+// No `throttle:` on this group, deliberately. The flooding these ids enabled was the
+// stack trace each 500 appended to an unrotated laravel.log, and a 404 from the router
+// writes nothing; a request budget here would instead break the legitimate traffic
+// pattern, since one `composer install` or `npm ci` fires hundreds of metadata requests
+// from a single address. The DoS surface that is worth bounding — the artifact cache —
+// has its own byte budget (KONTORFIX_UPSTREAM_CACHE_MAX_BYTES).
+$uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+
+$registryEndpoints = function () use ($uuid) {
     // Composer — gated by the composer type being enabled for the group's organization.
-    Route::middleware('registry.type:composer')->group(function () {
+    Route::middleware('registry.type:composer')->group(function () use ($uuid) {
         Route::get('/packages.json', [ComposerController::class, 'root']);
         Route::get('/p2/{vendor}/{name}.json', [ComposerController::class, 'metadata'])
             ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.~-]+']);
@@ -29,26 +47,26 @@ $registryEndpoints = function () {
         // explicit (no token may trigger downloads via a foreign upstream). The UUID shape
         // is pinned so a non-UUID cannot reach the Postgres uuid comparison and 500.
         Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
-            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
+            ->where(['upstream' => $uuid, 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
     });
 
-    Route::middleware('registry.type:npm')->group(function () {
+    Route::middleware('registry.type:npm')->group(function () use ($uuid) {
         Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
-            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+            ->where(['upstream' => $uuid, 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
         Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
-            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+            ->where(['upstream' => $uuid, 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
     });
 
     // PyPI (Python) — registered before the greedy npm catch-all so `/simple` and
     // `/pypi/...` are not swallowed by the bare packument route. twine uploads land on
     // the registry root via POST.
-    Route::middleware('registry.type:python')->group(function () {
+    Route::middleware('registry.type:python')->group(function () use ($uuid) {
         Route::post('/', [PypiController::class, 'upload']);
         Route::get('/simple', [PypiController::class, 'simpleRoot']);
         Route::get('/simple/{project}', [PypiController::class, 'simpleProject'])
             ->where(['project' => '[A-Za-z0-9._-]+']);
         Route::get('/pypi/files/{package}/{filename}', [PypiController::class, 'download'])
-            ->where(['package' => '[0-9a-fA-F-]{36}', 'filename' => '[A-Za-z0-9][A-Za-z0-9._+-]*\.(whl|tar\.gz|zip)']);
+            ->where(['package' => $uuid, 'filename' => '[A-Za-z0-9][A-Za-z0-9._+-]*\.(whl|tar\.gz|zip)']);
     });
 
     // npm — after the Composer routes (first match protects packages.json/p2/dists).

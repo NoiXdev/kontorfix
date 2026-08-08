@@ -19,6 +19,7 @@ use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -148,6 +149,12 @@ class PypiController extends Controller
 
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
+
+        // Same reasoning as ProxyDownloadController::resolveUpstream(): whereKey() on a
+        // Postgres `uuid` column raises SQLSTATE[22P02] for anything that is not one,
+        // and an unrendered QueryException is a 500 plus a logged stack trace. The route
+        // pattern refuses those already; this does not rely on it.
+        abort_unless(Str::isUuid($package), 404);
 
         $pkg = Package::where('type', PackageType::Python)->whereKey($package)->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
