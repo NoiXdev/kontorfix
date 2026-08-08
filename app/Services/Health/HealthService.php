@@ -3,6 +3,7 @@
 namespace App\Services\Health;
 
 use App\Models\Upstream;
+use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
 use Illuminate\Support\Facades\Cache;
@@ -24,8 +25,38 @@ class HealthService
             $this->cache(),
             $this->queue(),
             $this->storageCheck(),
+            ...$this->broadcasting(),
             ...$this->upstreams(),
         ];
+    }
+
+    /**
+     * The operator-visible half of the Reverb secret guard. `reverb:start` refuses to
+     * come up on a published secret (see ReverbConfigGuard), but a crash-looping
+     * container is easy to miss and the app itself keeps serving — so the reason shows
+     * up here too. Emitted only when broadcasting actually runs over Reverb; on the
+     * `null` driver there is no websocket server and nothing to report.
+     *
+     * @return list<array{key:string,label:string,ok:bool,detail:string}>
+     */
+    private function broadcasting(): array
+    {
+        if (config('broadcasting.default') !== 'reverb' || ReverbConfigGuard::exempt()) {
+            return [];
+        }
+
+        $problem = ReverbConfigGuard::problem();
+
+        if ($problem === null) {
+            return [];
+        }
+
+        return [[
+            'key' => 'broadcasting',
+            'label' => 'Broadcasting (Reverb)',
+            'ok' => false,
+            'detail' => $problem,
+        ]];
     }
 
     /** @return array{key:string,label:string,ok:bool,detail:string} */

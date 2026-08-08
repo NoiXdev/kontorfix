@@ -82,7 +82,18 @@ return [
                     'scheme' => env('REVERB_SCHEME', 'https'),
                     'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
                 ],
-                'allowed_origins' => ['*'],
+                // `*` makes Reverb return before it ever looks at the Origin header
+                // (Protocols\Pusher\Server::handle), so any page on the internet could
+                // open a socket. Default to the host the application is served from and
+                // let an operator widen it deliberately, comma-separated. An empty
+                // APP_URL yields an empty list, i.e. refuse — the safe direction.
+                'allowed_origins' => array_values(array_filter(
+                    array_map('trim', explode(',', (string) env(
+                        'REVERB_ALLOWED_ORIGINS',
+                        (string) parse_url((string) env('APP_URL'), PHP_URL_HOST),
+                    ))),
+                    static fn (string $origin): bool => $origin !== '',
+                )),
                 'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
                 'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
                 'max_connections' => env('REVERB_APP_MAX_CONNECTIONS'),

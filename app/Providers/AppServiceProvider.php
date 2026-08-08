@@ -7,8 +7,10 @@ use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
 use App\Models\User;
+use App\Services\Broadcasting\ReverbConfigGuard;
 use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Event;
@@ -40,6 +42,18 @@ class AppServiceProvider extends ServiceProvider
         // methods. Hence explicit registration instead of discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
+
+        // The Pusher protocol authorizes private channels inside the websocket server,
+        // against the app secret — routes/channels.php never sees a raw wss:// client.
+        // So `reverb:start` must not come up on a secret this repository published.
+        // Hooked at the command rather than at application boot on purpose: the exposure
+        // is the running websocket server, and a broadcasting misconfiguration should
+        // not take the registry offline. See ReverbConfigGuard.
+        Event::listen(CommandStarting::class, function (CommandStarting $event): void {
+            if (str_starts_with((string) $event->command, 'reverb:')) {
+                ReverbConfigGuard::assertUsable();
+            }
+        });
 
         // Coarse IP limit protects the unauthenticated API surface (bad-bearer floods →
         // DB lookup). The fine-grained per-key limiter additionally runs in AuthenticateApiKey.
