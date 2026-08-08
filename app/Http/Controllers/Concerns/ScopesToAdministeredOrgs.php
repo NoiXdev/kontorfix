@@ -94,10 +94,21 @@ trait ScopesToAdministeredOrgs
      *
      * Packages carry no organization of their own — they belong to one through the
      * registries they are attached to. "Attachable" therefore means: already reachable
-     * in the active scope, or not attached anywhere yet (a freshly created package, as
-     * the package picker produces when it creates one inline). A package that lives
-     * only in another organization's registries is refused outright — otherwise
-     * attaching it would hand the caller write access to it via assertCanTouchPackage().
+     * in the active scope. A package that lives only in another organization's registries
+     * is refused outright — otherwise attaching it would hand the caller write access to
+     * it via assertCanTouchPackage().
+     *
+     * A package attached to *no* registry used to be exempt, on the grounds that a freshly
+     * created one has no pivot rows yet. That is not what the exemption did. Both create
+     * paths attach their `group_ids` in the same request, and a package created with none
+     * is invisible to its own creator afterwards — every package listing joins through
+     * `groups`. What the exemption really covered was the orphan a deleted registry leaves
+     * behind when the pivot rows cascade: claimable by any tenant who learns its id,
+     * together with the versions and dists already synced into it, and unrecoverable for
+     * the original organization, whose own re-attach then trips the foreign test.
+     *
+     * Orphans are now attachable only by a super-admin, whose scope spans every
+     * organization and who is the party that has to adjudicate the ownership anyway.
      *
      * @param  array<int, string>  $packageIds
      */
@@ -110,7 +121,6 @@ trait ScopesToAdministeredOrgs
         $orgIds = $this->scopedOrgIds();
 
         $foreign = Package::whereIn('id', $packageIds)
-            ->whereHas('groups')
             ->whereDoesntHave('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds))
             ->exists();
 
