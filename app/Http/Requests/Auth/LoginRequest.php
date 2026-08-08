@@ -60,6 +60,13 @@ class LoginRequest extends FormRequest
             RateLimiter::hit($this->throttleKey());
             RateLimiter::hit($this->accountThrottleKey(), self::ACCOUNT_DECAY_SECONDS);
 
+            // Past the account limit the failure is answered by the throttle rather than
+            // the credential check. The counter never sees a correct password, so the
+            // account holder is not caught by it.
+            if (RateLimiter::tooManyAttempts($this->accountThrottleKey(), self::ACCOUNT_MAX_ATTEMPTS)) {
+                $this->throwThrottleResponse($this->accountThrottleKey());
+            }
+
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
             ]);
@@ -74,39 +81,49 @@ class LoginRequest extends FormRequest
     /**
      * Ensure the login request is not rate limited.
      *
-     * Two counters. The per-address one is the usual burst brake. The account-scoped one
-     * exists because the first key contains the IP: an attacker with a pool of genuinely
-     * distinct source addresses stays under it forever and gets unlimited attempts against
-     * a single account. It is deliberately much looser (20 per 15 minutes, against 5 per
-     * minute) — it has to stay out of the way of a human mistyping their own password,
-     * and because it is keyed on the target account alone, a tight limit here would be an
-     * account-lockout DoS. The same model is already used by the 2FA challenge.
+     * Only the per-address counter is consulted here, i.e. before the credential check.
+     * Its key contains the requester's own IP, so burning it costs the attacker their
+     * own source address and never the victim's ability to log in.
+     *
+     * The account-scoped counter is deliberately NOT checked here. It is keyed on the
+     * target account alone — that is the whole point, an attacker with a pool of source
+     * addresses must not get unlimited attempts against one account — but a counter that
+     * anyone can burn by naming an email address must never be able to refuse the
+     * account holder's *correct* password: that would be an anonymous, targeted and
+     * indefinitely renewable lockout, and a password-only account has no other way in.
+     * It is therefore evaluated in validateCredentials() after the hash comparison and
+     * applies to failures only: a wrong password past the limit is answered with the
+     * throttle message (and raises Lockout for monitoring), a right one logs in and
+     * clears both counters.
      *
      * @throws ValidationException
      */
     public function ensureIsNotRateLimited(): void
     {
-        $limits = [
-            [$this->throttleKey(), 5],
-            [$this->accountThrottleKey(), self::ACCOUNT_MAX_ATTEMPTS],
-        ];
-
-        foreach ($limits as [$key, $maxAttempts]) {
-            if (! RateLimiter::tooManyAttempts($key, $maxAttempts)) {
-                continue;
-            }
-
-            event(new Lockout($this));
-
-            $seconds = RateLimiter::availableIn($key);
-
-            throw ValidationException::withMessages([
-                'email' => trans('auth.throttle', [
-                    'seconds' => $seconds,
-                    'minutes' => ceil($seconds / 60),
-                ]),
-            ]);
+        if (! RateLimiter::tooManyAttempts($this->throttleKey(), 5)) {
+            return;
         }
+
+        $this->throwThrottleResponse($this->throttleKey());
+    }
+
+    /**
+     * Raise Lockout and fail the request with the standard "try again later" message.
+     *
+     * @throws ValidationException
+     */
+    private function throwThrottleResponse(string $key): never
+    {
+        event(new Lockout($this));
+
+        $seconds = RateLimiter::availableIn($key);
+
+        throw ValidationException::withMessages([
+            'email' => trans('auth.throttle', [
+                'seconds' => $seconds,
+                'minutes' => ceil($seconds / 60),
+            ]),
+        ]);
     }
 
     /**
@@ -114,7 +131,7 @@ class LoginRequest extends FormRequest
      */
     public function throttleKey(): string
     {
-        return Str::transliterate(Str::lower($this->string('email')).'|'.$this->ip());
+        return $this->normalizedEmail().'|'.$this->ip();
     }
 
     /**
@@ -123,6 +140,20 @@ class LoginRequest extends FormRequest
      */
     public function accountThrottleKey(): string
     {
-        return Str::transliterate('login-account|'.Str::lower($this->string('email')));
+        return 'login-account|'.$this->normalizedEmail();
+    }
+
+    /**
+     * Both keys use the same normalization as the account lookup: lower-casing only.
+     * Str::transliterate would additionally fold accents, so failures against the
+     * non-account "tïm@x.com" would land on "tim@x.com"'s counter — a way to attack a
+     * counter belonging to an address the requester never names. Percent-encoding is
+     * required on top: RateLimiter::cleanRateLimiterKey() runs htmlentities() and then
+     * collapses "&iuml;" back to "i", which folds the same two addresses together
+     * again unless the key reaches it as pure ASCII.
+     */
+    private function normalizedEmail(): string
+    {
+        return rawurlencode(Str::lower($this->string('email')));
     }
 }
