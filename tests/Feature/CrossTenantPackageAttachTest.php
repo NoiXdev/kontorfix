@@ -69,18 +69,45 @@ it('forbids syncing a foreign orgs package into the own registry through the api
     expect($this->groupA->packages()->count())->toBe(0);
 });
 
-it('still allows attaching an unclaimed package and one from the own organization', function () {
-    // Freshly created packages are attached to no registry yet — the package picker
-    // creates them inline and attaches them in the same flow, so they must stay allowed.
-    $orphan = Package::factory()->create(['name' => 'a/fresh']);
+it('allows re-attaching a package already reachable in the own organization', function () {
+    // The picker's quick-add creates a package WITH its registry (group_ids in the same
+    // request) and then posts the attach, so by the time this route sees the id the
+    // package is already in scope. Re-attaching is idempotent and must stay allowed.
+    $fresh = Package::factory()->create(['name' => 'a/fresh']);
     $own = Package::factory()->create(['name' => 'a/mine']);
-    $this->groupA->packages()->attach($own->id);
+    $this->groupA->packages()->attach([$fresh->id, $own->id]);
 
     $this->actingAs($this->adminA)
-        ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$orphan->id, $own->id]])
+        ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$fresh->id, $own->id]])
         ->assertRedirect()->assertSessionHasNoErrors();
 
     expect($this->groupA->packages()->count())->toBe(2);
+});
+
+it('refuses a package attached to no registry at all, which no longer arises from the ui', function () {
+    // An orphan only appears when a registry is deleted and cascades its pivot rows. It
+    // used to be exempt from the foreign test, which made it claimable by any tenant that
+    // learned its id — together with the versions and dists already synced into it.
+    $orphan = Package::factory()->create(['name' => 'a/orphan']);
+
+    $this->actingAs($this->adminA)
+        ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$orphan->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0);
+});
+
+it('creates a quick-added package into its registry in one request, so no orphan appears', function () {
+    $this->actingAs($this->adminA)
+        ->postJson('/admin/packages', [
+            'type' => 'npm',
+            'name' => '@a/quick-add',
+            'group_ids' => [$this->groupA->id],
+        ])->assertSuccessful();
+
+    $package = Package::where('name', '@a/quick-add')->sole();
+
+    expect($package->groups()->pluck('groups.id')->all())->toBe([$this->groupA->id]);
 });
 
 it('allows a super admin to share a package across organizations', function () {

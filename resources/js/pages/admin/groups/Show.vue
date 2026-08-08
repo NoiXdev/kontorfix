@@ -353,7 +353,7 @@ async function copyToken() {
                                     Vorhandenes Paket suchen oder direkt neu anlegen, dann dieser Registry hinzufügen.
                                 </p>
                             </div>
-                            <PackagePicker v-model="packagesToAdd" create-button />
+                            <PackagePicker v-model="packagesToAdd" create-button :create-group-id="props.group.id" />
                             <div>
                                 <Button type="button" :disabled="packagesToAdd.length === 0" @click="addPackages">
                                     <Plus class="size-4" />
