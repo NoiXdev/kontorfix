@@ -1,14 +1,43 @@
-.git
-.github
-.ddev
+# What may enter the build context.
+#
+# docker/Dockerfile ships whatever survives this file with `COPY . .` and then runs
+# `chmod -R a+rX .`, so anything here that is not application source becomes a
+# world-readable file inside every container started from the image. Pinned by
+# tests/Unit/DockerignoreTest.php, which asserts concrete paths rather than wording.
+
+# Every dot-entry at the context root, as a blanket rule rather than a list. The list
+# form had already drifted — it named .git, .github, .ddev and .claude while letting
+# .idea and .superpowers (internal vulnerability write-ups) through — and the next
+# editor or agent directory would have leaked the same way. Nothing the image or the
+# asset build needs lives in a root dotfile.
+.*
+# Not covered by the rule above, because it is not at the root.
+docker/.env
+
+# Credentials for private Composer sources. Absent today, but docs/private-github-repos.md
+# describes creating one and it holds a GitHub PAT or a Packagist token. The image never
+# needs it: `composer install` runs from composer.json/composer.lock, before COPY.
+auth.json
+
+# Dependencies and build output — each is produced by its own stage.
 node_modules
 vendor
 public/build
-storage/app/artifacts
-storage/app/vcs
-storage/logs
-.claude
+
+# Runtime state, never source: proxied artifacts, git working copies, uploads, sessions,
+# logs, and compiled Blade templates (COPY preserves mtimes, so a compiled view that
+# outranks its own source silences recompilation). docker/Dockerfile recreates the
+# directory skeleton.
+storage
+
+# Locally generated caches. `php artisan config:cache` resolves the developer's whole
+# .env into bootstrap/cache/config.php — APP_KEY, database password, mail credentials —
+# and COPY would bake that into an image layer, where `config:cache` at container start
+# overwrites the file but not the layer. `composer dump-autoload` regenerates
+# packages.php and services.php during the build.
+bootstrap/cache
+
+# Repository furniture: the published audit reports and architecture notes, and the test
+# suite (which names fixtures, routes and internal behaviour).
 docs
 tests
-.env
-docker/.env
