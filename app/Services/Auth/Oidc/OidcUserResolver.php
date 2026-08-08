@@ -25,11 +25,18 @@ class OidcUserResolver
             return $identity->user;
         }
 
-        $email = (string) ($claims['email'] ?? '');
+        // Normalised, and matched case-insensitively below. `users.email` is a plain
+        // case-sensitive btree with no citext and no lowercasing mutator, so an IdP
+        // asserting `Root@firma.de` used to miss the existing `root@firma.de` entirely:
+        // it skipped the isPrivileged() guard, fell through to the registration branch and
+        // created a second, lookalike account carrying the provider's default_role. Not a
+        // takeover of the original — no identity link, a different id — but an
+        // identity-confusion primitive in every user and activity listing.
+        $email = Str::lower(trim((string) ($claims['email'] ?? '')));
         $emailVerified = ($claims['email_verified'] ?? false) === true;
 
         if ($email !== '' && $emailVerified) {
-            $user = User::where('email', $email)->first();
+            $user = User::whereRaw('lower(email) = ?', [$email])->first();
             if ($user !== null) {
                 // Do NOT automatically link a privileged account to a federated identity by
                 // email: an IdP that sets email_verified freely could otherwise take over that
