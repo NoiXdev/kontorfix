@@ -24,7 +24,10 @@ class EnsureSetupTokenPresented
             return $next($request);
         }
 
-        if ($request->routeIs('setup.show')) {
+        // The wizard page *is* the token prompt (it renders nothing but the token field
+        // while locked), and the unlock endpoint is what that field submits to — so both
+        // have to stay reachable while locked, or the gate could never be satisfied.
+        if ($request->routeIs('setup.show', 'setup.unlock')) {
             return $next($request);
         }
 

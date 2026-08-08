@@ -112,7 +112,9 @@ it('lets the operator complete setup with a valid token', function () {
     config()->set('kontorfix.setup.require_token', true);
     $token = app(SetupToken::class)->regenerate();
 
-    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+    // Presented as a POST body, never as `?token=` — see SetupTokenTransportTest.
+    $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
     $this->post('/setup', gatePayload())->assertRedirect(route('dashboard'));
 
     expect(User::query()->count())->toBe(1);
@@ -122,7 +124,7 @@ it('lets the operator send a wizard test mail with a valid token', function () {
     config()->set('kontorfix.setup.require_token', true);
     $token = app(SetupToken::class)->regenerate();
 
-    $this->get('/setup?token='.$token);
+    $this->post('/setup/unlock', ['token' => $token]);
     $this->postJson('/setup/mail-test', ['mailer' => 'log', 'recipient' => 'admin@example.com'])
         ->assertOk()->assertJsonPath('ok', true);
 });
@@ -131,7 +133,8 @@ it('refuses a wrong token', function () {
     config()->set('kontorfix.setup.require_token', true);
     app(SetupToken::class)->regenerate();
 
-    $this->get('/setup?token=not-the-token')->assertInertia(fn ($page) => $page->where('locked', true));
+    $this->post('/setup/unlock', ['token' => 'not-the-token'])->assertSessionHasErrors('token');
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', true));
     $this->post('/setup', gatePayload())->assertForbidden();
 
     expect(User::query()->count())->toBe(0);
@@ -142,7 +145,8 @@ it('refuses setup once the instance is set up, even with a valid token', functio
     $token = app(SetupToken::class)->regenerate();
 
     // Unlock first, then let somebody else finish the instance.
-    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+    $this->post('/setup/unlock', ['token' => $token]);
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
     User::factory()->create();
 
     // "Already complete" must stay distinguishable from "token refused": the wizard

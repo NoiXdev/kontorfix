@@ -27,11 +27,29 @@ use Inertia\Response;
 
 class SetupController extends Controller
 {
+    /**
+     * Presents the first-run token.
+     *
+     * A POST, because the token is a takeover secret and a query string is copied into
+     * proxy logs, APM traces and browser history. Reachable while the gate is locked —
+     * it is how one gets unlocked — but throttled, and it never echoes the value back.
+     */
+    public function unlock(Request $request, SetupGate $gate): RedirectResponse
+    {
+        if ($gate->unlock($request)) {
+            return redirect()->route('setup.show');
+        }
+
+        return redirect()->route('setup.show')
+            ->withErrors(['token' => 'Das Setup-Token ist ungültig. Es steht in den Startup-Logs des Containers.']);
+    }
+
     public function show(Request $request, SetupGate $gate): Response
     {
-        // The only route in the setup group that EnsureSetupTokenPresented lets through
-        // while locked, because this page *is* the token prompt. The gate has already
-        // consumed any ?token= by now; all that is left is to render the right view.
+        // One of the two routes in the setup group that EnsureSetupTokenPresented lets
+        // through while locked, because this page *is* the token prompt (the other is
+        // the unlock POST it submits to). All that is left here is to render the right
+        // view for the state the gate is in.
         $locked = $gate->state($request) === SetupGateState::Locked;
 
         return Inertia::render('setup/Wizard', [

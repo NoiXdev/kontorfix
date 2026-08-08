@@ -34,8 +34,12 @@ class SetupGate
     public function __construct(private readonly SetupToken $token) {}
 
     /**
-     * Resolves the gate for this request, consuming a token supplied as `?token=`
-     * (or a `token` field) and remembering a match in the session.
+     * Resolves the gate for this request from the session alone.
+     *
+     * It deliberately does NOT read a `token` parameter. The token used to be consumed
+     * from `?token=`, which put a 40-character instance-takeover secret into every
+     * reverse-proxy access log, APM trace and browser history entry along the way.
+     * Presenting it is now a separate, explicit POST — see unlock().
      */
     public function state(Request $request): SetupGateState
     {
@@ -54,13 +58,32 @@ class SetupGate
             return SetupGateState::Locked;
         }
 
+        return $request->session()->get(self::SESSION_KEY, false) === true
+            ? SetupGateState::Unlocked
+            : SetupGateState::Locked;
+    }
+
+    /**
+     * Consumes a token presented in the request body and remembers a match in the
+     * session. Returns whether the gate is open afterwards.
+     *
+     * The single place a token is ever read from a request, so the transport is one
+     * decision in one file rather than a property of whichever parameter bag a caller
+     * happens to reach for.
+     */
+    public function unlock(Request $request): bool
+    {
+        if (! $request->hasSession()) {
+            return false;
+        }
+
+        $stored = $this->token->current();
+
         if ($stored !== null && $this->token->matches($request->input('token'))) {
             $request->session()->put(self::SESSION_KEY, true);
         }
 
-        return $request->session()->get(self::SESSION_KEY, false) === true
-            ? SetupGateState::Unlocked
-            : SetupGateState::Locked;
+        return $this->state($request) !== SetupGateState::Locked;
     }
 
     /**

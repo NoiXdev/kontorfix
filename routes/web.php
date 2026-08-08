@@ -18,6 +18,11 @@ use Inertia\Inertia;
 // (403).
 Route::middleware([EnsureSetupIncomplete::class, EnsureSetupTokenPresented::class])->group(function () {
     Route::get('setup', [SetupController::class, 'show'])->name('setup.show');
+    // Presenting the token. A POST because the token is an instance-takeover secret and
+    // a query string is copied into proxy logs, APM traces and browser history; the
+    // throttle is defence in depth behind a 40-character random value.
+    Route::post('setup/unlock', [SetupController::class, 'unlock'])
+        ->middleware('throttle:10,1')->name('setup.unlock');
     Route::post('setup', [SetupController::class, 'store'])
         ->middleware('throttle:10,1')->name('setup.store');
     // Tighter limit than the wizard submit: this one actually sends mail.
