@@ -41,10 +41,15 @@ class RegistryTokenPolicy
             return false;
         }
 
-        // Personal tokens only by the owner; org-shared (without an owner)
-        // only by org admin/maintainer.
+        // Personal tokens only by the owner; org-shared (without an owner) only by an
+        // admin/maintainer *of the token's organization*. `$user->role` is the role in the
+        // caller's HOME organization, which is a different question entirely: it let an
+        // admin at home revoke another organization's shared credential on the strength of
+        // a plain membership there, and refused a pivot-admin their own. Every sibling
+        // (create above, Admin\TokenController::destroy, Api\V1\RegistryTokenController::destroy)
+        // already asks administers(); this one did not.
         return $token->user_id === null
-            ? in_array($user->role, [UserRole::Admin, UserRole::Maintainer], true)
+            ? $user->administers($token->organization_id)
             : $token->user_id === $user->id;
     }
 
