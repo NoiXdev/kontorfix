@@ -89,22 +89,27 @@ it('rejects a gitea push with a bad signature', function () {
     Queue::assertNothingPushed();
 });
 
-it('accepts a valid bitbucket token and matches the html url against a clone url', function () {
+it('accepts a valid bitbucket signature and matches the html url against a clone url', function () {
     Queue::fake();
     // The package is registered with the .git clone URL; Bitbucket delivers the html URL.
     Package::factory()->create(['repository_url' => 'https://bitbucket.org/acme/demo.git']);
 
-    $this->postJson('/webhooks/bitbucket?token=topsecret', [
-        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
-    ])->assertOk()->assertJsonPath('synced', 1);
+    // Bitbucket signs the body with the webhook secret, like github. It used to be
+    // compared against `?token=`, which put the secret in every access log on the path —
+    // see BitbucketSignatureTest.
+    $payload = ['repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]]];
+
+    $this->withHeaders(['X-Hub-Signature' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'topsecret')])
+        ->postJson('/webhooks/bitbucket', $payload)->assertOk()->assertJsonPath('synced', 1);
     Queue::assertPushed(SyncPackage::class);
 });
 
-it('rejects a bitbucket push with a bad token', function () {
+it('rejects a bitbucket push with a bad signature', function () {
     Queue::fake();
-    $this->postJson('/webhooks/bitbucket?token=wrong', [
-        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
-    ])->assertUnauthorized();
+    $payload = ['repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]]];
+
+    $this->withHeaders(['X-Hub-Signature' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'wrong')])
+        ->postJson('/webhooks/bitbucket', $payload)->assertUnauthorized();
     Queue::assertNothingPushed();
 });
 
