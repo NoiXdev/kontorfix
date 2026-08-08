@@ -89,6 +89,14 @@ worth reading before a rollout: **`KONTORFIX_VCS_ALLOWED_HOSTS`** (a git server 
 network must be named here or its syncs fail) and **`KONTORFIX_SETUP_REQUIRE_TOKEN`** (leave
 unset — an empty value parses as false and opens the first-run wizard).
 
+The outbound address policy (`UrlSafety`) fails closed on hosts it cannot resolve: a git
+remote, upstream, webhook target or OIDC issuer that does not resolve **from inside the
+container** is refused rather than attempted, because a host this application cannot resolve
+is one whose address it cannot check (numeric encodings such as `0x7f000001` reach loopback
+without DNS ever being consulted). So the container needs working DNS for every outbound
+target, and a git host that is deliberately not in public DNS belongs in
+`KONTORFIX_VCS_ALLOWED_HOSTS`.
+
 The container runs as **`www-data` (uid 33)**, not root. Everything the app writes
 (`storage`, `bootstrap/cache`, Caddy's `/data` and `/config`) is owned by that user in the
 image, and a freshly created `artifacts` volume inherits the ownership from it.
