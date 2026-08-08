@@ -177,7 +177,14 @@ function destroyUpstream(id: string) {
                             <td class="px-4 py-3"><TypeBadge :type="upstream.type" /></td>
                             <td class="px-4 py-3 font-mono text-xs">{{ upstream.url }}</td>
                             <td class="px-4 py-3">
-                                <span :class="cn('inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium', policyClasses(upstream.policy))">
+                                <span
+                                    :class="
+                                        cn(
+                                            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                                            policyClasses(upstream.policy),
+                                        )
+                                    "
+                                >
                                     {{ policyLabel(upstream.policy) }}
                                 </span>
                             </td>
@@ -252,6 +259,11 @@ function destroyUpstream(id: string) {
                     <div class="grid gap-2">
                         <Label for="url">URL</Label>
                         <Input id="url" v-model="form.url" placeholder="https://repo.packagist.org" autocomplete="off" />
+                        <p class="text-xs text-muted-foreground">
+                            Zugangsdaten gehören in das Token-Feld, nicht in die URL. Eine URL der Form
+                            <code class="font-mono">https://user:passwort@host/…</code> funktioniert zwar, wird aber gegenüber Mitgliedern der
+                            Organisation ausgeblendet.
+                        </p>
                         <InputError :message="form.errors.url" />
                     </div>
 

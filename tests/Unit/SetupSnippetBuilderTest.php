@@ -29,7 +29,12 @@ it('builds pip and twine snippets for the Python registry', function () {
 
     expect($snips['pip'])
         ->toContain('--index-url')
-        ->toContain('https://token:<dein-token>@reg.example.test/r/acme/simple/');
+        // The command line keeps the inline form (pip accepts nothing else there)…
+        ->toContain('https://token:<dein-token>@reg.example.test/r/acme/simple/')
+        // …but the persistent config must not carry the token: pip.conf gets the bare
+        // index URL and the credential goes to ~/.netrc.
+        ->toContain("index-url = https://reg.example.test/r/acme/simple/\n")
+        ->toContain('machine reg.example.test');
     expect($snips['twine'])
         ->toContain('[distutils]')
         ->toContain('repository = https://reg.example.test/r/acme/')
