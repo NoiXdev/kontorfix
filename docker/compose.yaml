@@ -48,6 +48,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # SyncPackage keeps the git mirrors under storage/app/vcs and writes package
+    # artifacts, so the worker needs the same volume the app serves them from.
     volumes:
       - artifacts:/app/storage/app
     restart: unless-stopped
@@ -60,6 +62,14 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # `upstream-cache:prune` (routes/console.php) deletes files under
+    # storage/app/artifacts/proxy, and this is the only service that runs the schedule.
+    # Without the volume it iterates the image's own empty directory, reports "0 removed"
+    # and the proxy cache stays at its budget for good — while the byte accounting, which
+    # lives in the shared Redis, keeps looking healthy. The command warns when it sees
+    # that mismatch, but the mount is what prevents it.
+    volumes:
+      - artifacts:/app/storage/app
     restart: unless-stopped
 
   reverb:
@@ -67,6 +77,8 @@ services:
     environment:
       CONTAINER_ROLE: reverb
     env_file: .env
+    # No volume on purpose: `reverb:start` only relays websocket frames via Redis and
+    # never reads or writes storage/app. Channel authorization happens in the app service.
     # Same reasoning as the app service: the websocket goes through the proxy too
     # (`reverb:8080`). Host-local alternative: ports: ['127.0.0.1:8081:8080']
     expose: ['8080']

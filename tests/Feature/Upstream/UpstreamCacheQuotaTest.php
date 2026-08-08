@@ -6,6 +6,7 @@ use App\Models\Organization;
 use App\Models\Upstream;
 use App\Models\UpstreamMetadataCache;
 use App\Services\Upstream\UpstreamCache;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
@@ -90,6 +91,28 @@ it('prunes proxy artifacts older than the configured age', function () {
     expect($cache->pruneArtifacts(30))->toBe(1);
     Storage::disk('artifacts')->assertMissing("proxy/{$up->id}/old.zip");
     Storage::disk('artifacts')->assertExists("proxy/{$up->id}/new.zip");
+});
+
+it('says so when the accounting knows about bytes the prune cannot see', function () {
+    // The accounting lives in the shared Redis, the artifacts live on a volume. A
+    // container that has the one but not the other (the scheduler ran without the
+    // artifacts volume mounted) prunes an empty tree, reports "0 removed" and leaves the
+    // cache wedged at its budget forever. That mismatch has to be audible.
+    Storage::fake('artifacts');
+    Cache::put('upstream-cache:proxy-bytes', 5_000_000_000);
+
+    $this->artisan('upstream-cache:prune --days=30')
+        ->expectsOutputToContain('Proxy-Cache')
+        ->assertSuccessful();
+});
+
+it('stays quiet when the empty tree matches an empty accounting', function () {
+    Storage::fake('artifacts');
+    Cache::forget('upstream-cache:proxy-bytes');
+
+    $this->artisan('upstream-cache:prune --days=30')
+        ->doesntExpectOutputToContain('Proxy-Cache')
+        ->assertSuccessful();
 });
 
 it('exposes the prune as a schedulable command', function () {

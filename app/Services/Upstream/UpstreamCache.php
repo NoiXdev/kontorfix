@@ -104,6 +104,19 @@ class UpstreamCache
     }
 
     /**
+     * The accounted byte total as recorded, or null when nothing is recorded — unlike
+     * usedBytes() this never falls back to counting the tree. The difference between the
+     * two is what exposes a container that shares the accounting (Redis) but not the
+     * storage it accounts for.
+     */
+    public function recordedBytes(): ?int
+    {
+        $recorded = Cache::get(self::USAGE_KEY);
+
+        return is_numeric($recorded) ? (int) $recorded : null;
+    }
+
+    /**
      * Bytes currently held by the proxy cache. Counting the tree is O(files), so the
      * total is memoised and kept current by incrementing it on write; the periodic
      * recount is what makes it self-correcting after a prune or an out-of-band deletion.

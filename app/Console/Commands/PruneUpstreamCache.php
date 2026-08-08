@@ -28,9 +28,25 @@ class PruneUpstreamCache extends Command
             return self::FAILURE;
         }
 
+        // Read before pruning: pruneArtifacts() drops the memoised total.
+        $recorded = $cache->recordedBytes();
+
         $deleted = $cache->pruneArtifacts($days);
 
         $this->info("{$deleted} Proxy-Artefakt(e) älter als {$days} Tage entfernt.");
+
+        // The byte accounting is shared (cache store), the artifacts are not (a volume).
+        // A container that has the first but not the second prunes an empty tree, reports
+        // "0 removed" and leaves the cache stuck at its budget forever — the pass-through
+        // fallback then re-fetches every proxied download from upstream, indefinitely.
+        // Nothing else would ever say so, so say it here.
+        if ($deleted === 0 && ($recorded ?? 0) > 0 && $cache->usedBytes() === 0) {
+            $this->warn(
+                'Proxy-Cache: die Abrechnung kennt '.$recorded.' Byte, auf diesem Container ist der Proxy-Baum '
+                .'aber leer. Vermutlich fehlt das artifacts-Volume in diesem Dienst — solange das so ist, '
+                .'räumt der Prune nichts auf.'
+            );
+        }
 
         return self::SUCCESS;
     }
