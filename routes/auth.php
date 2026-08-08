@@ -68,6 +68,13 @@ Route::middleware('auth')->group(function () {
 
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
 
+    // The escape hatch out of the gate for accounts whose owner never knew a password
+    // (OIDC-provisioned, admin-invited). Keyed on the session owner, so the throttle
+    // protects that one mailbox and cannot be burned on anyone else's behalf.
+    Route::post('confirm-password/set-link', [ConfirmablePasswordController::class, 'sendPasswordLink'])
+        ->middleware('throttle:5,10')
+        ->name('password.confirm.link');
+
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');
 });
