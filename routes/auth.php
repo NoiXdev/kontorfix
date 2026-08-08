@@ -42,7 +42,7 @@ Route::middleware('guest')->group(function () {
         ->name('password.reset');
 
     Route::post('reset-password', [NewPasswordController::class, 'store'])
-        ->middleware('throttle:password-reset')
+        ->middleware('throttle:password-reset-complete')
         ->name('password.store');
 
     Route::get('auth/oidc/{slug}/redirect', [OidcController::class, 'redirect'])

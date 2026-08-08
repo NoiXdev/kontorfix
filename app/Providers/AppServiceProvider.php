@@ -47,9 +47,9 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(240)->by($request->ip());
         });
 
-        // The password-reset endpoints are unauthenticated and expensive: Laravel runs the
-        // token lookup inside a 200ms Timebox, so an unlimited endpoint pins every PHP
-        // worker for the price of a curl loop, and it sends mail, so it also mail-bombs any
+        // Requesting a reset link. Unauthenticated and expensive: Laravel runs the token
+        // lookup inside a 200ms Timebox, so an unlimited endpoint pins every PHP worker
+        // for the price of a curl loop, and it sends mail, so it also mail-bombs any
         // known address. Two counters, because they stop different attacks:
         //
         //  - per source address, for the worker-exhaustion angle. This is the real peer:
@@ -69,6 +69,19 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(6)->by('password-reset-ip:'.$request->ip()),
                 Limit::perHour(10)->by('password-reset-account:'.$email),
             ];
+        });
+
+        // Completing a reset is a separate limiter on purpose. It is a different action
+        // with a different abuse profile: the requester must present a 64-character
+        // single-use token, so there is nothing per-account left to brute force here,
+        // and the account-scoped send bucket above is burnable by anyone who knows an
+        // address. Sharing one bucket therefore meant ten POSTs to /forgot-password
+        // locked the victim out of /reset-password for the whole 60-minute token
+        // lifetime — the recovery path denied to the only person holding a valid token.
+        // What remains worth limiting is the same worker-exhaustion angle, which is a
+        // property of the source address, not of the target account.
+        RateLimiter::for('password-reset-complete', function (Request $request): Limit {
+            return Limit::perMinute(6)->by('password-reset-complete-ip:'.$request->ip());
         });
 
         // Deliberate security decision (v0.8): a passkey here strictly requires
