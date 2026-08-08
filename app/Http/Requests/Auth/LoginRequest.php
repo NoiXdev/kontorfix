@@ -98,11 +98,28 @@ class LoginRequest extends FormRequest
         /** @var User|null $user */
         $user = User::where('email', $this->string('email'))->first();
 
-        // Hash::check also runs against a fixed dummy hash when there is no user — constant work,
-        // so the response time doesn't reveal whether an account exists (timing enumeration).
-        $hash = $user->password ?? '$2y$12$wOujnffIB7RK/vXl7tujy.x0A/eb3esFIi0X.CdsC9MUy5aS6cHBi';
+        $hash = $user?->password;
 
-        if (! Hash::check((string) $this->string('password'), $hash) || ! $user) {
+        if (is_string($hash) && $hash !== '') {
+            $matches = Hash::check((string) $this->string('password'), $hash);
+        } else {
+            // No account — or one whose hash nobody can match, as robots hold none. Burn
+            // one hash so the response costs the same as a real comparison and the timing
+            // does not reveal whether an account exists.
+            //
+            // Derived from the *active* hasher rather than pinned to a `$2y$12$…` literal.
+            // The project publishes no config/hashing.php, so `BCRYPT_ROUNDS` and
+            // `HASH_DRIVER` are live env knobs: a literal desynchronises from real hashes
+            // the moment either moves — and `hashing.rehash_on_login` is true, so real
+            // hashes migrate to the new cost while a literal stays put, widening the gap
+            // over time. Worse, under `HASH_DRIVER=argon2id` ArgonHasher::check() throws on
+            // a bcrypt literal, turning a missing account into a 500 next to a real
+            // account's 302 — a perfect oracle in place of the timing one this closes.
+            Hash::make(Str::random(40));
+            $matches = false;
+        }
+
+        if (! $matches || ! $user) {
             $this->penaliseFailure();
 
             throw ValidationException::withMessages([
