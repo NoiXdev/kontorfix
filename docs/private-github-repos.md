@@ -67,6 +67,15 @@ In the admin console → **Pakete → Paket hinzufügen** (or the quick-add on a
   or GitHub Enterprise credential must name its host explicitly. Changing the host
   requires re-entering the token — only someone who already holds the secret may decide
   where it is sent.
+- The binding is the whole **authority, port included**. `gitlab.corp` matches
+  `https://gitlab.corp/…` and `https://gitlab.corp:443/…` but not `https://gitlab.corp:9999/…`,
+  because the `Authorization` header git receives is scoped to `scheme://host:port` and a
+  different port on the same machine is a different service. A git server on a non-default
+  port is named with it: `gitlab.corp:8443`.
+
+> **Upgrading:** if a package's repository URL carries an explicit non-default port, edit
+> the credential to name that port and re-enter the token, or its syncs will refuse with
+> *"Dieses Git-Token ist an … gebunden"*.
 
 ### Upgrading an instance that predates the host binding
 
@@ -74,9 +83,18 @@ The migration binds every existing credential to its provider's canonical host. 
 **not** derive a host from a package's repository URL: that URL was operator-supplied and
 would let a maintainer nominate the host their organization's token gets sent to. Any
 credential whose assigned packages point somewhere other than the canonical host — a
-self-hosted GitLab or GHE, typically — is therefore left **unbound** and logged with a
-`Git credential left without a host binding` warning. Such a credential refuses every
-sync and probe until an admin edits it, names the host, and re-enters the token.
+self-hosted GitLab or GHE, typically — is therefore left with an empty `host` column and
+logged with a `Git credential left without a host binding` warning.
+
+What that produces is **not** an unbound credential. For the three known providers,
+`GitCredential::allowedHost()` falls back to the provider's canonical host when the column
+is empty, so such a credential is bound to `github.com` / `gitlab.com` / `bitbucket.org` and
+refuses the self-hosted repository it was actually created for. It fails closed, which is
+the important part, but the fix is **not** to re-enter the token: edit the credential, name
+the real host in the *Host* field, and re-enter the token (the retarget guard asks for it
+because only someone who holds the secret may decide where it is sent). A credential with
+provider *generic* really is unusable until a host is named — there is no canonical host to
+fall back to.
 
 ## Troubleshooting
 

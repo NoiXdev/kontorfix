@@ -157,6 +157,56 @@ as trusted infrastructure. Two deliberate properties:
 - A broken S3 configuration can interrupt downloads (the `artifacts` disk throws on errors).
   Use the built-in connection test before saving.
 
+## Re-authentication and session invalidation
+
+**What `password.confirm` covers.** Every route that hands the caller a long-lived bearer
+credential, or that decides who may log in from now on, sits behind it: `settings/tokens`
+and `settings/api-keys` (index, store and destroy), the whole two-factor enrolment group,
+`settings/passkeys`, `portal/tokens`, `admin/tokens`, `admin/robots/{user}/keys`, and — via
+`ConfirmPasswordOnEmailChange` — the address field of `PATCH /settings/profile`, because the
+address is the account's recovery channel. The index pages are gated as well as the POSTs,
+so the prompt happens on the way into the page rather than swallowing a submitted form.
+
+Administration is deliberately **not** gated. `PUT /admin/users/{user}` accepts
+`is_super_admin` and `email`, so the `super` group is one trust boundary and gating a single
+route in it would close nothing. The line is: gate where a secret is handed out, not where
+configuration is changed.
+
+**The window is session-wide and lasts three hours** (`auth.password_timeout`, Laravel's
+default). One confirmation therefore unlocks *every* gated route until it expires — opening
+`GET /settings/tokens` is enough to satisfy `POST /admin/robots/{user}/keys` later in the
+same session. Shorten it with `AUTH_PASSWORD_TIMEOUT` (seconds) on an instance where that is
+too broad; the cost is a prompt on more page loads, which is the reason the default is not
+lower. There is no per-route window: `RequirePassword` reads one session key.
+
+**Two ways to satisfy the gate without a password**, for accounts whose owner never knew
+one (OIDC-provisioned, admin-invited): a passkey assertion with user verification
+(`passkey.confirm`), and `POST /confirm-password/set-link`, which mails a set-password link
+to the address stored on the account — never to one taken from the request.
+
+**Guessing at the gate is metered.** Every endpoint that compares a submitted string against
+the session owner's password hash — `POST /confirm-password`, `DELETE /settings/two-factor`,
+`PUT /settings/password`, `DELETE /settings/profile` — goes through
+`App\Services\Auth\PasswordAttemptLimiter` and shares two counters: 6 failures per source
+address and 20 per account, both over 15 minutes, with a `Failed` event and a log line per
+miss. The account counter is evaluated only *after* a failed comparison, so nobody holding a
+session can use it to refuse the owner their own correct password.
+
+**What a password change or reset invalidates, and what it does not.** Changing the hash
+evicts every other web session (`AuthenticateSession` pins each session to the hash it was
+created under, and `PUT /settings/password` additionally re-issues the recaller cookie for
+the device doing the change). It does **not** revoke registry tokens, API keys or passkeys.
+That is deliberate: they are named credentials the user can see and revoke individually,
+minting them requires re-proving the password, and registry tokens in particular are machine
+credentials wired into CI — destroying them on a routine rotation would turn a password
+change into a build outage. A user who believes a credential leaked revokes it directly.
+
+`AuthenticateSession` does not pin a session whose account holds no password hash at all.
+The only account shape that reaches that state is a robot (`POST /admin/robots`), and a
+robot is refused an interactive session both at login and, by `RejectRobotWebSession`, on
+every subsequent request — so there is no session for the fail-open to fail open on. It is a
+property worth re-checking if a second writer of a null password is ever introduced.
+
 ## Known residual risks / follow-ups
 
 Deliberately classified as low and documented in the security audit (non-blocking):
@@ -168,9 +218,23 @@ Deliberately classified as low and documented in the security audit (non-blockin
   organization (which sees nothing in the portal). For a closed instance, `/register` can be
   gated or disabled.
 - **OIDC email linking:** auto-linking across multiple enabled identity providers for member
-  accounts — relevant only with multiple, partly untrusted IdPs.
+  accounts — relevant only with multiple, partly untrusted IdPs. The match is
+  case-insensitive on `lower(email)`, but the column carries no functional unique index: an
+  instance that already holds two case-variant addresses keeps both rows.
 - **API existence oracle:** route model binding runs before the key auth; non-existent
   `{id}` routes return 404 instead of 401. Low value due to non-enumerable UUIDs.
 - **API docs in `local`:** `/docs/api` is ungated in the `local` environment (development).
+  The page also loads Stoplight Elements from unpkg.com and runs it on this origin without
+  subresource integrity, in a session that is by definition an operator admin's. Set
+  `KONTORFIX_API_DOCS_ENABLED=false` on an instance that does not need the browser.
+- **API keys minted from an API key:** `POST /api/v1/me/api-keys` cannot carry
+  `password.confirm` (the gate reads a session key; `/api/v1` is stateless). A successor may
+  be neither wider nor longer-lived than its parent, but a parent with no expiry still mints
+  successors with no expiry — bound that with `KONTORFIX_API_KEY_MAX_TTL_DAYS`.
+- **No throttle on the registry protocol routes:** a cold `composer install` or `npm ci`
+  legitimately issues one request per dependency at once, so any limit low enough to matter
+  would break CI. The exhaustion angle is bounded directly instead: the proxy cache enforces
+  its per-artifact byte cap while the artifact streams, and the Composer dist build holds a
+  per-archive lock.
 - **JWKS cache:** OIDC reloads the JWKS on each callback (performance/robustness, not a
   security issue).

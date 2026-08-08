@@ -34,6 +34,12 @@ return new class extends Migration
         // GitHub Enterprise one and the migration has no safe way to know its host. Those
         // rows are left unset and the operator is told, because a maintainer who can only
         // cause a fail-closed state cannot use the veto to gain anything.
+        //
+        // "Left unset" is not "left unbound": for the three known providers allowedHost()
+        // falls back to the provider's canonical host, so a vetoed row is bound to the
+        // *public* provider and refuses the self-hosted repository it exists for. Still
+        // fail-closed, but the operator's fix is to name the real host — see
+        // docs/private-github-repos.md, which used to say the opposite.
         foreach (GitProvider::cases() as $provider) {
             $canonical = $provider->defaultHost();
             if ($canonical === null) {
