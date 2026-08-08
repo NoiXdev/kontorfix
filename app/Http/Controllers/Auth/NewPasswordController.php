@@ -62,8 +62,14 @@ class NewPasswordController extends Controller
             return to_route('login')->with('status', __($status));
         }
 
+        // Every failure answers as an invalid token. The broker's own statuses distinguish
+        // them: `validateReset()` returns INVALID_USER *before* it ever looks at the token,
+        // so rendering the status verbatim turned this endpoint into the account-existence
+        // oracle that `POST /forgot-password` is deliberately written to withhold — same
+        // directory, one bit per address, no authentication and no token needed. RESET_THROTTLED
+        // is collapsed with it, because a distinguishable "too many attempts" is the same bit.
         throw ValidationException::withMessages([
-            'email' => [__($status)],
+            'email' => [__(Password::INVALID_TOKEN)],
         ]);
     }
 }
