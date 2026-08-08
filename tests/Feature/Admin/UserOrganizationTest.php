@@ -140,6 +140,9 @@ it('hides portal-disabled groups from the portal listing and blocks direct acces
 });
 
 it('lets a member create a token for a registry of an additional organization', function () {
+    // Portal minting is behind `password.confirm`; the additional-org reach is the subject.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
     $home = Organization::factory()->create();
     $other = Organization::factory()->create();
     $user = User::factory()->for($home)->create(['role' => UserRole::Member]);
@@ -154,6 +157,8 @@ it('lets a member create a token for a registry of an additional organization', 
 });
 
 it('still refuses a token for a foreign organizations registry', function () {
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
     $user = User::factory()->for(Organization::factory()->create())->create(['role' => UserRole::Member]);
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
 

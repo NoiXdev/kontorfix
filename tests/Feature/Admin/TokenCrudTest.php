@@ -6,6 +6,12 @@ use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 
+// `POST /admin/tokens` sits behind `password.confirm` (see routes/web.php): the same
+// long-lived bearer credential as `settings/tokens`. This file exercises the CRUD and
+// scoping behind that gate; the gate itself is covered by
+// tests/Feature/Settings/CredentialPasswordConfirmationTest.php.
+beforeEach(fn () => $this->withSession(['auth.password_confirmed_at' => time()]));
+
 it('lists tokens for admins', function () {
     $org = Organization::factory()->create();
     RegistryToken::issue($org, 'ci', null);

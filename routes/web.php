@@ -56,7 +56,13 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
-    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'destroy']);
+    // Minting is gated like `settings/tokens`: the same RegistryToken::issue() hands out a
+    // long-lived bearer credential that outlives the session, so a stolen session alone
+    // must not produce one. Listing and revoking stay ungated — revocation must never be
+    // harder than issuance. On refusal the operator is returned to the form page.
+    Route::post('tokens', [Admin\TokenController::class, 'store'])
+        ->middleware('password.confirm')->name('tokens.store');
     Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'store', 'destroy']);
     // Reusable git access tokens (for syncing private repositories), org-scoped.
@@ -110,7 +116,10 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
 
     Route::get('robots', [Admin\RobotController::class, 'index'])->name('robots.index');
     Route::post('robots', [Admin\RobotController::class, 'store'])->name('robots.store');
-    Route::post('robots/{user}/keys', [Admin\RobotController::class, 'issueKey'])->name('robots.keys.store');
+    // Same class of credential as `settings/api-keys`, so the same gate: an API key for a
+    // robot is a standalone, long-lived bearer token with the robot's full reach.
+    Route::post('robots/{user}/keys', [Admin\RobotController::class, 'issueKey'])
+        ->middleware('password.confirm')->name('robots.keys.store');
     Route::delete('robots/{user}', [Admin\RobotController::class, 'destroy'])->name('robots.destroy');
 });
 
@@ -118,7 +127,12 @@ Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->grou
     Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
     Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
     Route::get('registries/{group}/packages/{package}', [RegistryController::class, 'showPackage'])->name('registries.package');
-    Route::post('tokens', [TokenController::class, 'store'])->name('tokens.store');
+    // The portal mints exactly the credential `settings/tokens` mints, so it carries the
+    // same `password.confirm` gate — gating one surface and not the other would only tell
+    // a session thief which URL to use. `destroy` stays ungated so that revoking a token
+    // is never harder than minting one.
+    Route::post('tokens', [TokenController::class, 'store'])
+        ->middleware('password.confirm')->name('tokens.store');
     Route::delete('tokens/{token}', [TokenController::class, 'destroy'])->name('tokens.destroy');
 });
 

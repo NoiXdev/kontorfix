@@ -30,6 +30,10 @@ it('fully isolates two customers across list, detail, snippets and tokens', func
     // Foreign detail: forbidden
     $this->actingAs($memberA)->get("/portal/registries/{$groupB->id}")->assertForbidden();
 
+    // Minting sits behind `password.confirm`; the isolation this test is about is the
+    // org scoping behind that gate.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
     // Token for own registry: ok
     $this->actingAs($memberA)->from('/portal')
         ->post('/portal/tokens', ['name' => 'CI', 'group_id' => $groupA->id])->assertRedirect('/portal');
