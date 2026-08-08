@@ -6,6 +6,7 @@ use App\Http\Controllers\Settings\PasskeyController;
 use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\TwoFactorController;
+use App\Http\Middleware\ConfirmPasswordOnEmailChange;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -13,7 +14,12 @@ Route::middleware('auth')->group(function () {
     Route::redirect('settings', 'settings/profile');
 
     Route::get('settings/profile', [ProfileController::class, 'edit'])->name('profile.edit');
-    Route::patch('settings/profile', [ProfileController::class, 'update'])->name('profile.update');
+    // The address on this form is the account's password-reset channel, so moving it
+    // re-proves the password like every other route that can outlive the session. The
+    // middleware only engages when the address actually changes — see its docblock.
+    Route::patch('settings/profile', [ProfileController::class, 'update'])
+        ->middleware(ConfirmPasswordOnEmailChange::class)
+        ->name('profile.update');
     Route::delete('settings/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     Route::get('settings/password', [PasswordController::class, 'edit'])->name('password.edit');
