@@ -89,6 +89,7 @@ const props = defineProps<{
     pythonDists: PythonDistRow[];
     gitCredentials: { id: string; name: string; provider: string }[];
     groups: GroupRow[];
+    sharedElsewhere: number;
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
 }>();
@@ -250,7 +251,12 @@ useOperatorChannel({
                                         </td>
                                         <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
                                     </tr>
-                                    <tr v-if="props.groups.length === 0">
+                                    <tr v-if="props.sharedElsewhere > 0" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                        <td colspan="2" class="px-4 py-3 text-muted-foreground">
+                                            Zusätzlich in {{ props.sharedElsewhere }} Registry(s) außerhalb deines Bereichs.
+                                        </td>
+                                    </tr>
+                                    <tr v-if="props.groups.length === 0 && props.sharedElsewhere === 0">
                                         <td colspan="2" class="px-4 py-8 text-center text-muted-foreground">Keiner Registry zugeordnet.</td>
                                     </tr>
                                 </tbody>

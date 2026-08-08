@@ -16,6 +16,7 @@ use App\Models\PythonDist;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
 use App\Services\Registry\RegistryTypeService;
+use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
@@ -76,7 +77,18 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
-        $package->load(['versions', 'groups:id,name,slug']);
+        $package->load(['versions', 'groups:id,name,slug,organization_id']);
+
+        // `assertCanTouchPackage()` only asserts that ONE of the package's registries is
+        // reachable in the active scope. Serialising the whole relation therefore handed a
+        // customer-org admin the id, name and slug of every *other* organization's registry
+        // the package is shared into. The state needs a super-admin's deliberate cross-org
+        // attach to arise at all, which is why this is small — but the caller has no business
+        // reading it, so they get a count instead.
+        $scope = app(OrgScope::class);
+        $visibleGroups = $scope->spansAllOrganizations()
+            ? $package->groups
+            : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
 
         // Python is file-centric (multiple dists per version), so its "versions" and stats
         // come from the python_dists table rather than package_versions.
@@ -119,7 +131,8 @@ class PackageController extends Controller
                 'download_count' => $d->download_count,
                 'uploaded_at' => $d->uploaded_at?->toDateString(),
             ]),
-            'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
+            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug])->values(),
+            'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
             'stats' => $isPython ? [
                 'downloads' => (int) $dists->sum('download_count'),
                 'storage_bytes' => (int) $dists->sum('size'),
