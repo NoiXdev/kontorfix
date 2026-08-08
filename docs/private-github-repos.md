@@ -62,6 +62,22 @@ In the admin console → **Pakete → Paket hinzufügen** (or the quick-add on a
 - To rotate: edit the package (re-enter a new token) or delete and recreate it.
   Revoke the old token at the provider.
 
+- A credential is **bound to one host** and its token is never sent anywhere else. For
+  GitHub/GitLab/Bitbucket that host defaults to the provider's own; a self-hosted GitLab
+  or GitHub Enterprise credential must name its host explicitly. Changing the host
+  requires re-entering the token — only someone who already holds the secret may decide
+  where it is sent.
+
+### Upgrading an instance that predates the host binding
+
+The migration binds every existing credential to its provider's canonical host. It does
+**not** derive a host from a package's repository URL: that URL was operator-supplied and
+would let a maintainer nominate the host their organization's token gets sent to. Any
+credential whose assigned packages point somewhere other than the canonical host — a
+self-hosted GitLab or GHE, typically — is therefore left **unbound** and logged with a
+`Git credential left without a host binding` warning. Such a credential refuses every
+sync and probe until an admin edits it, names the host, and re-enters the token.
+
 ## Troubleshooting
 
 - **"Zugriff verweigert — Repository privat?"** on *Prüfen*: the token is missing,
