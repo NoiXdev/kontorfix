@@ -9,8 +9,8 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -141,7 +141,6 @@ function saveSource() {
 
 // Live update of the sync status for the currently displayed package.
 // Local state, so the live update doesn't mutate the prop.
-const page = usePage<SharedData>();
 const syncStatus = ref(props.package.sync_status);
 const syncError = ref(props.package.sync_error);
 
@@ -153,13 +152,11 @@ function applyStatus(p: PackagePayload) {
     syncError.value = p.error ?? null;
 }
 
-const isOperator = page.props.auth.can?.console ?? false;
-if (isOperator) {
-    useOperatorChannel({
-        onSynced: applyStatus,
-        onFailed: applyStatus,
-    });
-}
+// The composable decides whether this account may subscribe at all.
+useOperatorChannel({
+    onSynced: applyStatus,
+    onFailed: applyStatus,
+});
 </script>
 
 <template>

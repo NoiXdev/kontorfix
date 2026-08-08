@@ -115,19 +115,17 @@ function applyStatus(p: PackagePayload) {
     }
 }
 
-const isOperator = page.props.auth.can?.console ?? false;
-if (isOperator) {
-    useOperatorChannel({
-        onSynced: (p) => {
-            applyStatus(p);
-            showHint(`${p.name} synchronisiert`, false);
-        },
-        onFailed: (p) => {
-            applyStatus(p);
-            showHint(`${p.name}: Sync fehlgeschlagen`, true);
-        },
-    });
-}
+// The composable decides whether this account may subscribe at all.
+useOperatorChannel({
+    onSynced: (p) => {
+        applyStatus(p);
+        showHint(`${p.name} synchronisiert`, false);
+    },
+    onFailed: (p) => {
+        applyStatus(p);
+        showHint(`${p.name}: Sync fehlgeschlagen`, true);
+    },
+});
 
 const dialogOpen = ref(false);
 

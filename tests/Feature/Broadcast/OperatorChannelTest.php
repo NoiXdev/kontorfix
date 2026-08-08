@@ -57,3 +57,28 @@ it('denies the private operator channel to everyone below super-admin', function
     authorizeOperatorChannel($customerAdmin)->assertForbidden();
     authorizeOperatorChannel($customer)->assertForbidden();
 });
+
+/**
+ * `EnsureOperator` still admits an operator-org maintainer to the three pages that
+ * subscribe to this channel, so the frontend needs a reliable answer to "may I
+ * subscribe?" before it tries. `useOperatorChannel` reads `auth.can.super`; this pins
+ * that prop to the same predicate `routes/channels.php` enforces, on an account that
+ * reaches the pages but not the channel.
+ */
+it('tells an operator maintainer they may open the pages but not the channel', function () {
+    $maintainer = User::factory()
+        ->for(Organization::factory()->create(['is_operator' => true]))
+        ->create(['role' => UserRole::Maintainer]);
+
+    authorizeOperatorChannel($maintainer)->assertForbidden();
+
+    foreach (['/dashboard', '/admin/packages'] as $uri) {
+        $this->actingAs($maintainer)->get($uri)
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->where('auth.can.console', true)
+                ->where('auth.can.super', false)
+                ->etc()
+            );
+    }
+});
