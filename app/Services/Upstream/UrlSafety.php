@@ -5,6 +5,25 @@ namespace App\Services\Upstream;
 class UrlSafety
 {
     /**
+     * Test seam for resolveIps(). Never set in production; the test suite installs a
+     * deterministic resolver so the address policy — which now fails closed on an
+     * unresolvable host — can be exercised without depending on the machine's DNS.
+     *
+     * @var (callable(string): list<string>)|null
+     */
+    private static $resolver = null;
+
+    /**
+     * Replace (or, with null, restore) the DNS lookup used by the address policy.
+     *
+     * @param  (callable(string): list<string>)|null  $resolver
+     */
+    public static function resolveHostsUsing(?callable $resolver): void
+    {
+        self::$resolver = $resolver;
+    }
+
+    /**
      * Whether an artifact URL (delivered by the upstream) may be safely fetched:
      * only http/https, no IP literal in private/reserved ranges, no localhost.
      * Prevents second-order SSRF via a compromised/typosquatted upstream URL
@@ -43,8 +62,7 @@ class UrlSafety
      * to a private/reserved address is rejected — this closes SSRF via internal
      * hostnames (e.g. a malicious OIDC discovery document with token_endpoint pointing
      * to http://vault.internal) as well as octal/decimal IP encodings that filter_var
-     * treats as hostnames. Hosts that don't resolve are allowed through (the HTTP
-     * fetch then fails harmlessly anyway, since there's no internal target).
+     * treats as hostnames. Hosts that don't resolve are rejected too: see hostIsPublic().
      *
      * Note: does not protect against DNS rebinding (TOCTOU) — that would require a
      * resolver pinned to cURL; this is noted as a follow-up.
@@ -61,8 +79,25 @@ class UrlSafety
 
     /**
      * Whether a bare host — an IP literal (optionally bracketed/zone-suffixed) or a
-     * hostname — points exclusively at public addresses. Hosts that do not resolve pass,
-     * on the same reasoning as isSafeResolving(): there is no internal target to reach.
+     * hostname — points exclusively at public addresses.
+     *
+     * The check FAILS CLOSED: a host that is neither a valid IP literal nor resolvable to
+     * at least one address is refused. It used to pass, on the reasoning that an
+     * unresolvable name has no internal target to reach — but that inference is unsound
+     * in both directions:
+     *
+     *  - The client that finally connects does not necessarily go through this resolver.
+     *    libcurl's inet_aton path decodes hex/octal/short numeric forms (`0x7f000001`,
+     *    `0x7f.1`) that filter_var refuses as IPs and that DNS is never asked about, so
+     *    "unresolvable" meant "allowed" for every loopback and RFC1918 address written
+     *    that way.
+     *  - The check and the connection are separated in time (a URL is validated in a
+     *    request, fetched later by a queued job), so a lookup that SERVFAILs or times out
+     *    now says nothing about where the name points when the fetch actually happens.
+     *
+     * The cost is that a transient resolver failure refuses an otherwise legitimate
+     * outbound target; that is the correct direction for an address policy to fail, and
+     * the git path keeps `kontorfix.vcs.allowed_hosts` as the explicit escape hatch.
      *
      * Public so callers outside the HTTP path (the git transports, which are neither
      * http nor https and therefore cannot use isSafe()) share one address policy.
@@ -79,7 +114,14 @@ class UrlSafety
             return self::ipIsPublic($host);
         }
 
-        foreach (self::resolveIps($host) as $ip) {
+        $ips = self::resolveIps($host);
+
+        // No address to judge — refuse rather than guess.
+        if ($ips === []) {
+            return false;
+        }
+
+        foreach ($ips as $ip) {
             if (! self::ipIsPublic($ip)) {
                 return false;
             }
@@ -235,6 +277,10 @@ class UrlSafety
      */
     private static function resolveIps(string $host): array
     {
+        if (self::$resolver !== null) {
+            return (self::$resolver)($host);
+        }
+
         $ips = [];
 
         $v4 = @gethostbynamel($host);

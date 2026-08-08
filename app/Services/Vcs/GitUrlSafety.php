@@ -23,10 +23,12 @@ use App\Services\Upstream\UrlSafety;
  *     already applies. Without it the probe is a working internal port-scanner: it
  *     reports auth-failed / not-found / unreachable distinguishably, and returns real
  *     repository metadata when it does find an internal git server.
+ *     The address check fails closed: a host that resolves to nothing is refused as well,
+ *     because git's transport resolves numeric host encodings this policy never sees.
  *
- * An operator whose git server genuinely lives on a private network names it in
- * `kontorfix.vcs.allowed_hosts` (exact host, or `*.suffix`), which exempts that host from
- * the address check but not from the scheme check.
+ * An operator whose git server genuinely lives on a private network — or is not resolvable
+ * from this container at all — names it in `kontorfix.vcs.allowed_hosts` (exact host, or
+ * `*.suffix`), which exempts that host from the address check but not from the scheme check.
  *
  * This is enforced at the two sinks — RepositoryProbe::probe() and GitRepository::sync()
  * — rather than at the controllers, so the queued SyncPackage job, the packages:resync
@@ -68,7 +70,10 @@ class GitUrlSafety
         }
 
         if (! UrlSafety::hostIsPublic($host)) {
-            return 'Repository-URL abgelehnt: der Host zeigt auf eine interne oder reservierte Adresse.';
+            // One message for "points at a reserved address" and for "no address could be
+            // established at all" — deliberately: distinguishing them would turn the
+            // rejection into the DNS-existence oracle this guard exists to prevent.
+            return 'Repository-URL abgelehnt: der Host konnte nicht als öffentliche Adresse bestätigt werden.';
         }
 
         return null;

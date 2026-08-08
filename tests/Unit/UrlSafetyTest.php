@@ -56,7 +56,34 @@ it('rejects ip-literal and localhost urls via isSafeResolving', function () {
     expect(UrlSafety::isSafeResolving(null))->toBeFalse();
 });
 
-it('allows an unresolvable host (the http call fails harmlessly, no internal target)', function () {
-    // *.test doesn't resolve → resolveIps is empty → passes (the fetch then fails).
-    expect(UrlSafety::isSafeResolving('https://idp.test/authorize'))->toBeTrue();
+it('refuses a host it cannot resolve instead of assuming there is no target', function () {
+    // This used to pass, on the reasoning "the fetch then fails harmlessly, there is no
+    // internal target". The inference is unsound: the client that connects does not have
+    // to use this resolver, and the fetch happens later (queued job) than the check.
+    UrlSafety::resolveHostsUsing(fn () => []);
+
+    expect(UrlSafety::hostIsPublic('idp.test'))->toBeFalse();
+    expect(UrlSafety::isSafeResolving('https://idp.test/authorize'))->toBeFalse();
+});
+
+it('refuses numeric host encodings that filter_var does not recognise as an IP', function () {
+    // libcurl's inet_aton path decodes all of these to 127.0.0.1, while
+    // filter_var(..., FILTER_VALIDATE_IP) refuses them as IPs and DNS is never asked —
+    // gethostbynamel('0x7f000001') is false in the container. Before the policy failed
+    // closed, that combination made every one of them "public".
+    UrlSafety::resolveHostsUsing(fn () => []);
+
+    expect(UrlSafety::hostIsPublic('0x7f000001'))->toBeFalse();
+    expect(UrlSafety::hostIsPublic('0x7f.0.0.1'))->toBeFalse();
+    expect(UrlSafety::hostIsPublic('0x7f.1'))->toBeFalse();
+    expect(UrlSafety::isSafeResolving('https://0x7f000001:9999/x'))->toBeFalse();
+});
+
+it('judges a hostname by the addresses it resolves to', function () {
+    UrlSafety::resolveHostsUsing(fn () => ['93.184.216.34']);
+    expect(UrlSafety::hostIsPublic('mirror.example.com'))->toBeTrue();
+    expect(UrlSafety::isSafeResolving('https://mirror.example.com/x'))->toBeTrue();
+
+    UrlSafety::resolveHostsUsing(fn () => ['93.184.216.34', '10.0.0.5']);
+    expect(UrlSafety::hostIsPublic('mirror.example.com'))->toBeFalse();
 });
