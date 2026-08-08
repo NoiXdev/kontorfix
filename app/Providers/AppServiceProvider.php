@@ -50,7 +50,11 @@ class AppServiceProvider extends ServiceProvider
         // (the browser stays on); an operator who does not need it can now switch it off
         // and keep only the machine-readable spec they generate themselves. This must run
         // in register(): ScrambleServiceProvider reads the flag in its own boot().
-        if (! (bool) config('kontorfix.api_docs_enabled', true)) {
+        // Read through the container rather than the helper: register() also runs on bare
+        // containers that never loaded configuration, and "no config" must mean "leave the
+        // default behaviour alone", not "take the routes away".
+        if ($this->app->bound('config')
+            && ! (bool) $this->app->make('config')->get('kontorfix.api_docs_enabled', true)) {
             Scramble::ignoreDefaultRoutes();
         }
     }
