@@ -8,6 +8,8 @@ use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
 use App\Models\User;
 use App\Services\Broadcasting\ReverbConfigGuard;
+use App\Services\Upstream\HostResolver;
+use App\Services\Upstream\SystemHostResolver;
 use Dedoc\Scramble\Scramble;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
@@ -30,7 +32,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // The one DNS lookup the outbound address policy rests on (UrlSafety consumes it
+        // for every upstream fetch, git transport, webhook delivery and OIDC discovery
+        // document). Bound rather than hard-coded so tests can substitute a deterministic
+        // resolver through the container instead of a public static setter that
+        // production code could also reach.
+        $this->app->singleton(HostResolver::class, SystemHostResolver::class);
     }
 
     /**

@@ -67,10 +67,24 @@ it('still probes a public https remote', function () {
     expect((new RepositoryProbe)->probe(PackageType::Composer, 'https://github.com/acme/demo.git')['ok'])->toBeTrue();
 });
 
+it('refuses an internal git host by name, not only by IP literal', function () {
+    // The case the suite could not see before: `gitlab.corp.internal` is a *hostname*, so
+    // it reaches the resolver instead of short-circuiting on an IP literal. Under the old
+    // global stub every alphabetic TLD came back public and this was allowed.
+    Process::fake();
+
+    expect((new RepositoryProbe)->probe(PackageType::Composer, 'https://gitlab.corp.internal/acme/demo.git')['ok'])->toBeFalse();
+
+    Process::assertNothingRan();
+});
+
 it('allows an internal git host that the operator put on the allowlist', function () {
     config(['kontorfix.vcs.allowed_hosts' => ['*.corp.internal']]);
     Process::fake(['*ls-remote*' => Process::result(output: "ref: refs/heads/main\tHEAD\n")]);
 
+    // Load-bearing only because the fixture resolver answers *.internal with a private
+    // address (see Tests\Support\FixtureHostResolver): delete the config line above and
+    // this must go red. It passed identically without it while every hostname was public.
     expect((new RepositoryProbe)->probe(PackageType::Composer, 'https://gitlab.corp.internal/acme/demo.git')['ok'])->toBeTrue();
 });
 

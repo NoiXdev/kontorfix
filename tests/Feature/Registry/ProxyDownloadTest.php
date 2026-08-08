@@ -120,14 +120,25 @@ it('refuses a dist url whose host resolves to an internal address', function () 
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
-    // 2130706433 == 127.0.0.1: not an IP literal, filter_var treats it as a hostname —
-    // only the DNS resolution in isSafeResolving() detects the internal target.
-    seedComposerCache($up, 'acme/demo', '1.0.0.0', 'http://2130706433/latest/meta-data/');
-    Http::fake();
+    // Two shapes of the same defect, and they are caught by different branches.
+    //
+    //  - `2130706433` == 127.0.0.1: not an IP literal, so filter_var treats it as a
+    //    hostname and only the resolver detects the target. It is handed to the *real*
+    //    system resolver on purpose (Tests\Support\FixtureHostResolver), because how the
+    //    C library decodes it is exactly the property production relies on. This case
+    //    used to take the fail-closed branch under the old blanket stub and therefore
+    //    did not test what its comment claimed.
+    //  - `vault.internal` is an ordinary name that resolves into a private range — the
+    //    property isSafeResolving() exists for, and which had no coverage at all.
+    foreach (['http://2130706433/latest/meta-data/', 'http://vault.internal/secret'] as $distUrl) {
+        UpstreamMetadataCache::where('upstream_id', $up->id)->delete();
+        seedComposerCache($up, 'acme/demo', '1.0.0.0', $distUrl);
+        Http::fake();
 
-    $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertStatus(422);
-    Http::assertNothingSent(); // the address that resolves internally must never be requested
+        $this->withHeaders(tokenHeaderFor($group))
+            ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertStatus(422);
+        Http::assertNothingSent(); // the address that resolves internally must never be requested
+    }
 });
 
 it('refuses an upstream redirect to a host that resolves to an internal address', function () {

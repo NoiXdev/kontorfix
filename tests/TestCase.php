@@ -3,42 +3,56 @@
 namespace Tests;
 
 use App\Models\User;
-use App\Services\Upstream\UrlSafety;
+use App\Services\Upstream\HostResolver;
+use App\Services\Upstream\SystemHostResolver;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Tests\Support\FixtureHostResolver;
 
 abstract class TestCase extends BaseTestCase
 {
     /**
-     * The outbound address policy fails closed on a host it cannot resolve, so leaving it
-     * on the machine's real DNS would make every fixture host (`repo.test`,
-     * `hooks.example`, …) unroutable and the whole outbound suite red for a reason that
-     * has nothing to do with the code under test. Resolve the fixture space to one public
-     * address instead — deterministic, offline, and the same allow/deny decision a real
-     * public host would get. A test that needs a different answer (an internal address, or
-     * no address at all) calls UrlSafety::resolveHostsUsing() itself; this reinstalls the
-     * default before each test.
+     * The outbound address policy fails closed on a host it cannot resolve, so leaving
+     * the suite on the machine's real DNS would make every fixture host (`repo.test`,
+     * `hooks.example`, …) unroutable and the whole outbound suite red for reasons that
+     * have nothing to do with the code under test.
+     *
+     * The substitution is a container binding, not a static setter on UrlSafety: the
+     * resolver is the single decision point of the address policy and should not have a
+     * public mutator that production code can reach. Container bindings are torn down
+     * with the application between tests, so there is nothing to restore either.
+     *
+     * See FixtureHostResolver for what the fixture namespace resolves to — in
+     * particular, `*.internal` and single-label names now resolve to a *private*
+     * address, which is what makes the allowlist and SSRF tests load-bearing.
      */
     protected function setUp(): void
     {
         parent::setUp();
 
-        UrlSafety::resolveHostsUsing(function (string $host): array {
-            // Mirror the one property of real DNS this suite depends on: a name whose
-            // last label is not alphabetic is not a name, so it never resolves. That
-            // keeps the numeric host encodings (0x7f000001, 127.1) unresolvable here
-            // exactly as they are in the container.
-            $labels = explode('.', $host);
-            $tld = (string) end($labels);
-
-            return ctype_alpha($tld) ? ['93.184.216.34'] : [];
-        });
+        $this->app->instance(HostResolver::class, new FixtureHostResolver);
     }
 
-    protected function tearDown(): void
+    /**
+     * Pins one hostname to an exact set of addresses for the duration of a test.
+     *
+     * @param  list<string>  $ips
+     */
+    protected function resolveHostTo(string $host, array $ips): void
     {
-        UrlSafety::resolveHostsUsing(null);
+        $resolver = $this->app->make(HostResolver::class);
 
-        parent::tearDown();
+        if ($resolver instanceof FixtureHostResolver) {
+            $resolver->map($host, $ips);
+        }
+    }
+
+    /**
+     * Hands the test back to the real system resolver, for the cases whose whole point
+     * is what the C library and the configured nameservers actually answer.
+     */
+    protected function useRealHostResolver(): void
+    {
+        $this->app->instance(HostResolver::class, new SystemHostResolver);
     }
 
     /**

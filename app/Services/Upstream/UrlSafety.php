@@ -5,25 +5,6 @@ namespace App\Services\Upstream;
 class UrlSafety
 {
     /**
-     * Test seam for resolveIps(). Never set in production; the test suite installs a
-     * deterministic resolver so the address policy — which now fails closed on an
-     * unresolvable host — can be exercised without depending on the machine's DNS.
-     *
-     * @var (callable(string): list<string>)|null
-     */
-    private static $resolver = null;
-
-    /**
-     * Replace (or, with null, restore) the DNS lookup used by the address policy.
-     *
-     * @param  (callable(string): list<string>)|null  $resolver
-     */
-    public static function resolveHostsUsing(?callable $resolver): void
-    {
-        self::$resolver = $resolver;
-    }
-
-    /**
      * Whether an artifact URL (delivered by the upstream) may be safely fetched:
      * only http/https, no IP literal in private/reserved ranges, no localhost.
      * Prevents second-order SSRF via a compromised/typosquatted upstream URL
@@ -273,30 +254,20 @@ class UrlSafety
     /**
      * All A and AAAA addresses of a hostname (empty if not resolvable).
      *
+     * Delegated to the container-bound HostResolver rather than done here, so the one
+     * decision point of the address policy is a collaborator that a test can swap and
+     * that production code has no global handle on. The fallback covers the case where
+     * the binding is missing — a resolver that is absent must mean "use the real one",
+     * never "resolve nothing", because "nothing" now means "refuse".
+     *
      * @return list<string>
      */
     private static function resolveIps(string $host): array
     {
-        if (self::$resolver !== null) {
-            return (self::$resolver)($host);
-        }
+        $resolver = app()->bound(HostResolver::class)
+            ? app()->make(HostResolver::class)
+            : new SystemHostResolver;
 
-        $ips = [];
-
-        $v4 = @gethostbynamel($host);
-        if (is_array($v4)) {
-            $ips = $v4;
-        }
-
-        $aaaa = @dns_get_record($host, DNS_AAAA);
-        if (is_array($aaaa)) {
-            foreach ($aaaa as $record) {
-                if (isset($record['ipv6']) && is_string($record['ipv6'])) {
-                    $ips[] = $record['ipv6'];
-                }
-            }
-        }
-
-        return $ips;
+        return $resolver->resolve($host);
     }
 }

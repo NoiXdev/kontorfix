@@ -123,6 +123,16 @@ without DNS ever being consulted). So the container needs working DNS for every 
 target, and a git host that is deliberately not in public DNS belongs in
 `KONTORFIX_VCS_ALLOWED_HOSTS`.
 
+The lookup itself is one container binding, `App\Services\Upstream\HostResolver`, bound to
+`SystemHostResolver` in `AppServiceProvider::register()`. It is the single decision point
+of the address policy for every outbound sink, so it deliberately has no public setter —
+substitute it through the container, never globally. The test suite binds
+`Tests\Support\FixtureHostResolver`, which resolves the internal fixture space
+(`*.internal`, `*.local`, `*.consul`, any single-label name) to a **private** address and
+the documented example/test TLDs to a public one, and hands everything else — numeric host
+encodings in particular — to the real system resolver, because how the C library decodes
+those is the property production depends on.
+
 The container runs as **`www-data` (uid 33)**, not root. Everything the app writes
 (`storage`, `bootstrap/cache`, Caddy's `/data` and `/config`) is owned by that user in the
 image, and a freshly created `artifacts` volume inherits the ownership from it.
