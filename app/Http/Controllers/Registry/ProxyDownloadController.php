@@ -41,6 +41,11 @@ class ProxyDownloadController extends Controller
         $packageName = "{$vendor}/{$name}";
         $up = $this->resolveUpstream($upstream, $group, PackageType::Composer, $packageName);
 
+        // Defense in depth behind the route constraint: the storage key is built by
+        // interpolation right below, so the invariant is asserted where it is relied on
+        // rather than only in routes/registry.php, where a later edit could widen it back.
+        $this->assertSafeKeySegments($vendor, $name, $version);
+
         $path = "proxy/{$up->id}/composer/{$vendor}/{$name}/{$version}.zip";
         $disk = Storage::disk('artifacts');
 
@@ -106,6 +111,10 @@ class ProxyDownloadController extends Controller
         $this->authorizeGroup($request, $group);
         $up = $this->resolveUpstream($upstream, $group, PackageType::Npm, $packageName);
 
+        // The npm route parameters are charset-constrained already; keep the same
+        // explicit check so the two proxy paths cannot drift apart.
+        $this->assertSafeKeySegments(...[...explode('/', $packageName), $file]);
+
         $path = "proxy/{$up->id}/npm/{$packageName}/{$file}";
         $disk = Storage::disk('artifacts');
 
@@ -136,6 +145,19 @@ class ProxyDownloadController extends Controller
             $file,
             ['Content-Type' => 'application/octet-stream'],
         );
+    }
+
+    /**
+     * Refuses anything that would not stay a single directory level once the storage key
+     * is normalised. 404 rather than 422: the escaped key names an object the caller has
+     * no business knowing about, and an error that distinguished "escaped" from "absent"
+     * would be a probe for what lives on the disk.
+     */
+    private function assertSafeKeySegments(string ...$segments): void
+    {
+        foreach ($segments as $segment) {
+            abort_unless(UpstreamCache::isSafeKeySegment($segment), 404);
+        }
     }
 
     private function resolveUpstream(string $upstreamId, Group $group, PackageType $type, string $packageName): Upstream

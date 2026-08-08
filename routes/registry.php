@@ -16,21 +16,27 @@ $registryEndpoints = function () {
         Route::get('/packages.json', [ComposerController::class, 'root']);
         Route::get('/p2/{vendor}/{name}.json', [ComposerController::class, 'metadata'])
             ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.~-]+']);
+        // `{version}` is interpolated into a storage key. `[^/]+` was not enough: Flysystem
+        // normalises `\` to `/` before collapsing `..`, so a backslash escaped the intended
+        // directory. Constrain it to the character set real Composer versions actually use
+        // (digits, dots, dashes, underscores, `+` build metadata, `dev-` prefixes) — a `/`
+        // was never matchable here anyway, so no version that used to resolve stops doing so.
         Route::get('/dists/{vendor}/{name}/{version}.zip', [ComposerController::class, 'dist'])
-            ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
+            ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
 
         // Proxy downloads: {upstream} is a UUID, deliberately NOT resolved via route model
         // binding but manually in the controller — this keeps the group-ownership check
-        // explicit (no token may trigger downloads via a foreign upstream).
+        // explicit (no token may trigger downloads via a foreign upstream). The UUID shape
+        // is pinned so a non-UUID cannot reach the Postgres uuid comparison and 500.
         Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
-            ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[^/]+']);
+            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
     });
 
     Route::middleware('registry.type:npm')->group(function () {
         Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
-            ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
         Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
-            ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+            ->where(['upstream' => '[0-9a-fA-F-]{36}', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
     });
 
     // PyPI (Python) — registered before the greedy npm catch-all so `/simple` and

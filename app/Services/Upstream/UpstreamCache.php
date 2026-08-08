@@ -43,6 +43,27 @@ class UpstreamCache
         );
     }
 
+    /**
+     * Whether a value may be interpolated into a storage key as a single path segment.
+     *
+     * Flysystem's WhitespacePathNormalizer rewrites `\` to `/` BEFORE it collapses `..`,
+     * so a backslash inside a client-supplied value is a directory separator in disguise:
+     * a route constraint that merely excludes `/` does not keep the resulting key inside
+     * the directory it was meant for. Both separators, every relative component and NUL
+     * are refused outright rather than normalised away, so the decision cannot be undone
+     * by a later normalisation pass — and an empty segment is refused too, because it
+     * collapses into the surrounding slashes and shortens the path by one level.
+     */
+    public static function isSafeKeySegment(string $segment): bool
+    {
+        return $segment !== ''
+            && $segment !== '.'
+            && $segment !== '..'
+            && ! str_contains($segment, '/')
+            && ! str_contains($segment, '\\')
+            && ! str_contains($segment, "\0");
+    }
+
     public function hasArtifact(string $path): bool
     {
         return Storage::disk('artifacts')->exists($path);
