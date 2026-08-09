@@ -8,10 +8,13 @@ use App\Events\PackageSyncFailed;
 use App\Models\Package;
 use App\Services\Vcs\GitRepository;
 use App\Services\Vcs\GitSourceImporter;
+use App\Services\Vcs\ReadmeLocator;
+use App\Services\Vcs\ReadmeRenderer;
 use Composer\Semver\Semver;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class SyncPackage implements ShouldQueue
@@ -60,6 +63,8 @@ class SyncPackage implements ShouldQueue
             // Python sdist) lives in one place, driven by the package type.
             app(GitSourceImporter::class)->import($this->package, $repo);
 
+            $this->syncReadme($repo);
+
             $this->package->update([
                 'sync_status' => SyncStatus::Synced,
                 'sync_error' => null,
@@ -84,6 +89,54 @@ class SyncPackage implements ShouldQueue
     {
         // Only after exhausting all retries — a single sync.failed event.
         PackageSyncFailed::dispatch($this->package, $e->getMessage());
+    }
+
+    /**
+     * A README is a nice-to-have on a detail page. It must never be able to fail a sync,
+     * so every failure mode here is swallowed and logged rather than allowed to propagate:
+     *
+     * - `ReadmeLocator::find()` never throws — a missing README, a root entry that turns
+     *   out to be a directory, and a symlinked README all come back as `null` from inside
+     *   the locator. `null` here just means "nothing to store"; the try/catch below is not
+     *   what handles that case.
+     * - `ReadmeRenderer::render()` *does* throw on a markdown parse failure (deliberately —
+     *   see its docblock), which is the one realistic way this method can fail. That's
+     *   what the catch is actually for: log which package failed to render and move on.
+     * - A genuinely empty README (render() returning '') is treated the same as "nothing to
+     *   store": no update.
+     *
+     * Either way — not found, empty, or unparsable — readme_html keeps whatever was stored
+     * on the previous sync rather than being blanked, so a transient rendering failure
+     * never makes an already-working README page regress.
+     *
+     * Read at the mirror's HEAD (the default branch), not the newest version tag: unlike
+     * `latestDescription()`, there is no single "current version" ref already resolved
+     * here — GitSourceImporter imports every tag rather than picking one. Many
+     * repositories (including one synced before its first tagged release) have no tags at
+     * all, so a tag-based ref would leave the README empty for them. HEAD is also what a
+     * reader lands on when opening the repository directly, matching what GitHub/GitLab
+     * show as the project's README.
+     */
+    private function syncReadme(GitRepository $repo): void
+    {
+        $readmeRef = 'HEAD';
+
+        try {
+            $found = ReadmeLocator::find($repo, $readmeRef);
+
+            if ($found !== null) {
+                $html = ReadmeRenderer::render($found['source'], $found['filename']);
+
+                if ($html !== '') {
+                    $this->package->update(['readme_html' => $html]);
+                }
+            }
+        } catch (Throwable $e) {
+            Log::warning('readme extraction failed', [
+                'package_id' => $this->package->id,
+                'reason' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function markFailed(string $message): void

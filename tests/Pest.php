@@ -5,6 +5,7 @@ use App\Models\Group;
 use App\Models\RegistryToken;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
 
 /*
@@ -94,4 +95,38 @@ function publishBody(string $name, string $version, string $file, string $bytes)
         'dist-tags' => ['latest' => $version],
         '_attachments' => [$file => ['content_type' => 'application/octet-stream', 'data' => base64_encode($bytes), 'length' => strlen($bytes)]],
     ];
+}
+
+/**
+ * Builds a throwaway git repository on disk (one commit, branch "main") and returns its
+ * `file://` origin URL — a real repository a `GitRepository` can clone/mirror, not a
+ * fake. A faked Process would prove nothing about how `git ls-tree` / `git show` (or a
+ * full `SyncPackage` run) actually behave against a real mirror.
+ *
+ * `KONTORFIX_VCS_ALLOWED_SCHEMES` in phpunit.xml includes `file`, which is what lets this
+ * origin past `GitUrlSafety` — the same mechanism every other git-sourced sync test
+ * relies on (see e.g. `tests/Feature/SyncPackageTest.php` via `Tests\Support\FixtureRepo`).
+ *
+ * @param  array<string, string>  $files  path (relative to repo root) => contents
+ */
+function makeGitRepoWith(array $files): string
+{
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0775, true);
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+
+    foreach ($files as $name => $contents) {
+        $path = $dir.'/'.$name;
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+        file_put_contents($path, $contents);
+    }
+
+    Process::path($dir)->run(['git', 'add', '-A'])->throw();
+    Process::path($dir)
+        ->env(['GIT_AUTHOR_NAME' => 'T', 'GIT_AUTHOR_EMAIL' => 't@t.test', 'GIT_COMMITTER_NAME' => 'T', 'GIT_COMMITTER_EMAIL' => 't@t.test'])
+        ->run(['git', 'commit', '-q', '-m', 'init'])->throw();
+
+    return 'file://'.$dir;
 }
