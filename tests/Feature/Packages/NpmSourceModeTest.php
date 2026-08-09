@@ -82,6 +82,11 @@ it('advertises one source mode for npm and two for python', function () {
             ->where('sourceModes.npm.0.value', 'publish')
             ->count('sourceModes.python', 2)
             ->count('sourceModes.composer', 1)
+            // Order matters, not just membership: the dialog's onTypeChange() seeds
+            // form.source_mode from sourceModes[type][0].value, so the first entry is
+            // what gets submitted when the user never touches the selector.
+            ->where('sourceModes.composer.0.value', 'git')
+            ->where('sourceModes.python.0.value', 'publish')
         );
 });
 

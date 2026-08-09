@@ -152,7 +152,11 @@ function onPrivateToggle() {
 // (publish), so the selector below only renders when there is a real choice to make.
 const modesForType = computed(() => props.sourceModes[form.type] ?? []);
 const canChooseSource = computed(() => modesForType.value.length > 1);
-const isGitMode = computed(() => form.type === 'composer' || form.source_mode === 'git');
+// A type whose only/default mode is git (Composer today) is always git-mode, regardless
+// of what form.source_mode happens to hold (its selector is hidden, so nothing sets it
+// deliberately). Derived from modesForType rather than a hardcoded 'composer' check, so
+// this stays correct if allowedFor() ever changes which type that is.
+const isGitMode = computed(() => modesForType.value[0]?.value === 'git' || form.source_mode === 'git');
 
 // Switching type resets the source mode to that type's first (default) allowed mode —
 // composer → git, npm → publish — instead of a hardcoded 'publish', so a type with no
