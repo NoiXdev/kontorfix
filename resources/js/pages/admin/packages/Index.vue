@@ -421,8 +421,9 @@ function destroyPackage(id: string) {
                         <InputError :message="form.errors.type" />
                     </div>
 
-                    <!-- npm/Python can either receive pushed artifacts (publish) or mirror a
-                         git repository's tags (git). Composer is always git. -->
+                    <!-- Rendered only for a type with more than one allowed mode, which today
+                         means Python. Composer is always git, npm always publish — offering
+                         either a choice would offer one the server refuses. -->
                     <div v-if="canChooseSource" class="grid gap-2">
                         <Label for="source_mode">Quelle</Label>
                         <SearchableSelect
