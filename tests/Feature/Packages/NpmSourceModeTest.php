@@ -332,3 +332,28 @@ it('does not dispatch a sync when the admin path adds a repository url to a publ
     expect($package->fresh()->repository_url)->toBe('https://github.test/acme/demo.git');
     Queue::assertNotPushed(SyncPackage::class);
 });
+
+// SyncPackage tells the operator of a publish-mode package to remove its stale
+// repository_url. Two things made that impossible: Show.vue gated the "Quelle" tab on
+// is_git_sourced, and update() resolved the URL with `??`, so an emptied field — null after
+// ConvertEmptyStringsToNull — fell back to the stored value. The tab gate has no test
+// harness (no JS runner); this covers the half that does.
+it('lets an operator clear the stale repository url of a publish-mode package', function () {
+    Queue::fake();
+    [$admin, $groupId] = sourceModeFixture();
+
+    $this->actingAs($admin)
+        ->post('/admin/packages', npmPayload($groupId, [
+            'source_mode' => 'publish',
+            'repository_url' => 'https://github.test/acme/demo.git',
+        ]))
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    $package = Package::where('name', 'acme-demo')->firstOrFail();
+
+    $this->actingAs($admin)
+        ->put("/admin/packages/{$package->id}", ['repository_url' => '', 'remove_token' => true])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($package->fresh()->repository_url)->toBeNull();
+});

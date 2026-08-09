@@ -288,7 +288,12 @@ class PackageController extends Controller
             'remove_token' => ['sometimes', 'boolean'],
         ]);
 
-        $url = $data['repository_url'] ?? $package->repository_url;
+        // `??` could not express "clear it". An emptied field arrives as null (the global
+        // ConvertEmptyStringsToNull), which the null-coalesce read as "not submitted" and
+        // answered by keeping the old URL — so removing a stale repository_url, the remedy
+        // SyncPackage recommends to the operator of a publish-mode package, silently did
+        // nothing. An absent key still means "unchanged".
+        $url = array_key_exists('repository_url', $data) ? $data['repository_url'] : $package->repository_url;
 
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);
