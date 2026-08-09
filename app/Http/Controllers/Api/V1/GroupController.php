@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreGroupRequest;
@@ -14,12 +15,12 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class GroupController extends Controller
 {
-    use ScopesApiToUser;
+    use ClampsPageSize, ScopesApiToUser;
 
     public function index(Request $request): AnonymousResourceCollection
     {
         return GroupResource::collection(
-            $this->scopeGroupRead(Group::query())->orderBy('name')->paginate(min((int) $request->query('per_page', 25), 100))
+            $this->scopeGroupRead(Group::query())->orderBy('name')->paginate($this->perPage($request))
         );
     }
 

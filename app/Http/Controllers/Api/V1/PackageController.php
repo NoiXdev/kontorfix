@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
@@ -17,7 +18,7 @@ use Illuminate\Validation\ValidationException;
 
 class PackageController extends Controller
 {
-    use ScopesApiToUser;
+    use ClampsPageSize, ScopesApiToUser;
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -28,7 +29,7 @@ class PackageController extends Controller
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
             ->when(in_array($type, ['composer', 'npm'], true), fn ($query) => $query->where('type', $type))
             ->latest()
-            ->paginate(min((int) $request->query('per_page', 25), 100))
+            ->paginate($this->perPage($request))
             ->withQueryString();
 
         return PackageResource::collection($packages);

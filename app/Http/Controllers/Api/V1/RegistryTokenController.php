@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\TokenAbility;
+use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreTokenRequest;
@@ -16,7 +17,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class RegistryTokenController extends Controller
 {
-    use ScopesApiToUser;
+    use ClampsPageSize, ScopesApiToUser;
 
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -27,7 +28,7 @@ class RegistryTokenController extends Controller
         }
 
         return RegistryTokenResource::collection(
-            $query->paginate(min((int) $request->query('per_page', 25), 100))
+            $query->paginate($this->perPage($request))
         );
     }
 

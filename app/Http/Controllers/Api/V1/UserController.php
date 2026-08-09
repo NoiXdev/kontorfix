@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\AccountType;
 use App\Enums\UserRole;
+use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
@@ -18,6 +19,8 @@ use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
+    use ClampsPageSize;
+
     public function index(Request $request): AnonymousResourceCollection
     {
         $type = $request->query('account_type');
@@ -26,7 +29,7 @@ class UserController extends Controller
             User::query()
                 ->when(in_array($type, ['human', 'robot'], true), fn ($q) => $q->where('account_type', $type))
                 ->orderBy('name')
-                ->paginate(min((int) $request->query('per_page', 25), 100))
+                ->paginate($this->perPage($request))
         );
     }
 
