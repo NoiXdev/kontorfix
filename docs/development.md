@@ -329,7 +329,8 @@ Deliberately classified as low and documented in the security audit (non-blockin
   to cURL (`CURLOPT_RESOLVE`).
 - **Open self-registration:** `/register` allows creating a `member` account without an
   organization (which sees nothing in the portal). For a closed instance, `/register` can be
-  gated or disabled.
+  gated or disabled — it is disabled by default. The endpoint carries `throttle:5,1` per
+  source address: it performs a bcrypt-12 hash, inserts a row and sends mail per request.
 - **OIDC email linking:** auto-linking across multiple enabled identity providers for member
   accounts — relevant only with multiple, partly untrusted IdPs. The match is
   case-insensitive on `lower(email)`, but the column carries no functional unique index: an
