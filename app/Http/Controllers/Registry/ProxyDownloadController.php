@@ -65,8 +65,10 @@ class ProxyDownloadController extends Controller
             // Relayed to the client while it is cached, so the size cap is applied to the
             // bytes as they arrive rather than to a string that had to fit in memory first.
             // An artifact over the cap is still delivered; only the caching is declined.
+            // The upstream's declared length travels along so a transfer that ends short is
+            // relayed to this caller but never committed to the cache key.
             return response()->streamDownload(
-                fn () => $this->cache->relayArtifact($source, $path),
+                fn () => $this->cache->relayArtifact($source['stream'], $path, $source['length']),
                 "{$name}-{$version}.zip",
                 ['Content-Type' => 'application/zip'],
             );
@@ -119,7 +121,7 @@ class ProxyDownloadController extends Controller
             abort_if($source === null, 404);
 
             return response()->streamDownload(
-                fn () => $this->cache->relayArtifact($source, $path),
+                fn () => $this->cache->relayArtifact($source['stream'], $path, $source['length']),
                 $file,
                 ['Content-Type' => 'application/octet-stream'],
             );

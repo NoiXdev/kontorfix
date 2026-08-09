@@ -55,9 +55,15 @@ class UpstreamClient
      * 128 M memory_limit: an oversize artifact killed the worker instead of being declined.
      * The cap belongs where the bytes arrive, and that needs a stream.
      *
-     * @return resource|null null on 404
+     * The declared Content-Length travels with the stream, because the consumer cannot
+     * otherwise tell a complete body from a truncated one: with `['stream' => true]` and
+     * `allow_url_fopen` on — the shipped configuration — Guzzle uses the StreamHandler,
+     * where a mid-body stall simply stops producing bytes instead of raising. A chunked
+     * upstream declares no length; null says so rather than pretending to zero.
+     *
+     * @return array{stream: resource, length: int|null}|null null on 404
      */
-    public function getStream(Upstream $upstream, string $absoluteUrl)
+    public function getStream(Upstream $upstream, string $absoluteUrl): ?array
     {
         $response = $this->follow(
             $upstream,
@@ -72,9 +78,17 @@ class UpstreamClient
             throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.");
         }
 
+        $declared = $response->header('Content-Length');
         $stream = $response->toPsrResponse()->getBody()->detach();
 
-        return is_resource($stream) ? $stream : null;
+        if (! is_resource($stream)) {
+            return null;
+        }
+
+        return [
+            'stream' => $stream,
+            'length' => is_numeric($declared) ? (int) $declared : null,
+        ];
     }
 
     /**
