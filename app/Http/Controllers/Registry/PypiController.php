@@ -104,6 +104,14 @@ class PypiController extends Controller
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
 
+        // The third ecosystem, closed to match the other two. `[A-Za-z0-9._-]+` admits `.`
+        // and `..`, neither of which can name a project. Measured before this line: PEP 503
+        // normalisation already collapsed them to `-`, so the outbound path was
+        // `/simple/-/` rather than a traversal — the impact the sibling routes had does not
+        // reach here. Refused anyway, and BEFORE normalisation, so that the guarantee rests
+        // on an explicit refusal rather than on a side effect of the normaliser.
+        $this->assertProxyableName($project);
+
         $normalized = PythonName::normalize($project);
 
         /** @var RegistryToken|null $token */
