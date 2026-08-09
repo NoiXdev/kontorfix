@@ -124,12 +124,15 @@ class Package extends Model
     }
 
     /**
-     * Whether this package is populated by mirroring a git repository's tags. Composer is
-     * always git-sourced; npm/Python are git-sourced only when explicitly configured.
+     * Whether this package is populated by mirroring a git repository's tags.
+     *
+     * The stored column is the answer, with no per-type special case on top: every writer
+     * resolves the mode through `PackageSourceMode::allowedFor()` before saving, so a
+     * Composer row always carries `git` — that rule lives on the enum and only there.
      */
     public function isGitSourced(): bool
     {
-        return $this->type === PackageType::Composer || $this->source_mode === PackageSourceMode::Git;
+        return $this->source_mode === PackageSourceMode::Git;
     }
 
     /** Whether this package is populated by pushing artifacts (npm publish / twine upload). */

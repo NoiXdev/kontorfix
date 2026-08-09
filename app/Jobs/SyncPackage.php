@@ -73,15 +73,7 @@ class SyncPackage implements ShouldQueue
 
         // A row can only reach this state by predating the rule that npm is publish-only.
         // Fail it the same way as any other configuration error: retrying cannot help.
-        //
-        // Checked against Git specifically, not against the package's own source_mode
-        // column: Composer packages carry a "publish" default in the factory (a neutral
-        // value that Package::isGitSourced() overrides by type), so comparing the column
-        // itself against allowedFor() would reject every Composer package that never had
-        // its source_mode column explicitly set to 'git' — which is most of them. What
-        // actually matters, now that isGitSourced() above has established this row is
-        // being git-synced one way or another, is whether the type permits that at all.
-        if (! in_array(PackageSourceMode::Git, PackageSourceMode::allowedFor($this->package->type), true)) {
+        if (! in_array($this->package->source_mode, PackageSourceMode::allowedFor($this->package->type), true)) {
             $this->markFailed(sprintf(
                 'Der Quellmodus „%s“ ist für %s-Pakete nicht mehr zulässig — Paket auf den Quellmodus „Publish“ umstellen.',
                 $this->package->source_mode->label(),
