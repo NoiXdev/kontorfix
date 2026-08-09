@@ -96,12 +96,16 @@ class PackageController extends Controller
     {
         $this->assertCanWritePackage($package);
 
-        // Publish-based packages (npm, Python) are filled by pushing artifacts; a
-        // repository_url on one is reference-only, so a resync request against it is a
-        // silent no-op rather than a dispatch doomed to fail. Mirrors store() above.
-        if ($package->isGitSourced() && $package->repository_url !== null) {
-            SyncPackage::dispatch($package);
-        }
+        // Unlike store()/update(), where dispatching is a side effect of a save that
+        // already succeeded, dispatch *is* the entire point of this endpoint — silently
+        // declining it while still returning 200 would tell the caller a resync happened
+        // when nothing was queued. A publish-based package (npm, Python) is filled by
+        // pushing artifacts, not synced from a repository, so reject synchronously instead,
+        // matching the 409 convention NpmController/PypiController already use for "this
+        // package's mode forbids this operation".
+        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
+
+        SyncPackage::dispatch($package);
 
         return new PackageResource($package);
     }

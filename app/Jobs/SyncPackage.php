@@ -54,9 +54,18 @@ class SyncPackage implements ShouldQueue
         // for a package that was never meant to be git-synced is a configuration error,
         // not a transient one, so it is failed the same way rather than left to clone.
         if (! $this->package->isGitSourced()) {
+            // The remedy must not recommend a mode the type cannot actually use: npm's
+            // allowedFor() is [Publish] only, so "switch to Git-Mirror" would send an
+            // operator straight into a validation error on both create paths. Only offer
+            // that clause when the type genuinely permits Git.
+            $canMirror = in_array(PackageSourceMode::Git, PackageSourceMode::allowedFor($this->package->type), true);
+
             $this->markFailed(sprintf(
-                'Paket ist nicht git-basiert (Quellmodus „%s“) — ein Git-Sync ist hierfür nicht vorgesehen. Repository-URL entfernen, falls sie nur zur Referenz dient, oder den Quellmodus auf Git-Mirror stellen, falls das Paket tatsächlich gespiegelt werden soll.',
+                'Paket ist nicht git-basiert (Quellmodus „%s“) — ein Git-Sync ist hierfür nicht vorgesehen. %s',
                 $this->package->source_mode->label(),
+                $canMirror
+                    ? 'Repository-URL entfernen, falls sie nur zur Referenz dient, oder den Quellmodus auf Git-Mirror stellen, falls das Paket tatsächlich gespiegelt werden soll.'
+                    : 'Repository-URL entfernen, falls sie nur zur Referenz dient — dieser Pakettyp kann nicht gespiegelt werden.',
             ));
 
             return; // Configuration error — retrying makes no sense

@@ -233,6 +233,33 @@ it('refuses to sync a publish-mode package that carries a stray repository_url',
         ->and($package->fresh()->sync_error)->toContain('nicht git-basiert');
 });
 
+// The remedy in that message must not recommend a mode the type cannot actually use.
+// npm's allowedFor() is [Publish] only, so "switch to Git-Mirror" would send an operator
+// straight into a validation error on both create paths — it must be withheld. Python's
+// allowedFor() includes Git, so the same clause is a real, actionable remedy there and
+// must be offered. This is the control-removal check for that conditional: making the
+// clause unconditional again would turn the npm assertion red.
+it('only recommends switching to git-mirror when the type actually allows it', function () {
+    $npmPackage = Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.test/acme/demo.git',
+    ]);
+    $pythonPackage = Package::factory()->create([
+        'type' => 'python',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.test/acme/lib.git',
+    ]);
+
+    (new SyncPackage($npmPackage))->handle();
+    (new SyncPackage($pythonPackage))->handle();
+
+    expect($npmPackage->fresh()->sync_error)
+        ->not->toContain('Git-Mirror stellen')
+        ->and($pythonPackage->fresh()->sync_error)
+        ->toContain('Git-Mirror stellen');
+});
+
 // Api\V1\PackageController::store() dispatched whenever repository_url was set, unlike
 // Admin\PackageController::store() which also requires isGitSourced(). A publish-mode
 // package with a reference-only repository_url (legitimate today; also the shape Task 5's

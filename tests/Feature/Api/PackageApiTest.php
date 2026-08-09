@@ -60,7 +60,7 @@ it('triggers a resync', function () {
     Queue::assertPushed(SyncPackage::class);
 });
 
-it('does not dispatch a sync for a resync request against a publish-based package with a reference-only repository url', function () {
+it('refuses a resync request against a publish-based package with a reference-only repository url', function () {
     Queue::fake();
     $plain = operatorWriteToken();
     $package = Package::factory()->create([
@@ -69,7 +69,12 @@ it('does not dispatch a sync for a resync request against a publish-based packag
         'repository_url' => 'https://github.com/acme/reference-only.git',
     ]);
 
-    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")->assertOk();
+    // 409, not a silent 200: dispatch IS the point of this endpoint, so declining it must
+    // not be reported as success. Status code asserted explicitly (not assertOk()'s
+    // opposite) so this is the control-removal check for the abort_if() guard — dropping
+    // it would make this assertion fail with 200 instead of 409.
+    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")
+        ->assertStatus(409);
 
     Queue::assertNothingPushed();
 });
