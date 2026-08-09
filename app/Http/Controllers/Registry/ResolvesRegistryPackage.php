@@ -8,6 +8,7 @@ use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Http\AppUrl;
 use App\Services\RegistryAccessService;
+use App\Services\Upstream\UpstreamCache;
 use Illuminate\Http\Request;
 
 trait ResolvesRegistryPackage
@@ -60,6 +61,30 @@ trait ResolvesRegistryPackage
     protected function registryPathPrefix(Request $request, Group $group): string
     {
         return $request->attributes->get('registryDomainMode') === true ? '' : "/r/{$group->slug}";
+    }
+
+    /**
+     * Refuses a package-name segment that is a relative path component.
+     *
+     * The Composer `p2` and npm packument constraints (`[a-z0-9_.-]+`, `[a-z0-9._~-]+`,
+     * `[a-z0-9._-]+`) all admit `.` and `..`. Neither can name a local package, so such a
+     * request falls through to the upstream — where the segment is interpolated into the
+     * outbound path, and where the answer is then written to `upstream_metadata_cache`
+     * under that name. The registry routes carry no throttle by design, so those rows are
+     * unbounded, and a caller that can choose `..` is choosing which upstream path is
+     * fetched rather than which package.
+     *
+     * Reuses the refusal set the artifact cache key already uses. Its guard sits in
+     * ProxyDownloadController and never covered these two paths, because the sinks here
+     * are a URL path and a database key rather than a Flysystem key — but the values that
+     * must not be admitted are exactly the same, and refusing them outright rather than
+     * normalising them keeps the decision from being undone by a later pass.
+     */
+    protected function assertProxyableName(string ...$segments): void
+    {
+        foreach ($segments as $segment) {
+            abort_unless(UpstreamCache::isSafeKeySegment($segment), 404);
+        }
     }
 
     protected function findAccessible(Request $request, Group $group, PackageType $type, string $fullName): Package

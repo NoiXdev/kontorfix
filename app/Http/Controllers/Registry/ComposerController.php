@@ -58,6 +58,7 @@ class ComposerController extends Controller
     {
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
+        $this->assertProxyableName($vendor, $name);
         $fullName = "{$vendor}/{$name}";
         $package = $this->findLocal($request, $group, PackageType::Composer, $fullName);
 

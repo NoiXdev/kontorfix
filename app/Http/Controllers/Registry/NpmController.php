@@ -48,6 +48,7 @@ class NpmController extends Controller
     private function respondPackument(Request $request, Group $group, string $name): JsonResponse
     {
         $this->authorizeGroup($request, $group);
+        $this->assertProxyableName(...explode('/', $name));
         $pkg = $this->findLocal($request, $group, PackageType::Npm, $name);
 
         if ($pkg !== null) {
