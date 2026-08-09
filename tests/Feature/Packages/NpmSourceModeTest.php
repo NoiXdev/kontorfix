@@ -278,3 +278,42 @@ it('does not dispatch a sync for a publish-mode npm package with a reference rep
 
     Queue::assertNotPushed(SyncPackage::class);
 });
+
+// The admin twins of the API test above. Both admin dispatch sites gate on isGitSourced()
+// as well as on repository_url, and nothing tested the first half: the existing "publish
+// npm creates without a sync" cases all omit the URL, so the second half alone kept them
+// green. `POST /admin/packages` with npm + publish + a repository_url is accepted and the
+// URL is stored — the exact shape the migration leaves behind — so the gate is reachable.
+it('does not dispatch a sync when the admin path creates a publish-mode npm package with a repository url', function () {
+    Queue::fake();
+    [$admin, $groupId] = sourceModeFixture();
+
+    $this->actingAs($admin)
+        ->post('/admin/packages', npmPayload($groupId, [
+            'source_mode' => 'publish',
+            'repository_url' => 'https://github.test/acme/demo.git',
+        ]))
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect(Package::where('name', 'acme-demo')->firstOrFail()->repository_url)
+        ->toBe('https://github.test/acme/demo.git');
+    Queue::assertNotPushed(SyncPackage::class);
+});
+
+it('does not dispatch a sync when the admin path adds a repository url to a publish-mode npm package', function () {
+    Queue::fake();
+    [$admin, $groupId] = sourceModeFixture();
+
+    $this->actingAs($admin)
+        ->post('/admin/packages', npmPayload($groupId, ['source_mode' => 'publish']))
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    $package = Package::where('name', 'acme-demo')->firstOrFail();
+
+    $this->actingAs($admin)
+        ->put("/admin/packages/{$package->id}", ['repository_url' => 'https://github.test/acme/demo.git'])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($package->fresh()->repository_url)->toBe('https://github.test/acme/demo.git');
+    Queue::assertNotPushed(SyncPackage::class);
+});
