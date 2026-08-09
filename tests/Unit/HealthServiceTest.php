@@ -5,6 +5,7 @@ use App\Services\Health\HealthService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
@@ -31,6 +32,18 @@ it('marks an unreachable upstream as failed but does not throw', function () {
     $checks = collect(app(HealthService::class)->checks());
     $u = $checks->firstWhere('key', 'upstream:'.Upstream::first()->id);
     expect($u['ok'])->toBeFalse();
+});
+
+it('does not report an unreachable queue backend as healthy', function () {
+    // The same silence pattern the broadcasting check had: the queue used to be `ok`
+    // whenever no job had *already* failed — i.e. green precisely while nothing could
+    // run at all, because a backend that cannot be reached also fails nothing.
+    Queue::shouldReceive('size')->andThrow(new RuntimeException('Connection refused'));
+
+    $queue = collect(app(HealthService::class)->checks())->firstWhere('key', 'queue');
+
+    expect($queue['ok'])->toBeFalse()
+        ->and($queue['detail'])->toContain('Connection refused');
 });
 
 it('reports the failed jobs count in the queue check detail', function () {

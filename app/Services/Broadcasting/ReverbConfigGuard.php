@@ -2,7 +2,9 @@
 
 namespace App\Services\Broadcasting;
 
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
+use Throwable;
 
 /**
  * Refuses to run the websocket server on a secret that is not a secret.
@@ -42,6 +44,35 @@ class ReverbConfigGuard
     ];
 
     /**
+     * Where the websocket container leaves the reason it refused to start, for the app
+     * container's health page to read back. The two processes share nothing else: the
+     * websocket container has no HTTP surface and mounts no volume, so a refusal that is
+     * only written to its own stdout is invisible to anyone not tailing that container.
+     *
+     * The shipped compose gives every service the same Redis-backed cache. On a store
+     * that is not shared (`array`, a per-container `file`) the read simply finds nothing
+     * and the health page degrades to the config-derived check below — never worse than
+     * before, never a hard dependency.
+     */
+    private const REFUSAL_KEY = 'broadcasting:reverb-refusal';
+
+    /** How long a recorded refusal stays on the health page without being renewed. */
+    private const REFUSAL_TTL = 6 * 3600;
+
+    /**
+     * Whether this instance actually broadcasts over Reverb.
+     *
+     * `docker/.env.example` ships the whole broadcasting block commented out, so the
+     * stock instance runs the `null` driver and has no websocket server. A `reverb`
+     * container on such an instance relays nothing — it is unauthenticated surface with
+     * no purpose — which is why the guard refuses it rather than waving it through.
+     */
+    public static function broadcastsOverReverb(): bool
+    {
+        return config('broadcasting.default') === 'reverb';
+    }
+
+    /**
      * Describes what is wrong with the configured app secret, or null if it is usable.
      */
     public static function problem(): ?string
@@ -74,6 +105,12 @@ class ReverbConfigGuard
     /**
      * Aborts the websocket server rather than letting it accept subscriptions that
      * anyone on the internet can sign.
+     *
+     * Still scoped to `reverb:*` and nothing else: a broadcasting misconfiguration must
+     * never take the registry itself offline. What changed is that the reason for a
+     * refusal is recorded where the operator can see it, and that an instance which does
+     * not broadcast over Reverb is refused for *that* reason instead of being told its
+     * secret is wrong.
      */
     public static function assertUsable(): void
     {
@@ -81,10 +118,60 @@ class ReverbConfigGuard
             return;
         }
 
+        if (! self::broadcastsOverReverb()) {
+            self::refuse(
+                'BROADCAST_CONNECTION is not set to `reverb`, so this instance has no websocket '
+                .'traffic to relay and the server would only be unauthenticated surface. Either set '
+                .'BROADCAST_CONNECTION=reverb (with a secret — see docs/reverb-ops.md) or stop running '
+                .'the `reverb` container; it is opt-in via the `reverb` compose profile.'
+            );
+        }
+
         $problem = self::problem();
 
         if ($problem !== null) {
-            throw new RuntimeException('Refusing to start Reverb: '.$problem);
+            self::refuse($problem);
+        }
+
+        // Came up clean — retract any refusal an earlier boot of this container left on
+        // the health page, so a fixed instance stops reporting a problem it no longer has.
+        self::remember(fn () => Cache::forget(self::REFUSAL_KEY));
+    }
+
+    /**
+     * The reason the websocket container last refused to start, or null if it has not
+     * refused (recently, or at all).
+     */
+    public static function recordedRefusal(): ?string
+    {
+        $value = self::remember(fn () => Cache::get(self::REFUSAL_KEY));
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /** Records the reason for the health page, then aborts the command. */
+    private static function refuse(string $problem): never
+    {
+        self::remember(fn () => Cache::put(self::REFUSAL_KEY, $problem, self::REFUSAL_TTL));
+
+        throw new RuntimeException('Refusing to start Reverb: '.$problem);
+    }
+
+    /**
+     * Cache access that cannot change the outcome. A refusal must still be a refusal when
+     * Redis is down, and the health page must not 500 because the cache is unreachable.
+     *
+     * @template T
+     *
+     * @param  callable():T  $operation
+     * @return T|null
+     */
+    private static function remember(callable $operation): mixed
+    {
+        try {
+            return $operation();
+        } catch (Throwable) {
+            return null;
         }
     }
 }

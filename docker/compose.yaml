@@ -74,6 +74,13 @@ services:
 
   reverb:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    # Opt-in, exactly like the broadcasting block in .env.example that it needs:
+    #   docker compose --profile reverb up -d
+    # Without the profile this service is not created at all. `docker/.env.example` ships
+    # BROADCAST_CONNECTION commented out, so the stock instance runs the `null` driver and
+    # `reverb:start` can only refuse (ReverbConfigGuard) — which under a restart policy is
+    # an invisible, permanent crash loop next to a registry that looks perfectly healthy.
+    profiles: ['reverb']
     environment:
       CONTAINER_ROLE: reverb
     env_file: .env
@@ -84,7 +91,10 @@ services:
     expose: ['8080']
     depends_on:
       redis: { condition: service_healthy }
-    restart: unless-stopped
+    # Not `unless-stopped`: a refused start is a configuration error, and restarting it
+    # forever is what kept the last one invisible. Five attempts, then the container stays
+    # down with the reason in its logs and on the operator health page.
+    restart: on-failure:5
 
   postgres:
     image: postgres:17-alpine

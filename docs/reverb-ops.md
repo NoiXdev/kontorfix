@@ -9,8 +9,40 @@ Der `reverb`-Service (`CONTAINER_ROLE=reverb`) fährt beim Start
 `php artisan reverb:start --host=0.0.0.0 --port=8080`. Der WebSocket-Server
 lauscht damit containerintern auf Port `8080`. In `docker/compose.yaml` ist der
 Service analog zu `worker` aufgebaut (gleiches Image, `env_file: .env`,
-`depends_on: redis (service_healthy)`, `restart: unless-stopped`) und mappt den
-internen Port nach `8081` am Host (`ports: ['8081:8080']`).
+`depends_on: redis (service_healthy)`).
+
+**Der Service ist opt-in.** Er liegt hinter dem Compose-Profil `reverb` und wird
+von `docker compose up -d` *nicht* gestartet:
+
+```
+docker compose --profile reverb up -d
+```
+
+Grund: `docker/.env.example` liefert den Broadcasting-Block auskommentiert aus,
+eine Standard-Instanz fährt also den `null`-Treiber. `reverb:start` verweigert
+in dieser Lage den Start (siehe unten) — unter `restart: unless-stopped` wäre das
+eine dauerhafte, unsichtbare Restart-Schleife neben einer gesund aussehenden
+Registry. Deshalb gilt für den Service `restart: on-failure:5`: nach fünf
+Fehlversuchen bleibt der Container unten, mit dem Grund im Log.
+
+> **Upgrade-Hinweis:** Wer den `reverb`-Container bisher über die
+> mitgelieferte Compose-Datei betrieben hat, muss ab jetzt `--profile reverb`
+> mitgeben. Ohne das Flag bleiben nur die Live-Updates im Portal aus; die
+> Registry selbst ist davon nicht betroffen.
+
+## Verweigerter Start
+
+`reverb:start` bricht ab, wenn
+
+- `BROADCAST_CONNECTION` nicht `reverb` ist (der Container hätte nichts zu
+  relayen und wäre nur unauthentifizierte Angriffsfläche), oder
+- `REVERB_APP_SECRET` leer ist oder einem in diesem Repository veröffentlichten
+  Wert entspricht.
+
+Der Grund wird zusätzlich in den geteilten Cache geschrieben und erscheint unter
+*Admin → Status* als Check „Broadcasting (Reverb)". Ein verweigerter Container
+ist damit sichtbar, ohne dass jemand dessen Log tailen muss. Läuft der Server
+sauber an, wird der Eintrag wieder entfernt.
 
 ## Öffentlicher Endpunkt (Prod)
 

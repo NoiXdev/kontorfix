@@ -31,31 +31,55 @@ class HealthService
     }
 
     /**
-     * The operator-visible half of the Reverb secret guard. `reverb:start` refuses to
-     * come up on a published secret (see ReverbConfigGuard), but a crash-looping
-     * container is easy to miss and the app itself keeps serving — so the reason shows
-     * up here too. Emitted only when broadcasting actually runs over Reverb; on the
-     * `null` driver there is no websocket server and nothing to report.
+     * The operator-visible half of the Reverb guard. `reverb:start` refuses to come up on
+     * a published secret or on an instance that does not broadcast over Reverb at all
+     * (see ReverbConfigGuard) — and a container that refuses under a restart policy is
+     * easy to miss, because the app itself keeps serving.
+     *
+     * Two sources, in order:
+     *
+     *  1. A refusal the websocket container actually recorded. This is reported whatever
+     *     `broadcasting.default` says, because the previous version keyed the whole check
+     *     off that setting — and a container refusing *because* the setting is `null` was
+     *     exactly the state the check then declared uninteresting.
+     *  2. The configuration this instance would start on, when it does broadcast over
+     *     Reverb. Reported green as well as red: silence was previously the only "all
+     *     good" signal, which is indistinguishable from a check that never ran.
+     *
+     * An instance with no websocket container and no Reverb driver still reports nothing
+     * — there is no server, so there is no condition.
      *
      * @return list<array{key:string,label:string,ok:bool,detail:string}>
      */
     private function broadcasting(): array
     {
-        if (config('broadcasting.default') !== 'reverb' || ReverbConfigGuard::exempt()) {
+        if (ReverbConfigGuard::exempt()) {
+            return [];
+        }
+
+        $label = 'Broadcasting (Reverb)';
+        $refusal = ReverbConfigGuard::recordedRefusal();
+
+        if ($refusal !== null) {
+            return [[
+                'key' => 'broadcasting',
+                'label' => $label,
+                'ok' => false,
+                'detail' => 'Der WebSocket-Container startet nicht: '.$refusal,
+            ]];
+        }
+
+        if (! ReverbConfigGuard::broadcastsOverReverb()) {
             return [];
         }
 
         $problem = ReverbConfigGuard::problem();
 
-        if ($problem === null) {
-            return [];
-        }
-
         return [[
             'key' => 'broadcasting',
-            'label' => 'Broadcasting (Reverb)',
-            'ok' => false,
-            'detail' => $problem,
+            'label' => $label,
+            'ok' => $problem === null,
+            'detail' => $problem ?? 'Konfiguration ok.',
         ]];
     }
 
@@ -102,7 +126,10 @@ class HealthService
 
             return ['key' => 'queue', 'label' => 'Queue', 'ok' => $failed === 0, 'detail' => $detail];
         } catch (Throwable $e) {
-            return ['key' => 'queue', 'label' => 'Queue', 'ok' => $failed === 0, 'detail' => "Fehlgeschlagen: {$failed}. ({$e->getMessage()})"];
+            // Same silence pattern as the broadcasting check had: an unreachable queue
+            // backend used to report `ok` as long as no job had *already* failed — i.e.
+            // green precisely while nothing could run at all.
+            return ['key' => 'queue', 'label' => 'Queue', 'ok' => false, 'detail' => "Queue nicht erreichbar. Fehlgeschlagen: {$failed}. ({$e->getMessage()})"];
         }
     }
 
