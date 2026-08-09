@@ -63,6 +63,20 @@ class TrustedHosts
     }
 
     /**
+     * Whether a hostname is one an operator attached to a registry group.
+     *
+     * Shares the cache the allowlist is built from, so asking this per request costs no
+     * additional query. Case-insensitive, because `Request::getHost()` lowercases but a
+     * caller elsewhere may not.
+     */
+    public static function isAttachedHostname(string $host): bool
+    {
+        $host = strtolower(trim($host));
+
+        return $host !== '' && in_array($host, self::attachedHostnames(), true);
+    }
+
+    /**
      * Hostnames the operator attached to a registry group.
      *
      * Swallows store failures on purpose: this runs in front of every request, so a

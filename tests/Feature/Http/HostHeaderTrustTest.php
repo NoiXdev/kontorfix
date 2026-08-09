@@ -122,6 +122,28 @@ it('drops the allowlist rather than locking the instance out when APP_URL names 
     expect(TrustedHosts::patterns())->toBe([]);
 });
 
+it('roots a generated link at the request host when that host is an attached registry hostname', function () {
+    // The availability half of the same control: pinning every generated URL to APP_URL
+    // fixed the reset-link injection and broke multi-hostname operation, because every
+    // asset, Inertia XHR and form action on a tenant hostname became cross-origin.
+    User::factory()->create();
+    $group = Group::factory()->for(Organization::factory())->create();
+    Domain::factory()->for($group)->create(['hostname' => 'packages.customer.example']);
+
+    // Reachability anchor: an unauthenticated GET /dashboard is answered by the `auth`
+    // middleware's own redirect, so the asserted Location is a route() URL generated
+    // inside this request — not a router 404, a setup bounce or a refused host.
+    $this->get('http://packages.customer.example/dashboard')
+        ->assertRedirect('http://packages.customer.example/login');
+});
+
+it('refuses to root a generated link at a Host that is not an attached registry hostname', function () {
+    User::factory()->create();
+
+    $this->get(ATTACKER.'/dashboard')
+        ->assertRedirect(rtrim((string) config('app.url'), '/').'/login');
+});
+
 it('refuses a request whose Host is not on the allowlist', function () {
     // TrustHosts stands down under `runningUnitTests()`, so install the very patterns it
     // would install and drive a real request through the framework's host validation.

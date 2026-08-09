@@ -7,6 +7,7 @@ use App\Http\Middleware\EnsureOperator;
 use App\Http\Middleware\EnsureRegistryTypeEnabled;
 use App\Http\Middleware\EnsureSuperAdmin;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\PinUrlRoot;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
 use App\Http\Middleware\ResolveRegistryContext;
@@ -55,9 +56,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // getSchemeAndHttpHost() echoes whatever the client sent, and a proxy with a
         // catch-all router — the natural shape once custom registry domains are in use —
         // lets an anonymous caller put its own domain into the password-reset link that
-        // is then delivered to the victim. Complements, and does not replace,
-        // URL::forceRootUrl() in AppServiceProvider: this one also covers the consumers
-        // that build URLs from the request rather than from the URL generator.
+        // is then delivered to the victim. Complements, and does not replace, PinUrlRoot
+        // below: this one also covers the consumers that build URLs from the request
+        // rather than from the URL generator.
         // `subdomains: false` because TrustedHosts::patterns() already emits the
         // subdomain pattern for the APP_URL host itself and would otherwise duplicate it.
         $middleware->trustHosts(at: fn (): array => TrustedHosts::patterns(), subdomains: false);
@@ -75,6 +76,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 Request::HEADER_X_FORWARDED_PORT |
                 Request::HEADER_X_FORWARDED_PROTO,
         );
+
+        // Decides what generated absolute URLs are rooted at, for this request only. Must
+        // run after trustProxies() (it reads the forwarded host) and is deliberately
+        // global: a redirect emitted by `auth`, or by the router itself, is already an
+        // absolute URL, so the decision cannot wait for the route middleware groups.
+        $middleware->append(PinUrlRoot::class);
 
         // Global on purpose: the registry, webhook, API and health routes deliberately
         // live outside the `web` group and would otherwise get no security headers at
