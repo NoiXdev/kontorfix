@@ -77,16 +77,35 @@ it('does not serve the repository pat as composer source metadata', function () 
     expect($res->json('packages')['acme/demo'][0]['source']['url'])->toBe(PCR_REDACTED);
 });
 
-it('still shows the operator the stored value so it can be read back and re-entered', function () {
+it('withholds the stored credential from the operator tier too', function () {
+    // Reversed from the original assertion, deliberately. The reason it gave — that
     // admin/packages/Show.vue pre-fills `sourceForm.repository_url` from this prop, so
-    // redacting it would overwrite the PAT with the marker on the next save.
+    // redacting would overwrite the PAT with the marker on the next save — was answered by
+    // NotRedactedCredentialUrl in the same commit: the marker is REFUSED, never stored. And
+    // this prop is not only read by the tier that wrote it. A package shared into a
+    // registry another organization administers makes its admin a reader here, and the
+    // value survives in the activity log after rotation. The echo-back case below is what
+    // keeps the form usable.
     $this->actingAs($this->admin)->get("/admin/packages/{$this->package->id}")
-        ->assertInertia(fn ($p) => $p->where('package.repository_url', PCR_PAT_URL));
+        ->assertInertia(fn ($p) => $p->where('package.repository_url', PCR_REDACTED))
+        ->assertDontSee('ghp_AAAABBBBCCCCDDDDEEEE');
+});
+
+it('takes the redacted value the form was shown as "unchanged"', function () {
+    $this->actingAs($this->admin)
+        ->put("/admin/packages/{$this->package->id}", ['repository_url' => PCR_REDACTED])
+        ->assertSessionHasNoErrors();
+
+    // Not destroyed, not half-written: the stored credential is exactly as it was.
+    expect($this->package->fresh()->repository_url)->toBe(PCR_PAT_URL);
 });
 
 it('refuses a redacted value written back over the stored credential', function () {
+    // A marker that is NOT the echo of what is stored: the operator edited the path around
+    // it, or a client invented one. Either way it names no credential, so it cannot replace
+    // the one that is there.
     $this->actingAs($this->admin)
-        ->put("/admin/packages/{$this->package->id}", ['repository_url' => PCR_REDACTED])
+        ->put("/admin/packages/{$this->package->id}", ['repository_url' => 'https://***@github.com/acme/somewhere-else.git'])
         ->assertSessionHasErrors(['repository_url' => PCR_WRITEBACK_ERROR]);
 
     expect($this->package->fresh()->repository_url)->toBe(PCR_PAT_URL);

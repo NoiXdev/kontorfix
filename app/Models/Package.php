@@ -6,6 +6,7 @@ use App\Enums\GitProvider;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
 use Database\Factories\PackageFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -20,7 +21,12 @@ use Spatie\Activitylog\Support\LogOptions;
 class Package extends Model
 {
     /** @use HasFactory<PackageFactory> */
-    use HasFactory, HasUuids, LogsActivity;
+    use HasFactory, HasUuids, LogsActivity {
+        // Aliased so the override below can call through: LogsActivity is a trait, so a
+        // method of the same name on the class replaces it outright and `parent::` reaches
+        // Model, which has none.
+        LogsActivity::buildChanges as protected spatieBuildChanges;
+    }
 
     /**
      * Keeps `repository_token_host` truthful without any write path having to remember it.
@@ -50,6 +56,34 @@ class Package extends Model
             ->logOnly(['name', 'type', 'repository_url', 'sync_status'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
+    }
+
+    /**
+     * Keeps a git PAT out of `activity_log.properties`.
+     *
+     * `repository_url` legitimately carries `https://x-access-token:<PAT>@github.com/…` —
+     * that is the supported inline shape and CredentialUrl exists because the column cannot
+     * simply reject it. Logging the raw value put the secret in a second table, in
+     * cleartext, where it outlives the rotation that answers a leak and is rendered to any
+     * reader of the activity view. Redacted rather than dropped: which host a repository
+     * moved to is the audit-relevant fact, and a bare boolean would lose it.
+     *
+     * The dirty comparison in the parent runs on the real values, so what is logged is
+     * still exactly what changed.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildChanges(string $processingEvent): array
+    {
+        $changes = $this->spatieBuildChanges($processingEvent);
+
+        foreach (['attributes', 'old'] as $bag) {
+            if (is_array($changes[$bag] ?? null) && array_key_exists('repository_url', $changes[$bag])) {
+                $changes[$bag]['repository_url'] = CredentialUrl::redact($changes[$bag]['repository_url']);
+            }
+        }
+
+        return $changes;
     }
 
     protected $fillable = [

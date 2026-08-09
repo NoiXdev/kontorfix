@@ -116,7 +116,14 @@ class PackageController extends Controller
                 'is_git_sourced' => $package->isGitSourced(),
                 'name' => $package->name,
                 'description' => $package->description,
-                'repository_url' => $package->repository_url,
+                // The one read path of this column that did not redact. An inline
+                // `https://x-access-token:<PAT>@…` is a supported shape here, and the
+                // reader may be an admin of a *different* tenant sharing the registry —
+                // the prior-#10 shared-pool state. Aligned with the five siblings that
+                // already redact; NotRedactedCredentialUrl on the update route refuses the
+                // marker on its way back in, so a withheld value cannot silently destroy
+                // the credential it was withheld from.
+                'repository_url' => CredentialUrl::redact($package->repository_url),
                 'git_credential_id' => $package->git_credential_id,
                 'has_repository_token' => $package->repository_token !== null,
                 'sync_status' => $package->sync_status->value,
@@ -250,6 +257,20 @@ class PackageController extends Controller
     public function update(Request $request, Package $package): RedirectResponse
     {
         $this->assertCanTouchPackage($package);
+
+        // The detail page is now shown the redacted URL like every other reader, and its
+        // form posts back whatever it was given. A redacted value byte-identical to the
+        // redaction of what is stored is that echo — it means "unchanged", not "erase the
+        // credential" — so it is resolved back to the stored value before validation.
+        // Anything else redacted is still refused by NotRedactedCredentialUrl: an operator
+        // who edited the path around a `***` has to supply the credential for the new URL,
+        // and a client inventing a marker cannot overwrite a secret with it.
+        $submitted = $request->input('repository_url');
+        if (is_string($submitted)
+            && CredentialUrl::isRedacted($submitted)
+            && $submitted === CredentialUrl::redact($package->repository_url)) {
+            $request->merge(['repository_url' => $package->repository_url]);
+        }
 
         $data = $request->validate([
             'repository_url' => ['nullable', 'string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
