@@ -99,6 +99,13 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: props.package.name, href: route('admin.packages.show', props.package.id) },
 ];
 
+// Version selector: defaults to the newest version (props.versions[0], guaranteed by VersionOrder::sort()).
+const selectedVersion = ref<string>(props.versions[0]?.version ?? '');
+
+const currentVersion = computed(() => props.versions.find((v) => v.version === selectedVersion.value) ?? null);
+
+const versionOptions = computed(() => props.versions.map((v) => ({ value: v.version, label: v.version })));
+
 const installCommand = {
     composer: `composer require ${props.package.name}`,
     npm: `npm install ${props.package.name}`,
@@ -340,61 +347,90 @@ useOperatorChannel({
                 </TabsContent>
 
                 <TabsContent v-else value="versionen">
-                    <section class="flex flex-col gap-3">
+                    <section class="flex flex-col gap-4">
                         <div
                             v-if="props.versions.length === 0"
                             class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
                         >
                             Noch keine Versionen synchronisiert.
                         </div>
-                        <div
-                            v-for="version in props.versions"
-                            :key="version.version"
-                            class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
-                        >
+
+                        <template v-else>
                             <div class="flex flex-wrap items-center gap-3">
-                                <span class="font-mono text-sm font-semibold">{{ version.version }}</span>
-                                <span v-if="version.released_at" class="text-xs text-muted-foreground">{{ version.released_at }}</span>
-                                <span v-if="version.reference" class="font-mono text-xs text-muted-foreground">
-                                    {{ version.reference.slice(0, 12) }}
-                                </span>
-                                <span class="ml-auto text-xs text-muted-foreground">
-                                    {{ version.download_count.toLocaleString('de-DE') }} Downloads · {{ formatBytes(version.dist_size) }}
+                                <Label for="version-select" class="text-sm">Version</Label>
+                                <SearchableSelect
+                                    id="version-select"
+                                    v-model="selectedVersion"
+                                    :options="versionOptions"
+                                    class="w-64"
+                                />
+                                <span class="text-xs text-muted-foreground">
+                                    {{ props.versions.length }} Versionen
                                 </span>
                             </div>
 
-                            <details v-if="depCount(version.dependencies.runtime) > 0" class="mt-3">
-                                <summary class="cursor-pointer text-sm font-medium">
-                                    Abhängigkeiten ({{ depCount(version.dependencies.runtime) }})
-                                </summary>
-                                <ul class="mt-2 space-y-1">
-                                    <li
-                                        v-for="(constraint, name) in version.dependencies.runtime"
-                                        :key="name"
-                                        class="flex gap-2 font-mono text-xs"
-                                    >
-                                        <span>{{ name }}</span>
-                                        <span class="text-muted-foreground">{{ constraint }}</span>
-                                    </li>
-                                </ul>
-                            </details>
+                            <div v-if="currentVersion" class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
+                                <div class="flex flex-wrap items-baseline gap-3">
+                                    <span class="font-mono text-lg font-semibold">{{ currentVersion.version }}</span>
+                                    <span v-if="currentVersion.released_at" class="text-sm text-muted-foreground">
+                                        {{ currentVersion.released_at }}
+                                    </span>
+                                    <span v-if="currentVersion.reference" class="font-mono text-xs text-muted-foreground">
+                                        {{ currentVersion.reference.slice(0, 12) }}
+                                    </span>
+                                    <span class="ml-auto text-sm text-muted-foreground">
+                                        {{ currentVersion.download_count.toLocaleString('de-DE') }} Downloads ·
+                                        {{ formatBytes(currentVersion.dist_size) }}
+                                    </span>
+                                </div>
 
-                            <details v-if="depCount(version.dependencies.dev) > 0" class="mt-2">
-                                <summary class="cursor-pointer text-sm font-medium">
-                                    Dev-Abhängigkeiten ({{ depCount(version.dependencies.dev) }})
-                                </summary>
-                                <ul class="mt-2 space-y-1">
-                                    <li
-                                        v-for="(constraint, name) in version.dependencies.dev"
-                                        :key="name"
-                                        class="flex gap-2 font-mono text-xs"
-                                    >
-                                        <span>{{ name }}</span>
-                                        <span class="text-muted-foreground">{{ constraint }}</span>
-                                    </li>
-                                </ul>
-                            </details>
-                        </div>
+                                <div class="mt-5 grid gap-6 md:grid-cols-2">
+                                    <div>
+                                        <h3 class="text-sm font-medium">
+                                            Abhängigkeiten ({{ depCount(currentVersion.dependencies.runtime) }})
+                                        </h3>
+                                        <p
+                                            v-if="depCount(currentVersion.dependencies.runtime) === 0"
+                                            class="mt-2 text-sm text-muted-foreground"
+                                        >
+                                            Keine
+                                        </p>
+                                        <ul v-else class="mt-2 space-y-1">
+                                            <li
+                                                v-for="(constraint, name) in currentVersion.dependencies.runtime"
+                                                :key="name"
+                                                class="flex gap-2 font-mono text-xs"
+                                            >
+                                                <span>{{ name }}</span>
+                                                <span class="text-muted-foreground">{{ constraint }}</span>
+                                            </li>
+                                        </ul>
+                                    </div>
+
+                                    <div>
+                                        <h3 class="text-sm font-medium">
+                                            Dev-Abhängigkeiten ({{ depCount(currentVersion.dependencies.dev) }})
+                                        </h3>
+                                        <p
+                                            v-if="depCount(currentVersion.dependencies.dev) === 0"
+                                            class="mt-2 text-sm text-muted-foreground"
+                                        >
+                                            Keine
+                                        </p>
+                                        <ul v-else class="mt-2 space-y-1">
+                                            <li
+                                                v-for="(constraint, name) in currentVersion.dependencies.dev"
+                                                :key="name"
+                                                class="flex gap-2 font-mono text-xs"
+                                            >
+                                                <span>{{ name }}</span>
+                                                <span class="text-muted-foreground">{{ constraint }}</span>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
                     </section>
                 </TabsContent>
 
