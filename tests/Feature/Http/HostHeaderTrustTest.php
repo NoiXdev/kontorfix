@@ -113,6 +113,38 @@ it('wires the allowlist into the framework middleware', function () {
         ->and((new TrustHosts(app()))->hosts())->toBe(TrustedHosts::patterns());
 });
 
+it('keeps the allowlist in force when APP_URL was written without a scheme', function () {
+    // `parse_url('registry.example.test', PHP_URL_HOST)` is null: the value parses as a
+    // path, not as a host. Reading it raw made one typo switch off the allowlist AND the
+    // URL root pinning at once — a single environment variable silently removing two
+    // controls. The value is normalised before either control reads it instead.
+    config(['app.url' => 'registry.example.test']);
+
+    $patterns = TrustedHosts::patterns();
+
+    expect($patterns)->not->toBe([])
+        ->and(hostIsTrusted('registry.example.test', $patterns))->toBeTrue()
+        ->and(hostIsTrusted('sub.registry.example.test', $patterns))->toBeTrue()
+        ->and(hostIsTrusted('attacker.example.net', $patterns))->toBeFalse();
+});
+
+it('keeps the reset link pinned when APP_URL was written without a scheme', function () {
+    config(['app.url' => 'registry.example.test']);
+    Notification::fake();
+    $user = User::factory()->create();
+
+    // Reachability anchor: the POST reaches the reset handler and a notification is
+    // actually sent, so the link below is one this request generated — the assertion is
+    // about URL generation, not about a refusal at the router or the throttle.
+    $this->post(ATTACKER.'/forgot-password', ['email' => $user->email])
+        ->assertSessionHasNoErrors();
+    Notification::assertSentTo($user, ResetPassword::class);
+
+    // The host is the asserted property. The scheme still follows the request, as it did
+    // before — `forceRootUrl` never pinned it, and only a trusted proxy can set it.
+    expect(parse_url(resetLinkFor($user), PHP_URL_HOST))->toBe('registry.example.test');
+});
+
 it('drops the allowlist rather than locking the instance out when APP_URL names no host', function () {
     // An empty allowlist means "trust everything" in Symfony. That is the right
     // direction for a value the operator may simply not have set: the URL root pinning

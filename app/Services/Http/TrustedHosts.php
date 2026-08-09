@@ -26,8 +26,10 @@ use Throwable;
  * It fails **open** in exactly one case: when `APP_URL` names no host there is nothing
  * to build an allowlist from, and an empty array means "trust everything" rather than
  * "trust nothing". Locking an instance out of itself over an unset variable would be a
- * worse bug than the one this closes, and it is not the only control — the URL root is
- * pinned to `APP_URL` in AppServiceProvider regardless of what any header says.
+ * worse bug than the one this closes. That case is narrow — a value written without a
+ * scheme still names a host, see AppUrl — and it is no longer silent: HealthService
+ * reports it, because the other control (PinUrlRoot) stands down on exactly the same
+ * input, so this one cannot cite it as a backstop.
  */
 class TrustedHosts
 {
@@ -47,9 +49,9 @@ class TrustedHosts
      */
     public static function patterns(): array
     {
-        $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        $appHost = AppUrl::host();
 
-        if (! is_string($appHost) || $appHost === '') {
+        if ($appHost === null) {
             return [];
         }
 

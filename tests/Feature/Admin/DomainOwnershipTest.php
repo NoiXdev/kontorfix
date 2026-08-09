@@ -100,3 +100,15 @@ it('writes an audit record when a hostname is attached and detached', function (
     expect(Activity::where('subject_type', Domain::class)->where('subject_id', $domain->id)
         ->where('description', 'deleted')->exists())->toBeTrue();
 });
+
+it('still refuses the instance host when APP_URL was written without a scheme', function () {
+    // The reserved-hostname rule reads the same APP_URL string: unparsed, it produced an
+    // empty reserve list, so the console hostname could be handed to a registry.
+    config(['app.url' => 'registry.example.test']);
+
+    $this->actingAs($this->operator)
+        ->post('/admin/domains', ['group_id' => $this->customerGroup->id, 'hostname' => 'registry.example.test'])
+        ->assertSessionHasErrors('hostname');
+
+    expect(Domain::where('hostname', 'registry.example.test')->exists())->toBeFalse();
+});

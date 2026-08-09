@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\Http\AppUrl;
 use App\Services\Http\TrustedHosts;
 use Closure;
 use Illuminate\Http\Request;
@@ -56,11 +57,9 @@ class PinUrlRoot
             return null;
         }
 
-        $appUrl = rtrim((string) config('app.url'), '/');
-
         // No configured root to pin to. Leaving the generator on the request root is the
         // pre-existing behaviour for this case; TrustedHosts documents the same fail-open
         // and the health page reports it.
-        return $appUrl !== '' ? $appUrl : null;
+        return AppUrl::root();
     }
 }

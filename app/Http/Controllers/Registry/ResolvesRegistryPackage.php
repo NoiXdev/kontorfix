@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Package;
 use App\Models\RegistryToken;
+use App\Services\Http\AppUrl;
 use App\Services\RegistryAccessService;
 use Illuminate\Http\Request;
 
@@ -39,8 +40,9 @@ trait ResolvesRegistryPackage
      * instance answers to by definition. Slug mode may not — nothing there constrains
      * the `Host` header, so an injected one would end up as the download URL in every
      * client's lock file. It uses the configured application URL instead, which is the
-     * same value every other generated link is rooted at (URL::forceRootUrl in
-     * AppServiceProvider).
+     * same value every other generated link is rooted at (App\Http\Middleware\PinUrlRoot)
+     * and is read through AppUrl, so a value written without a scheme still produces an
+     * absolute download URL rather than a scheme-less one.
      */
     protected function registryBaseUrl(Request $request, Group $group): string
     {
@@ -48,9 +50,7 @@ trait ResolvesRegistryPackage
             return $request->getSchemeAndHttpHost();
         }
 
-        $appUrl = rtrim((string) config('app.url'), '/');
-
-        return ($appUrl !== '' ? $appUrl : $request->getSchemeAndHttpHost()).'/r/'.$group->slug;
+        return (AppUrl::root() ?? $request->getSchemeAndHttpHost()).'/r/'.$group->slug;
     }
 
     /**

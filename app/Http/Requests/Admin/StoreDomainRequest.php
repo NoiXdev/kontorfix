@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Services\Http\AppUrl;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -35,7 +36,8 @@ class StoreDomainRequest extends FormRequest
                 // The instance's own host must not become a registry root: the web routes
                 // are registered first and win, but every unclaimed path would fall through
                 // to the registry routes and serve one group's packages off the console
-                // hostname. An unset/unparseable APP_URL yields an empty list, i.e. no rule.
+                // hostname. Only an APP_URL that names no host at all yields an empty list,
+                // i.e. no rule — a value written without a scheme still reserves its host.
                 Rule::notIn($this->reservedHostnames()),
             ],
         ];
@@ -58,8 +60,8 @@ class StoreDomainRequest extends FormRequest
      */
     private function reservedHostnames(): array
     {
-        $appHost = strtolower((string) parse_url((string) config('app.url'), PHP_URL_HOST));
+        $appHost = AppUrl::host();
 
-        return $appHost === '' ? [] : [$appHost];
+        return $appHost === null ? [] : [$appHost];
     }
 }

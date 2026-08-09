@@ -5,6 +5,7 @@ namespace App\Services\Health;
 use App\Enums\PackageType;
 use App\Models\Upstream;
 use App\Services\Broadcasting\ReverbConfigGuard;
+use App\Services\Http\AppUrl;
 use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
 use App\Support\CredentialUrl;
@@ -23,6 +24,7 @@ class HealthService
     public function checks(): array
     {
         return [
+            $this->appUrl(),
             $this->database(),
             $this->cache(),
             $this->queue(),
@@ -83,6 +85,34 @@ class HealthService
             'ok' => $problem === null,
             'detail' => $problem ?? 'Konfiguration ok.',
         ]];
+    }
+
+    /**
+     * The only remaining state in which BOTH host controls stand down.
+     *
+     * `TrustedHosts` returns an empty allowlist — which Symfony reads as "trust every
+     * `Host`" — and `PinUrlRoot` has no root to pin a generated URL to, so a fronting
+     * proxy that forwards an arbitrary `Host` puts an attacker's domain into the
+     * password-reset link. Both fail open deliberately (an unset variable must not lock an
+     * instance out of itself), which is only defensible while the state is visible.
+     *
+     * A value written without a scheme is NOT this state: AppUrl normalises it.
+     *
+     * @return array{key:string,label:string,ok:bool,detail:string}
+     */
+    private function appUrl(): array
+    {
+        $root = AppUrl::root();
+
+        return [
+            'key' => 'app-url',
+            'label' => 'APP_URL',
+            'ok' => $root !== null,
+            'detail' => $root
+                ?? 'APP_URL nennt keinen Host. Die Host-Allowlist und die Verankerung erzeugter '
+                    .'Links sind dadurch beide abgeschaltet — ein vorgelagerter Proxy kann den '
+                    .'Host in Passwort-Reset-Links frei wählen.',
+        ];
     }
 
     /** @return array{key:string,label:string,ok:bool,detail:string} */
