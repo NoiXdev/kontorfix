@@ -10,8 +10,11 @@ namespace App\Enums;
  * Which modes a type may use is decided by allowedFor(), the single source of truth.
  * Composer is always git-sourced: a Composer package *is* its source tree. Python may be
  * either, because pip builds from a source distribution at install time. npm is publish
- * only — what `npm publish` uploads is a built artifact, not the repository tree, so a
- * mirror produces a package with the right name and the wrong contents.
+ * only by decision, not by impossibility: most npm packages publish a derived subset of
+ * the repo (a build step, `files`, `.npmignore`), but some publish their source tree
+ * essentially unchanged, and there is no way to tell the two apart from outside the repo.
+ * A mode that silently works for some repos and produces an unusable package for others is
+ * worse than not offering it at all.
  */
 enum PackageSourceMode: string
 {
@@ -41,6 +44,11 @@ enum PackageSourceMode: string
         };
     }
 
+    /**
+     * Indexing `[0]` is safe only because every arm of allowedFor()'s match returns a
+     * non-empty list and there is no default/catch-all arm; a future catch-all that can
+     * return `[]` would break this silently.
+     */
     public static function defaultFor(PackageType $type): self
     {
         return self::allowedFor($type)[0];

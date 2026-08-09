@@ -27,6 +27,9 @@ it('defaults python to publish', function () {
 
 it('reports every type in the enum, so a new type cannot be forgotten', function () {
     foreach (PackageType::cases() as $type) {
+        // The ->not->toBeEmpty() assertion is decorative: an exhaustive match with no
+        // catch-all arm throws UnhandledMatchError for an unforgotten type before this
+        // line is ever reached. It's the call itself, not the assertion, that is the canary.
         expect(PackageSourceMode::allowedFor($type))->not->toBeEmpty();
     }
 });
