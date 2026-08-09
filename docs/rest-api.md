@@ -119,6 +119,32 @@ curl -s "${auth[@]}" -H "Content-Type: application/json" \
 Both `https://` and `ssh://` repository URLs are accepted; SSH remotes require a deploy
 key configured on the server.
 
+**`source_mode`** (optional, create only)
+
+How the package is filled: `publish` — versions arrive by `npm publish` / `twine upload` —
+or `git` — versions are mirrored from a repository's tags. Which values a type accepts is
+fixed, and a `git` package must also carry a `repository_url`:
+
+| `type` | Accepted | Applied when omitted |
+| --- | --- | --- |
+| `composer` | `git` | `git` |
+| `npm` | `publish` | `publish` |
+| `python` | `publish`, `git` | `publish` |
+
+Omitting the field is the normal case — the example above does — and gets the type's
+default. Sending a value the type does not accept is a `422` on `source_mode`. Two of
+those are recent and may break an existing client:
+
+- `npm` with `source_mode: "git"` was accepted before and is now refused outright: what
+  `npm publish` uploads is a built artifact, not the repository tree, so the mirror
+  produced an installable package with the wrong contents. Existing npm mirrors were
+  migrated to `publish`; see `docs/git-mirror-python.md`.
+- `composer` with an explicit `source_mode: "publish"` used to be coerced to `git` in
+  silence and is now refused. Drop the field.
+
+There is no way to change the mode afterwards — the API exposes no update route for a
+package, and the field is create-only.
+
 **Re-sync a package after a push** (e.g. from CI)
 
 ```bash
