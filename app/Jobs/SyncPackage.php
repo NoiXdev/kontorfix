@@ -93,21 +93,27 @@ class SyncPackage implements ShouldQueue
 
     /**
      * A README is a nice-to-have on a detail page. It must never be able to fail a sync,
-     * so every failure mode here is swallowed and logged rather than allowed to propagate:
+     * so every failure here is logged and swallowed rather than allowed to propagate.
      *
-     * - `ReadmeLocator::find()` never throws — a missing README, a root entry that turns
-     *   out to be a directory, and a symlinked README all come back as `null` from inside
-     *   the locator. `null` here just means "nothing to store"; the try/catch below is not
-     *   what handles that case.
-     * - `ReadmeRenderer::render()` *does* throw on a markdown parse failure (deliberately —
-     *   see its docblock), which is the one realistic way this method can fail. That's
-     *   what the catch is actually for: log which package failed to render and move on.
-     * - A genuinely empty README (render() returning '') is treated the same as "nothing to
-     *   store": no update.
+     * The column is written on every sync that reached a verdict, and only then. Two
+     * outcomes, kept apart because they pull in opposite directions:
      *
-     * Either way — not found, empty, or unparsable — readme_html keeps whatever was stored
-     * on the previous sync rather than being blanked, so a transient rendering failure
-     * never makes an already-working README page regress.
+     * - **The repository answered.** Whatever it says is now the truth: a README becomes
+     *   the stored HTML, and no README — or one emptied down to nothing — clears the
+     *   column. `readme_html` had no other writer at all (no admin edit path, not
+     *   request-fillable, no reset in `packages:resync`), so without this a README deleted
+     *   upstream, including one deleted *because* it leaked something, would be served
+     *   from this column forever, and re-syncing — the one action an operator would reach
+     *   for — would not undo it.
+     * - **The repository did not answer,** or its README did not render. Nothing is known,
+     *   so nothing is written and the previous value stands. A transient git failure or an
+     *   unparsable README must never blank a working README page.
+     *
+     * `ReadmeLocator::find()` is what separates the two: it returns `null` only for a root
+     * that listed cleanly and holds no README candidate, and throws when the listing or
+     * the read failed. `ReadmeRenderer::render()` throws on a parse failure (deliberately —
+     * see its docblock), which is the second failure shape and is caught separately, after
+     * the locator has already established that a README does exist.
      *
      * Read at the mirror's HEAD (the default branch), not the newest version tag: unlike
      * `latestDescription()`, there is no single "current version" ref already resolved
@@ -123,20 +129,38 @@ class SyncPackage implements ShouldQueue
 
         try {
             $found = ReadmeLocator::find($repo, $readmeRef);
-
-            if ($found !== null) {
-                $html = ReadmeRenderer::render($found['source'], $found['filename']);
-
-                if ($html !== '') {
-                    $this->package->update(['readme_html' => $html]);
-                }
-            }
         } catch (Throwable $e) {
-            Log::warning('readme extraction failed', [
-                'package_id' => $this->package->id,
-                'reason' => $e->getMessage(),
-            ]);
+            $this->logReadmeFailure('readme lookup failed', $e);
+
+            return; // Nothing learned about the repository — keep what is stored.
         }
+
+        if ($found === null) {
+            // The root listed cleanly and holds no README. That is an answer, not a
+            // failure, so a previously stored one stops being served.
+            $this->package->update(['readme_html' => null]);
+
+            return;
+        }
+
+        try {
+            $html = ReadmeRenderer::render($found['source'], $found['filename']);
+        } catch (Throwable $e) {
+            $this->logReadmeFailure('readme render failed', $e);
+
+            return; // Keep the previous value rather than blanking on a parse error.
+        }
+
+        // An empty render means the file exists but says nothing — an answer too.
+        $this->package->update(['readme_html' => $html !== '' ? $html : null]);
+    }
+
+    private function logReadmeFailure(string $message, Throwable $e): void
+    {
+        Log::warning($message, [
+            'package_id' => $this->package->id,
+            'reason' => $e->getMessage(),
+        ]);
     }
 
     private function markFailed(string $message): void

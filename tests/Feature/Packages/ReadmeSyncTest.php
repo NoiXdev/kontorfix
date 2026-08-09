@@ -2,6 +2,7 @@
 
 use App\Jobs\SyncPackage;
 use App\Models\Package;
+use Illuminate\Support\Facades\Process;
 
 it('stores the rendered readme when the repository has one', function () {
     $origin = makeGitRepoWith([
@@ -32,18 +33,66 @@ it('leaves the column null when the repository has no readme', function () {
     expect($package->fresh()->readme_html)->toBeNull();
 });
 
-it('keeps the previous readme and still completes when the new sync cannot read one', function () {
+it('clears a stored readme once the repository no longer has one', function () {
+    // A README deleted upstream — including one deleted *because* it leaked something —
+    // must stop being served. Only a successful render used to write this column and
+    // nothing ever cleared it: no admin edit path, not request-fillable, no reset in
+    // packages:resync. So the stale copy was served indefinitely, and re-syncing, the one
+    // action an operator would reach for, did nothing.
     $origin = makeGitRepoWith(['composer.json' => json_encode(['name' => 'acme/demo'])]);
     $package = Package::factory()->create([
         'source_mode' => 'git',
         'repository_url' => $origin,
+        'readme_html' => '<h1>Geheimnis</h1>',
+        'sync_status' => 'pending',
+    ]);
+
+    (new SyncPackage($package))->handle();
+
+    expect($package->fresh()->sync_status->value)->toBe('synced')
+        ->and($package->fresh()->readme_html)->toBeNull();
+});
+
+it('clears a stored readme once the repository readme is emptied', function () {
+    // Emptying README.md is the other way upstream retracts it, and it reaches a different
+    // branch: the file is found and renders to '', which used to be treated as "nothing to
+    // store" and left the old HTML in place.
+    $origin = makeGitRepoWith([
+        'composer.json' => json_encode(['name' => 'acme/demo']),
+        'README.md' => "   \n",
+    ]);
+    $package = Package::factory()->create([
+        'source_mode' => 'git',
+        'repository_url' => $origin,
+        'readme_html' => '<h1>Geheimnis</h1>',
+        'sync_status' => 'pending',
+    ]);
+
+    (new SyncPackage($package))->handle();
+
+    expect($package->fresh()->sync_status->value)->toBe('synced')
+        ->and($package->fresh()->readme_html)->toBeNull();
+});
+
+it('keeps the previous readme and still completes when the repository cannot be listed', function () {
+    // The counterpart to the two tests above, and the reason clearing has to be narrow: a
+    // repository we could not read is not a repository whose README is gone. A clone with
+    // no commits has no HEAD to list, so `git ls-tree HEAD` fails while the sync itself
+    // succeeds — if that were treated as "no README", one unreadable sync would wipe a
+    // working README page.
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0775, true);
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+
+    $package = Package::factory()->create([
+        'source_mode' => 'git',
+        'repository_url' => 'file://'.$dir,
         'readme_html' => '<h1>Alt</h1>',
         'sync_status' => 'pending',
     ]);
 
     (new SyncPackage($package))->handle();
 
-    // The sync itself must succeed, and a missing README must not blank what was stored.
     expect($package->fresh()->sync_status->value)->toBe('synced')
         ->and($package->fresh()->readme_html)->toBe('<h1>Alt</h1>');
 });

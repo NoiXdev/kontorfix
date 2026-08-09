@@ -57,6 +57,43 @@ it('returns null when the repository has no readme', function () {
     expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
 });
 
+it('throws instead of reporting no readme when the root listing fails', function () {
+    // "The repository lists fine and holds no README" and "we could not read the
+    // repository" have opposite consequences for a stored readme: the first means upstream
+    // deleted it and the column must be cleared, the second means we know nothing and the
+    // column must be left alone. Collapsing both into null — which this locator used to do
+    // — makes that decision impossible for the caller, so a failed listing has to be
+    // distinguishable here, at the source.
+    //
+    // A repository with no commits at all clones fine but has no HEAD to list, so
+    // `git ls-tree HEAD` fails. That is the "could not read" shape without any mocking.
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0775, true);
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+
+    $repo = new GitRepository('file://'.$dir, 'readme-test-'.bin2hex(random_bytes(6)));
+    $repo->sync();
+
+    expect(fn () => ReadmeLocator::find($repo, 'HEAD'))->toThrow(RuntimeException::class);
+});
+
+it('throws instead of reporting no readme when the readme blob cannot be read', function () {
+    // The other half of the same distinction: the listing named a README, so the project
+    // has one — failing to read it is not evidence that it is gone.
+    $origin = makeGitRepoWith(['README.md' => '# Hallo']);
+
+    $repo = new class($origin, 'readme-test-'.bin2hex(random_bytes(6))) extends GitRepository
+    {
+        public function fileAtRef(string $ref, string $path): string
+        {
+            throw new RuntimeException('git show failed');
+        }
+    };
+    $repo->sync();
+
+    expect(fn () => ReadmeLocator::find($repo, 'HEAD'))->toThrow(RuntimeException::class);
+});
+
 it('ignores a readme in a subdirectory', function () {
     $repo = readmeRepoWith(['composer.json' => '{}', 'docs/README.md' => 'nested']);
 

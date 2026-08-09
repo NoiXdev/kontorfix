@@ -2,8 +2,6 @@
 
 namespace App\Services\Vcs;
 
-use Throwable;
-
 /**
  * Locates a project README inside a bare git mirror.
  *
@@ -21,23 +19,33 @@ class ReadmeLocator
     private const CANDIDATES = ['readme.md', 'readme.markdown', 'readme.rst', 'readme.txt', 'readme'];
 
     /**
+     * Three outcomes, and the caller has to be able to tell them apart:
+     *
+     * - an array — this ref has a README, here it is;
+     * - `null` — the root listed cleanly and holds no README candidate. The project has
+     *   none, which includes the case of one that was deleted upstream;
+     * - a Throwable — the listing or the read failed, so nothing is known either way.
+     *
+     * This class used to return `null` for all three, and a caller cannot distinguish
+     * "upstream deleted the README" from "git would not talk to us" after the fact. That
+     * collapse is why a README deleted upstream — including one deleted *because* it
+     * leaked something — went on being served: the only safe reading of an ambiguous
+     * `null` is "keep what you have". Failures are therefore no longer swallowed here;
+     * they propagate, and `null` means exactly one thing.
+     *
      * @return array{filename: string, source: string}|null
+     *
+     * @throws \Throwable if the root cannot be listed or the README blob cannot be read
      */
     public static function find(GitRepository $repo, string $ref): ?array
     {
-        $entry = self::pick(self::rootEntries($repo, $ref));
+        $entry = self::pick($repo->rootFileEntries($ref));
 
         if ($entry === null) {
             return null;
         }
 
-        try {
-            $source = self::read($repo, $ref, $entry);
-        } catch (Throwable) {
-            return null;
-        }
-
-        return ['filename' => $entry['name'], 'source' => $source];
+        return ['filename' => $entry['name'], 'source' => self::read($repo, $ref, $entry)];
     }
 
     /**
@@ -73,24 +81,16 @@ class ReadmeLocator
     }
 
     /**
-     * Root-level file (blob) entries only. A README inside a subdirectory is documentation
-     * for that directory, not the project's front page — and
-     * GitRepository::rootFileEntries() already excludes directories/submodules, so a
-     * directory named e.g. "README.md" can't be picked and handed to `fileAtRef()`, which
-     * would happily return its tree listing.
+     * Picks the preferred candidate out of the root-level file (blob) entries. A README
+     * inside a subdirectory is documentation for that directory, not the project's front
+     * page — and GitRepository::rootFileEntries() lists the root only and already excludes
+     * directories/submodules, so a directory named e.g. "README.md" can't be picked and
+     * handed to `fileAtRef()`, which would happily return its tree listing.
      *
-     * @return list<array{name: string, size: int}>
-     */
-    private static function rootEntries(GitRepository $repo, string $ref): array
-    {
-        try {
-            return $repo->rootFileEntries($ref);
-        } catch (Throwable) {
-            return [];
-        }
-    }
-
-    /**
+     * No match is a real answer, not a failure: the listing succeeded, and a repository
+     * whose root holds a directory or a symlink named README.md genuinely has no README
+     * blob to show.
+     *
      * @param  list<array{name: string, size: int}>  $entries
      * @return array{name: string, size: int}|null
      */
