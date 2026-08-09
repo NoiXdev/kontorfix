@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ActivityList from '@/components/kontorfix/ActivityList.vue';
+import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -78,6 +79,7 @@ const props = defineProps<{
         is_git_sourced: boolean;
         name: string;
         description: string | null;
+        readme_html: string | null;
         repository_url: string | null;
         git_credential_id: string | null;
         has_repository_token: boolean;
@@ -119,6 +121,10 @@ function depCount(deps: Record<string, string>): number {
 // --- Edit repository source (git-sourced packages only) ---
 // Composer is always git-sourced; npm/Python only when created in git-mirror mode.
 const isGitSourced = computed(() => props.package.is_git_sourced);
+
+// The README empty state points at the tab that actually replaces "Versionen" for this
+// package type — Python shows "Distributionen" there instead (see the TabsTrigger below).
+const secondaryTabLabel = computed(() => (props.package.type === 'python' ? 'Distributionen' : 'Versionen'));
 
 const credentialOptions = computed(() => [
     { value: '', label: 'Kein Token / öffentlich' },
@@ -218,8 +224,9 @@ useOperatorChannel({
                 </div>
             </div>
 
-            <Tabs default-value="installation">
+            <Tabs default-value="uebersicht">
                 <TabsList>
+                    <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
                     <TabsTrigger v-if="isGitSourced" value="quelle">Quelle</TabsTrigger>
@@ -227,6 +234,17 @@ useOperatorChannel({
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="uebersicht">
+                    <ReadmeContent :html="props.package.readme_html" />
+                    <div
+                        v-if="!props.package.readme_html"
+                        class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                    >
+                        Für dieses Paket liegt keine README vor. Installationsbefehle stehen im Tab „Installation“,
+                        weitere Details unter „{{ secondaryTabLabel }}“.
+                    </div>
+                </TabsContent>
 
                 <TabsContent value="installation">
                     <section class="flex flex-col gap-3">
@@ -443,4 +461,3 @@ useOperatorChannel({
         </div>
     </AppLayout>
 </template>
-

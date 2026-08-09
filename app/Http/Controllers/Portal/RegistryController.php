@@ -112,6 +112,7 @@ class RegistryController extends Controller
                 'type' => $package->type->value,
                 'name' => $package->name,
                 'description' => $package->description,
+                'readme_html' => $package->readme_html,
                 'sync_status' => $package->sync_status->value,
             ],
             'versions' => $package->versions->map(fn (PackageVersion $v) => [

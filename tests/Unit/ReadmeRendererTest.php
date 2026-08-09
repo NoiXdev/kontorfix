@@ -38,6 +38,19 @@ it('renders a plain text readme as preformatted text', function () {
     expect(ReadmeRenderer::render('nur text', 'README'))->toContain('<pre');
 });
 
+it('substitutes an invalid byte on the plain text path instead of emptying the file', function () {
+    // Pins the flag set behind Laravel's e(): ENT_QUOTES | ENT_SUBSTITUTE turns an invalid
+    // UTF-8 byte into U+FFFD. Plain htmlspecialchars() without ENT_SUBSTITUTE returns ''
+    // for the *whole* string, so one bad byte anywhere would blank an entire plain-text
+    // README. ReadmeLocator::truncate() documents which of the two render paths a
+    // mid-character cut actually endangers, and it is not this one.
+    $html = ReadmeRenderer::render("Zeile eins\xFF und weiter", 'README.txt');
+
+    expect($html)->toContain('Zeile eins')
+        ->toContain('und weiter')
+        ->toContain("\u{FFFD}");
+});
+
 it('returns an empty string for empty source', function () {
     expect(ReadmeRenderer::render('   ', 'README.md'))->toBe('');
 });
@@ -115,9 +128,13 @@ it('escapes hostile alt text instead of smuggling it through when an image is st
 
     expect($html)->not->toContain('<script>')->not->toContain('<img');
 
+    // Escaped entities alone prove nothing here: an <img> that survived would carry the
+    // very same entities inside its alt attribute, so `toContain('&lt;')` stays green with
+    // stripImages() deleted. The claim worth making is *where* the escaped text ends up —
+    // as the paragraph's own content, not as an attribute on a tag that should not exist.
     $escaped = ReadmeRenderer::render('![1 < 2 and 3 > 2](https://evil.example/x.png)', 'README.md');
 
-    expect($escaped)->toContain('&lt;')->toContain('&gt;')->not->toContain('1 < 2');
+    expect($escaped)->toContain('<p>1 &lt; 2 and 3 &gt; 2</p>')->not->toContain('1 < 2');
 });
 
 it('leaves nothing at all behind for an image written without alt text', function () {

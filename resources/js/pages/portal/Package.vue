@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -33,6 +34,7 @@ const props = defineProps<{
         type: 'composer' | 'npm';
         name: string;
         description: string | null;
+        readme_html: string | null;
         sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
     };
     versions: VersionRow[];
@@ -89,6 +91,18 @@ function depCount(deps: Record<string, string>): number {
                     <span class="ml-2 break-all font-mono text-xs">{{ props.registry.url }}</span>
                 </p>
             </div>
+
+            <section class="flex flex-col gap-3">
+                <h2 class="text-lg font-medium">Übersicht</h2>
+                <ReadmeContent :html="props.package.readme_html" />
+                <div
+                    v-if="!props.package.readme_html"
+                    class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                >
+                    Für dieses Paket liegt keine README vor. Installationsbefehle stehen unten, die
+                    Versionshistorie darunter.
+                </div>
+            </section>
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Installation</h2>

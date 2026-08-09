@@ -7,6 +7,7 @@ use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
 use RuntimeException;
+use Symfony\Component\Process\Process as SystemProcess;
 use Throwable;
 
 class GitRepository
@@ -90,7 +91,164 @@ class GitRepository
     {
         // --end-of-options prevents a ref/path like "--output=..." from being
         // interpreted as a git option (option injection from a malicious upstream tag).
-        return $this->run(['git', 'show', '--end-of-options', "{$ref}:{$path}"])->output();
+        return $this->run($this->showCommand($ref, $path))->output();
+    }
+
+    /**
+     * Same as fileAtRef(), but never lets more than $maxBytes of the blob into this
+     * process — the whole point being that the remainder is never read at all.
+     *
+     * fileAtRef() hands `git show`'s entire stdout to the caller as one string, so a
+     * repository carrying a multi-hundred-megabyte file exhausts `memory_limit`. That is a
+     * PHP fatal rather than a Throwable: nothing catches it, the worker process dies, and
+     * the queue replays the job. A caller that already knows the blob is oversize (see
+     * rootFileEntries(), which reports each blob's size) must therefore have a way to read
+     * a bounded prefix instead of reading everything and cutting afterwards.
+     *
+     * Symfony's runner offers no way for an output callback to say "stop"; throwing out of
+     * it is the abort. Output arrives in chunks, so the buffer briefly holds up to one chunk
+     * more than the budget before it is cut back — bounded either way, which is what matters
+     * here.
+     *
+     * Two details that are not optional:
+     *
+     * - The callback throws **once**. Tearing the process down reads its pipes one last
+     *   time and calls the callback again, and a second throw escapes from *there* —
+     *   outside this try/catch, during stop() or, worse, during garbage collection, where
+     *   it surfaces as a BlobCapReached inside whatever unrelated code happens to be
+     *   running. The $capped latch makes every call after the first a no-op.
+     * - git is stopped explicitly rather than left to the destructor, so the abandoned
+     *   `git show` ends when this method does and not whenever the process object is
+     *   collected.
+     *
+     * A process that ends on its own without reaching the budget is checked for success as
+     * usual: abandoning at the cap must not quietly turn every git failure into "".
+     *
+     * @throws RuntimeException if git fails before the budget is reached
+     */
+    public function fileAtRefCapped(string $ref, string $path, int $maxBytes): string
+    {
+        $buffer = '';
+        $capped = false;
+
+        $process = Process::path($this->mirrorPath)->timeout(120)->start(
+            $this->showCommand($ref, $path),
+            function (string $type, string $chunk) use (&$buffer, &$capped, $maxBytes) {
+                if ($capped || $type !== SystemProcess::OUT) {
+                    return;
+                }
+
+                $buffer .= $chunk;
+
+                if (strlen($buffer) >= $maxBytes) {
+                    $capped = true;
+
+                    throw new BlobCapReached;
+                }
+            },
+        );
+
+        try {
+            $result = $process->wait();
+        } catch (Throwable $e) {
+            // The latch, not the exception type, decides whether this was our own abort:
+            // a timeout or any other genuine failure leaves it false and must propagate
+            // rather than be reported as a successful short read.
+            if (! $capped) {
+                throw $e;
+            }
+
+            $process->stop();
+
+            return substr($buffer, 0, $maxBytes);
+        }
+
+        if (! $result->successful()) {
+            throw new RuntimeException('git show failed: '.$result->errorOutput());
+        }
+
+        return substr($buffer, 0, $maxBytes);
+    }
+
+    /** @return list<string> */
+    private function showCommand(string $ref, string $path): array
+    {
+        return ['git', 'show', '--end-of-options', "{$ref}:{$path}"];
+    }
+
+    /**
+     * Regular files at the root of $ref, non-recursive, each with the byte size git
+     * records for its blob. `run()` stays private — this is the one narrow slice of it a
+     * caller outside this class needs (ReadmeLocator).
+     *
+     * The size is here rather than in a separate lookup because `git ls-tree -l` reports it
+     * in the listing this method already runs: it costs an extra column, not an extra
+     * process. The alternative, `git cat-file -s {ref}:{path}`, would spawn a second git per
+     * candidate *and* resolve the path a second time, independently of the listing that
+     * chose it — so the size checked and the blob subsequently read would be two separate
+     * resolutions rather than one. Returning name and size together keeps the decision and
+     * the object it describes tied to a single authoritative listing, which is what lets
+     * ReadmeLocator refuse an oversize blob before reading a byte of it.
+     *
+     * Deliberately regular files only, not directories or symlinks:
+     *
+     * - Directories: `git show {ref}:{path}` exits 0 and happily prints a tree listing when
+     *   $path is a directory rather than failing, so a caller that can't tell a blob from a
+     *   tree ahead of time would treat a directory named e.g. "README.md" as if it were that
+     *   file.
+     * - Symlinks: a symlink is *also* type "blob" (git stores the link target as the blob's
+     *   content), so a type check alone lets one through. `git show` on a symlink path
+     *   returns the literal target string, not the target's content and not an error — a
+     *   reader would see one line of nonsense (e.g. "TARGET.md") where the README belongs.
+     *   Resolving the link instead was considered and rejected: it means following a path
+     *   the repository author controls, inside a bare mirror, with the same "where does
+     *   this actually point" questions a symlink raises anywhere else. Skipping it is the
+     *   honest outcome — the caller sees no README rather than a wrong one.
+     *
+     * With `-l` and without `--name-only`, `git ls-tree` reports each entry as
+     * "<mode> <type> <sha> <size>\t<name>" — <mode> is "120000" for a symlink (vs. "100644"
+     * / "100755" for a regular file), <type> is "blob" for both a regular file and a
+     * symlink, "tree" for a subdirectory, "commit" for a submodule — so both mode and type
+     * are filtered here rather than left for the caller to infer from a command that can't
+     * fail on either. <size> is right-aligned in a padded column and is "-" for anything
+     * that is not a blob, hence the whitespace split and the digit check below; an entry
+     * whose size does not parse is dropped rather than reported with a guessed size, so a
+     * caller sizing a read against it can never be handed an unbounded one.
+     *
+     * Entry names are not unquoted: `core.quotePath` (on by default) makes git render a
+     * name containing a non-ASCII byte or a tab as a C-style escaped, double-quoted string
+     * rather than the raw bytes. That's a real gap in this parser for arbitrary filenames,
+     * but not one that can hide a legitimate README: every name in
+     * ReadmeLocator::CANDIDATES is plain ASCII with no special characters, which git never
+     * quotes, so the candidate this method exists to find is never affected by it.
+     *
+     * @return list<array{name: string, size: int}>
+     */
+    public function rootFileEntries(string $ref): array
+    {
+        $output = $this->run(['git', 'ls-tree', '-l', '--end-of-options', $ref])->output();
+
+        $entries = [];
+
+        foreach (explode("\n", $output) as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+
+            [$info, $name] = array_pad(explode("\t", $line, 2), 2, null);
+
+            if ($info === null || $name === null) {
+                continue;
+            }
+
+            [$mode, $type, , $size] = array_pad(preg_split('/\s+/', trim($info)) ?: [], 4, null);
+
+            if ($type === 'blob' && $mode !== '120000' && is_string($size) && ctype_digit($size)) {
+                $entries[] = ['name' => $name, 'size' => (int) $size];
+            }
+        }
+
+        return $entries;
     }
 
     /**
