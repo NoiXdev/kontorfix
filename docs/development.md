@@ -339,9 +339,13 @@ Deliberately classified as low and documented in the security audit (non-blockin
   gated or disabled — it is disabled by default. The endpoint carries `throttle:5,1` per
   source address: it performs a bcrypt-12 hash, inserts a row and sends mail per request.
 - **OIDC email linking:** auto-linking across multiple enabled identity providers for member
-  accounts — relevant only with multiple, partly untrusted IdPs. The match is
-  case-insensitive on `lower(email)`, but the column carries no functional unique index: an
-  instance that already holds two case-variant addresses keeps both rows.
+  accounts — relevant only with multiple, partly untrusted IdPs. The address is now one
+  identity whatever its case: a unique partial index on `lower(users.email)`, a
+  case-insensitive uniqueness check on every write path, and an oldest-first order in the
+  resolver. An instance that already held two case-variant addresses gets a *non-unique*
+  index instead of a failed deploy, with the addresses named in the log and on the operator
+  health page; `php artisan users:enforce-email-uniqueness` installs the unique one once
+  they are resolved.
 - **API existence oracle:** route model binding runs before the key auth; non-existent
   `{id}` routes return 404 instead of 401. Low value due to non-enumerable UUIDs.
 - **API docs in `local`:** `/docs/api` is ungated in the `local` environment (development).
@@ -350,12 +354,24 @@ Deliberately classified as low and documented in the security audit (non-blockin
   `KONTORFIX_API_DOCS_ENABLED=false` on an instance that does not need the browser.
 - **API keys minted from an API key:** `POST /api/v1/me/api-keys` cannot carry
   `password.confirm` (the gate reads a session key; `/api/v1` is stateless). A successor may
-  be neither wider nor longer-lived than its parent, but a parent with no expiry still mints
-  successors with no expiry — bound that with `KONTORFIX_API_KEY_MAX_TTL_DAYS`.
+  be neither wider nor longer-lived than its parent, and a parent with no expiry falls back
+  to `KONTORFIX_API_KEY_SUCCESSOR_MAX_TTL_DAYS` (90 days) so the chain ends rather than
+  renewing itself — the console form behind `password.confirm` is unaffected and still mints
+  perpetual keys. `KONTORFIX_API_KEY_MAX_TTL_DAYS` remains the instance-wide ceiling and now
+  also applies to keys issued to robot accounts from the console.
 - **No throttle on the registry protocol routes:** a cold `composer install` or `npm ci`
   legitimately issues one request per dependency at once, so any limit low enough to matter
-  would break CI. The exhaustion angle is bounded directly instead: the proxy cache enforces
-  its per-artifact byte cap while the artifact streams, and the Composer dist build holds a
-  per-archive lock.
+  would break CI. What is bounded is the *work*, not the requests: the proxy cache enforces
+  its per-artifact byte cap while the artifact streams; a per-artifact fetch lock collapses
+  concurrent misses for one coordinate into a single upstream fetch; the cache evicts to make
+  room instead of degrading to permanent pass-through when its budget is reached; and the
+  Composer dist build holds a per-archive lock. Note that the byte budget bounds disk, not
+  work — an artifact over `KONTORFIX_UPSTREAM_CACHE_MAX_ARTIFACT_BYTES` is served and never
+  cached, so setting that value below what your upstreams actually ship leaves those
+  coordinates permanently in pass-through, bounded only by the fetch lock.
+- **Inline git credentials:** `packages.repository_token` is bound to the authority
+  (host *and* port) it was entered for, and `packages.repository_url` is redacted on every
+  read path including the activity log. A package whose recorded destination no longer
+  matches its URL syncs unauthenticated and fails visibly; re-entering the token rebinds it.
 - **JWKS cache:** OIDC reloads the JWKS on each callback (performance/robustness, not a
   security issue).

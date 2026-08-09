@@ -86,15 +86,18 @@ credential whose assigned packages point somewhere other than the canonical host
 self-hosted GitLab or GHE, typically — is therefore left with an empty `host` column and
 logged with a `Git credential left without a host binding` warning.
 
-What that produces is **not** an unbound credential. For the three known providers,
-`GitCredential::allowedHost()` falls back to the provider's canonical host when the column
-is empty, so such a credential is bound to `github.com` / `gitlab.com` / `bitbucket.org` and
-refuses the self-hosted repository it was actually created for. It fails closed, which is
-the important part, but the fix is **not** to re-enter the token: edit the credential, name
-the real host in the *Host* field, and re-enter the token (the retarget guard asks for it
-because only someone who holds the secret may decide where it is sent). A credential with
-provider *generic* really is unusable until a host is named — there is no canonical host to
-fall back to.
+Such a credential is **unusable** until an operator names its host. `allowedHost()` returns
+null for an empty column and `permits()` refuses everything, whatever the provider — it used
+to fall back to the provider's canonical host, which quietly bound a self-hosted PAT to
+`github.com` / `gitlab.com` / `bitbucket.org` and transmitted it there, where it is useless
+but disclosed. Nothing entered through the console is affected: the form writes the provider
+default into the column when the operator names no host, so an empty column is exactly the
+set of rows the migration refused to decide for.
+
+The fix is the same as before: edit the credential, name the real host in the *Host* field
+(with a port if the server uses a non-default one, e.g. `gitlab.example:8443`), and re-enter
+the token — the retarget guard asks for it because only someone who holds the secret may
+decide where it is sent.
 
 ## Troubleshooting
 
