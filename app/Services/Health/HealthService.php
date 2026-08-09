@@ -2,10 +2,12 @@
 
 namespace App\Services\Health;
 
+use App\Enums\PackageType;
 use App\Models\Upstream;
 use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
+use App\Support\CredentialUrl;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -145,7 +147,19 @@ class HealthService
     private function upstreams(): array
     {
         return Upstream::query()->get()->map(function (Upstream $u): array {
-            $label = 'Upstream: '.$u->url;
+            // Redacted even here. This surface is super-admin only, but it is still a
+            // read surface, and every other one in the application withholds userinfo.
+            $label = 'Upstream: '.CredentialUrl::redact($u->url);
+
+            // A credential in the URL disables the PyPI simple-index fallthrough
+            // (PypiController::simpleProject): that path answers with a redirect, and a
+            // redirect would hand the mirror's password to the client. Say so, rather
+            // than letting upstream resolution stop working for no visible reason.
+            if ($u->type === PackageType::Python && CredentialUrl::carries($u->url)) {
+                return ['key' => 'upstream:'.$u->id, 'label' => $label, 'ok' => false, 'detail' => 'Die URL enthält ein Credential. Der PyPI-Simple-Index-Fallthrough ist für diesen '
+                    .'Upstream deaktiviert, weil er per Redirect antwortet und das Credential damit an '
+                    .'den Client ausliefern würde.'];
+            }
 
             if (! UrlSafety::isSafeResolving($u->url)) {
                 return ['key' => 'upstream:'.$u->id, 'label' => $label, 'ok' => false, 'detail' => 'Unsichere/nicht auflösbare URL.'];

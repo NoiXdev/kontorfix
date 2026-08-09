@@ -4,6 +4,7 @@ namespace App\Services\Upstream;
 
 use App\Exceptions\UpstreamException;
 use App\Models\Upstream;
+use App\Support\CredentialUrl;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -26,7 +27,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException("Upstream {$upstream->url} returned {$response->status()} for {$path}.");
+            throw new UpstreamException('Upstream '.CredentialUrl::redact($upstream->url)." returned {$response->status()} for {$path}.");
         }
 
         return $response->json();
@@ -92,7 +93,7 @@ class UpstreamClient
     {
         for ($hop = 0; $hop < 5; $hop++) {
             if (! UrlSafety::isSafeResolving($url)) {
-                throw new UpstreamException("Refusing unsafe upstream URL: {$url}.");
+                throw new UpstreamException('Refusing unsafe upstream URL: '.CredentialUrl::redact($url).'.');
             }
 
             // Same host AND an encrypted hop — see request().
@@ -102,7 +103,7 @@ class UpstreamClient
             if ($response->redirect()) {
                 $location = (string) $response->header('Location');
                 if ($location === '') {
-                    throw new UpstreamException("Upstream redirect without a Location header from {$url}.");
+                    throw new UpstreamException('Upstream redirect without a Location header from '.CredentialUrl::redact($url).'.');
                 }
                 $url = $location;
 
@@ -112,7 +113,7 @@ class UpstreamClient
             return $response;
         }
 
-        throw new UpstreamException("Too many redirects fetching upstream URL {$url}.");
+        throw new UpstreamException('Too many redirects fetching upstream URL '.CredentialUrl::redact($url).'.');
     }
 
     private function request(Upstream $upstream, bool $withAuth = true): PendingRequest

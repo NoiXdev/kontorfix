@@ -47,6 +47,38 @@ final class CredentialUrl
     }
 
     /**
+     * Whether the value carries a userinfo component at all — redacted or not.
+     */
+    public static function carries(?string $url): bool
+    {
+        return $url !== null && preg_match(self::USERINFO, $url) === 1;
+    }
+
+    /**
+     * The URL with any userinfo component removed outright, marker and all.
+     *
+     * Distinct from redact(), and the distinction matters wherever a URL is *used* rather
+     * than *displayed*. A `Location` header is handed to a client that will dial it:
+     *
+     * `https://***@host/` is a credential the client would actually try to authenticate
+     * with, and the marker still announces that a credential exists and on which host.
+     * Redaction is the right tool for a value a human reads; removal is the right tool
+     * for a value a machine follows.
+     *
+     * Removing userinfo does not make a credentialled upstream safe to redirect to — the
+     * request simply arrives unauthenticated. Callers must decide whether an anonymous
+     * request to that host is acceptable at all; see PypiController::simpleProject().
+     */
+    public static function strip(?string $url): ?string
+    {
+        if ($url === null) {
+            return null;
+        }
+
+        return (string) preg_replace(self::USERINFO, '${1}', $url);
+    }
+
+    /**
      * Whether the value carries the marker in place of real userinfo — i.e. it is a
      * redacted value on its way back in. Write paths refuse it rather than storing it,
      * so a client that echoes a withheld value can never silently destroy the credential
@@ -54,11 +86,6 @@ final class CredentialUrl
      */
     public static function isRedacted(?string $url): bool
     {
-        if ($url === null) {
-            return false;
-        }
-
-        return preg_match(self::USERINFO, $url) === 1
-            && self::redact($url) === $url;
+        return self::carries($url) && self::redact($url) === $url;
     }
 }

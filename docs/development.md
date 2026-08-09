@@ -123,6 +123,18 @@ without DNS ever being consulted). So the container needs working DNS for every 
 target, and a git host that is deliberately not in public DNS belongs in
 `KONTORFIX_VCS_ALLOWED_HOSTS`.
 
+**A credential in an upstream URL disables the PyPI fallthrough.** `upstreams.url` is the
+only place a Basic-auth mirror credential can live — `UpstreamClient` sends the dedicated
+`auth_token` as a Bearer header and nothing else — and the Composer and npm proxies handle
+that fine, because they fetch server-side and rewrite artifact URLs to `/proxy/...`. The
+PyPI simple index does not: for an unknown project it answers with a **302**, and a
+`Location` is handed to the client. On a public group that client is anonymous. So when a
+Python upstream's URL carries `user:pass@`, no redirect is emitted at all (404), and
+*Admin → Status* reports the upstream as failing with the reason. Removing the credential
+from the redirect instead would only trade the disclosure for a 401 at the mirror while
+still naming the internal host. For a credentialled Python mirror there is currently no
+fallthrough; use a credential-free mirror URL, or mirror the projects locally.
+
 The lookup itself is one container binding, `App\Services\Upstream\HostResolver`, bound to
 `SystemHostResolver` in `AppServiceProvider::register()`. It is the single decision point
 of the address policy for every outbound sink, so it deliberately has no public setter —
