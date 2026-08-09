@@ -38,6 +38,19 @@ it('renders a plain text readme as preformatted text', function () {
     expect(ReadmeRenderer::render('nur text', 'README'))->toContain('<pre');
 });
 
+it('substitutes an invalid byte on the plain text path instead of emptying the file', function () {
+    // Pins the flag set behind Laravel's e(): ENT_QUOTES | ENT_SUBSTITUTE turns an invalid
+    // UTF-8 byte into U+FFFD. Plain htmlspecialchars() without ENT_SUBSTITUTE returns ''
+    // for the *whole* string, so one bad byte anywhere would blank an entire plain-text
+    // README. ReadmeLocator::truncate() documents which of the two render paths a
+    // mid-character cut actually endangers, and it is not this one.
+    $html = ReadmeRenderer::render("Zeile eins\xFF und weiter", 'README.txt');
+
+    expect($html)->toContain('Zeile eins')
+        ->toContain('und weiter')
+        ->toContain("\u{FFFD}");
+});
+
 it('returns an empty string for empty source', function () {
     expect(ReadmeRenderer::render('   ', 'README.md'))->toBe('');
 });

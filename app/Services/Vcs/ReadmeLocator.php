@@ -113,13 +113,15 @@ class ReadmeLocator
      * Two things a plain `substr()` gets wrong here, both because MAX_BYTES is a byte
      * count that lands wherever it lands, with no regard for what's at that offset:
      *
-     * 1. It can split a multi-byte UTF-8 character in half. The renderer (ReadmeRenderer)
-     *    throws on that rather than degrading gracefully — CommonMark raises
-     *    UnexpectedEncodingException on invalid UTF-8, and the plain-text path's
-     *    htmlspecialchars() silently returns "" for the whole string. Either way a
-     *    one-byte accident at the cap would take out an otherwise-fine README. mb_strcut()
-     *    cuts at a byte budget without ever splitting a character, so this is a real bug a
-     *    naive cap would ship, not a hypothetical.
+     * 1. It can split a multi-byte UTF-8 character in half, and on the markdown path that
+     *    takes out the whole file: CommonMark raises UnexpectedEncodingException on invalid
+     *    UTF-8, so a one-byte accident at the cap loses an otherwise-fine README. (The
+     *    plain-text path is not affected — Laravel's e() passes ENT_QUOTES | ENT_SUBSTITUTE,
+     *    so htmlspecialchars() replaces the bad bytes with U+FFFD rather than returning ""
+     *    for the whole string, which is what an earlier version of this comment claimed.
+     *    Without ENT_SUBSTITUTE it would return "", but that is not the flag set in use.)
+     *    mb_strcut() cuts at a byte budget without ever splitting a character, so this is a
+     *    real bug a naive cap would ship on the markdown path, not a hypothetical.
      *
      * 2. It can leave an unterminated ``` / ~~~ fenced code block open — on the markdown
      *    path, which is why both that and the notice's own syntax depend on which path
