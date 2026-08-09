@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\UserRole;
 use App\Models\User;
+use App\Rules\UniqueEmail;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -23,6 +24,11 @@ class UpdateUserRequest extends FormRequest
         if ($this->has('is_super_admin')) {
             $this->merge(['is_super_admin' => $this->boolean('is_super_admin')]);
         }
+
+        // See StoreUserRequest: one address is one identity, whatever case it arrives in.
+        if ($this->has('email') && is_string($this->input('email'))) {
+            $this->merge(['email' => Str::lower(trim($this->input('email')))]);
+        }
     }
 
     /**
@@ -41,7 +47,7 @@ class UpdateUserRequest extends FormRequest
             'name' => ['sometimes', 'required', 'string', 'max:190'],
             'email' => [
                 'sometimes', 'required', 'email', 'max:190',
-                Rule::unique('users', 'email')->ignore($userId),
+                new UniqueEmail($userId),
             ],
             'role' => ['required', Rule::enum(UserRole::class)],
             'is_super_admin' => ['sometimes', 'boolean'],

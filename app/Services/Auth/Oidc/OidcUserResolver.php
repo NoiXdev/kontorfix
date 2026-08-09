@@ -36,7 +36,12 @@ class OidcUserResolver
         $emailVerified = ($claims['email_verified'] ?? false) === true;
 
         if ($email !== '' && $emailVerified) {
-            $user = User::whereRaw('lower(email) = ?', [$email])->first();
+            // Ordered: with the unique functional index in place at most one row can match,
+            // but an instance whose migration had to fall back to a non-unique index (see
+            // EmailUniquenessIndex) can still hold a case-variant pair, and an unordered
+            // `first()` would then link whichever row the planner happened to return. Oldest
+            // wins, deterministically — the account that held the address first.
+            $user = User::whereRaw('lower(email) = ?', [$email])->orderBy('created_at')->orderBy('id')->first();
             if ($user !== null) {
                 // Do NOT automatically link a privileged account to a federated identity by
                 // email: an IdP that sets email_verified freely could otherwise take over that

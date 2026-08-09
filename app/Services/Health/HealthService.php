@@ -8,6 +8,7 @@ use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Http\AppUrl;
 use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
+use App\Services\Users\EmailUniquenessIndex;
 use App\Support\CredentialUrl;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -29,8 +30,46 @@ class HealthService
             $this->cache(),
             $this->queue(),
             $this->storageCheck(),
+            $this->emailUniqueness(),
             ...$this->broadcasting(),
             ...$this->upstreams(),
+        ];
+    }
+
+    /**
+     * Whether one address really is one account.
+     *
+     * `OidcUserResolver` matches on `lower(email)` while the column's own unique constraint
+     * is case-sensitive, so a case-variant pair is an identity-confusion state the resolver
+     * has to pick between. The migration installs a unique functional index where it can and
+     * falls back to a non-unique one where collisions already exist, rather than failing the
+     * deploy — which is only defensible if the fallback is visible. This is where it is.
+     *
+     * @return array{key:string,label:string,ok:bool,detail:string}
+     */
+    private function emailUniqueness(): array
+    {
+        $index = app(EmailUniquenessIndex::class);
+
+        if ($index->isEnforced()) {
+            return [
+                'key' => 'email-uniqueness',
+                'label' => 'E-Mail-Eindeutigkeit',
+                'ok' => true,
+                'detail' => 'Eindeutiger Index auf lower(users.email) ist aktiv.',
+            ];
+        }
+
+        $collisions = $index->collisions();
+
+        return [
+            'key' => 'email-uniqueness',
+            'label' => 'E-Mail-Eindeutigkeit',
+            'ok' => false,
+            'detail' => $collisions === []
+                ? 'Der eindeutige Index auf lower(users.email) fehlt — "php artisan users:enforce-email-uniqueness" installiert ihn.'
+                : count($collisions).' Adresse(n) gehören zu mehreren Konten ('.implode(', ', array_keys($collisions))
+                    .'). Konten zusammenführen, dann "php artisan users:enforce-email-uniqueness" ausführen.',
         ];
     }
 
