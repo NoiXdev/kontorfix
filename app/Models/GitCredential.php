@@ -57,15 +57,28 @@ class GitCredential extends Model
     }
 
     /**
-     * The single host this credential's token may be transmitted to: the explicitly
-     * stored one, else the provider's canonical host. Null means "unknown" — the
-     * credential is then unusable rather than usable everywhere.
+     * The single host this credential's token may be transmitted to. Null means "unknown",
+     * and unknown means unusable — never "usable everywhere".
+     *
+     * There used to be a fallback to `$this->provider->defaultHost()` here, and it turned
+     * the one refusal the system makes on its own into an assertion. The `host` backfill
+     * deliberately leaves a credential unbound when its assigned packages point somewhere
+     * other than the canonical host: that is a self-hosted GHE or GitLab PAT, the migration
+     * has no safe way to learn its address, and it warns instead of guessing. The fallback
+     * then bound exactly those rows to github.com / gitlab.com / bitbucket.org, so the
+     * self-hosted PAT was transmitted to the public provider — useless there, and disclosed.
+     *
+     * Removing it costs nothing legitimate: `GitCredentialController::resolveHost()`
+     * materialises the provider default into the column on create and on update, so every
+     * credential entered through the console names its host. An empty column is precisely
+     * the set of rows the migration declined to decide for, and the operator's fix is to
+     * name the real host and re-enter the token.
      */
     public function allowedHost(): ?string
     {
         $host = $this->host !== null ? trim($this->host) : '';
 
-        return $host !== '' ? strtolower($host) : $this->provider->defaultHost();
+        return $host !== '' ? strtolower($host) : null;
     }
 
     /**
