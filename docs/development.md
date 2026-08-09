@@ -247,12 +247,30 @@ attacker ends up holding the password. Both writers are therefore covered:
   on the instance. Everything revocation *does* undo stays writable. Use the web UI to move
   an address.
 
-**The window is session-wide and lasts three hours** (`auth.password_timeout`, Laravel's
-default). One confirmation therefore unlocks *every* gated route until it expires — opening
-`GET /settings/tokens` is enough to satisfy `POST /admin/robots/{user}/keys` later in the
-same session. Shorten it with `AUTH_PASSWORD_TIMEOUT` (seconds) on an instance where that is
-too broad; the cost is a prompt on more page loads, which is the reason the default is not
-lower. There is no per-route window: `RequirePassword` reads one session key.
+**The window is session-wide and lasts fifteen minutes** (`auth.password_timeout`;
+Laravel's own default is three hours). One confirmation unlocks *every* gated route until
+it expires — opening `GET /settings/tokens` is enough to satisfy
+`POST /admin/robots/{user}/keys` later in the same session — so the window's length is also
+how long a stolen session rides a confirmation the owner made for an unrelated reason.
+Three hours is most of a working day and was not defensible for that; fifteen minutes
+covers the multi-step flows the gate actually spans (open the page, fill the form, submit)
+and matches the decay window of the guessing counters. `AUTH_PASSWORD_TIMEOUT` (seconds)
+moves it.
+
+**One gate asks for less.** `ConfirmPasswordOnEmailChange` requires a confirmation made in
+the last **five minutes**. Every other gated surface hands out something revocable; moving
+the reset channel is the one gated action with no undo — it survives losing the session,
+survives changing the password back, and survives revoking every credential the attacker
+holds.
+
+**Why the window is not scoped per action.** The obvious better answer is a separate stamp
+per purpose, so opening the token page cannot satisfy an address change at all. It is not
+implemented because `passkey.confirm` — the escape hatch that makes the gate usable for
+accounts whose owner never knew a password — lives in `laravel/passkeys` and writes the
+single `auth.password_confirmed_at` key itself. A per-purpose scheme would therefore either
+lose that hatch or need a shim around vendor code that silently breaks on upgrade, and
+inside a fifteen-minute window the ride it would prevent is already short. Individual
+middleware narrowing its own window, as above, gets most of the benefit with none of that.
 
 **Two ways to satisfy the gate without a password**, for accounts whose owner never knew
 one (OIDC-provisioned, admin-invited): a passkey assertion with user verification

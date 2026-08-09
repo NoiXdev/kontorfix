@@ -106,12 +106,26 @@ return [
     | Password Confirmation Timeout
     |--------------------------------------------------------------------------
     |
-    | Here you may define the amount of seconds before a password confirmation
-    | window expires and users are asked to re-enter their password via the
-    | confirmation screen. By default, the timeout lasts for three hours.
+    | Seconds before a password confirmation expires and the gated routes ask
+    | again. Laravel ships three hours; this instance uses fifteen minutes.
+    |
+    | The window is session-GLOBAL — RequirePassword reads one session key — so
+    | its length is the length of the ride a stolen session gets from a single
+    | confirmation the owner made for an unrelated reason. Every gated surface
+    | hands out something that outlives the session (registry tokens, API keys,
+    | passkeys, second factors) or moves the account's reset channel, and the
+    | gate exists precisely because a session cookie alone must not be enough.
+    | Three hours of "already confirmed" is most of a working day and is not
+    | defensible for that; fifteen minutes covers the multi-step flows the gate
+    | actually spans (open the token page, fill the form, submit) and matches
+    | the decay window of the guessing counters.
+    |
+    | Individual middleware may require a fresher confirmation than this by
+    | passing its own timeout — ConfirmPasswordOnEmailChange does, because the
+    | address change is the one gated action that survives losing the session.
     |
     */
 
-    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
+    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 900),
 
 ];

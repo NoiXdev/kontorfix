@@ -33,6 +33,19 @@ use Illuminate\Support\Str;
 class ConfirmPasswordOnEmailChange extends RequirePassword
 {
     /**
+     * Deliberately shorter than `auth.password_timeout`.
+     *
+     * The shared window is session-global: one confirmation, made for any reason, unlocks
+     * every gated route until it expires. For the surfaces that hand out a *revocable*
+     * credential that is a reasonable trade. This one is different in kind — moving the
+     * reset channel survives losing the session, survives the password being changed back,
+     * and survives revoking everything the attacker holds. It is the one gated action with
+     * no undo, so it asks for a confirmation made in the last five minutes rather than one
+     * inherited from opening a settings page a quarter of an hour ago.
+     */
+    private const FRESH_CONFIRMATION_SECONDS = 300;
+
+    /**
      * @param  string|null  $redirectToRoute
      * @param  string|int|null  $passwordTimeoutSeconds
      * @return mixed
@@ -43,7 +56,12 @@ class ConfirmPasswordOnEmailChange extends RequirePassword
             return $next($request);
         }
 
-        return parent::handle($request, $next, $redirectToRoute, $passwordTimeoutSeconds);
+        return parent::handle(
+            $request,
+            $next,
+            $redirectToRoute,
+            $passwordTimeoutSeconds ?? self::FRESH_CONFIRMATION_SECONDS,
+        );
     }
 
     /**
