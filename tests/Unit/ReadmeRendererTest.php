@@ -89,3 +89,39 @@ it('does not emit a javascript url smuggled through an entity-encoded control ch
 
     expect($html)->not->toContain('href=');
 });
+
+it('unwraps an unsafe-scheme link instead of leaving a dead, styled anchor', function () {
+    $html = ReadmeRenderer::render('[klick](javascript:alert(1))', 'README.md');
+
+    expect($html)
+        ->not->toContain('<a')
+        ->toContain('klick');
+});
+
+it('does not render an image with a remote absolute source, keeping only its alt text', function () {
+    $html = ReadmeRenderer::render('![Build Status](https://evil.example/track.png)', 'README.md');
+
+    expect($html)
+        ->not->toContain('<img')
+        ->not->toContain('evil.example')
+        ->toContain('Build Status');
+});
+
+it('does not render an image with a relative source, keeping only its alt text', function () {
+    $html = ReadmeRenderer::render('![Screenshot](assets/screenshot.png)', 'README.md');
+
+    expect($html)
+        ->not->toContain('<img')
+        ->not->toContain('screenshot.png')
+        ->toContain('Screenshot');
+});
+
+it('escapes hostile alt text instead of smuggling it through when an image is stripped', function () {
+    $html = ReadmeRenderer::render('![<script>alert(1)</script>](https://evil.example/x.png)', 'README.md');
+
+    expect($html)->not->toContain('<script>')->not->toContain('<img');
+
+    $escaped = ReadmeRenderer::render('![1 < 2 and 3 > 2](https://evil.example/x.png)', 'README.md');
+
+    expect($escaped)->toContain('&lt;')->toContain('&gt;')->not->toContain('1 < 2');
+});
