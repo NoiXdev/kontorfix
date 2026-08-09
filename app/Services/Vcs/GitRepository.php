@@ -94,16 +94,44 @@ class GitRepository
     }
 
     /**
-     * Blob and subtree names at the root of $ref, non-recursive. `run()` stays private —
+     * Blob (regular file) names at the root of $ref, non-recursive. `run()` stays private —
      * this is the one narrow slice of it a caller outside this class needs (ReadmeLocator).
+     *
+     * Deliberately blobs only, not directory/subtree names: `git show {ref}:{path}` exits
+     * 0 and happily prints a tree listing when $path is a directory rather than failing,
+     * so a caller that can't tell a blob from a tree ahead of time would treat a directory
+     * named e.g. "README.md" as if it were that file. Without `--name-only`, `git ls-tree`
+     * reports each entry as "<mode> <type> <sha>\t<name>" — <type> is "blob" for a regular
+     * file, "tree" for a subdirectory, "commit" for a submodule — so the type is filtered
+     * here rather than left for the caller to infer from a command that can't fail on it.
      *
      * @return list<string>
      */
     public function rootFileNames(string $ref): array
     {
-        $output = $this->run(['git', 'ls-tree', '--name-only', '--end-of-options', $ref])->output();
+        $output = $this->run(['git', 'ls-tree', '--end-of-options', $ref])->output();
 
-        return array_values(array_filter(array_map('trim', explode("\n", $output)), fn (string $line) => $line !== ''));
+        $names = [];
+
+        foreach (explode("\n", $output) as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+
+            [$info, $name] = array_pad(explode("\t", $line, 2), 2, null);
+
+            if ($info === null || $name === null) {
+                continue;
+            }
+
+            $type = explode(' ', $info)[1] ?? null;
+
+            if ($type === 'blob') {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
     }
 
     /**

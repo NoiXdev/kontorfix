@@ -111,3 +111,48 @@ it('closes an unterminated code fence left open by truncation', function () {
 
     expect(substr_count($found['source'], '```') % 2)->toBe(0);
 });
+
+it('does not treat a root-level directory named README.md as the readme', function () {
+    // `git show HEAD:README.md` exits 0 and prints a tree listing when README.md is a
+    // directory rather than a blob — it does not throw, so a type-blind picker would
+    // silently return that listing as the "readme" of the project. There is no other
+    // readme candidate here, so the correct outcome is null, not a tree dump.
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir.'/README.md', 0775, true);
+    file_put_contents($dir.'/README.md/notes.txt', 'not a readme');
+
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+    Process::path($dir)->run(['git', 'add', '-A'])->throw();
+    Process::path($dir)
+        ->env(['GIT_AUTHOR_NAME' => 'T', 'GIT_AUTHOR_EMAIL' => 't@t.test', 'GIT_COMMITTER_NAME' => 'T', 'GIT_COMMITTER_EMAIL' => 't@t.test'])
+        ->run(['git', 'commit', '-q', '-m', 'init'])->throw();
+
+    $repo = new GitRepository('file://'.$dir, 'readme-test-'.bin2hex(random_bytes(6)));
+    $repo->sync();
+
+    expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
+});
+
+it('does not let a shorter nested fence marker falsely close a longer outer fence', function () {
+    // A 4-backtick fence is the correct way to show a 3-backtick example literally (per
+    // CommonMark's length rule); the inner ``` lines never close the real fence. A
+    // char-only heuristic would treat the first inner ``` as closing the outer block,
+    // append its own (too-short) closer, and leave the truncation notice as literal text
+    // inside the still-open 4-backtick fence when rendered — i.e. inside <pre><code>.
+    $intro = "```` markdown\nExample:\n\n```bash\necho hi\n```\n\nMore text.\n";
+    $padding = str_repeat("filler line to push this past the truncation cap\n", (int) ceil(ReadmeLocator::MAX_BYTES / 49));
+    $source = $intro.$padding;
+
+    expect(strlen($source))->toBeGreaterThan(ReadmeLocator::MAX_BYTES);
+
+    $repo = readmeRepoWith(['README.md' => $source]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    $html = ReadmeRenderer::render($found['source'], $found['filename']);
+    $preClose = strpos($html, '</pre>');
+    $notice = strpos($html, 'gekürzt');
+
+    expect($preClose)->not->toBeFalse()
+        ->and($notice)->not->toBeFalse()
+        ->and($notice)->toBeGreaterThan($preClose);
+});

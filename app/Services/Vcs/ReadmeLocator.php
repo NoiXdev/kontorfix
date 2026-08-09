@@ -45,8 +45,10 @@ class ReadmeLocator
     }
 
     /**
-     * Root-level entry names only. A README inside a subdirectory is documentation for
-     * that directory, not the project's front page.
+     * Root-level file (blob) names only. A README inside a subdirectory is documentation
+     * for that directory, not the project's front page — and GitRepository::rootFileNames()
+     * already excludes directories/submodules, so a directory named e.g. "README.md" can't
+     * be picked and handed to `fileAtRef()`, which would happily return its tree listing.
      *
      * @return list<string>
      */
@@ -106,32 +108,50 @@ class ReadmeLocator
 
     /**
      * Heuristic, not a markdown parser: walks lines looking for fence markers (three or
-     * more backticks or tildes, optionally indented up to three spaces, per the CommonMark
-     * fence rule) and tracks whether the last one opened or closed a block. If the
-     * truncated text ends mid-fence, appends a closing ``` so nothing after it — notably
-     * the truncation notice — gets absorbed into the code block.
+     * more backticks or tildes, optionally indented up to three spaces — both forms are
+     * handled by the regex/char-class below, not out of scope) and tracks whether the
+     * last one opened or closed a block. If the truncated text ends mid-fence, appends a
+     * matching closing fence so nothing after it — notably the truncation notice — gets
+     * absorbed into the code block.
+     *
+     * Per the CommonMark fence rule, a closing fence must use the *same character* as the
+     * opening one and be *at least as long*. Matching on character alone is not enough: a
+     * README that documents markdown or shell fencing commonly nests a shorter example
+     * fence inside a longer outer one (e.g. a 4-backtick block containing a 3-backtick
+     * snippet) — CommonMark treats the inner, shorter run as literal text, not a real
+     * close, and this method must agree or it ends up believing an still-open block is
+     * closed. A closing line also carries no info string (only optional trailing
+     * whitespace) per spec, so a same-length run followed by other text — e.g. a second
+     * opening fence of the same length and character — does not close the current one
+     * either.
      */
     private static function closeUnterminatedFence(string $source): string
     {
         $inFence = false;
         $fenceChar = null;
+        $fenceLength = 0;
 
         foreach (preg_split('/\R/', $source) ?: [] as $line) {
-            if (! preg_match('/^ {0,3}(`{3,}|~{3,})/', $line, $matches)) {
+            if (! preg_match('/^ {0,3}(`{3,}|~{3,})(.*)$/', $line, $matches)) {
                 continue;
             }
 
-            $char = $matches[1][0];
+            $marker = $matches[1];
+            $trailing = trim($matches[2]);
+            $char = $marker[0];
+            $length = strlen($marker);
 
             if (! $inFence) {
                 $inFence = true;
                 $fenceChar = $char;
-            } elseif ($char === $fenceChar) {
+                $fenceLength = $length;
+            } elseif ($char === $fenceChar && $length >= $fenceLength && $trailing === '') {
                 $inFence = false;
                 $fenceChar = null;
+                $fenceLength = 0;
             }
         }
 
-        return $inFence ? $source."\n```" : $source;
+        return $inFence ? $source."\n".str_repeat((string) $fenceChar, $fenceLength) : $source;
     }
 }
