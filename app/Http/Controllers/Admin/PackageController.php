@@ -118,6 +118,7 @@ class PackageController extends Controller
                 'is_git_sourced' => $package->isGitSourced(),
                 'name' => $package->name,
                 'description' => $package->description,
+                'readme_html' => $package->readme_html,
                 // The one read path of this column that did not redact. An inline
                 // `https://x-access-token:<PAT>@…` is a supported shape here, and the
                 // reader may be an admin of a *different* tenant sharing the registry —
