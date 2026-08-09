@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Auth;
 
 use App\Models\User;
+use App\Services\Auth\KnownClients;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -14,33 +15,58 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Three counters guard this endpoint, and only one of them is allowed to refuse a request.
+ * The property this endpoint guarantees:
  *
- *  - per (email, IP), 5/60 s, checked BEFORE the comparison. It may refuse, because its key
- *    carries the requester's own address: burning it costs the attacker a source address,
- *    not the account holder their way in.
- *  - per account, across every source address. It may NOT refuse. Anyone who knows an
- *    address can drive it, so a refusal here is an anonymous, targeted and indefinitely
- *    renewable lockout of an account that may hold no second factor and no other way in.
- *  - per source address, across every account — the credential-stuffing dimension the
- *    (email, IP) key misses entirely, since that key changes with every addressee. It may
- *    not refuse either: a shared office egress would otherwise be a lockout button for
- *    everyone behind it.
+ *   Past a free allowance, the instance never answers more than DELAY_SLOTS penalised
+ *   guesses per DELAY_CAP_MS — about 0.8 per second — no matter how many source addresses
+ *   or concurrent connections the attacker brings; and no anonymous traffic can stop the
+ *   account holder from logging in from a browser they have used before.
  *
- * The two counters that may not refuse buy time instead. Past a free allowance, a *failing*
- * attempt is held for a progressively longer interval before it is answered; a correct
- * password never enters that branch, so the holder pays nothing and is never denied. That
- * bounds a sequential attacker to roughly one guess per DELAY_CAP_MS however many addresses
- * they rotate through, where before they had 5/minute per address and no aggregate limit.
+ * Getting both halves of that at once is the whole difficulty, and two earlier attempts
+ * each surrendered one of them. The constraint is structural: a refusal has to be decided
+ * *before* the comparison, or it refuses nothing an attacker cares about — they already
+ * know a guess was wrong from not being logged in. But a refusal decided before the
+ * comparison cannot tell the holder from the attacker, so a counter keyed on the account
+ * becomes an anonymous, targeted, indefinitely renewable lockout. Holding the connection
+ * instead sidesteps the lockout and buys real time from a sequential attacker, but a hold
+ * is a worker, and a bound that may only spend a fixed number of workers evaporates the
+ * moment the attacker brings more connections than that.
  *
- * A delay is server time, so it is itself an availability risk: an unbounded or unbudgeted
- * hold on /login is a way to park every PHP-FPM worker. Hence DELAY_CAP_MS, and hence
- * DELAY_SLOTS — at most that many failing logins are ever held at once instance-wide, and a
- * request that finds the pool full is answered immediately. The residual is stated plainly:
- * an attacker willing to run more concurrent connections than the slot pool gets undelayed
- * answers for the excess. Bounding *that* would mean holding connections without limit,
- * which on a synchronous worker pool is a denial of service wearing a hat. The concurrency
- * an attacker needs to reach it is loud, and Lockout fires once per burst for monitoring.
+ * The tie is broken by the one thing the holder has before the comparison and an anonymous
+ * attacker does not: a marker their browser picked up the last time this account signed in
+ * there (see KnownClients). Three counters and one admission rule:
+ *
+ *  - per (email, IP), 5/60 s, checked before the comparison. It may refuse outright: its
+ *    key carries the requester's own address, so burning it costs the attacker a source
+ *    address, not the holder their way in.
+ *  - per account, across every source address, and per source address, across every
+ *    account — the two dimensions the (email, IP) key cannot see. Neither refuses on its
+ *    own count. They set a *penalty*, a progressive hold applied to the failing attempt.
+ *  - admission: a request that owes a penalty and comes from a browser this account has
+ *    never signed in from must claim one of DELAY_SLOTS before its password is compared,
+ *    and is refused when the pool is full. That is what makes the pool a pace-setter
+ *    instead of an escape hatch — the previous release answered the excess immediately,
+ *    at full bcrypt speed, so four cheap connections switched the brake off for everyone.
+ *
+ * What that costs whom:
+ *
+ *  - a recognised browser is never held and never refused, whatever the counters say. The
+ *    holder's correct password is answered at once even mid-attack.
+ *  - a *first* login from a new browser, while an attacker is saturating the pool against
+ *    that same account, is refused. This is the residual, and it is deliberate: it is the
+ *    price of the bound, it costs the attacker continuous traffic to sustain, and it is
+ *    not a dead end — completing a password reset marks the browser (that endpoint is
+ *    throttled per source address only, precisely so an attacker cannot deny it).
+ *  - workers held are still capped at DELAY_SLOTS × DELAY_CAP_MS.
+ *
+ * What is still open, plainly: guesses inside the free allowance are not paced at all, so
+ * an attacker with unlimited addresses still gets ACCOUNT_FREE_FAILURES tries per account
+ * per DECAY_SECONDS for free, and credential stuffing — one guess against each of many
+ * accounts — is bounded only per source address. Refusing on the source counter would fix
+ * the second and is deliberately not done: with TRUSTED_PROXIES misconfigured (its shipped
+ * default is documented as too broad) every user collapses onto one address and that
+ * refusal becomes an instance-wide outage. Edge rate limiting is the control for that
+ * dimension; LogAuthenticationEvent is what gives an operator something to act on.
  */
 class LoginRequest extends FormRequest
 {
@@ -64,6 +90,12 @@ class LoginRequest extends FormRequest
 
     /** How many failing logins may be held at once, instance-wide. */
     private const DELAY_SLOTS = 4;
+
+    /**
+     * The slot claimed for this request, held from before the comparison until the hold is
+     * over — so the pool paces guesses rather than merely capping how many are slow.
+     */
+    private ?string $delaySlot = null;
 
     /**
      * Determine if the user is authorized to make this request.
@@ -95,6 +127,18 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
+        try {
+            return $this->compareCredentials();
+        } finally {
+            $this->releaseDelaySlot();
+        }
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    private function compareCredentials(): User
+    {
         /** @var User|null $user */
         $user = User::where('email', $this->string('email'))->first();
 
@@ -143,14 +187,67 @@ class LoginRequest extends FormRequest
      */
     public function ensureIsNotRateLimited(): void
     {
-        if (! RateLimiter::tooManyAttempts($this->throttleKey(), self::ADDRESS_MAX_ATTEMPTS)) {
+        if (RateLimiter::tooManyAttempts($this->throttleKey(), self::ADDRESS_MAX_ATTEMPTS)) {
+            event(new Lockout($this));
+
+            $this->refuse(RateLimiter::availableIn($this->throttleKey()));
+        }
+
+        $this->ensureThePenaltyCanBePaid();
+    }
+
+    /**
+     * Admission control for a guess that already owes a penalty.
+     *
+     * Runs before the comparison, because a refusal handed out afterwards refuses nothing:
+     * the attacker has their answer either way. Only unrecognised browsers are ever
+     * subject to it, which is what keeps it from being a lockout: the holder's own machine
+     * carries a marker from its last successful sign-in and skips the queue entirely.
+     *
+     * @throws ValidationException
+     */
+    private function ensureThePenaltyCanBePaid(): void
+    {
+        if ($this->pendingDelay() <= 0) {
             return;
         }
 
-        event(new Lockout($this));
+        if (app(KnownClients::class)->recognises($this, (string) $this->string('email'))) {
+            return;
+        }
 
-        $seconds = RateLimiter::availableIn($this->throttleKey());
+        $this->delaySlot = $this->acquireDelaySlot();
 
+        if ($this->delaySlot === null) {
+            // Every slot is spoken for. Refusing here is what converts the pool from a cap
+            // on how many guesses are slow into a cap on how many guesses happen at all.
+            // The retry hint is the length of one hold, not the counter's decay: the queue
+            // is what is full, and it drains in that time.
+            $this->refuse((int) ceil(self::DELAY_CAP_MS / 1000));
+        }
+    }
+
+    /**
+     * What this attempt would cost if it fails — evaluated before the hit, so admission
+     * can be decided before the comparison rather than after it.
+     */
+    private function pendingDelay(): int
+    {
+        return max(
+            $this->delayMilliseconds(RateLimiter::attempts($this->accountThrottleKey()) + 1, self::ACCOUNT_FREE_FAILURES),
+            $this->delayMilliseconds(RateLimiter::attempts($this->sourceThrottleKey()) + 1, self::SOURCE_FREE_FAILURES),
+        );
+    }
+
+    /**
+     * One wording for every refusal on this endpoint. A throttled answer must look the
+     * same for an address that has an account and one that does not, or the throttle
+     * becomes the account-existence oracle the rest of this class is written to avoid.
+     *
+     * @throws ValidationException
+     */
+    private function refuse(int $seconds): never
+    {
         throw ValidationException::withMessages([
             'email' => trans('auth.throttle', [
                 'seconds' => $seconds,
@@ -185,8 +282,8 @@ class LoginRequest extends FormRequest
             $this->delayMilliseconds($sourceFailures, self::SOURCE_FREE_FAILURES),
         );
 
-        if ($delay > 0) {
-            $this->holdWithinBudget($delay);
+        if ($delay > 0 && $this->delaySlot !== null) {
+            Sleep::for($delay)->milliseconds();
         }
     }
 
@@ -197,36 +294,17 @@ class LoginRequest extends FormRequest
     }
 
     /**
-     * Hold the response, but only if the instance can currently spare a worker for it.
-     * Availability wins over the guessing bound: dropping the penalty leaves the attacker
-     * where the previous release already had them, whereas holding past the budget takes
-     * the login page down for everyone.
-     */
-    private function holdWithinBudget(int $milliseconds): void
-    {
-        $slot = $this->acquireDelaySlot();
-
-        if ($slot === null) {
-            return;
-        }
-
-        try {
-            Sleep::for($milliseconds)->milliseconds();
-        } finally {
-            Cache::forget($slot);
-        }
-    }
-
-    /**
      * Claim one of the fixed delay slots, or null when all are taken.
      *
-     * add() is atomic, so two workers cannot take the same slot. The TTL is one full hold
-     * plus a margin: a slot leaked by a worker killed mid-sleep frees itself instead of
-     * disabling the delay for the rest of the cache's life.
+     * add() is atomic, so two workers cannot take the same slot. The TTL covers the
+     * comparison plus one full hold: a slot leaked by a worker killed mid-sleep frees
+     * itself instead of refusing every unrecognised login for the rest of the cache's
+     * life. That direction matters — a leaked slot now denies rather than merely
+     * un-delays, so the TTL is the thing keeping a crash from becoming an outage.
      */
     private function acquireDelaySlot(): ?string
     {
-        $ttl = (int) ceil(self::DELAY_CAP_MS / 1000) + 1;
+        $ttl = (int) ceil(self::DELAY_CAP_MS / 1000) + 5;
 
         for ($slot = 0; $slot < self::DELAY_SLOTS; $slot++) {
             $key = 'login-delay-slot|'.$slot;
@@ -237,6 +315,15 @@ class LoginRequest extends FormRequest
         }
 
         return null;
+    }
+
+    /** Give the slot back the moment this request is done with it, however it ends. */
+    private function releaseDelaySlot(): void
+    {
+        if ($this->delaySlot !== null) {
+            Cache::forget($this->delaySlot);
+            $this->delaySlot = null;
+        }
     }
 
     /**

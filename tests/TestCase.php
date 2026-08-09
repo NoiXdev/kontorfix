@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\User;
+use App\Services\Auth\KnownClients;
 use App\Services\Upstream\HostResolver;
 use App\Services\Upstream\SystemHostResolver;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
@@ -53,6 +54,27 @@ abstract class TestCase extends BaseTestCase
     protected function useRealHostResolver(): void
     {
         $this->app->instance(HostResolver::class, new SystemHostResolver);
+    }
+
+    /**
+     * Presents the request as coming from a browser this account has signed in from
+     * before — the marker App\Services\Auth\KnownClients issues on every completed
+     * authentication.
+     *
+     * Built through the real service and handed to the framework's own cookie plumbing
+     * (withCookie encrypts it exactly as EncryptCookies expects), so a test that relies
+     * on recognition breaks if the production encoding moves.
+     */
+    protected function withKnownClient(User ...$users): static
+    {
+        $clients = $this->app->make(KnownClients::class);
+
+        $fingerprints = array_map(
+            fn (User $user): string => $clients->fingerprint((string) $user->email),
+            $users,
+        );
+
+        return $this->withCookie(KnownClients::COOKIE, (string) json_encode($fingerprints));
     }
 
     /**

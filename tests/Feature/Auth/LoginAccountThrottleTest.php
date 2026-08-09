@@ -1,10 +1,13 @@
 <?php
 
 use App\Models\User;
+use App\Services\Auth\KnownClients;
 use Carbon\CarbonInterval;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Sleep;
 
 // The per-request login limiter keys on (email, IP), so an attacker with a pool of source
@@ -127,7 +130,7 @@ it('answers the account holder immediately with the correct password while the a
     Sleep::assertNeverSlept();
 });
 
-it('drops the delay rather than the worker when every delay slot is already in use', function () {
+it('refuses an unrecognised guess instead of answering it at full speed when the queue is full', function () {
     $user = User::factory()->create();
 
     foreach (range(1, 11) as $i) {
@@ -136,20 +139,142 @@ it('drops the delay rather than the worker when every delay slot is already in u
             ->post('/login', ['email' => $user->email, 'password' => 'wrong-password']);
     }
 
-    // Stand in for four other failing logins already being held instance-wide. Holding a
-    // fifth would trade a guessing bound for an availability outage.
+    // Stand in for four other failing logins already being held instance-wide — the exact
+    // condition the previous release answered immediately, at full bcrypt speed, which is
+    // what made four cheap connections a switch that turned the brake off for everyone.
     foreach (range(0, 3) as $slot) {
         Cache::put('login-delay-slot|'.$slot, 1, 10);
     }
 
     forgetRecordedSleeps();
+    $before = RateLimiter::attempts('login-account|'.rawurlencode($user->email));
+
+    $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
+        ->from('/login')
+        ->post('/login', ['email' => $user->email, 'password' => 'wrong-password'])
+        ->assertSessionHasErrors('email');
+
+    // Not `auth.failed`: the guess was refused, not compared.
+    expect(session('errors')->first('email'))->not->toBe(trans('auth.failed'));
+
+    // The proof that the refusal is *pre*-comparison, which is the only kind that refuses
+    // anything: a compared guess would have charged the account counter. A refusal handed
+    // out after the comparison would leave the attacker with their answer.
+    expect(RateLimiter::attempts('login-account|'.rawurlencode($user->email)))->toBe($before);
+
+    // And no worker was held for it either — refusing is not a second hold.
+    Sleep::assertNeverSlept();
+
+    // Anchor: the identical request differs only in whether the queue is full. Free the
+    // slots and it reaches the comparison and answers `auth.failed`, which pins the two
+    // assertions above to the admission rule rather than to CSRF, the route, the `guest`
+    // middleware or the per-(email, IP) counter — none of which changed between the two.
+    foreach (range(0, 3) as $slot) {
+        Cache::forget('login-delay-slot|'.$slot);
+    }
 
     $this->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
         ->from('/login')
         ->post('/login', ['email' => $user->email, 'password' => 'wrong-password'])
         ->assertSessionHasErrors(['email' => trans('auth.failed')]);
 
+    expect(RateLimiter::attempts('login-account|'.rawurlencode($user->email)))->toBe($before + 1);
+});
+
+it('lets a browser this account has signed in from through a full queue', function () {
+    $user = User::factory()->create();
+
+    foreach (range(1, 11) as $i) {
+        $this->withServerVariables(['REMOTE_ADDR' => "203.0.113.{$i}"])
+            ->from('/login')
+            ->post('/login', ['email' => $user->email, 'password' => 'wrong-password']);
+    }
+
+    foreach (range(0, 3) as $slot) {
+        Cache::put('login-delay-slot|'.$slot, 1, 10);
+    }
+
+    forgetRecordedSleeps();
+
+    // Same saturated instance, same burned counter, same fresh source address — the only
+    // difference is the marker this browser picked up the last time the account signed in
+    // here. Without this the bound would be an anonymous lockout with extra steps.
+    $this->withKnownClient($user)
+        ->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
+        ->from('/login')
+        ->post('/login', ['email' => $user->email, 'password' => 'password'])
+        ->assertRedirect();
+
+    $this->assertAuthenticatedAs($user);
     Sleep::assertNeverSlept();
+});
+
+it('marks the browser as known on a successful login', function () {
+    $user = User::factory()->create();
+
+    $this->post('/login', ['email' => $user->email, 'password' => 'password'])
+        ->assertCookie(KnownClients::COOKIE);
+});
+
+it('marks the browser as known on a completed password reset, so a flooded account is still recoverable', function () {
+    $user = User::factory()->create();
+    $token = Password::createToken($user);
+
+    // Bury the account past its free allowance and fill the queue: an unrecognised
+    // browser cannot log in at all in this state.
+    foreach (range(1, 11) as $i) {
+        $this->withServerVariables(['REMOTE_ADDR' => "203.0.113.{$i}"])
+            ->from('/login')
+            ->post('/login', ['email' => $user->email, 'password' => 'wrong-password']);
+    }
+    foreach (range(0, 3) as $slot) {
+        Cache::put('login-delay-slot|'.$slot, 1, 10);
+    }
+
+    $this->post('/reset-password', [
+        'token' => $token,
+        'email' => $user->email,
+        'password' => 'a-brand-new-password',
+        'password_confirmation' => 'a-brand-new-password',
+    ])->assertSessionHasNoErrors()->assertCookie(KnownClients::COOKIE);
+
+    forgetRecordedSleeps();
+
+    $this->withKnownClient($user)
+        ->withServerVariables(['REMOTE_ADDR' => '203.0.113.99'])
+        ->post('/login', ['email' => $user->email, 'password' => 'a-brand-new-password'])
+        ->assertRedirect();
+
+    $this->assertAuthenticatedAs($user);
+});
+
+it('paces unrecognised guesses at the queue rate instead of the comparison rate', function () {
+    $user = User::factory()->create();
+
+    foreach (range(1, 11) as $i) {
+        $this->withServerVariables(['REMOTE_ADDR' => "203.0.113.{$i}"])
+            ->from('/login')
+            ->post('/login', ['email' => $user->email, 'password' => 'wrong-password']);
+    }
+
+    // Four guesses in flight. A fifth, sixth and seventh concurrent connection — the
+    // shape the previous release let straight through — must now find no slot.
+    foreach (range(0, 3) as $slot) {
+        Cache::put('login-delay-slot|'.$slot, 1, 10);
+    }
+
+    $accountKey = 'login-account|'.rawurlencode($user->email);
+    $before = RateLimiter::attempts($accountKey);
+
+    foreach (range(100, 120) as $i) {
+        $this->withServerVariables(['REMOTE_ADDR' => "203.0.113.{$i}"])
+            ->from('/login')
+            ->post('/login', ['email' => $user->email, 'password' => "guess-{$i}"]);
+    }
+
+    // Twenty-one further connections, none of them from an address the per-(email, IP)
+    // counter has ever seen, and not one password was compared.
+    expect(RateLimiter::attempts($accountKey))->toBe($before);
 });
 
 it('releases the delay slot it took, so the next failing request is held again', function () {

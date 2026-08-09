@@ -169,6 +169,47 @@ as trusted infrastructure. Two deliberate properties:
 - A broken S3 configuration can interrupt downloads (the `artifacts` disk throws on errors).
   Use the built-in connection test before saving.
 
+## Login guessing
+
+`POST /login` guarantees one property: past a free allowance, the instance answers at most
+four penalised guesses per five seconds — about 0.8 per second — regardless of how many
+source addresses or concurrent connections the caller brings, and no anonymous traffic can
+stop an account holder from signing in from a browser they have used before.
+
+Three counters and one admission rule (`App\Http\Requests\Auth\LoginRequest`):
+
+| Counter | Key | Effect |
+|---|---|---|
+| 5 / 60 s | (email, IP) | refuses outright — burning it costs the caller their own address |
+| 10 free / 15 min | account, any address | sets a progressive hold, 500 ms per failure, capped at 5 s |
+| 20 free / 15 min | source address, any account | same hold, credential-stuffing dimension |
+
+The admission rule is what makes the hold a bound rather than a speed bump. A request that
+owes a penalty and comes from a browser this account has never signed in from must claim
+one of four instance-wide slots *before* its password is compared, and is refused when they
+are all taken. Refusing after the comparison would refuse nothing — the caller has their
+answer either way — and refusing on the account counter alone would be an anonymous,
+targeted lockout, which is what the first version of this control shipped. The tie is broken
+by `App\Services\Auth\KnownClients`: an encrypted, `httpOnly`, one-year cookie holding a
+keyed digest per account that every completed authentication adds to (`RememberKnownClient`,
+on the `Login` event, so passkey, OIDC, two-factor and wizard sign-ins all mark it too). It
+grants nothing on its own — only a place in the queue.
+
+**Who this can deny, and their way back.** A *first* sign-in from a new browser while an
+attacker is saturating the queue against that same account is refused. That is the price of
+the bound and it costs the attacker continuous traffic to sustain. It is not a dead end:
+completing a password reset also marks the browser, and `POST /reset-password` is throttled
+per source address only (see the `password-reset-complete` limiter), so it is the one
+recovery path an attacker flooding the account cannot deny.
+
+**What is not bounded.** Guesses inside the free allowance are not paced, so an attacker
+with unlimited addresses still gets ten tries per account per 15 minutes for free, and
+credential stuffing — one guess against each of many accounts — is bounded only per source
+address. Making the source counter refuse would close the second and is deliberately not
+done: with `TRUSTED_PROXIES` set too broadly (its shipped default is documented as such)
+every user collapses onto one address and that refusal becomes an instance-wide outage.
+Edge rate limiting is the control for that dimension.
+
 ## Re-authentication and session invalidation
 
 **What `password.confirm` covers.** Every route that hands the caller a long-lived bearer
