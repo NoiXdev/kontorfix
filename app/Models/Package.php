@@ -6,6 +6,7 @@ use App\Enums\GitProvider;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Support\RepositoryAuthority;
 use Database\Factories\PackageFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,6 +21,27 @@ class Package extends Model
 {
     /** @use HasFactory<PackageFactory> */
     use HasFactory, HasUuids, LogsActivity;
+
+    /**
+     * Keeps `repository_token_host` truthful without any write path having to remember it.
+     *
+     * The binding is stamped exactly when the token itself is written, never when the URL
+     * moves: re-deriving it from a changed URL would rebind the secret to whatever the
+     * caller just typed, which is the retarget this exists to refuse. Entering a token is
+     * the act that names its destination.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $package): void {
+            if (! $package->isDirty('repository_token')) {
+                return;
+            }
+
+            $package->repository_token_host = $package->repository_token === null
+                ? null
+                : RepositoryAuthority::of($package->repository_url);
+        });
+    }
 
     public function getActivitylogOptions(): LogOptions
     {
@@ -138,6 +160,17 @@ class Package extends Model
             $credential->forceFill(['last_used_at' => now()])->saveQuietly();
 
             return ['token' => $credential->token, 'provider' => $credential->provider, 'username' => $credential->username];
+        }
+
+        // The inline column gets the check the managed one already has. `repository_token_host`
+        // records the authority the token was entered for, so a repository_url that has since
+        // moved — to another port of the same host, which the old console guard could not
+        // see, or by any writer that does not pass through the console at all — gets no token
+        // rather than shipping the organization's PAT to an address someone else named.
+        // Fails closed on a null binding: a token whose destination is unknown is not sent.
+        if ($this->repository_token !== null
+            && RepositoryAuthority::of($this->repository_url) !== $this->repository_token_host) {
+            return ['token' => null, 'provider' => GitProvider::GitHub, 'username' => null];
         }
 
         return ['token' => $this->repository_token, 'provider' => GitProvider::GitHub, 'username' => null];

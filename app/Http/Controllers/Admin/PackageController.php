@@ -20,6 +20,7 @@ use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
+use App\Support\RepositoryAuthority;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -320,9 +321,22 @@ class PackageController extends Controller
         }
     }
 
+    /**
+     * Whether two repository URLs point at the same place a token would be sent.
+     *
+     * `parse_url(..., PHP_URL_HOST)` discards the port by construction, so this compared
+     * `https://gitlab.corp/x` and `https://gitlab.corp:9999/x` as equal — and
+     * `GitAuth::origin()` scopes the Authorization header to scheme://host:port, so they are
+     * not. A Maintainer who could bind a listener on another port of the repository host
+     * therefore had the organization's PAT delivered to it, unchanged, on the next sync.
+     * `GitCredential::permits()` was fixed for the managed column; this asks the same
+     * question through the same helper so they cannot drift again.
+     *
+     * Two absent URLs are the same authority (nothing moved). One absent and one present is
+     * not.
+     */
     private function sameHost(?string $a, ?string $b): bool
     {
-        return strtolower((string) parse_url((string) $a, PHP_URL_HOST))
-            === strtolower((string) parse_url((string) $b, PHP_URL_HOST));
+        return RepositoryAuthority::of($a) === RepositoryAuthority::of($b);
     }
 }

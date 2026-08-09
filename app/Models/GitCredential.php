@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\GitProvider;
+use App\Support\RepositoryAuthority;
 use Database\Factories\GitCredentialFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -93,31 +94,10 @@ class GitCredential extends Model
 
         $scheme = is_string($parts['scheme'] ?? null) ? $parts['scheme'] : 'https';
 
-        return self::authority($parts['host'], isset($parts['port']) ? (int) $parts['port'] : null, $scheme)
-            === self::authority($allowed, null, $scheme);
-    }
-
-    /**
-     * `host[:port]`, with the scheme's default port dropped so that `gitlab.corp` and
-     * `https://gitlab.corp:443/...` agree while `https://gitlab.corp:9999/...` does not.
-     * A port embedded in the stored host is parsed out of it the same way.
-     */
-    private static function authority(string $host, ?int $port, string $scheme): string
-    {
-        $host = strtolower(trim($host));
-
-        if ($port === null && str_contains($host, ':')) {
-            [$host, $rawPort] = explode(':', $host, 2);
-            $port = ctype_digit($rawPort) ? (int) $rawPort : null;
-        }
-
-        $default = match (strtolower($scheme)) {
-            'http' => 80,
-            'ssh', 'git+ssh' => 22,
-            default => 443,
-        };
-
-        return $port === null || $port === $default ? $host : $host.':'.$port;
+        // Shared with the inline `packages.repository_token` guard, so the two credential
+        // columns cannot answer "where does this token get sent" differently again.
+        return RepositoryAuthority::normalize($parts['host'], isset($parts['port']) ? (int) $parts['port'] : null, $scheme)
+            === RepositoryAuthority::normalize($allowed, null, $scheme);
     }
 
     /** Operator-facing explanation for a refused host, shared by every entry point. */
