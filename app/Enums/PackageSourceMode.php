@@ -53,15 +53,4 @@ enum PackageSourceMode: string
     {
         return self::allowedFor($type)[0];
     }
-
-    /**
-     * @return list<array{value:string, label:string}>
-     */
-    public static function metadata(): array
-    {
-        return array_map(fn (self $m): array => [
-            'value' => $m->value,
-            'label' => $m->label(),
-        ], self::cases());
-    }
 }
