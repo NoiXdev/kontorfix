@@ -94,16 +94,37 @@ class GitRepository
     }
 
     /**
-     * Blob (regular file) names at the root of $ref, non-recursive. `run()` stays private —
-     * this is the one narrow slice of it a caller outside this class needs (ReadmeLocator).
+     * Regular-file names at the root of $ref, non-recursive. `run()` stays private — this
+     * is the one narrow slice of it a caller outside this class needs (ReadmeLocator).
      *
-     * Deliberately blobs only, not directory/subtree names: `git show {ref}:{path}` exits
-     * 0 and happily prints a tree listing when $path is a directory rather than failing,
-     * so a caller that can't tell a blob from a tree ahead of time would treat a directory
-     * named e.g. "README.md" as if it were that file. Without `--name-only`, `git ls-tree`
-     * reports each entry as "<mode> <type> <sha>\t<name>" — <type> is "blob" for a regular
-     * file, "tree" for a subdirectory, "commit" for a submodule — so the type is filtered
-     * here rather than left for the caller to infer from a command that can't fail on it.
+     * Deliberately regular files only, not directories or symlinks:
+     *
+     * - Directories: `git show {ref}:{path}` exits 0 and happily prints a tree listing when
+     *   $path is a directory rather than failing, so a caller that can't tell a blob from a
+     *   tree ahead of time would treat a directory named e.g. "README.md" as if it were that
+     *   file.
+     * - Symlinks: a symlink is *also* type "blob" (git stores the link target as the blob's
+     *   content), so a type check alone lets one through. `git show` on a symlink path
+     *   returns the literal target string, not the target's content and not an error — a
+     *   reader would see one line of nonsense (e.g. "TARGET.md") where the README belongs.
+     *   Resolving the link instead was considered and rejected: it means following a path
+     *   the repository author controls, inside a bare mirror, with the same "where does
+     *   this actually point" questions a symlink raises anywhere else. Skipping it is the
+     *   honest outcome — the caller sees no README rather than a wrong one.
+     *
+     * Without `--name-only`, `git ls-tree` reports each entry as
+     * "<mode> <type> <sha>\t<name>" — <mode> is "120000" for a symlink (vs. "100644" /
+     * "100755" for a regular file), <type> is "blob" for both a regular file and a symlink,
+     * "tree" for a subdirectory, "commit" for a submodule — so both mode and type are
+     * filtered here rather than left for the caller to infer from a command that can't fail
+     * on either.
+     *
+     * Entry names are not unquoted: `core.quotePath` (on by default) makes git render a
+     * name containing a non-ASCII byte or a tab as a C-style escaped, double-quoted string
+     * rather than the raw bytes. That's a real gap in this parser for arbitrary filenames,
+     * but not one that can hide a legitimate README: every name in
+     * ReadmeLocator::CANDIDATES is plain ASCII with no special characters, which git never
+     * quotes, so the candidate this method exists to find is never affected by it.
      *
      * @return list<string>
      */
@@ -124,9 +145,9 @@ class GitRepository
                 continue;
             }
 
-            $type = explode(' ', $info)[1] ?? null;
+            [$mode, $type] = array_pad(explode(' ', $info), 2, null);
 
-            if ($type === 'blob') {
+            if ($type === 'blob' && $mode !== '120000') {
                 $names[] = $name;
             }
         }

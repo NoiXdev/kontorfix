@@ -133,6 +133,38 @@ it('does not treat a root-level directory named README.md as the readme', functi
     expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
 });
 
+it('does not treat a symlinked README as the readme', function () {
+    // Unlike a directory, a symlink IS type "blob" (git stores the link target string as
+    // the blob's content), so it survives a type-only filter. `git show ref:README.md` on
+    // a symlink returns the literal target path, not the target's content and not an
+    // error — e.g. "TARGET.md", one line of nonsense where the README belongs. Skipping
+    // it (rather than resolving it) is the deliberate choice: resolving means following a
+    // path the repository author controls, inside a bare mirror, and a symlinked README is
+    // rare enough that "no README" is an honest outcome. There's no other candidate here,
+    // so the correct result is null.
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0775, true);
+    file_put_contents($dir.'/TARGET.md', "# Real content\n");
+    symlink('TARGET.md', $dir.'/README.md');
+
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+    Process::path($dir)->run(['git', 'add', '-A'])->throw();
+    Process::path($dir)
+        ->env(['GIT_AUTHOR_NAME' => 'T', 'GIT_AUTHOR_EMAIL' => 't@t.test', 'GIT_COMMITTER_NAME' => 'T', 'GIT_COMMITTER_EMAIL' => 't@t.test'])
+        ->run(['git', 'commit', '-q', '-m', 'init'])->throw();
+
+    // Sanity check the fixture actually committed a symlink blob, not a regular file —
+    // otherwise this test would pass for the wrong reason on a platform/config that
+    // dereferences symlinks on `git add`.
+    $mode = trim(Process::path($dir)->run(['git', 'ls-tree', 'HEAD', 'README.md'])->output());
+    expect($mode)->toStartWith('120000');
+
+    $repo = new GitRepository('file://'.$dir, 'readme-test-'.bin2hex(random_bytes(6)));
+    $repo->sync();
+
+    expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
+});
+
 it('does not let a shorter nested fence marker falsely close a longer outer fence', function () {
     // A 4-backtick fence is the correct way to show a 3-backtick example literally (per
     // CommonMark's length rule); the inner ``` lines never close the real fence. A
