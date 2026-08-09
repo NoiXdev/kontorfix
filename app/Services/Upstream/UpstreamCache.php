@@ -22,6 +22,16 @@ class UpstreamCache
     private const CHUNK_BYTES = 262144;
 
     /**
+     * How recently an artifact may have been written and still be safe to evict.
+     *
+     * Without a floor, a burst of cold artifacts evicts each other in a loop: every request
+     * caches, is immediately evicted by the next, and the cache degrades into a write
+     * amplifier — the opposite of what reclamation is for. The floor also keeps eviction
+     * away from a `.part` staging file another worker is still filling.
+     */
+    private const EVICTION_MIN_AGE = 3600;
+
+    /**
      * @return array<string, mixed>|null null on miss or expiry
      */
     public function getMetadata(Upstream $upstream, string $packageName): ?array
@@ -68,9 +78,106 @@ class UpstreamCache
             && ! str_contains($segment, "\0");
     }
 
+    /**
+     * Whether the artifact is on the disk right now.
+     *
+     * Impure, and the analyser has to be told: asking twice in one request is exactly what
+     * the fetch lock in ProxyDownloadController does, because the answer changes when the
+     * request that held the lock fills the cache. Treated as pure, the second look is
+     * "always false" and the collapse is optimised away.
+     *
+     * @phpstan-impure
+     */
     public function hasArtifact(string $path): bool
     {
         return Storage::disk('artifacts')->exists($path);
+    }
+
+    /**
+     * Makes room for $needed bytes by deleting the oldest proxy artifacts, and reports
+     * whether the budget can now take them.
+     *
+     * A budget that is merely *reached* used to be a one-way wall: `putArtifact()` and
+     * `relayArtifact()` both declined the local copy and kept serving, which is the right
+     * call for that one request — but `hasArtifact()` then stayed false for that coordinate
+     * forever, so every later request for it was another full upstream fetch and another
+     * full relay. Nothing brought the cache back under budget except the daily prune, whose
+     * horizon is `upstream_cache_prune_days` (30). So a cache that filled once put the whole
+     * proxy into pass-through for a month, with no request budget in front of it — the byte
+     * budget bounded disk while leaving the network, CPU and worker cost unbounded.
+     *
+     * A cache is supposed to evict. Oldest-written first, which is an approximation of
+     * least-recently-used: the artifacts disk gives no reliable access time (relatime is off
+     * on most container volumes), and the alternative — touching every artifact on every
+     * download — buys a better ordering at the cost of a write per read. Stated rather than
+     * implied, because it means a long-lived hot artifact can be evicted and re-fetched once.
+     *
+     * Two refusals, both deliberate:
+     *
+     *  - nothing written within EVICTION_MIN_AGE is a candidate, so a burst cannot evict
+     *    itself in a loop and an in-flight write is never reclaimed underneath its writer;
+     *  - an artifact larger than the whole budget frees the entire cache and still would not
+     *    fit, so it is declined without deleting anything.
+     *
+     * Returns false only to decline *caching*. No caller may turn that into a refusal to
+     * serve — see relayArtifact().
+     */
+    public function reclaim(int $needed): bool
+    {
+        $budget = (int) config('kontorfix.upstream_cache_max_bytes', 0);
+        if ($budget <= 0) {
+            return true;
+        }
+
+        $used = $this->usedBytes();
+        if ($used + $needed <= $budget) {
+            return true;
+        }
+
+        if ($needed > $budget) {
+            return false;
+        }
+
+        $disk = Storage::disk('artifacts');
+        $cutoff = now()->subSeconds(self::EVICTION_MIN_AGE)->getTimestamp();
+
+        /** @var list<array{path: string, mtime: int, size: int}> $candidates */
+        $candidates = [];
+        foreach ($disk->allFiles(self::PROXY_PREFIX) as $file) {
+            if (str_ends_with($file, '.part')) {
+                continue;
+            }
+
+            $mtime = $disk->lastModified($file);
+            if ($mtime >= $cutoff) {
+                continue;
+            }
+
+            $candidates[] = ['path' => $file, 'mtime' => $mtime, 'size' => $disk->size($file)];
+        }
+
+        usort($candidates, fn (array $a, array $b): int => $a['mtime'] <=> $b['mtime']);
+
+        $freed = 0;
+        foreach ($candidates as $candidate) {
+            if ($used - $freed + $needed <= $budget) {
+                break;
+            }
+
+            $disk->delete($candidate['path']);
+            $freed += $candidate['size'];
+        }
+
+        if ($freed > 0) {
+            Cache::decrement(self::USAGE_KEY, $freed);
+            Log::info('Upstream artifact cache evicted to make room.', [
+                'freed' => $freed,
+                'needed' => $needed,
+                'budget' => $budget,
+            ]);
+        }
+
+        return $used - $freed + $needed <= $budget;
     }
 
     /**
@@ -89,8 +196,7 @@ class UpstreamCache
             return false;
         }
 
-        $budget = (int) config('kontorfix.upstream_cache_max_bytes', 0);
-        if ($budget > 0 && $this->usedBytes() + $size > $budget) {
+        if (! $this->reclaim($size)) {
             return false;
         }
 
@@ -134,8 +240,10 @@ class UpstreamCache
         $maxArtifact = (int) config('kontorfix.upstream_cache_max_artifact_bytes', 0);
         $budget = (int) config('kontorfix.upstream_cache_max_bytes', 0);
 
-        // No room at all: relay without ever opening a local copy.
-        $local = ($budget > 0 && $this->usedBytes() >= $budget) ? null : tmpfile();
+        // No room at all: relay without ever opening a local copy. The size is not known
+        // yet, so this only asks whether the cache can be brought under its budget at all;
+        // the exact fit is settled below, once the artifact has arrived.
+        $local = ($budget > 0 && $this->usedBytes() >= $budget && ! $this->reclaim(1)) ? null : tmpfile();
         $size = 0;
         $readFailed = false;
         $reachedEof = false;
@@ -195,7 +303,7 @@ class UpstreamCache
         }
 
         try {
-            if ($budget > 0 && $this->usedBytes() + $size > $budget) {
+            if (! $this->reclaim($size)) {
                 return $size;
             }
 

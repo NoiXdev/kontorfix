@@ -170,6 +170,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Upstream artifact fetch lock
+    |--------------------------------------------------------------------------
+    |
+    | One upstream fetch per coordinate at a time. Without it, N concurrent requests for
+    | the same uncached artifact are N concurrent upstream fetches — and for an artifact
+    | over `upstream_cache_max_artifact_bytes` that state is permanent, because such an
+    | artifact is served but never cached. The registry routes carry no request budget by
+    | design (a cold `composer install` fires hundreds of requests from one address), so
+    | duplicated work is what has to be bounded here, not requests.
+    |
+    | Waiting is bounded and never refuses the download: when the wait runs out the request
+    | fetches on its own, which is exactly the behaviour that predates the lock. Set the
+    | wait to 0 to opt out. The TTL is the ceiling for a lock orphaned by a client that
+    | disconnected mid-relay, so it must comfortably exceed a slow large download.
+    |
+    */
+
+    'upstream_fetch_lock_wait' => (int) env('KONTORFIX_UPSTREAM_FETCH_LOCK_WAIT', 15),
+
+    'upstream_fetch_lock_ttl' => (int) env('KONTORFIX_UPSTREAM_FETCH_LOCK_TTL', 300),
+
+    /*
+    |--------------------------------------------------------------------------
     | Incoming webhook secret
     |--------------------------------------------------------------------------
     |

@@ -24,8 +24,15 @@ use Illuminate\Support\Facades\Route;
 // stack trace each 500 appended to an unrotated laravel.log, and a 404 from the router
 // writes nothing; a request budget here would instead break the legitimate traffic
 // pattern, since one `composer install` or `npm ci` fires hundreds of metadata requests
-// from a single address. The DoS surface that is worth bounding — the artifact cache —
-// has its own byte budget (KONTORFIX_UPSTREAM_CACHE_MAX_BYTES).
+// from a single address.
+//
+// What this does NOT mean, corrected: KONTORFIX_UPSTREAM_CACHE_MAX_BYTES bounds the disk
+// consumed, not the work performed. An artifact over the per-artifact cap is served and
+// never cached, so every request for it used to be a fresh upstream fetch and a fresh
+// relay, at whatever rate and concurrency the caller chose. The bound for that is on the
+// work, not on the requests: ProxyDownloadController::serveArtifact() takes a per-artifact
+// fetch lock so concurrent misses collapse into one upstream fetch, and
+// UpstreamCache::reclaim() keeps a full budget from turning into a month of pass-through.
 $uuid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 
 $registryEndpoints = function () use ($uuid) {
