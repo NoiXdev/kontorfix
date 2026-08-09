@@ -23,13 +23,29 @@ use Illuminate\Support\Facades\RateLimiter;
  * key names are unchanged so the two buckets stay the ones the confirm-password screen
  * already fills.
  *
- * The asymmetry between the two counters is deliberate and load-bearing:
+ * Both counters refuse, and both refuse *before* the comparison. A refusal handed out
+ * afterwards refuses nothing — the caller learns whether the guess was right either way —
+ * which is exactly what the account counter used to do: it swapped the error string and
+ * bounded nothing, so past the per-(user, IP) bucket an attacker rotated source address
+ * (sessions are not pinned to one) and guessed without any aggregate limit at all.
  *
- *  - the per-address counter is consulted *before* the comparison. Its key carries the
- *    requester's own IP, so burning it costs them their source address.
- *  - the account counter is evaluated only *after* a failed comparison. A counter that
- *    anyone holding a session can burn must never be able to refuse the owner's correct
- *    password — that is the anonymous lockout `65be613` produced on the login path.
+ * On `POST /login` that same construction would be an anonymous lockout, and this class
+ * deliberately does *not* copy the admission rule that solves it there. Two reasons, and
+ * the second is the important one:
+ *
+ *  - the KnownClients marker the login throttle uses to tell the holder from an attacker
+ *    is worthless here. It is a cookie on the same origin as the session cookie, so every
+ *    way of obtaining one obtains the other; it would wave the attacker through.
+ *  - it is not needed. These four routes are reachable only with a session for the account
+ *    being guessed at, so the account bucket can only ever be burned by the owner or by
+ *    somebody who already holds the owner's session. That is not an anonymous actor and
+ *    not a low-privileged one, which is the entire reason a refusal is safe here and is
+ *    not safe on the login form.
+ *
+ * What the owner pays: up to DECAY_SECONDS with no password confirmation — no new tokens,
+ * no two-factor changes, no self-deletion — while somebody who already occupies their
+ * session guesses. They are not evicted from anything they already hold, and the way out
+ * is a password reset, which also evicts the attacker.
  */
 class PasswordAttemptLimiter
 {
@@ -49,13 +65,22 @@ class PasswordAttemptLimiter
      */
     public function refusalReason(Request $request, User $user): ?string
     {
-        $key = $this->addressKey($request, $user);
+        $addressKey = $this->addressKey($request, $user);
 
-        if (! RateLimiter::tooManyAttempts($key, self::MAX_ATTEMPTS)) {
-            return null;
+        if (RateLimiter::tooManyAttempts($addressKey, self::MAX_ATTEMPTS)) {
+            return $this->throttleMessage($request, $addressKey);
         }
 
-        return $this->throttleMessage($request, $key);
+        // The address-independent bound. Without it the per-(user, IP) bucket above is
+        // defeated by moving to the next source address, which costs an attacker who
+        // already holds the session nothing at all.
+        $accountKey = $this->accountKey($user);
+
+        if (RateLimiter::tooManyAttempts($accountKey, self::ACCOUNT_MAX_ATTEMPTS)) {
+            return $this->throttleMessage($request, $accountKey);
+        }
+
+        return null;
     }
 
     /**
@@ -79,7 +104,9 @@ class PasswordAttemptLimiter
      * fire no event and write nothing, so an unlimited password oracle behind a stolen
      * session used to leave no record at all.
      *
-     * @return string|null the throttle message once the account limit is reached
+     * @return string|null the throttle message for the attempt that crosses the account
+     *                     limit; every attempt after it is refused by refusalReason()
+     *                     before the comparison ever runs
      */
     public function recordFailure(Request $request, User $user): ?string
     {

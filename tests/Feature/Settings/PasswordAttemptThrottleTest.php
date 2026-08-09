@@ -96,20 +96,56 @@ it('leaves a trace for a failed comparison on a sibling route', function () {
     Event::assertDispatched(Failed::class, fn (Failed $e) => $e->user?->is($user) === true);
 });
 
-it('never lets the account-wide counter refuse the owner on a sibling route', function () {
+it('refuses on the account-wide counter before the comparison, however the source address rotates', function () {
     $user = userWithConfirmedTwoFactor();
 
     // Burn the IP-free account counter the way an attacker on a pool of addresses would.
-    // It gates failures only: if it could refuse before the comparison, anyone holding a
-    // session could lock the owner out of disabling their own second factor.
-    foreach (range(1, 40) as $i) {
+    // Until now this only swapped the error string: past the per-(user, IP) bucket the
+    // attacker moved address and guessed on, with no aggregate bound at all.
+    foreach (range(1, 21) as $i) {
         RateLimiter::hit('confirm-password-account|'.$user->id, 900);
     }
+
+    $addressKey = 'confirm-password|'.$user->id.'|127.0.0.1';
+    expect(RateLimiter::attempts($addressKey))->toBe(0);
+
+    $this->actingAs($user)->delete('/settings/two-factor', ['password' => 'wrong'])
+        ->assertSessionHasErrors('password');
+
+    // The proof that the refusal is *pre*-comparison, which is the only kind that bounds
+    // anything: a compared guess runs recordFailure() and would have charged the address
+    // bucket. A refusal issued afterwards leaves the attacker holding their answer.
+    expect(RateLimiter::attempts($addressKey))->toBe(0);
+    expect(session('errors')->first('password'))->not->toBe(trans('auth.password'));
+
+    // Anchor: the same request differs only in the state of that one counter. Clear it
+    // and the identical call reaches the comparison and strips the second factor, which
+    // pins both assertions above to PasswordAttemptLimiter rather than to the `auth`
+    // middleware, CSRF, the route or the form request's own `required`.
+    RateLimiter::clear('confirm-password-account|'.$user->id);
 
     $this->actingAs($user)->delete('/settings/two-factor', ['password' => 'password'])
         ->assertSessionHasNoErrors();
 
     expect($user->fresh()->two_factor_confirmed_at)->toBeNull();
+});
+
+it('keeps the account-wide counter reachable only from the account it belongs to', function () {
+    $victim = userWithConfirmedTwoFactor();
+    $other = User::factory()->create();
+
+    // The property that makes a pre-comparison refusal safe here and unsafe on /login:
+    // the bucket is keyed on the principal whose own session is making the request, so
+    // no anonymous caller and no other account can fill it.
+    foreach (range(1, 21) as $i) {
+        $this->actingAs($other)->post('/confirm-password', ['password' => 'wrong'])
+            ->assertSessionHasErrors('password');
+    }
+
+    $this->actingAs($victim)->delete('/settings/two-factor', ['password' => 'password'])
+        ->assertSessionHasNoErrors();
+
+    expect($victim->fresh()->two_factor_confirmed_at)->toBeNull();
 });
 
 it('clears both buckets when the owner proves the password on a sibling route', function () {

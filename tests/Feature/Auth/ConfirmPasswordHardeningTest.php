@@ -38,15 +38,31 @@ it('leaves a trace for every failed confirmation', function () {
     Event::assertDispatched(Failed::class, fn (Failed $e) => $e->user?->is($user) === true);
 });
 
-it('never lets the account-wide counter refuse the owner their correct password', function () {
+it('refuses on the account-wide counter before the comparison, so rotating source address buys nothing', function () {
     $user = User::factory()->create();
 
     // Burn the account-scoped counter as an attacker on other source addresses would.
-    // It must gate failures only — otherwise anyone holding a session could lock the
-    // owner out of their own credential area, the regression `65be613` taught us about.
-    foreach (range(1, 40) as $i) {
+    // `65be613` taught that a counter *anonymous* traffic can burn must not refuse; this
+    // one is different in the only way that matters — reaching it at all needs a session
+    // for the very account it protects, so the actor who can fill it is the owner or
+    // somebody already inside their session.
+    foreach (range(1, 21) as $i) {
         RateLimiter::hit('confirm-password-account|'.$user->id, 900);
     }
+
+    $addressKey = 'confirm-password|'.$user->id.'|127.0.0.1';
+
+    $this->actingAs($user)->post('/confirm-password', ['password' => 'wrong'])
+        ->assertSessionHasErrors('password');
+
+    // Pre-comparison: a compared guess would have charged the per-address bucket.
+    expect(RateLimiter::attempts($addressKey))->toBe(0);
+    expect(session('auth.password_confirmed_at'))->toBeNull();
+
+    // Anchor: clearing that one counter is the only change, and the identical request
+    // then confirms — so the refusal above is PasswordAttemptLimiter's, not the `auth`
+    // middleware's, the route's or CSRF's.
+    RateLimiter::clear('confirm-password-account|'.$user->id);
 
     $this->actingAs($user)->post('/confirm-password', ['password' => 'password'])
         ->assertSessionHasNoErrors();

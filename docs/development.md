@@ -241,9 +241,18 @@ to the address stored on the account — never to one taken from the request.
 the session owner's password hash — `POST /confirm-password`, `DELETE /settings/two-factor`,
 `PUT /settings/password`, `DELETE /settings/profile` — goes through
 `App\Services\Auth\PasswordAttemptLimiter` and shares two counters: 6 failures per source
-address and 20 per account, both over 15 minutes, with a `Failed` event and a log line per
-miss. The account counter is evaluated only *after* a failed comparison, so nobody holding a
-session can use it to refuse the owner their own correct password.
+address and 20 per account, both over 15 minutes, with a `Failed` event per miss. Both
+refuse *before* the comparison — a refusal issued afterwards bounds nothing, since the
+caller learns whether the guess was right either way. The account counter is the
+address-independent half: without it, an attacker past the per-(user, IP) bucket simply
+moves to the next source address, because sessions are not pinned to one.
+
+Unlike `POST /login`, a pre-comparison refusal is safe here: all four routes require a
+session **for the account being guessed at**, so the account bucket can only be filled by
+the owner or by somebody who already holds the owner's session — never anonymously and
+never by another account. The owner's cost while that is happening is up to 15 minutes with
+no password confirmation (no new tokens, no two-factor change, no self-deletion); the way
+out is a password reset, which evicts the attacker's session along with everything else.
 
 **What a password change or reset invalidates, and what it does not.** Changing the hash
 evicts every other web session (`AuthenticateSession` pins each session to the hash it was
