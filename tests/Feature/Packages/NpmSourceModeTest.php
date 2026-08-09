@@ -1,7 +1,9 @@
 <?php
 
 use App\Enums\ApiKeyPermission;
+use App\Enums\SyncStatus;
 use App\Enums\UserRole;
+use App\Jobs\SyncPackage;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Package;
@@ -195,4 +197,57 @@ it('resolves composer to git on the api path too, without the client sending a m
         ->assertCreated();
 
     expect(Package::where('name', 'acme/php-demo')->first()->source_mode->value)->toBe('git');
+});
+
+it('refuses to sync an npm package left in git-mirror mode', function () {
+    // Created directly, bypassing validation, because validation is exactly what this
+    // backstop exists for the absence of — a row that predates the rule.
+    $package = Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'git',
+        'repository_url' => 'https://github.test/acme/demo.git',
+    ]);
+
+    (new SyncPackage($package))->handle();
+
+    expect($package->fresh()->sync_status)->toBe(SyncStatus::Failed)
+        ->and($package->fresh()->sync_error)->toContain('npm');
+});
+
+// The dispatch sites this job's guard cannot see into (packages:resync, incoming webhooks,
+// and — until the fix below — the API create path) do not all check isGitSourced() before
+// queuing a sync. A publish-mode package can carry a repository_url purely for reference
+// (npm publish sends the tarball, not the tree), so the job must refuse that combination
+// too, not just a disallowed mode — otherwise it would clone a repository for a package
+// that was never meant to be git-synced at all.
+it('refuses to sync a publish-mode package that carries a stray repository_url', function () {
+    $package = Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.test/acme/demo.git',
+    ]);
+
+    (new SyncPackage($package))->handle();
+
+    expect($package->fresh()->sync_status)->toBe(SyncStatus::Failed)
+        ->and($package->fresh()->sync_error)->toContain('nicht git-basiert');
+});
+
+// Api\V1\PackageController::store() dispatched whenever repository_url was set, unlike
+// Admin\PackageController::store() which also requires isGitSourced(). A publish-mode
+// package with a reference-only repository_url (legitimate today; also the shape Task 5's
+// migration leaves existing npm git-mirror rows in) would queue a sync doomed to fail,
+// leaving a package that was never meant to sync at all sitting in sync_status=failed.
+it('does not dispatch a sync for a publish-mode npm package with a reference repository_url', function () {
+    Queue::fake();
+    [$user, $groupId, $key] = npmApiFixture();
+
+    $this->withHeader('Authorization', "Bearer {$key}")
+        ->postJson('/api/v1/packages', npmPayload($groupId, [
+            'source_mode' => 'publish',
+            'repository_url' => 'https://github.test/acme/demo.git',
+        ]))
+        ->assertCreated();
+
+    Queue::assertNotPushed(SyncPackage::class);
 });

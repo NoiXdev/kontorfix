@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\SyncStatus;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
@@ -42,6 +43,41 @@ class SyncPackage implements ShouldQueue
     {
         if ($this->package->repository_url === null) {
             $this->markFailed('Package has no repository_url configured.');
+
+            return; // Configuration error — retrying makes no sense
+        }
+
+        // Not every dispatch site checks isGitSourced() before queuing this job (the
+        // packages:resync command and incoming webhooks dispatch on repository_url alone),
+        // and a publish-mode package may legitimately carry a repository_url purely for
+        // reference — npm publish uploads a tarball, not the tree. Attempting a git sync
+        // for a package that was never meant to be git-synced is a configuration error,
+        // not a transient one, so it is failed the same way rather than left to clone.
+        if (! $this->package->isGitSourced()) {
+            $this->markFailed(sprintf(
+                'Paket ist nicht git-basiert (Quellmodus „%s") — ein Git-Sync ist hierfür nicht vorgesehen.',
+                $this->package->source_mode->label(),
+            ));
+
+            return; // Configuration error — retrying makes no sense
+        }
+
+        // A row can only reach this state by predating the rule that npm is publish-only.
+        // Fail it the same way as any other configuration error: retrying cannot help.
+        //
+        // Checked against Git specifically, not against the package's own source_mode
+        // column: Composer packages carry a "publish" default in the factory (a neutral
+        // value that Package::isGitSourced() overrides by type), so comparing the column
+        // itself against allowedFor() would reject every Composer package that never had
+        // its source_mode column explicitly set to 'git' — which is most of them. What
+        // actually matters, now that isGitSourced() above has established this row is
+        // being git-synced one way or another, is whether the type permits that at all.
+        if (! in_array(PackageSourceMode::Git, PackageSourceMode::allowedFor($this->package->type), true)) {
+            $this->markFailed(sprintf(
+                'Der Quellmodus „%s" ist für %s-Pakete nicht mehr zulässig.',
+                $this->package->source_mode->label(),
+                $this->package->type->value,
+            ));
 
             return; // Configuration error — retrying makes no sense
         }

@@ -77,9 +77,10 @@ class PackageController extends Controller
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Publish-based packages (npm, Python) without a repository have nothing to sync
-        // from git — they are filled by pushing artifacts.
-        if ($package->repository_url !== null) {
+        // Publish-based packages (npm, Python) are filled by pushing artifacts; a
+        // repository_url on one is reference-only (npm publish uploads a tarball, not the
+        // tree), so it must not queue a sync. Mirrors Admin\PackageController::store.
+        if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
         }
 
