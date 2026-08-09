@@ -80,3 +80,22 @@ it('seals the unlock endpoint once the instance is set up', function () {
 
     $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('home'));
 });
+
+it('ignores a valid token presented in the query string of the unlock endpoint', function () {
+    $token = app(SetupToken::class)->regenerate();
+
+    // The endpoint is a POST, but `input()` reads the query bag as well as the body, so
+    // `POST /setup/unlock?token=…` still worked and was still written to every access
+    // log on the way — while the method docblock asserted the token is never in a URL.
+    $this->post('/setup/unlock?token='.$token)
+        ->assertRedirect(route('setup.show'))
+        ->assertSessionHasErrors('token');
+
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', true));
+
+    // Reachability anchor: the same endpoint, the same token, in the body — it unlocks.
+    // So the refusal above is the transport decision and not the throttle, the seal or
+    // a value that never reached the gate at all.
+    $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
+});

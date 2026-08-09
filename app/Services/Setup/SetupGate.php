@@ -70,6 +70,12 @@ class SetupGate
      * The single place a token is ever read from a request, so the transport is one
      * decision in one file rather than a property of whichever parameter bag a caller
      * happens to reach for.
+     *
+     * `post()` and not `input()`: `input()` reads the query bag too, so
+     * `POST /setup/unlock?token=…` kept working and kept writing a 40-character
+     * instance-takeover secret into every reverse-proxy access log, APM trace and browser
+     * history entry on the way — the exact exposure moving the transport to a body was
+     * meant to end, and the exact opposite of what this docblock claimed.
      */
     public function unlock(Request $request): bool
     {
@@ -78,8 +84,9 @@ class SetupGate
         }
 
         $stored = $this->token->current();
+        $presented = $request->post('token');
 
-        if ($stored !== null && $this->token->matches($request->input('token'))) {
+        if ($stored !== null && is_string($presented) && $this->token->matches($presented)) {
             $request->session()->put(self::SESSION_KEY, true);
         }
 
