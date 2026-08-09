@@ -71,6 +71,58 @@ it('truncates a readme above the cap and says so', function () {
         ->and($found['source'])->toContain('gekürzt');
 });
 
+it('never hands an oversize blob to the uncapped reader', function () {
+    // The cap has to be decided from the blob size git already reports in the root
+    // listing, *before* any read. GitRepository::fileAtRef() buffers all of `git show`'s
+    // stdout in this process, so a multi-hundred-megabyte README would exhaust
+    // memory_limit — a PHP fatal, not a Throwable, so SyncPackage's catch never runs and
+    // the worker dies and gets replayed. A post-read strlen() check is therefore too late
+    // by construction: this test fails the moment the check moves back after the read.
+    $origin = makeGitRepoWith(['README.md' => str_repeat('a', 2 * ReadmeLocator::MAX_BYTES)]);
+
+    $repo = new class($origin, 'readme-test-'.bin2hex(random_bytes(6))) extends GitRepository
+    {
+        public bool $readUncapped = false;
+
+        public function fileAtRef(string $ref, string $path): string
+        {
+            $this->readUncapped = true;
+
+            return parent::fileAtRef($ref, $path);
+        }
+    };
+    $repo->sync();
+
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    expect($repo->readUncapped)->toBeFalse()
+        ->and(strlen($found['source']))->toBeLessThanOrEqual(ReadmeLocator::MAX_BYTES + 200)
+        ->and($found['source'])->toContain('gekürzt');
+});
+
+it('reads an under-cap readme through the ordinary uncapped reader', function () {
+    // The counterpart to the test above: the capped read is reserved for blobs the
+    // listing reports as oversize, so a normal README is not silently routed through a
+    // path that abandons the git process mid-stream.
+    $origin = makeGitRepoWith(['README.md' => '# Klein']);
+
+    $repo = new class($origin, 'readme-test-'.bin2hex(random_bytes(6))) extends GitRepository
+    {
+        public bool $readUncapped = false;
+
+        public function fileAtRef(string $ref, string $path): string
+        {
+            $this->readUncapped = true;
+
+            return parent::fileAtRef($ref, $path);
+        }
+    };
+    $repo->sync();
+
+    expect(ReadmeLocator::find($repo, 'HEAD')['source'])->toBe('# Klein')
+        ->and($repo->readUncapped)->toBeTrue();
+});
+
 it('does not split a multi-byte character at the truncation boundary', function () {
     // "é" is 2 bytes in UTF-8. Placed so the byte cap lands on its first byte only, a
     // naive substr() would slice it in half and hand ReadmeRenderer invalid UTF-8 —

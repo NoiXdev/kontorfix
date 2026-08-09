@@ -10,7 +10,7 @@ use Throwable;
  * The sync clones with `git clone --mirror`, so there is no working tree and nothing to
  * read from disk. The root listing comes from `git ls-tree` and the contents from
  * `git show`, both reached through GitRepository's public surface — `run()` itself stays
- * private, see `GitRepository::rootFileNames()`.
+ * private, see `GitRepository::rootFileEntries()`.
  */
 class ReadmeLocator
 {
@@ -25,50 +25,80 @@ class ReadmeLocator
      */
     public static function find(GitRepository $repo, string $ref): ?array
     {
-        $filename = self::pick(self::rootEntries($repo, $ref));
+        $entry = self::pick(self::rootEntries($repo, $ref));
 
-        if ($filename === null) {
+        if ($entry === null) {
             return null;
         }
 
         try {
-            $source = $repo->fileAtRef($ref, $filename);
+            $source = self::read($repo, $ref, $entry);
         } catch (Throwable) {
             return null;
         }
 
-        if (strlen($source) > self::MAX_BYTES) {
-            $source = self::truncate($source);
-        }
-
-        return ['filename' => $filename, 'source' => $source];
+        return ['filename' => $entry['name'], 'source' => $source];
     }
 
     /**
-     * Root-level file (blob) names only. A README inside a subdirectory is documentation
-     * for that directory, not the project's front page — and GitRepository::rootFileNames()
-     * already excludes directories/submodules, so a directory named e.g. "README.md" can't
-     * be picked and handed to `fileAtRef()`, which would happily return its tree listing.
+     * Reads the picked blob, never letting more than MAX_BYTES of it into this process.
      *
-     * @return list<string>
+     * The size decides *before* the read, not after. Reading first and cutting afterwards
+     * looks equivalent and is not: `git show`'s whole stdout lands in one PHP string, so a
+     * repository with a 500 MB README exhausts `memory_limit` — a PHP fatal, not a
+     * Throwable, so no caller's catch runs and the queue worker dies and replays the job.
+     * By the time a `strlen()` check could fire, the damage is done. The size in the root
+     * listing (GitRepository::rootFileEntries()) is what makes the decision reachable
+     * without reading anything.
+     *
+     * @param  array{name: string, size: int}  $entry
+     */
+    private static function read(GitRepository $repo, string $ref, array $entry): string
+    {
+        if ($entry['size'] > self::MAX_BYTES) {
+            // One byte past the cap, so truncate()'s mb_strcut() can still tell that the
+            // text continues and back off to the last whole character. Handed exactly
+            // MAX_BYTES it would have no way to know the final character was cut short.
+            return self::truncate($repo->fileAtRefCapped($ref, $entry['name'], self::MAX_BYTES + 1));
+        }
+
+        $source = $repo->fileAtRef($ref, $entry['name']);
+
+        // Second line of defence, deliberately kept: the branch above trusts the size the
+        // listing reported, and this one does not. A blob that comes back longer than
+        // advertised — a listing and a read that disagree for any reason — is still cut.
+        return strlen($source) > self::MAX_BYTES
+            ? self::truncate($source)
+            : $source;
+    }
+
+    /**
+     * Root-level file (blob) entries only. A README inside a subdirectory is documentation
+     * for that directory, not the project's front page — and
+     * GitRepository::rootFileEntries() already excludes directories/submodules, so a
+     * directory named e.g. "README.md" can't be picked and handed to `fileAtRef()`, which
+     * would happily return its tree listing.
+     *
+     * @return list<array{name: string, size: int}>
      */
     private static function rootEntries(GitRepository $repo, string $ref): array
     {
         try {
-            return $repo->rootFileNames($ref);
+            return $repo->rootFileEntries($ref);
         } catch (Throwable) {
             return [];
         }
     }
 
     /**
-     * @param  list<string>  $entries
+     * @param  list<array{name: string, size: int}>  $entries
+     * @return array{name: string, size: int}|null
      */
-    private static function pick(array $entries): ?string
+    private static function pick(array $entries): ?array
     {
         foreach (self::CANDIDATES as $candidate) {
             foreach ($entries as $entry) {
-                if (strtolower($entry) === $candidate) {
+                if (strtolower($entry['name']) === $candidate) {
                     return $entry;
                 }
             }

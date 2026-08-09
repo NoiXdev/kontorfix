@@ -7,6 +7,7 @@ use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
 use RuntimeException;
+use Symfony\Component\Process\Process as SystemProcess;
 use Throwable;
 
 class GitRepository
@@ -90,12 +91,80 @@ class GitRepository
     {
         // --end-of-options prevents a ref/path like "--output=..." from being
         // interpreted as a git option (option injection from a malicious upstream tag).
-        return $this->run(['git', 'show', '--end-of-options', "{$ref}:{$path}"])->output();
+        return $this->run($this->showCommand($ref, $path))->output();
     }
 
     /**
-     * Regular-file names at the root of $ref, non-recursive. `run()` stays private — this
-     * is the one narrow slice of it a caller outside this class needs (ReadmeLocator).
+     * Same as fileAtRef(), but never lets more than $maxBytes of the blob into this
+     * process — the whole point being that the remainder is never read at all.
+     *
+     * fileAtRef() hands `git show`'s entire stdout to the caller as one string, so a
+     * repository carrying a multi-hundred-megabyte file exhausts `memory_limit`. That is a
+     * PHP fatal rather than a Throwable: nothing catches it, the worker process dies, and
+     * the queue replays the job. A caller that already knows the blob is oversize (see
+     * rootFileEntries(), which reports each blob's size) must therefore have a way to read
+     * a bounded prefix instead of reading everything and cutting afterwards.
+     *
+     * Symfony's runner offers no way for an output callback to say "stop"; throwing out of
+     * it is the abort. The process object goes out of scope immediately afterwards and its
+     * destructor stops git, so the abandoned `git show` does not linger. Output arrives in
+     * chunks, so the buffer briefly holds up to one chunk more than the budget before it is
+     * cut back — bounded either way, which is what matters here.
+     *
+     * A process that ends on its own without reaching the budget is checked for success as
+     * usual: abandoning at the cap must not quietly turn every git failure into "".
+     *
+     * @throws RuntimeException if git fails before the budget is reached
+     */
+    public function fileAtRefCapped(string $ref, string $path, int $maxBytes): string
+    {
+        $buffer = '';
+
+        try {
+            $result = Process::path($this->mirrorPath)->timeout(120)->run(
+                $this->showCommand($ref, $path),
+                function (string $type, string $chunk) use (&$buffer, $maxBytes) {
+                    if ($type !== SystemProcess::OUT) {
+                        return;
+                    }
+
+                    $buffer .= $chunk;
+
+                    if (strlen($buffer) >= $maxBytes) {
+                        throw new BlobCapReached;
+                    }
+                },
+            );
+        } catch (BlobCapReached) {
+            return substr($buffer, 0, $maxBytes);
+        }
+
+        if (! $result->successful()) {
+            throw new RuntimeException('git show failed: '.$result->errorOutput());
+        }
+
+        return substr($buffer, 0, $maxBytes);
+    }
+
+    /** @return list<string> */
+    private function showCommand(string $ref, string $path): array
+    {
+        return ['git', 'show', '--end-of-options', "{$ref}:{$path}"];
+    }
+
+    /**
+     * Regular files at the root of $ref, non-recursive, each with the byte size git
+     * records for its blob. `run()` stays private — this is the one narrow slice of it a
+     * caller outside this class needs (ReadmeLocator).
+     *
+     * The size is here rather than in a separate lookup because `git ls-tree -l` reports it
+     * in the listing this method already runs: it costs an extra column, not an extra
+     * process. The alternative, `git cat-file -s {ref}:{path}`, would spawn a second git per
+     * candidate *and* resolve the path a second time, independently of the listing that
+     * chose it — so the size checked and the blob subsequently read would be two separate
+     * resolutions rather than one. Returning name and size together keeps the decision and
+     * the object it describes tied to a single authoritative listing, which is what lets
+     * ReadmeLocator refuse an oversize blob before reading a byte of it.
      *
      * Deliberately regular files only, not directories or symlinks:
      *
@@ -112,12 +181,15 @@ class GitRepository
      *   this actually point" questions a symlink raises anywhere else. Skipping it is the
      *   honest outcome — the caller sees no README rather than a wrong one.
      *
-     * Without `--name-only`, `git ls-tree` reports each entry as
-     * "<mode> <type> <sha>\t<name>" — <mode> is "120000" for a symlink (vs. "100644" /
-     * "100755" for a regular file), <type> is "blob" for both a regular file and a symlink,
-     * "tree" for a subdirectory, "commit" for a submodule — so both mode and type are
-     * filtered here rather than left for the caller to infer from a command that can't fail
-     * on either.
+     * With `-l` and without `--name-only`, `git ls-tree` reports each entry as
+     * "<mode> <type> <sha> <size>\t<name>" — <mode> is "120000" for a symlink (vs. "100644"
+     * / "100755" for a regular file), <type> is "blob" for both a regular file and a
+     * symlink, "tree" for a subdirectory, "commit" for a submodule — so both mode and type
+     * are filtered here rather than left for the caller to infer from a command that can't
+     * fail on either. <size> is right-aligned in a padded column and is "-" for anything
+     * that is not a blob, hence the whitespace split and the digit check below; an entry
+     * whose size does not parse is dropped rather than reported with a guessed size, so a
+     * caller sizing a read against it can never be handed an unbounded one.
      *
      * Entry names are not unquoted: `core.quotePath` (on by default) makes git render a
      * name containing a non-ASCII byte or a tab as a C-style escaped, double-quoted string
@@ -126,13 +198,13 @@ class GitRepository
      * ReadmeLocator::CANDIDATES is plain ASCII with no special characters, which git never
      * quotes, so the candidate this method exists to find is never affected by it.
      *
-     * @return list<string>
+     * @return list<array{name: string, size: int}>
      */
-    public function rootFileNames(string $ref): array
+    public function rootFileEntries(string $ref): array
     {
-        $output = $this->run(['git', 'ls-tree', '--end-of-options', $ref])->output();
+        $output = $this->run(['git', 'ls-tree', '-l', '--end-of-options', $ref])->output();
 
-        $names = [];
+        $entries = [];
 
         foreach (explode("\n", $output) as $line) {
             if (trim($line) === '') {
@@ -145,14 +217,14 @@ class GitRepository
                 continue;
             }
 
-            [$mode, $type] = array_pad(explode(' ', $info), 2, null);
+            [$mode, $type, , $size] = array_pad(preg_split('/\s+/', trim($info)) ?: [], 4, null);
 
-            if ($type === 'blob' && $mode !== '120000') {
-                $names[] = $name;
+            if ($type === 'blob' && $mode !== '120000' && is_string($size) && ctype_digit($size)) {
+                $entries[] = ['name' => $name, 'size' => (int) $size];
             }
         }
 
-        return $names;
+        return $entries;
     }
 
     /**
