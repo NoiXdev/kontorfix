@@ -43,10 +43,14 @@ class VersionOrder
                 }
 
                 // normalize() has a legacy special case that accepts "master"/"trunk"/"default"
-                // as branch aliases and happily returns "dev-trunk" etc. instead of throwing.
-                // Those are branch names, not release versions — a real package version is
-                // never legitimately "dev-*" — so they belong with the other unparseable tags,
-                // not among semantically-comparable releases.
+                // as branch aliases and happily returns "dev-trunk" etc. instead of throwing, so
+                // a tag with one of those names would otherwise sort as a comparable version.
+                // Excluding every "dev-*" result is safe in this codebase specifically because
+                // GitSourceImporter only ever imports from tags(), never branches, and npm
+                // publish requires a real semver — so no genuine version row is a branch
+                // pseudo-version today. Composer itself treats "dev-main"/"dev-master" as
+                // legitimate installable versions; a future change that starts importing
+                // branches (not just tags) would need to revisit this exclusion.
                 if (str_starts_with($label, 'dev-')) {
                     return false;
                 }
