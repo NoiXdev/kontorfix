@@ -55,6 +55,35 @@ it('stops reading a blob once the byte budget is spent', function () {
     expect(strlen($repo->fileAtRefCapped('HEAD', 'BIG.md', 8192)))->toBe(8192);
 });
 
+it('does not let the internal cap signal escape when the abandoned read is torn down', function () {
+    // Aborting the read means throwing out of the output callback, and tearing the process
+    // down afterwards reads its pipes one last time and calls that callback again. A second
+    // throw escapes the capped read entirely — out of stop(), or later out of a destructor
+    // and into whatever unrelated code happens to be running, which is how it first showed
+    // up: a BlobCapReached reported against a path-traversal test in another file.
+    //
+    // A tiny budget against a multi-megabyte blob is the shape that reproduces it: git is
+    // still streaming when the abort happens, so there is always more output waiting at
+    // teardown. Anything escaping here fails this test rather than a random later one.
+    $dir = sys_get_temp_dir().'/kfx-fixture-escape-'.uniqid();
+    mkdir($dir, 0775, true);
+    file_put_contents($dir.'/BIG.md', str_repeat('a', 8 * 1024 * 1024));
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+    Process::path($dir)->run(['git', 'add', '-A'])->throw();
+    Process::path($dir)
+        ->env(['GIT_AUTHOR_NAME' => 'T', 'GIT_AUTHOR_EMAIL' => 't@t.test', 'GIT_COMMITTER_NAME' => 'T', 'GIT_COMMITTER_EMAIL' => 't@t.test'])
+        ->run(['git', 'commit', '-q', '-m', 'init'])->throw();
+
+    $repo = new GitRepository('file://'.$dir, 'test-pkg-'.uniqid());
+    $repo->sync();
+
+    expect(strlen($repo->fileAtRefCapped('HEAD', 'BIG.md', 16)))->toBe(16);
+
+    // A second capped read on the same mirror has to behave identically — a signal left
+    // in flight by the first would land here.
+    expect(strlen($repo->fileAtRefCapped('HEAD', 'BIG.md', 16)))->toBe(16);
+});
+
 it('returns a short blob whole when it fits inside the byte budget', function () {
     $repo = new GitRepository('file://'.FixtureRepo::make(), 'test-pkg-'.uniqid());
     $repo->sync();

@@ -106,10 +106,20 @@ class GitRepository
      * a bounded prefix instead of reading everything and cutting afterwards.
      *
      * Symfony's runner offers no way for an output callback to say "stop"; throwing out of
-     * it is the abort. The process object goes out of scope immediately afterwards and its
-     * destructor stops git, so the abandoned `git show` does not linger. Output arrives in
-     * chunks, so the buffer briefly holds up to one chunk more than the budget before it is
-     * cut back — bounded either way, which is what matters here.
+     * it is the abort. Output arrives in chunks, so the buffer briefly holds up to one chunk
+     * more than the budget before it is cut back — bounded either way, which is what matters
+     * here.
+     *
+     * Two details that are not optional:
+     *
+     * - The callback throws **once**. Tearing the process down reads its pipes one last
+     *   time and calls the callback again, and a second throw escapes from *there* —
+     *   outside this try/catch, during stop() or, worse, during garbage collection, where
+     *   it surfaces as a BlobCapReached inside whatever unrelated code happens to be
+     *   running. The $capped latch makes every call after the first a no-op.
+     * - git is stopped explicitly rather than left to the destructor, so the abandoned
+     *   `git show` ends when this method does and not whenever the process object is
+     *   collected.
      *
      * A process that ends on its own without reaching the budget is checked for success as
      * usual: abandoning at the cap must not quietly turn every git failure into "".
@@ -119,23 +129,37 @@ class GitRepository
     public function fileAtRefCapped(string $ref, string $path, int $maxBytes): string
     {
         $buffer = '';
+        $capped = false;
+
+        $process = Process::path($this->mirrorPath)->timeout(120)->start(
+            $this->showCommand($ref, $path),
+            function (string $type, string $chunk) use (&$buffer, &$capped, $maxBytes) {
+                if ($capped || $type !== SystemProcess::OUT) {
+                    return;
+                }
+
+                $buffer .= $chunk;
+
+                if (strlen($buffer) >= $maxBytes) {
+                    $capped = true;
+
+                    throw new BlobCapReached;
+                }
+            },
+        );
 
         try {
-            $result = Process::path($this->mirrorPath)->timeout(120)->run(
-                $this->showCommand($ref, $path),
-                function (string $type, string $chunk) use (&$buffer, $maxBytes) {
-                    if ($type !== SystemProcess::OUT) {
-                        return;
-                    }
+            $result = $process->wait();
+        } catch (Throwable $e) {
+            // The latch, not the exception type, decides whether this was our own abort:
+            // a timeout or any other genuine failure leaves it false and must propagate
+            // rather than be reported as a successful short read.
+            if (! $capped) {
+                throw $e;
+            }
 
-                    $buffer .= $chunk;
+            $process->stop();
 
-                    if (strlen($buffer) >= $maxBytes) {
-                        throw new BlobCapReached;
-                    }
-                },
-            );
-        } catch (BlobCapReached) {
             return substr($buffer, 0, $maxBytes);
         }
 
