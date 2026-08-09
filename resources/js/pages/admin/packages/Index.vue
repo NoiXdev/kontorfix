@@ -53,13 +53,13 @@ const props = defineProps<{
     filters: Filters;
     registryTypes: string[];
     gitCredentials: { id: string; name: string; provider: string }[];
-    sourceModes: { value: string; label: string }[];
+    sourceModes: Record<string, { value: string; label: string }[]>;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
 
-// Type metadata (labels, publish-based) comes from the shared single source.
-const { isPublishBased, options: typeOptionsFor } = useRegistryTypes();
+// Type metadata (labels) comes from the shared single source.
+const { options: typeOptionsFor } = useRegistryTypes();
 // Only instance-enabled types are offered in the create dialog and the filter.
 const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
 
@@ -147,13 +147,18 @@ function onPrivateToggle() {
     }
 }
 
-// Composer is always git; npm/python default to publish and may opt into git-mirror.
-const canChooseSource = computed(() => isPublishBased(form.type));
+// The modes this package type actually allows, per PackageSourceMode::allowedFor() on the
+// server — the single source of truth. Composer has exactly one (git), npm exactly one
+// (publish), so the selector below only renders when there is a real choice to make.
+const modesForType = computed(() => props.sourceModes[form.type] ?? []);
+const canChooseSource = computed(() => modesForType.value.length > 1);
 const isGitMode = computed(() => form.type === 'composer' || form.source_mode === 'git');
 
-// Switching type resets the source mode (composer → git implicitly) and the probe.
+// Switching type resets the source mode to that type's first (default) allowed mode —
+// composer → git, npm → publish — instead of a hardcoded 'publish', so a type with no
+// publish option never lands on an invalid value. Also resets the probe.
 function onTypeChange() {
-    form.source_mode = 'publish';
+    form.source_mode = (props.sourceModes[form.type]?.[0]?.value ?? 'publish') as 'publish' | 'git';
     onSourceModeChange();
 }
 
@@ -419,7 +424,7 @@ function destroyPackage(id: string) {
                         <SearchableSelect
                             id="source_mode"
                             v-model="form.source_mode"
-                            :options="props.sourceModes"
+                            :options="modesForType"
                             @update:model-value="onSourceModeChange"
                         />
                         <p class="text-xs text-muted-foreground">

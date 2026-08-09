@@ -72,6 +72,19 @@ function composerPayload(string $groupId, array $overrides = []): array
     ], $overrides);
 }
 
+it('advertises one source mode for npm and two for python', function () {
+    [$admin] = sourceModeFixture();
+
+    $this->actingAs($admin)
+        ->get('/admin/packages')
+        ->assertInertia(fn ($page) => $page
+            ->count('sourceModes.npm', 1)
+            ->where('sourceModes.npm.0.value', 'publish')
+            ->count('sourceModes.python', 2)
+            ->count('sourceModes.composer', 1)
+        );
+});
+
 it('refuses an npm package in git-mirror mode on the web path', function () {
     // A real SyncPackage dispatch would attempt an actual git clone; faking the queue
     // keeps this a pure validation test regardless of whether the refusal holds.

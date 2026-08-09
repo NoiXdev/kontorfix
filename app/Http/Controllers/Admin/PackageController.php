@@ -78,8 +78,14 @@ class PackageController extends Controller
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
-            // Source-mode options (publish vs git-mirror) for the create dialog.
-            'sourceModes' => PackageSourceMode::metadata(),
+            // Source-mode options per package type. npm has exactly one, so the create
+            // dialog hides the selector for it rather than offering a rejected choice.
+            'sourceModes' => collect(PackageType::cases())
+                ->mapWithKeys(fn (PackageType $t): array => [$t->value => array_map(
+                    fn (PackageSourceMode $m): array => ['value' => $m->value, 'label' => $m->label()],
+                    PackageSourceMode::allowedFor($t)
+                )])
+                ->all(),
             // Managed git credentials the user may assign (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
