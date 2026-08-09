@@ -7,6 +7,7 @@ use App\Http\Controllers\Settings\PasswordController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\TwoFactorController;
 use App\Http\Middleware\ConfirmPasswordOnEmailChange;
+use App\Http\Middleware\ConfirmPasswordUnlessSubmitted;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -20,7 +21,14 @@ Route::middleware('auth')->group(function () {
     Route::patch('settings/profile', [ProfileController::class, 'update'])
         ->middleware(ConfirmPasswordOnEmailChange::class)
         ->name('profile.update');
-    Route::delete('settings/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    // Deleting your own account proves the password inline. Accounts this application
+    // creates without one (OIDC-provisioned, admin-invited, passkey-only) hold a random
+    // hash nobody knows, so that was a route they could never take; submitting no password
+    // now sends them to the confirmation screen, which accepts a passkey or mails a
+    // set-password link. See ConfirmPasswordUnlessSubmitted.
+    Route::delete('settings/profile', [ProfileController::class, 'destroy'])
+        ->middleware(ConfirmPasswordUnlessSubmitted::class)
+        ->name('profile.destroy');
 
     Route::get('settings/password', [PasswordController::class, 'edit'])->name('password.edit');
     Route::put('settings/password', [PasswordController::class, 'update'])->name('password.update');
@@ -29,14 +37,18 @@ Route::middleware('auth')->group(function () {
     // `password.confirm` just like `settings/passkeys` — a stolen session alone must not
     // be enough to enroll an attacker's authenticator and lock the owner out. `show` is
     // included because it hands out the plaintext secret and the recovery codes.
-    // `disable` proves the password itself (DisableTwoFactorRequest) and needs no gate.
     Route::middleware('password.confirm')->group(function () {
         Route::get('settings/two-factor', [TwoFactorController::class, 'show'])->name('two-factor.show');
         Route::post('settings/two-factor/enable', [TwoFactorController::class, 'enable'])->name('two-factor.enable');
         Route::post('settings/two-factor/confirm', [TwoFactorController::class, 'confirm'])->name('two-factor.confirm');
     });
 
-    Route::delete('settings/two-factor', [TwoFactorController::class, 'disable'])->name('two-factor.disable');
+    // `disable` proves the password itself (DisableTwoFactorRequest); the middleware is
+    // only the way in for an account whose owner never knew one — otherwise such a user
+    // could enable a second factor (a passkey satisfies that gate) and never switch it off.
+    Route::delete('settings/two-factor', [TwoFactorController::class, 'disable'])
+        ->middleware(ConfirmPasswordUnlessSubmitted::class)
+        ->name('two-factor.disable');
 
     Route::get('settings/passkeys', [PasskeyController::class, 'index'])
         ->middleware('password.confirm')

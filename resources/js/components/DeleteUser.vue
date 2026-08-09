@@ -68,6 +68,10 @@ const closeModal = () => {
                             <Label for="password" class="sr-only">Password</Label>
                             <Input id="password" type="password" name="password" ref="passwordInput" v-model="form.password" placeholder="Password" />
                             <InputError :message="form.errors.password" />
+                            <p class="text-xs text-muted-foreground">
+                                No password on this account? Leave the field empty and submit — you will be asked to confirm with a passkey instead,
+                                or sent a link to set one.
+                            </p>
                         </div>
 
                         <DialogFooter>

@@ -277,6 +277,17 @@ one (OIDC-provisioned, admin-invited): a passkey assertion with user verificatio
 (`passkey.confirm`), and `POST /confirm-password/set-link`, which mails a set-password link
 to the address stored on the account — never to one taken from the request.
 
+**The two routes that prove the password inline reach the same hatch.**
+`DELETE /settings/two-factor` and `DELETE /settings/profile` want the current password in
+the payload, which for those accounts is a dead end — they could enable a second factor (a
+passkey satisfies that gate) and never switch it off, and could never delete themselves.
+Both now carry `ConfirmPasswordUnlessSubmitted`: submit a password and it is compared
+exactly as before; submit none and the request goes to the confirmation screen. It asks for
+a confirmation made in the last **five minutes**, not the shared fifteen, because these two
+used to prove the password on the acting request itself. Both form requests keep an
+implicit `requiredIf` behind the middleware, so a route that ever loses it falls back to
+demanding the password rather than to accepting an empty field.
+
 **Guessing at the gate is metered.** Every endpoint that compares a submitted string against
 the session owner's password hash — `POST /confirm-password`, `DELETE /settings/two-factor`,
 `PUT /settings/password`, `DELETE /settings/profile` — goes through

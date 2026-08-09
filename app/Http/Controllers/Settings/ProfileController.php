@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\ConfirmPasswordUnlessSubmitted;
 use App\Http\Requests\Settings\ProfileUpdateRequest;
 use App\Rules\CurrentPassword;
 use App\Services\Mail\MailManager;
@@ -11,6 +12,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -78,8 +80,19 @@ class ProfileController extends Controller
      */
     public function destroy(Request $request): RedirectResponse
     {
+        // Same shape as DisableTwoFactorRequest, for the same reason: the route's
+        // ConfirmPasswordUnlessSubmitted routes a caller who submits no password to the
+        // confirmation screen, which is the only way an account whose owner never knew one
+        // can ever delete itself. The implicit requiredIf keeps this fail-closed if the
+        // route ever loses that middleware — deleting an account on no proof at all is the
+        // one outcome that must not be reachable.
         $request->validate([
-            'password' => ['required', new CurrentPassword],
+            'password' => [
+                'nullable',
+                'string',
+                Rule::requiredIf(fn (): bool => ! ConfirmPasswordUnlessSubmitted::confirmedRecently($request)),
+                new CurrentPassword,
+            ],
         ]);
 
         $user = $request->user();
