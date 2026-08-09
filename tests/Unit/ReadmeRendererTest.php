@@ -125,3 +125,23 @@ it('escapes hostile alt text instead of smuggling it through when an image is st
 
     expect($escaped)->toContain('&lt;')->toContain('&gt;')->not->toContain('1 < 2');
 });
+
+it('leaves nothing at all behind for an image written without alt text', function () {
+    // The alt-less image is the shape a hostile readme actually uses: with no alt text there
+    // is no visible trace on the page, so the automatic same-origin GET happens with nothing
+    // for a reader to notice. The other image tests all have alt text to fall back to.
+    $html = ReadmeRenderer::render('![](/admin/delete-everything)', 'README.md');
+
+    expect($html)
+        ->not->toContain('<img')
+        ->not->toContain('/admin/delete-everything');
+});
+
+it('does not emit an image source smuggled through an entity-encoded control character', function () {
+    // Image-side twin of the link case above: the decoded tab is normalised to %09, which
+    // CommonMark's unsafe-protocol regex does not match, so allow_unsafe_links never sees it.
+    // Without the image rule this renders as a live src="jav%09ascript:alert(1)".
+    $html = ReadmeRenderer::render('![bild](jav&#x09;ascript:alert(1))', 'README.md');
+
+    expect($html)->not->toContain('src=');
+});
