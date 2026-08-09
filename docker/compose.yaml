@@ -1,3 +1,19 @@
+# The four services below run the same image. `:latest` is a MUTABLE tag: what it resolves
+# to is decided by the registry at pull time, so a `docker compose pull` re-executes whatever
+# is there now — the pull is part of the supply chain, and on a mutable tag it is
+# unauthenticated. The release workflow publishes an immutable version tag and signs the
+# image by digest (keyless cosign, bound to this repository's workflow identity), so an
+# operator can verify what they are about to run and pin it:
+#
+#   cosign verify docker.io/<namespace>/<image>:vX.Y.Z \
+#     --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/release\.yml@' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#   docker buildx imagetools inspect docker.io/<namespace>/<image>:vX.Y.Z --format '{{.Manifest.Digest}}'
+#
+# Then replace `:latest` below with `@sha256:<digest>` — every service, same digest. The
+# shipped file keeps `:latest` because a digest cannot be committed ahead of the release it
+# names, not because pinning is optional for a production deployment.
+
 services:
   app:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest

@@ -86,6 +86,13 @@ production deployment:
   uncomment the loopback `ports:` line instead. Independently of this, give the proxy a
   router rule that constrains the host (`Host(...)`, not `PathPrefix('/')`), so a forged
   `Host` never reaches the container in the first place.
+- **Verify and pin the image.** The release workflow signs every published image by digest
+  with keyless cosign, bound to this repository's `release.yml` workflow identity, alongside
+  the provenance attestation and SBOM it already produced. Provenance says how an image was
+  built; the signature says that *this* image is the one this repository published, which is
+  the part a `docker compose pull` of a mutable `:latest` cannot establish. Verify the version
+  tag, read its digest, and pin `docker/compose.yaml` to `@sha256:<digest>` — the exact
+  commands are in the header of that file.
 - **`SECURITY_HSTS=true`** — once TLS is terminated at the proxy.
 - **`SESSION_SECURE_COOKIE=true`** — session cookie over HTTPS only.
 - **`SECURITY_CSP=report`** — roll out the Content-Security-Policy in report-only mode first,

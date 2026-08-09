@@ -26,6 +26,9 @@ concurrency:
 
 permissions:
   contents: write
+  # Keyless cosign signing: the OIDC token IS the identity the signature is bound to,
+  # so there is no signing key to store, leak or rotate.
+  id-token: write
 
 jobs:
   release:
@@ -152,6 +155,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: Build & push image
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
@@ -172,6 +176,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Provenance and an SBOM say how the image was built; neither says that THIS image is
+      # the one this repository published. A consumer pulling a mutable tag has no way to
+      # tell an image substituted in the registry from the real one — the pull is the
+      # supply chain, and it was unauthenticated. Signed by digest, so the signature covers
+      # the bytes rather than the tag that currently points at them.
+      - name: Install cosign
+        if: ${{ inputs.dry_run == false }}
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign the published image
+        if: ${{ inputs.dry_run == false }}
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Commit version bump + CHANGELOG to main
         if: ${{ inputs.dry_run == false }}

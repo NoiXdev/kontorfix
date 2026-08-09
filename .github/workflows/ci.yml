@@ -3,13 +3,19 @@ on:
   push: { branches: [main] }
   pull_request:
 
+# Least privilege, stated rather than inherited. This workflow reads the repository and
+# nothing else; without the block the token's scopes come from the repository default,
+# which an org-level change can widen underneath it.
+permissions:
+  contents: read
+
 jobs:
   commitlint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.0
         with: { fetch-depth: 0 }
-      - uses: wagoid/commitlint-github-action@v6
+      - uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed # v6
         with: { configFile: .commitlintrc.yml }
 
   quality:
@@ -30,13 +36,13 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.4'
           extensions: pgsql, redis, zip, intl, pcntl
           coverage: none
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v5
         with: { node-version: '22', cache: 'npm' }
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
