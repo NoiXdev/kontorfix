@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Auth;
  */
 trait ScopesToAdministeredOrgs
 {
+    use GuardsPackageAttachment;
+
     /**
      * Organization ids the current request may read/list: the active scope, already
      * clamped to the user's administered organizations.
@@ -90,41 +92,23 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
-     * Aborts 403 unless every submitted package may be attached by the current user.
+     * Aborts 403 unless every submitted package may be attached by the current user:
+     * "attachable" means already reachable in the active scope. A package that lives only
+     * in another organization's registries — or in none at all — is refused, otherwise
+     * attaching it would hand the caller write access to it via assertCanTouchPackage().
      *
-     * Packages carry no organization of their own — they belong to one through the
-     * registries they are attached to. "Attachable" therefore means: already reachable
-     * in the active scope. A package that lives only in another organization's registries
-     * is refused outright — otherwise attaching it would hand the caller write access to
-     * it via assertCanTouchPackage().
-     *
-     * A package attached to *no* registry used to be exempt, on the grounds that a freshly
-     * created one has no pivot rows yet. That is not what the exemption did. Both create
-     * paths attach their `group_ids` in the same request, and a package created with none
-     * is invisible to its own creator afterwards — every package listing joins through
-     * `groups`. What the exemption really covered was the orphan a deleted registry leaves
-     * behind when the pivot rows cascade: claimable by any tenant who learns its id,
-     * together with the versions and dists already synced into it, and unrecoverable for
-     * the original organization, whose own re-attach then trips the foreign test.
-     *
-     * Orphans are now attachable only by a super-admin, whose scope spans every
-     * organization and who is the party that has to adjudicate the ownership anyway.
+     * The decision itself lives in {@see GuardsPackageAttachment}, shared with `/api/v1`;
+     * only the set of organizations that count as the caller's differs.
      *
      * @param  array<int, string>  $packageIds
      */
     protected function assertCanAttachPackages(array $packageIds): void
     {
-        if ($packageIds === [] || app(OrgScope::class)->spansAllOrganizations()) {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
             return;
         }
 
-        $orgIds = $this->scopedOrgIds();
-
-        $foreign = Package::whereIn('id', $packageIds)
-            ->whereDoesntHave('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds))
-            ->exists();
-
-        abort_if($foreign, 403);
+        $this->assertPackagesReachableIn($packageIds, $this->scopedOrgIds());
     }
 
     /**

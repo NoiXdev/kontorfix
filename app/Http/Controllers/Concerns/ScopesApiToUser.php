@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\Auth;
  */
 trait ScopesApiToUser
 {
+    use GuardsPackageAttachment;
+
     private function apiUser(): User
     {
         $user = Auth::user();
@@ -114,28 +116,23 @@ trait ScopesApiToUser
     }
 
     /**
-     * Aborts 403 unless every submitted package may be attached by the caller. Packages
-     * belong to an organization only through the registries they are attached to, so a
-     * package is attachable when it is already readable by the caller or is not attached
-     * anywhere yet. Pulling in a package that lives only in a foreign organization would
-     * otherwise grant write access to it through assertCanWritePackage().
+     * Aborts 403 unless every submitted package may be attached by the caller: it must
+     * already be attached to a registry in an organization the key owner administers.
+     * Pulling in a package that lives only in a foreign organization — or in none at all —
+     * would otherwise grant write access to it through assertCanWritePackage().
+     *
+     * The decision itself lives in {@see GuardsPackageAttachment}, shared with the web
+     * console; only the set of organizations that count as the caller's differs.
      *
      * @param  array<int, string>  $packageIds
      */
     protected function assertCanAttachPackages(array $packageIds): void
     {
-        if ($packageIds === [] || $this->seesAllOrganizations()) {
+        if ($this->seesAllOrganizations()) {
             return;
         }
 
-        $orgIds = $this->apiUser()->administeredOrganizationIds();
-
-        $foreign = Package::whereIn('id', $packageIds)
-            ->whereHas('groups')
-            ->whereDoesntHave('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds))
-            ->exists();
-
-        abort_if($foreign, 403);
+        $this->assertPackagesReachableIn($packageIds, $this->apiUser()->administeredOrganizationIds());
     }
 
     /**
