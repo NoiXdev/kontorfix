@@ -10,6 +10,7 @@ use App\Models\RegistryToken;
 use App\Services\Package\PackageDependencies;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
+use App\Support\VersionOrder;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -95,7 +96,8 @@ class RegistryController extends Controller
         $this->authorize('view', $group);
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
 
-        $package->load(['versions' => fn ($q) => $q->orderByDesc('released_at')]);
+        $package->load('versions');
+        $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         $install = $package->type->installHint($package->name);
 
