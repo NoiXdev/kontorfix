@@ -228,10 +228,24 @@ and `settings/api-keys` (index, store and destroy), the whole two-factor enrolme
 address is the account's recovery channel. The index pages are gated as well as the POSTs,
 so the prompt happens on the way into the page rather than swallowing a submitted form.
 
-Administration is deliberately **not** gated. `PUT /admin/users/{user}` accepts
-`is_super_admin` and `email`, so the `super` group is one trust boundary and gating a single
-route in it would close nothing. The line is: gate where a secret is handed out, not where
+Administration is otherwise deliberately **not** gated: the `super` group is one trust
+boundary and gating a single configuration route in it would close nothing. The line is:
+gate where a secret is handed out or where a change outlives the caller's access, not where
 configuration is changed.
+
+`users.email` is the second kind. It is the account's password-reset channel, so whoever
+moves it owns that account afterwards and *keeps* it once their own access is revoked — the
+attacker ends up holding the password. Both writers are therefore covered:
+
+- `PUT|PATCH /admin/users/{user}` carries `ConfirmPasswordOnEmailChange`, which measures the
+  change against the account being edited and engages only when the address actually moves;
+  role, name, home organization and the super-admin flag stay ungated.
+- `PUT /api/v1/users/{user}` **refuses** an address change outright. `AuthenticateApiKey`
+  admits any non-GET on a `write` key and calls `Auth::setUser()`, while `RequirePassword`
+  reads a session key that does not exist there, so no gate can ever apply on that surface.
+  A leaked super-admin key would otherwise convert into permanent ownership of any account
+  on the instance. Everything revocation *does* undo stays writable. Use the web UI to move
+  an address.
 
 **The window is session-wide and lasts three hours** (`auth.password_timeout`, Laravel's
 default). One confirmation therefore unlocks *every* gated route until it expires — opening

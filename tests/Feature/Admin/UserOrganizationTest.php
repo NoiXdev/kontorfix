@@ -16,11 +16,15 @@ it('edits a user name and email, not just the role', function () {
         'name' => 'Old Name', 'email' => 'old@example.com', 'role' => UserRole::Member,
     ]);
 
-    $this->actingAs($admin)->put("/admin/users/{$target->id}", [
-        'name' => 'New Name',
-        'email' => 'new@example.com',
-        'role' => 'member',
-    ])->assertRedirect()->assertSessionHasNoErrors();
+    // Moving somebody's reset channel re-proves the password (ConfirmPasswordOnEmailChange
+    // on the route). Note the sibling case below, which keeps the address as it is: that
+    // one is deliberately *not* stamped, because the gate must only engage on a change.
+    $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        ->put("/admin/users/{$target->id}", [
+            'name' => 'New Name',
+            'email' => 'new@example.com',
+            'role' => 'member',
+        ])->assertRedirect()->assertSessionHasNoErrors();
 
     $target->refresh();
     expect($target->name)->toBe('New Name');
@@ -32,9 +36,10 @@ it('rejects an email already used by another user', function () {
     User::factory()->create(['email' => 'taken@example.com']);
     $target = User::factory()->create(['email' => 'target@example.com']);
 
-    $this->actingAs($admin)->put("/admin/users/{$target->id}", [
-        'name' => 'X', 'email' => 'taken@example.com', 'role' => 'member',
-    ])->assertSessionHasErrors('email');
+    $this->actingAs($admin)->withSession(['auth.password_confirmed_at' => time()])
+        ->put("/admin/users/{$target->id}", [
+            'name' => 'X', 'email' => 'taken@example.com', 'role' => 'member',
+        ])->assertSessionHasErrors('email');
 });
 
 it('keeps a users own email valid on edit', function () {

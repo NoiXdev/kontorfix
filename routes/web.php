@@ -5,6 +5,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
 use App\Http\Controllers\SetupController;
+use App\Http\Middleware\ConfirmPasswordOnEmailChange;
 use App\Http\Middleware\EnsureSetupIncomplete;
 use App\Http\Middleware\EnsureSetupTokenPresented;
 use Illuminate\Support\Facades\Route;
@@ -122,7 +123,16 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::post('organizations/{organization}/members', [Admin\OrganizationController::class, 'attachMember'])->name('organizations.members.store');
     Route::delete('organizations/{organization}/members/{user}', [Admin\OrganizationController::class, 'detachMember'])->name('organizations.members.destroy');
 
-    Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'update', 'destroy']);
+    // Moving somebody else's address is the same takeover primitive as moving your own
+    // (PATCH /settings/profile carries the identical middleware): the address is the
+    // account's reset channel, so whoever redirects it owns the account afterwards and
+    // keeps it after their own access is revoked. The middleware engages only when the
+    // address actually changes, so role and organization edits are untouched — this is
+    // not the whole `super` group being gated, it is the one field that outlives the gate.
+    Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'destroy']);
+    Route::match(['put', 'patch'], 'users/{user}', [Admin\UserController::class, 'update'])
+        ->middleware(ConfirmPasswordOnEmailChange::class)
+        ->name('users.update');
     Route::post('users/{user}/invite', [Admin\UserController::class, 'invite'])->name('users.invite');
     // Grant/revoke additional organization access from the user view.
     Route::post('users/{user}/organizations', [Admin\UserController::class, 'attachOrganization'])->name('users.organizations.store');
