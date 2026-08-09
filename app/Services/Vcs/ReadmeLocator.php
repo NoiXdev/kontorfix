@@ -67,7 +67,7 @@ class ReadmeLocator
             // One byte past the cap, so truncate()'s mb_strcut() can still tell that the
             // text continues and back off to the last whole character. Handed exactly
             // MAX_BYTES it would have no way to know the final character was cut short.
-            return self::truncate($repo->fileAtRefCapped($ref, $entry['name'], self::MAX_BYTES + 1));
+            return self::truncate($repo->fileAtRefCapped($ref, $entry['name'], self::MAX_BYTES + 1), $entry['name']);
         }
 
         $source = $repo->fileAtRef($ref, $entry['name']);
@@ -76,7 +76,7 @@ class ReadmeLocator
         // listing reported, and this one does not. A blob that comes back longer than
         // advertised — a listing and a read that disagree for any reason — is still cut.
         return strlen($source) > self::MAX_BYTES
-            ? self::truncate($source)
+            ? self::truncate($source, $entry['name'])
             : $source;
     }
 
@@ -121,19 +121,28 @@ class ReadmeLocator
      *    cuts at a byte budget without ever splitting a character, so this is a real bug a
      *    naive cap would ship, not a hypothetical.
      *
-     * 2. It can leave an unterminated ``` / ~~~ fenced code block open. CommonMark treats
+     * 2. It can leave an unterminated ``` / ~~~ fenced code block open — on the markdown
+     *    path, which is why both that and the notice's own syntax depend on which path
+     *    will render the file. CommonMark treats
      *    an unterminated fence as running to end-of-document rather than throwing, so this
      *    is not a crash risk — but left alone it would swallow the truncation notice below
      *    into the code block, rendering it as if the README itself said "Diese README
      *    wurde gekürzt." instead of showing it as a note. closeUnterminatedFence() appends
-     *    a closing fence first so the notice always renders as prose.
+     *    a closing fence first so the notice always renders as prose. Neither the fence
+     *    repair nor markdown emphasis has any meaning on the plain-text path, where the
+     *    whole file is escaped into a <pre> block: there, `_..._` reaches the reader as
+     *    literal underscores and an appended ``` as a stray line of backticks. So the
+     *    notice is written in whichever syntax ReadmeRenderer will apply to this filename.
      */
-    private static function truncate(string $source): string
+    private static function truncate(string $source, string $filename): string
     {
         $cut = mb_strcut($source, 0, self::MAX_BYTES, 'UTF-8');
-        $cut = self::closeUnterminatedFence($cut);
 
-        return $cut."\n\n---\n\n_Diese README wurde gekürzt._";
+        if (! ReadmeRenderer::isMarkdown($filename)) {
+            return $cut."\n\n---\n\nDiese README wurde gekürzt.";
+        }
+
+        return self::closeUnterminatedFence($cut)."\n\n---\n\n_Diese README wurde gekürzt._";
     }
 
     /**

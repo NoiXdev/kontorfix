@@ -73,7 +73,13 @@ class ReadmeRenderer
             : '<pre class="readme-plain">'.e($source).'</pre>';
     }
 
-    private static function isMarkdown(string $filename): bool
+    /**
+     * Which of the two render paths $filename will take. Public because a caller that
+     * appends its own text to the source — ReadmeLocator's truncation notice — has to
+     * write it in the syntax that will actually be rendered, and duplicating the extension
+     * list there would let the two drift apart.
+     */
+    public static function isMarkdown(string $filename): bool
     {
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 

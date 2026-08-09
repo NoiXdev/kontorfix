@@ -160,6 +160,27 @@ it('reads an under-cap readme through the ordinary uncapped reader', function ()
         ->and($repo->readUncapped)->toBeTrue();
 });
 
+it('writes the truncation notice as markdown when markdown is what will render it', function () {
+    $repo = readmeRepoWith(['README.md' => str_repeat("a\n", ReadmeLocator::MAX_BYTES)]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    expect(ReadmeRenderer::render($found['source'], $found['filename']))
+        ->toContain('<em>Diese README wurde gekürzt.</em>');
+});
+
+it('writes the truncation notice as plain text when the plain-text path will render it', function () {
+    // .rst / .txt / extensionless are escaped into a <pre> block rather than parsed, so
+    // markdown emphasis in the notice reaches the reader as literal underscores around the
+    // sentence. The notice has to match whichever path will render it.
+    $repo = readmeRepoWith(['README.txt' => str_repeat("a\n", ReadmeLocator::MAX_BYTES)]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+    $html = ReadmeRenderer::render($found['source'], $found['filename']);
+
+    expect($html)->toContain('<pre')
+        ->toContain('Diese README wurde gekürzt.')
+        ->not->toContain('_Diese README wurde gekürzt._');
+});
+
 it('does not split a multi-byte character at the truncation boundary', function () {
     // "é" is 2 bytes in UTF-8. Placed so the byte cap lands on its first byte only, a
     // naive substr() would slice it in half and hand ReadmeRenderer invalid UTF-8 —
