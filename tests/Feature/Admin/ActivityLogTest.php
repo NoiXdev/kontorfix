@@ -64,3 +64,24 @@ it('denies the activity log to non-admins', function () {
 
     $this->actingAs($maintainer)->get('/admin/activity')->assertForbidden();
 });
+
+it('answers malformed subject and causer filters with an empty log instead of a driver error', function () {
+    $admin = activityAdmin();
+    $org = Organization::factory()->create();
+
+    // Reachability anchor: well-formed ids reach the controller and filter the log, so
+    // the malformed cases below exercise the same branch rather than an earlier layer.
+    $this->actingAs($admin)->get('/admin/activity?subject_type=Organization&subject_id='.$org->id)
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/activity/Index')->has('activities.data', 1));
+
+    foreach (['not-a-uuid', str_repeat('-', 36)] as $junk) {
+        $this->actingAs($admin)->get('/admin/activity?subject_id='.$junk)
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->component('admin/activity/Index')->has('activities.data', 0));
+
+        $this->actingAs($admin)->get('/admin/activity?causer='.$junk)
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->has('activities.data', 0));
+    }
+});

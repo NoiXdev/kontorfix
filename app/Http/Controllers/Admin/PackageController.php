@@ -22,6 +22,7 @@ use App\Support\ActivityPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -43,7 +44,16 @@ class PackageController extends Controller
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
             ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('type', $type))
             ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
-            ->when(is_string($group) && $group !== '', fn ($query) => $query->whereHas('groups', fn ($g) => $g->whereKey($group)))
+            // `group` is a plain query-string value on a route with no throttle, and it
+            // lands on a Postgres `uuid` comparison: a malformed one raised
+            // SQLSTATE[22P02], which nothing renders, so every request appended a stack
+            // trace with its bound parameters to an unrotated log. Str::isUuid decides
+            // this — not a character-class pattern; the two attempts at one on this branch
+            // were both satisfied by 36 dashes. A value that cannot be a group id matches
+            // no group, so the answer is an empty list, not an unfiltered one.
+            ->when(is_string($group) && $group !== '', fn ($query) => Str::isUuid($group)
+                ? $query->whereHas('groups', fn ($g) => $g->whereKey($group))
+                : $query->whereRaw('1 = 0'))
             ->latest()
             ->paginate(25)
             ->withQueryString()
