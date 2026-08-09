@@ -7,7 +7,7 @@ Python-Pakete können auf zwei Arten befüllt werden:
   kein Repository benötigt.
 - **Git-Mirror** – die Versionen werden aus den **Tags** eines Git-Repositories
   gespiegelt, genau wie es Composer schon immer tut. Beim Anlegen (oder im Tab
-  „Quelle" eines Pakets) wird eine Repository-URL hinterlegt; jeder Sync
+  „Quelle“ eines Pakets) wird eine Repository-URL hinterlegt; jeder Sync
   importiert die Tags als Versionen.
 
 Composer ist immer git-basiert und kennt diese Umschaltung nicht. npm ist immer
@@ -21,7 +21,7 @@ Unter **Pakete → Paket hinzufügen** erscheint für Python das Feld **Quelle**
 2. **Quelle** auf **Git-Mirror** stellen.
 3. **Repository-URL** eintragen und über **Prüfen** die Erreichbarkeit testen
    (der Name wird aus dem Manifest übernommen).
-4. Für **private Repositories** den Schalter „Privates Repository" aktivieren
+4. Für **private Repositories** den Schalter „Privates Repository“ aktivieren
    und entweder einen gespeicherten Git-Token wählen oder einen Einmal-Token
    einfügen (siehe [private-github-repos.md](private-github-repos.md)).
 
@@ -33,9 +33,7 @@ mit `409 Conflict` abgelehnt, weil der nächste Sync es überschreiben würde.
 Der Sync klont das Repository (Mirror) und erzeugt pro Version-Tag ein
 Quell-Archiv mit `git archive` — dieselbe Technik wie beim Composer-Dist:
 
-| Typ    | Artefakt                          | Prüfsumme |
-| ------ | ---------------------------------- | --------- |
-| Python | `<name>-<version>.tar.gz` (sdist)  | `sha256`  |
+Das Artefakt ist ein sdist (`<name>-<version>.tar.gz`) mit einer `sha256`-Prüfsumme.
 
 Python-sdists werden **beim Sync** gebaut, damit der PEP-503-Index sofort
 korrekte Prüfsummen anbietet. Ein erneuter Sync baut ein Artefakt nur neu,

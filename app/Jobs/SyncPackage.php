@@ -42,7 +42,7 @@ class SyncPackage implements ShouldQueue
     public function handle(): void
     {
         if ($this->package->repository_url === null) {
-            $this->markFailed('Für dieses Paket ist keine Repository-URL hinterlegt — im Tab „Quelle“ eine Repository-URL eintragen, dann erneut synchronisieren.');
+            $this->markFailed('Für dieses Paket ist keine Repository-URL hinterlegt — im Tab „Quelle“ nachtragen, dann erneut synchronisieren.');
 
             return; // Configuration error — retrying makes no sense
         }
