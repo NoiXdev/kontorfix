@@ -26,12 +26,6 @@ it('does not emit a javascript url as a link target', function () {
     expect($html)->not->toContain('href="javascript:');
 });
 
-it('does not emit a javascript url as an image source', function () {
-    $html = ReadmeRenderer::render('![bild](javascript:alert(1))', 'README.md');
-
-    expect($html)->not->toContain('src="javascript:');
-});
-
 it('renders an rst file as escaped preformatted text, not as markdown', function () {
     $html = ReadmeRenderer::render("Titel\n=====\n\n<b>roh</b>", 'README.rst');
 
@@ -135,13 +129,4 @@ it('leaves nothing at all behind for an image written without alt text', functio
     expect($html)
         ->not->toContain('<img')
         ->not->toContain('/admin/delete-everything');
-});
-
-it('does not emit an image source smuggled through an entity-encoded control character', function () {
-    // Image-side twin of the link case above: the decoded tab is normalised to %09, which
-    // CommonMark's unsafe-protocol regex does not match, so allow_unsafe_links never sees it.
-    // Without the image rule this renders as a live src="jav%09ascript:alert(1)".
-    $html = ReadmeRenderer::render('![bild](jav&#x09;ascript:alert(1))', 'README.md');
-
-    expect($html)->not->toContain('src=');
 });

@@ -157,7 +157,20 @@ class ReadmeRenderer
         }
     }
 
-    /** A link this renderer will not emit a working href for, so it must not look clickable. */
+    /**
+     * A link this renderer will not emit a working href for, so it must not look clickable.
+     *
+     * Known, deliberate over-blocking, not an oversight: RegexHelper::REGEX_UNSAFE_PROTOCOL is
+     * `/^javascript:|vbscript:|file:|data:/i` — the leading `^` binds to the first alternative
+     * only, so "javascript:" must lead the string, but "vbscript:", "file:", and "data:" match
+     * anywhere in it. A legitimate link that merely *contains* one of those substrings — e.g.
+     * `https://good.example/?redirect=data:text/plain` — is caught by isLinkPotentiallyUnsafe()
+     * and, here, unwrapped entirely rather than just losing its href. That is a behaviour change
+     * from before this class's round-2 fix, which only stripped the href and left a dead but
+     * still-styled anchor; fully unwrapping such a link now reads slightly worse (plain text
+     * where a real link belonged) but is still fail-safe, so it is left as is rather than
+     * special-cased to duplicate CommonMark's own unsafe-protocol matching in this class.
+     */
     private static function isDeadEnd(string $url): bool
     {
         return self::isRelative($url) || RegexHelper::isLinkPotentiallyUnsafe($url);
