@@ -4,6 +4,7 @@ namespace App\Services\Vcs;
 
 use App\Enums\GitProvider;
 use App\Enums\PackageType;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Throwable;
@@ -15,6 +16,9 @@ use Throwable;
  */
 class RepositoryProbe
 {
+    /** The one answer every "we could not get there" outcome collapses to. */
+    private const UNREACHABLE = 'Repository nicht erreichbar.';
+
     /**
      * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>}
      */
@@ -35,9 +39,24 @@ class RepositoryProbe
         // and suppress every tag (so `versions` was always empty) and the symref line
         // (so the default branch was never detected). `--symref` still prints the HEAD
         // symref among the full ref list.
-        $ls = Process::env($env)->timeout(30)->run([
-            'git', 'ls-remote', '--symref', '--end-of-options', $url,
-        ]);
+        //
+        // The timeout raises rather than returning a failed result, and nothing caught it:
+        // `https://host:81/x.git` (a public host on a filtered port) held a worker for the
+        // full 30 s and then produced a 500 with a stack trace, on an unauthenticated-log,
+        // caller-chosen target. A refused probe is an ordinary answer, not an exception, so
+        // it is reported the way every other unreachable target is reported.
+        try {
+            $ls = Process::env($env)->timeout(30)->run([
+                'git', 'ls-remote', '--symref', '--end-of-options', $url,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('Repository probe could not run git.', [
+                'reason' => class_basename($e),
+                'host' => (string) parse_url($url, PHP_URL_HOST),
+            ]);
+
+            return ['ok' => false, 'error' => self::UNREACHABLE, 'versions' => []];
+        }
 
         if (! $ls->successful()) {
             return ['ok' => false, 'error' => $this->readableGitError(GitAuth::scrub($ls->errorOutput())), 'versions' => []];
@@ -160,6 +179,20 @@ class RepositoryProbe
         return [$extract('name'), $extract('description')];
     }
 
+    /**
+     * Turns git's stderr into one of four fixed answers.
+     *
+     * The three named classes are product feedback and stay: they tell an operator whether
+     * to add a credential, fix a typo or check the network, and they say nothing the caller
+     * did not already supply. The fourth used to be the raw stderr, truncated to 200
+     * characters — and for the `ssh://` class that is the resolved IP address and the
+     * per-port connection state ("connect to host X port N: Connection refused" vs a
+     * banner), handed to an org Maintainer, the lowest console tier, for any target they
+     * name. The address policy in front of this refuses private targets; the stderr echo
+     * reported on everything that got past it, which made the probe a port scanner with a
+     * nicer UI. The detail the operator legitimately needs goes to the log, which is the
+     * operator's channel; the caller gets the non-distinguishing answer.
+     */
     private function readableGitError(string $stderr): string
     {
         $stderr = trim($stderr);
@@ -171,10 +204,16 @@ class RepositoryProbe
             return 'Repository nicht gefunden.';
         }
         if (Str::contains($stderr, ['Could not resolve host', 'unable to access', 'timed out'])) {
-            return 'Repository nicht erreichbar.';
+            return self::UNREACHABLE;
         }
 
-        return $stderr !== '' ? Str::limit($stderr, 200) : 'Repository konnte nicht gelesen werden.';
+        if ($stderr !== '') {
+            Log::info('Repository probe: unrecognised git transport error.', [
+                'stderr' => Str::limit($stderr, 500),
+            ]);
+        }
+
+        return 'Repository konnte nicht gelesen werden.';
     }
 
     private function deleteDir(string $dir): void

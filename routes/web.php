@@ -49,8 +49,14 @@ Route::get('dashboard', [DashboardController::class, 'index'])
 // admin only ever sees and touches their own registries, packages, tokens and domains.
 Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(function () {
     Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
-    // Preview a repository (reachability + discovered name/description/versions) before creating.
-    Route::post('packages/probe', [Admin\PackageController::class, 'probe'])->name('packages.probe');
+    // Preview a repository (reachability + discovered name/description/versions) before
+    // creating. Throttled: it shells out to git against a caller-named address and can hold
+    // a worker for the full `ls-remote` timeout, so an unbudgeted loop parks the worker pool
+    // — reachable by any Admin or Maintainer of any organization. The budget is per account
+    // (the default key for an authenticated route), so one tenant cannot spend another's,
+    // and 10/minute is far above what filling in the create dialog costs.
+    Route::post('packages/probe', [Admin\PackageController::class, 'probe'])
+        ->middleware('throttle:10,1')->name('packages.probe');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     // Edit a package's repository source (URL, private-repo credential/token).
     Route::put('packages/{package}', [Admin\PackageController::class, 'update'])->name('packages.update');

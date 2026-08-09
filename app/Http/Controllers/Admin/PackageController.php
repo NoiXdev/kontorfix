@@ -19,9 +19,11 @@ use App\Services\Registry\RegistryTypeService;
 use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
+use App\Support\CredentialUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -184,6 +186,18 @@ class PackageController extends Controller
         }
 
         $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $token, $provider, $username);
+
+        // This endpoint makes the instance dial an address the caller names, and it left no
+        // trace at all — so an org Maintainer sweeping hosts behind the address policy was
+        // indistinguishable from nobody having used the console. The URL is redacted because
+        // an inline `https://x-access-token:<PAT>@…` is a supported shape here, and a token
+        // in the log survives the rotation that is the response to leaking it.
+        Log::info('Repository probe.', [
+            'user_id' => $request->user()?->id,
+            'repository_url' => CredentialUrl::redact($data['repository_url']),
+            'git_credential_id' => $data['git_credential_id'] ?? null,
+            'ok' => $result['ok'],
+        ]);
 
         return response()->json($result);
     }

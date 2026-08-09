@@ -57,7 +57,7 @@ it('discovers the project name from a python pyproject.toml', function () {
 
 it('reports an unreachable repository', function () {
     Process::fake([
-        'git ls-remote*' => Process::result(output: '', errorOutput: 'fatal: Could not resolve host: nope.invalid', exitCode: 128),
+        '*ls-remote*' => Process::result(output: '', errorOutput: 'fatal: Could not resolve host: nope.invalid', exitCode: 128),
     ]);
 
     $this->actingAs(probeAdmin())->postJson('/admin/packages/probe', [
