@@ -27,7 +27,11 @@ it('read keys cannot create, write keys can', function () {
     $this->withToken($readPlain)->postJson('/api/v1/me/api-keys', ['name' => 'x', 'permission' => 'read'])
         ->assertForbidden();
 
-    $this->withToken($writePlain)->postJson('/api/v1/me/api-keys', ['name' => 'deploy', 'permission' => 'write'])
+    // A successor of a perpetual parent needs a finite life of its own — see
+    // ApiKeySuccessorTest; omitting expires_at here is now a 422, not a perpetual key.
+    $this->withToken($writePlain)->postJson('/api/v1/me/api-keys', [
+        'name' => 'deploy', 'permission' => 'write', 'expires_at' => now()->addDays(30)->toIso8601String(),
+    ])
         ->assertCreated()
         ->assertJsonPath('data.name', 'deploy')
         ->assertJsonPath('data.plain_text', fn ($v) => str_starts_with($v, 'kfxapi_'));

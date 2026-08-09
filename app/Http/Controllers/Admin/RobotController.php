@@ -70,7 +70,19 @@ class RobotController extends Controller
             'permission' => ['required', Rule::enum(ApiKeyPermission::class)],
         ]);
 
-        [, $plain] = ApiKey::issue($user, $validated['name'], ApiKeyPermission::from($validated['permission']));
+        // This path never went through StoreApiKeyRequest, so an operator who set an
+        // instance-wide ceiling had it silently bypassed for exactly the accounts that need
+        // it most: a robot's keys are not enumerable through any route, so nobody can see
+        // how many perpetual ones exist. The form offers no expiry field, so the ceiling is
+        // applied rather than validated — with no ceiling configured nothing changes.
+        $days = (int) config('kontorfix.api_key_max_ttl_days', 0);
+
+        [, $plain] = ApiKey::issue(
+            $user,
+            $validated['name'],
+            ApiKeyPermission::from($validated['permission']),
+            $days > 0 ? now()->addDays($days) : null,
+        );
 
         return back()->with('plainApiKey', $plain)->with('success', 'API-Key erstellt.');
     }

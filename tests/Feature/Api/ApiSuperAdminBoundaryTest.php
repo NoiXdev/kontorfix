@@ -39,7 +39,9 @@ it('still lets any authenticated key holder use the self-service endpoints', fun
 
     $this->withToken($plain)->getJson('/api/v1/me')->assertOk()->assertJsonPath('data.id', $custAdmin->id);
     $this->withToken($plain)->getJson('/api/v1/me/api-keys')->assertOk();
-    $this->withToken($plain)->postJson('/api/v1/me/api-keys', ['name' => 'ci', 'permission' => 'read'])->assertCreated();
+    $this->withToken($plain)->postJson('/api/v1/me/api-keys', [
+        'name' => 'ci', 'permission' => 'read', 'expires_at' => now()->addDays(30)->toIso8601String(),
+    ])->assertCreated();
 });
 
 it('lets a flag-based super-admin (in a customer org) use the instance-wide endpoints', function () {

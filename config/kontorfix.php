@@ -61,6 +61,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Successor API key lifetime
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound in days on a key minted by presenting another key — the self-service
+    | rotation route, which cannot carry `password.confirm` because /api/v1 is stateless.
+    | A successor may never outlive its parent; this is what bounds the case where the
+    | parent has no expiry at all, which otherwise let one leaked key renew itself forever
+    | and made revoking it pointless.
+    |
+    | Unlike `api_key_max_ttl_days` this defaults to a finite value, because it can only
+    | ever apply to a key being created right now: no existing credential is shortened by
+    | it. A robot that keeps rotating keeps working. 0 opts out and restores the
+    | self-renewing chain.
+    |
+    */
+
+    'api_key_successor_max_ttl_days' => (int) env('KONTORFIX_API_KEY_SUCCESSOR_MAX_TTL_DAYS', 90),
+
+    /*
+    |--------------------------------------------------------------------------
     | Interactive API browser
     |--------------------------------------------------------------------------
     |

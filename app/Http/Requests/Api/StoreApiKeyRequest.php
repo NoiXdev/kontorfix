@@ -19,10 +19,20 @@ use Illuminate\Validation\Rule;
  * its own credential, so it is not withdrawn; instead a successor is bounded by its parent:
  * never a wider permission, never a longer life.
  *
- * What this deliberately does NOT close: a parent key with no expiry at all still mints
- * successors with no expiry. Bounding that needs `api_key_max_ttl_days`, which is an
- * operator decision — defaulting it to something finite would silently expire the
- * automation of every existing install.
+ * The first version of that rule left the whole hole open in its most common shape: a
+ * parent with `expires_at = null` returned early, so it minted null-expiry successors and
+ * the chain never ended. The reasoning was that bounding it needs `api_key_max_ttl_days`,
+ * and defaulting THAT to something finite would silently expire the automation of every
+ * existing install. True of the ceiling — it applies to keys a human mints in the console —
+ * and not true here: a successor is a key being created right now, by the route that exists
+ * so a robot can rotate its credential. Giving it a finite life touches nothing that
+ * already exists. So an unbounded parent falls back to `api_key_successor_max_ttl_days`
+ * (90 days by default, 0 to opt out), and the chain has to be renewed rather than inherited.
+ *
+ * The human path is untouched: `clampToParentKey()` only fires when a key was presented as
+ * the credential for this request, so the console form behind `password.confirm` may still
+ * mint a perpetual key. That is the boundary — the tier that proved a password may, a key
+ * minting its own successor may not.
  */
 class StoreApiKeyRequest extends FormRequest
 {
@@ -88,15 +98,26 @@ class StoreApiKeyRequest extends FormRequest
             );
         }
 
-        if ($parent->expires_at === null) {
-            return;
+        $ceiling = $parent->expires_at;
+        $message = 'Ein mit einem API-Key ausgestellter Key darf nicht länger gültig sein als der ausstellende Key (spätestens '
+            .$ceiling?->toDateString().').';
+
+        if ($ceiling === null) {
+            // A perpetual parent was a blank cheque: it minted perpetual successors, so
+            // revoking the leaked key ended nothing. Fall back to the successor ceiling.
+            $days = (int) config('kontorfix.api_key_successor_max_ttl_days', 90);
+
+            if ($days <= 0) {
+                return;
+            }
+
+            $ceiling = now()->addDays($days);
+            $message = "Ein mit einem API-Key ausgestellter Key braucht ein Ablaufdatum von höchstens {$days} Tagen "
+                ."(spätestens {$ceiling->toDateString()}) — auch wenn der ausstellende Key unbegrenzt gültig ist.";
         }
 
-        if ($this->date('expires_at') === null || $this->date('expires_at')->gt($parent->expires_at)) {
-            $validator->errors()->add(
-                'expires_at',
-                'Ein mit einem API-Key ausgestellter Key darf nicht länger gültig sein als der ausstellende Key (spätestens '.$parent->expires_at->toDateString().').',
-            );
+        if ($this->date('expires_at') === null || $this->date('expires_at')->gt($ceiling)) {
+            $validator->errors()->add('expires_at', $message);
         }
     }
 }
