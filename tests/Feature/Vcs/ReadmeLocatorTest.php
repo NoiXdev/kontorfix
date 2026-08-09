@@ -1,0 +1,113 @@
+<?php
+
+use App\Services\Vcs\GitRepository;
+use App\Services\Vcs\ReadmeLocator;
+use App\Services\Vcs\ReadmeRenderer;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Process;
+
+afterEach(function () {
+    File::deleteDirectory(storage_path('app/vcs'));
+
+    foreach (glob(sys_get_temp_dir().'/readme-*') ?: [] as $dir) {
+        File::deleteDirectory($dir);
+    }
+});
+
+/**
+ * Builds a throwaway source repo on disk and returns a synced GitRepository mirror
+ * pointed at it, the same way production reaches a bare `--mirror` clone. A faked
+ * Process would prove nothing about how `git ls-tree` / `git show` actually behave.
+ *
+ * @param  array<string, string>  $files  path (relative to repo root) => contents
+ */
+function readmeRepoWith(array $files): GitRepository
+{
+    $dir = sys_get_temp_dir().'/readme-'.bin2hex(random_bytes(6));
+    mkdir($dir, 0775, true);
+    Process::path($dir)->run(['git', 'init', '-q', '-b', 'main'])->throw();
+
+    foreach ($files as $name => $contents) {
+        $path = $dir.'/'.$name;
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+        file_put_contents($path, $contents);
+    }
+
+    Process::path($dir)->run(['git', 'add', '-A'])->throw();
+    Process::path($dir)
+        ->env(['GIT_AUTHOR_NAME' => 'T', 'GIT_AUTHOR_EMAIL' => 't@t.test', 'GIT_COMMITTER_NAME' => 'T', 'GIT_COMMITTER_EMAIL' => 't@t.test'])
+        ->run(['git', 'commit', '-q', '-m', 'init'])->throw();
+
+    $repo = new GitRepository('file://'.$dir, 'readme-test-'.bin2hex(random_bytes(6)));
+    $repo->sync();
+
+    return $repo;
+}
+
+it('finds a README.md at the repository root', function () {
+    $repo = readmeRepoWith(['README.md' => '# Hallo']);
+
+    expect(ReadmeLocator::find($repo, 'HEAD'))
+        ->toMatchArray(['filename' => 'README.md', 'source' => '# Hallo']);
+});
+
+it('matches the filename case-insensitively', function () {
+    $repo = readmeRepoWith(['readme.MD' => 'x']);
+
+    expect(ReadmeLocator::find($repo, 'HEAD')['filename'])->toBe('readme.MD');
+});
+
+it('prefers README.md over README.txt when both exist', function () {
+    $repo = readmeRepoWith(['README.md' => 'md', 'README.txt' => 'txt']);
+
+    expect(ReadmeLocator::find($repo, 'HEAD')['source'])->toBe('md');
+});
+
+it('returns null when the repository has no readme', function () {
+    $repo = readmeRepoWith(['composer.json' => '{}']);
+
+    expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
+});
+
+it('ignores a readme in a subdirectory', function () {
+    $repo = readmeRepoWith(['composer.json' => '{}', 'docs/README.md' => 'nested']);
+
+    expect(ReadmeLocator::find($repo, 'HEAD'))->toBeNull();
+});
+
+it('truncates a readme above the cap and says so', function () {
+    $repo = readmeRepoWith(['README.md' => str_repeat('a', 300 * 1024)]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    expect(strlen($found['source']))->toBeLessThanOrEqual(ReadmeLocator::MAX_BYTES + 200)
+        ->and($found['source'])->toContain('gekürzt');
+});
+
+it('does not split a multi-byte character at the truncation boundary', function () {
+    // "é" is 2 bytes in UTF-8. Placed so the byte cap lands on its first byte only, a
+    // naive substr() would slice it in half and hand ReadmeRenderer invalid UTF-8 —
+    // which it throws on rather than degrading gracefully (see ReadmeRenderer's docblock
+    // and ReadmeLocator::truncate()'s).
+    $source = str_repeat('a', ReadmeLocator::MAX_BYTES - 1).'é'.str_repeat('b', 1000);
+    $repo = readmeRepoWith(['README.md' => $source]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    expect(mb_check_encoding($found['source'], 'UTF-8'))->toBeTrue();
+
+    // A raw byte split would hand invalid UTF-8 to CommonMark, which throws rather than
+    // degrading — an uncaught exception here fails the test.
+    expect(ReadmeRenderer::render($found['source'], $found['filename']))->toBeString();
+});
+
+it('closes an unterminated code fence left open by truncation', function () {
+    // Opens a fence early and never closes it before the byte cap, so the raw cut would
+    // swallow the truncation notice into the code block. closeUnterminatedFence() must
+    // append a closing fence first so the fence markers stay balanced.
+    $source = "```php\n".str_repeat("x\n", (int) (ReadmeLocator::MAX_BYTES / 2));
+    $repo = readmeRepoWith(['README.md' => $source]);
+    $found = ReadmeLocator::find($repo, 'HEAD');
+
+    expect(substr_count($found['source'], '```') % 2)->toBe(0);
+});

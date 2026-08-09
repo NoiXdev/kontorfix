@@ -94,6 +94,19 @@ class GitRepository
     }
 
     /**
+     * Blob and subtree names at the root of $ref, non-recursive. `run()` stays private —
+     * this is the one narrow slice of it a caller outside this class needs (ReadmeLocator).
+     *
+     * @return list<string>
+     */
+    public function rootFileNames(string $ref): array
+    {
+        $output = $this->run(['git', 'ls-tree', '--name-only', '--end-of-options', $ref])->output();
+
+        return array_values(array_filter(array_map('trim', explode("\n", $output)), fn (string $line) => $line !== ''));
+    }
+
+    /**
      * Builds a zip archive of the ref. The caller is responsible for deleting the
      * returned file.
      */
