@@ -25,6 +25,17 @@ it('shows a package detail within the customers own registry', function () {
             ->where('install', fn ($v) => str_contains($v, 'acme/widget')));
 });
 
+it('sends the portal detail page its versions newest first', function () {
+    foreach (['1.9.0', '1.10.0', '1.2.0'] as $v) {
+        PackageVersion::factory()->create(['package_id' => $this->pkg->id, 'version' => $v, 'version_pretty' => $v]);
+    }
+
+    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+        ->assertInertia(fn ($p) => $p->where(
+            'versions.0.version', '1.10.0'
+        )->where('versions.1.version', '1.9.0'));
+});
+
 it('forbids a package not in the members registry', function () {
     $otherGroup = Group::factory()->for(Organization::factory()->create())->create();
     $otherPkg = Package::factory()->create();

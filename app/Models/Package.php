@@ -91,6 +91,7 @@ class Package extends Model
         'source_mode',
         'name',
         'description',
+        'readme_html',
         'repository_url',
         'repository_token',
         'git_credential_id',

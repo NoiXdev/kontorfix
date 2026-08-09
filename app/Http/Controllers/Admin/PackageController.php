@@ -21,6 +21,7 @@ use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
+use App\Support\VersionOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -91,6 +92,7 @@ class PackageController extends Controller
         $this->assertCanTouchPackage($package);
 
         $package->load(['versions', 'groups:id,name,slug,organization_id']);
+        $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         // `assertCanTouchPackage()` only asserts that ONE of the package's registries is
         // reachable in the active scope. Serialising the whole relation therefore handed a
