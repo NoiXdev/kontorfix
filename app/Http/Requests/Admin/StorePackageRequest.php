@@ -39,8 +39,16 @@ class StorePackageRequest extends FormRequest
 
         return [
             'type' => ['required', Rule::enum(PackageType::class)],
-            // Composer is always git; npm/Python default to publish but may mirror git.
-            'source_mode' => ['nullable', Rule::enum(PackageSourceMode::class)],
+            // Which modes a type may use lives on the enum. npm is publish-only: a mirror
+            // of the repository tree is not what `npm publish` uploads.
+            'source_mode' => [
+                'nullable',
+                Rule::enum(PackageSourceMode::class),
+                Rule::in(array_map(
+                    fn (PackageSourceMode $m): string => $m->value,
+                    PackageSourceMode::allowedFor($type ?? PackageType::Composer)
+                )),
+            ],
             'name' => [
                 'required',
                 'string',
@@ -68,16 +76,21 @@ class StorePackageRequest extends FormRequest
     }
 
     /**
-     * The source mode the package will be created with: Composer is always Git; npm/Python
-     * honour the submitted mode, defaulting to Publish.
+     * The source mode the package will be created with. A submitted mode is honoured only
+     * if the type allows it — the rules() constraint rejects anything else before this
+     * runs — and otherwise the type's default applies.
      */
     public function effectiveSourceMode(?PackageType $type): PackageSourceMode
     {
-        if ($type === PackageType::Composer) {
-            return PackageSourceMode::Git;
+        if ($type === null) {
+            return PackageSourceMode::Publish;
         }
 
-        return PackageSourceMode::tryFrom((string) $this->input('source_mode')) ?? PackageSourceMode::Publish;
+        $submitted = PackageSourceMode::tryFrom((string) $this->input('source_mode'));
+
+        return $submitted !== null && in_array($submitted, PackageSourceMode::allowedFor($type), true)
+            ? $submitted
+            : PackageSourceMode::defaultFor($type);
     }
 
     public function withValidator(Validator $validator): void
