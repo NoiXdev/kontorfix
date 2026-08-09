@@ -10,6 +10,10 @@ use App\Models\User;
 beforeEach(function () {
     $this->orgA = Organization::factory()->create();
     $this->member = User::factory()->for($this->orgA)->create(['role' => UserRole::Member]);
+    // Minting through the portal sits behind `password.confirm` (see routes/web.php);
+    // this file is about the org scoping behind that gate, not the gate itself, which
+    // CredentialPasswordConfirmationTest covers.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
 });
 
 it('creates a token scoped to the members own org and returns the plaintext once', function () {

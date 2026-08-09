@@ -5,6 +5,7 @@ namespace App\Services\Composer;
 use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use App\Support\CredentialUrl;
 use Composer\MetadataMinifier\MetadataMinifier;
 
 class ComposerMetadataBuilder
@@ -35,7 +36,10 @@ class ComposerMetadataBuilder
                 if ($package->repository_url !== null) {
                     $entry['source'] = [
                         'type' => 'git',
-                        'url' => $package->repository_url,
+                        // Widest reader set in the product: every registry read token, and
+                        // anonymous clients when the group is public. A PAT written as
+                        // userinfo must never reach a package manager's lock file.
+                        'url' => CredentialUrl::redact($package->repository_url),
                         'reference' => $v->source_reference,
                     ];
                 }

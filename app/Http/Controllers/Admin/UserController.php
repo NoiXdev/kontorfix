@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\UserInvitation;
+use App\Services\RegistryTokenLifecycleService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -19,6 +20,8 @@ use Inertia\Response;
 
 class UserController extends Controller
 {
+    public function __construct(private readonly RegistryTokenLifecycleService $tokenLifecycle) {}
+
     public function index(): Response
     {
         return Inertia::render('admin/users/Index', [
@@ -90,6 +93,15 @@ class UserController extends Controller
 
         $user->update($validated);
 
+        // Deliberately no revokeUnentitled() here. A role or home-organization change is
+        // a dropdown in the same form as the name and the email, and it is the one
+        // lifecycle event that happens to a *current* employee — an accidental
+        // Maintainer -> Member toggle must not permanently take that person's publish
+        // tokens away. It does not have to: RegistryToken::ownerIsStillEntitled() refuses
+        // such a token at resolution time and follows the role back up when the mistake
+        // is corrected. Revocation is reserved for actual deprovisioning (detaching a
+        // membership, deleting the account).
+
         return back()->with('success', "Nutzer {$user->name} aktualisiert.");
     }
 
@@ -118,6 +130,9 @@ class UserController extends Controller
     public function detachOrganization(User $user, Organization $organization): RedirectResponse
     {
         $user->organizations()->detach($organization->id);
+
+        // Personal tokens for an organization the user has left are dead credentials.
+        $this->tokenLifecycle->revokeUnentitled($user);
 
         return back()->with('success', 'Organisation entfernt.');
     }

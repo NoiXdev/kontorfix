@@ -17,8 +17,13 @@ Route::middleware('guest')->group(function () {
     Route::get('register', [RegisteredUserController::class, 'create'])
         ->middleware(EnsureRegistrationEnabled::class)->name('register');
 
+    // The only unauthenticated endpoint on the instance that had no limit at all, and one
+    // of the most expensive: a bcrypt-12 hash, a row insert and a `Registered` event that
+    // sends mail, per request. Five a minute matches the neighbouring auth routes and is
+    // far above what a human ever needs; keyed on the source address, so it costs an
+    // abuser addresses and never denies an account that does not exist yet.
     Route::post('register', [RegisteredUserController::class, 'store'])
-        ->middleware(EnsureRegistrationEnabled::class);
+        ->middleware([EnsureRegistrationEnabled::class, 'throttle:5,1']);
 
     Route::get('login', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
@@ -35,12 +40,14 @@ Route::middleware('guest')->group(function () {
         ->name('password.request');
 
     Route::post('forgot-password', [PasswordResetLinkController::class, 'store'])
+        ->middleware('throttle:password-reset')
         ->name('password.email');
 
     Route::get('reset-password/{token}', [NewPasswordController::class, 'create'])
         ->name('password.reset');
 
     Route::post('reset-password', [NewPasswordController::class, 'store'])
+        ->middleware('throttle:password-reset-complete')
         ->name('password.store');
 
     Route::get('auth/oidc/{slug}/redirect', [OidcController::class, 'redirect'])
@@ -65,6 +72,13 @@ Route::middleware('auth')->group(function () {
         ->name('password.confirm');
 
     Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
+
+    // The escape hatch out of the gate for accounts whose owner never knew a password
+    // (OIDC-provisioned, admin-invited). Keyed on the session owner, so the throttle
+    // protects that one mailbox and cannot be burned on anyone else's behalf.
+    Route::post('confirm-password/set-link', [ConfirmablePasswordController::class, 'sendPasswordLink'])
+        ->middleware('throttle:5,10')
+        ->name('password.confirm.link');
 
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');

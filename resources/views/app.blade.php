@@ -11,7 +11,9 @@
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=instrument-sans:400,500,600" rel="stylesheet" />
 
-        @routes
+        {{-- The only inline script in the layout. It needs the CSP nonce, otherwise
+             enforcing the policy (SECURITY_CSP=enforce) blanks the whole SPA. --}}
+        @routes(nonce: \Illuminate\Support\Facades\Vite::cspNonce())
         @vite(['resources/js/app.ts'])
         @inertiaHead
     </head>

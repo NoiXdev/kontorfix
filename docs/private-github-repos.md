@@ -62,6 +62,43 @@ In the admin console → **Pakete → Paket hinzufügen** (or the quick-add on a
 - To rotate: edit the package (re-enter a new token) or delete and recreate it.
   Revoke the old token at the provider.
 
+- A credential is **bound to one host** and its token is never sent anywhere else. For
+  GitHub/GitLab/Bitbucket that host defaults to the provider's own; a self-hosted GitLab
+  or GitHub Enterprise credential must name its host explicitly. Changing the host
+  requires re-entering the token — only someone who already holds the secret may decide
+  where it is sent.
+- The binding is the whole **authority, port included**. `gitlab.corp` matches
+  `https://gitlab.corp/…` and `https://gitlab.corp:443/…` but not `https://gitlab.corp:9999/…`,
+  because the `Authorization` header git receives is scoped to `scheme://host:port` and a
+  different port on the same machine is a different service. A git server on a non-default
+  port is named with it: `gitlab.corp:8443`.
+
+> **Upgrading:** if a package's repository URL carries an explicit non-default port, edit
+> the credential to name that port and re-enter the token, or its syncs will refuse with
+> *"Dieses Git-Token ist an … gebunden"*.
+
+### Upgrading an instance that predates the host binding
+
+The migration binds every existing credential to its provider's canonical host. It does
+**not** derive a host from a package's repository URL: that URL was operator-supplied and
+would let a maintainer nominate the host their organization's token gets sent to. Any
+credential whose assigned packages point somewhere other than the canonical host — a
+self-hosted GitLab or GHE, typically — is therefore left with an empty `host` column and
+logged with a `Git credential left without a host binding` warning.
+
+Such a credential is **unusable** until an operator names its host. `allowedHost()` returns
+null for an empty column and `permits()` refuses everything, whatever the provider — it used
+to fall back to the provider's canonical host, which quietly bound a self-hosted PAT to
+`github.com` / `gitlab.com` / `bitbucket.org` and transmitted it there, where it is useless
+but disclosed. Nothing entered through the console is affected: the form writes the provider
+default into the column when the operator names no host, so an empty column is exactly the
+set of rows the migration refused to decide for.
+
+The fix is the same as before: edit the credential, name the real host in the *Host* field
+(with a port if the server uses a non-default one, e.g. `gitlab.example:8443`), and re-enter
+the token — the retarget guard asks for it because only someone who holds the secret may
+decide where it is sent.
+
 ## Troubleshooting
 
 - **"Zugriff verweigert — Repository privat?"** on *Prüfen*: the token is missing,

@@ -134,6 +134,10 @@ const disable = () => {
                                 placeholder="Passwort"
                             />
                             <InputError :message="disableForm.errors.password" />
+                            <p class="text-xs text-muted-foreground">
+                                Kein Passwort für dieses Konto? Feld leer lassen und abschicken — die Bestätigung läuft dann über einen Passkey oder
+                                einen zugeschickten Link zum Setzen eines Passworts.
+                            </p>
                         </div>
 
                         <Button variant="destructive" :disabled="disableForm.processing">Zwei-Faktor deaktivieren</Button>

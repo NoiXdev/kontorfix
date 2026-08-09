@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\SetupGateState;
 use App\Enums\UserRole;
 use App\Http\Requests\StoreSetupRequest;
 use App\Http\Requests\TestMailRequest;
@@ -11,6 +12,7 @@ use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
 use App\Services\Mail\MailManager;
+use App\Services\Setup\SetupGate;
 use App\Services\Setup\SetupStatus;
 use App\Services\Setup\SetupToken;
 use Illuminate\Http\JsonResponse;
@@ -25,23 +27,30 @@ use Inertia\Response;
 
 class SetupController extends Controller
 {
-    private const SESSION_KEY = 'setup.token_ok';
-
-    public function show(Request $request, SetupToken $token): Response
+    /**
+     * Presents the first-run token.
+     *
+     * A POST, because the token is a takeover secret and a query string is copied into
+     * proxy logs, APM traces and browser history. Reachable while the gate is locked —
+     * it is how one gets unlocked — but throttled, and it never echoes the value back.
+     */
+    public function unlock(Request $request, SetupGate $gate): RedirectResponse
     {
-        // If a setup token is configured (production, via `setup:token` at boot), the
-        // wizard stays locked until the correct token is presented — see class docblock
-        // on SetupToken. A token passed as ?token= is verified once and remembered in
-        // the session so the multi-step wizard doesn't need it on every request.
-        $locked = false;
-
-        if ($token->current() !== null) {
-            if ($token->matches($request->query('token'))) {
-                $request->session()->put(self::SESSION_KEY, true);
-            }
-
-            $locked = ! $request->session()->get(self::SESSION_KEY, false);
+        if ($gate->unlock($request)) {
+            return redirect()->route('setup.show');
         }
+
+        return redirect()->route('setup.show')
+            ->withErrors(['token' => 'Das Setup-Token ist ungültig. Es steht in den Startup-Logs des Containers.']);
+    }
+
+    public function show(Request $request, SetupGate $gate): Response
+    {
+        // One of the two routes in the setup group that EnsureSetupTokenPresented lets
+        // through while locked, because this page *is* the token prompt (the other is
+        // the unlock POST it submits to). All that is left here is to render the right
+        // view for the state the gate is in.
+        $locked = $gate->state($request) === SetupGateState::Locked;
 
         return Inertia::render('setup/Wizard', [
             'appName' => config('app.name'),
@@ -57,35 +66,29 @@ class SetupController extends Controller
     }
 
     /**
-     * Guards the writing endpoints (store/test) against a caller that never passed the
-     * setup token, even though they somehow reached the routes.
-     */
-    private function assertTokenSatisfied(Request $request, SetupToken $token): void
-    {
-        if ($token->current() !== null && ! $request->session()->get(self::SESSION_KEY, false)) {
-            abort(403, 'Setup token required.');
-        }
-    }
-
-    /**
      * Lets the installer prove the mail backend works before committing to it.
      *
      * Unauthenticated by necessity — there is no account yet — but bounded the same way
      * as the wizard itself: EnsureSetupIncomplete makes it unreachable once any user
      * exists, and the route is rate limited, so it cannot be used as an open relay.
+     * Without the token gate it would additionally be an anonymous arbitrary-host,
+     * arbitrary-port TCP connect with the transport error echoed back — hence the
+     * belt-and-braces assertion on top of the route middleware.
      */
-    public function testMail(TestMailRequest $request, MailManager $manager, SetupToken $token): JsonResponse
+    public function testMail(TestMailRequest $request, MailManager $manager, SetupGate $gate): JsonResponse
     {
-        $this->assertTokenSatisfied($request, $token);
+        $gate->assertUnlocked($request);
 
         $setting = $manager->fromInput($request->validated());
 
         return response()->json($manager->sendTest($setting, (string) $request->validated('recipient')));
     }
 
-    public function store(StoreSetupRequest $request, SetupStatus $status, SetupToken $token): RedirectResponse
+    public function store(StoreSetupRequest $request, SetupStatus $status, SetupToken $token, SetupGate $gate): RedirectResponse
     {
-        $this->assertTokenSatisfied($request, $token);
+        // Redundant with EnsureSetupTokenPresented on the route, deliberately: this is
+        // the action that hands out the instance, so it does not rely on its routing.
+        $gate->assertUnlocked($request);
 
         $data = $request->validated();
 

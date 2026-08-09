@@ -25,8 +25,10 @@ function unlock() {
     if (tokenInput.value.trim() === '') {
         return;
     }
-    // Re-hit the wizard with the token; the server verifies and remembers it.
-    router.get(route('setup.show'), { token: tokenInput.value.trim() }, { preserveState: false });
+    // POST, never a query parameter: the token grants the whole instance, and a URL is
+    // copied into proxy logs, APM traces and the browser's own history. The server
+    // verifies it and remembers the result in the session.
+    router.post(route('setup.unlock'), { token: tokenInput.value.trim() }, { preserveState: false });
 }
 
 const form = useForm({

@@ -27,6 +27,8 @@ class StoreTokenRequest extends FormRequest
                 Rule::exists('groups', 'id')->where('organization_id', $this->input('organization_id')),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],
+            // Optional lifetime. Omitting it keeps the token open-ended.
+            'expires_at' => ['nullable', 'date', 'after:now'],
         ];
     }
 }

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\Auth\KnownClients;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +18,8 @@ use Inertia\Response;
 
 class NewPasswordController extends Controller
 {
+    public function __construct(private readonly KnownClients $knownClients) {}
+
     /**
      * Show the password reset page.
      */
@@ -51,6 +55,16 @@ class NewPasswordController extends Controller
                     'remember_token' => Str::random(60),
                 ])->save();
 
+                // The way back in for a holder whose browser the login throttle does not
+                // recognise — new machine, cleared cookies — while somebody is saturating
+                // the guess queue against their account. Proving control of the mailbox is
+                // strictly more than the marker stands for, and this endpoint is throttled
+                // per source address only (see the `password-reset-complete` limiter), so
+                // it is the one recovery path an attacker cannot deny them.
+                if ($user instanceof User) {
+                    $this->knownClients->remember($request, $user);
+                }
+
                 event(new PasswordReset($user));
             }
         );
@@ -62,8 +76,14 @@ class NewPasswordController extends Controller
             return to_route('login')->with('status', __($status));
         }
 
+        // Every failure answers as an invalid token. The broker's own statuses distinguish
+        // them: `validateReset()` returns INVALID_USER *before* it ever looks at the token,
+        // so rendering the status verbatim turned this endpoint into the account-existence
+        // oracle that `POST /forgot-password` is deliberately written to withhold — same
+        // directory, one bit per address, no authentication and no token needed. RESET_THROTTLED
+        // is collapsed with it, because a distinguishable "too many attempts" is the same bit.
         throw ValidationException::withMessages([
-            'email' => [__($status)],
+            'email' => [__(Password::INVALID_TOKEN)],
         ]);
     }
 }

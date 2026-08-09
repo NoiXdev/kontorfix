@@ -16,7 +16,17 @@ class IncomingPayloadParser
                 $provider === 'github' ? 'sha256=' : '',
             ),
             'gitlab' => hash_equals($secret, (string) $request->header('X-Gitlab-Token', '')),
-            'bitbucket' => hash_equals($secret, (string) $request->query('token', '')),
+            // Bitbucket used to be compared against `?token=`, i.e. a bare bearer token in
+            // the request line: disclosed to every access log, CDN and APM on the path, on
+            // every delivery, and replayable forever from a single captured URL. Both
+            // Bitbucket Cloud and Data Center send `X-Hub-Signature: sha256=<hmac>` when
+            // the webhook has a secret, so it gets the same body-bound construction as the
+            // github branch and the secret never travels. The query parameter is not
+            // accepted as a fallback — that would keep the disclosure — and nothing that
+            // worked is lost: the admin UI never emitted a token-bearing URL and the REST
+            // reference never described the convention, so a hook configured as documented
+            // always 401'd.
+            'bitbucket' => $this->verifyHmacHeader($request, 'X-Hub-Signature', $secret, 'sha256='),
             default => false,
         };
     }

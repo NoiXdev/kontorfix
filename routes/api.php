@@ -64,7 +64,8 @@ Route::prefix('v1')
             Route::delete('groups/{group}', [GroupController::class, 'destroy'])->name('groups.destroy');
 
             // Sub-resources of a registry: domains, upstreams, package assignment.
-            Route::post('groups/{group}/domains', [GroupDomainController::class, 'store'])->name('groups.domains.store');
+            // Attaching a hostname is NOT here — it is instance-wide and operator-only
+            // (see the `super` group below). Detaching stays with the owning organization.
             Route::delete('groups/{group}/domains/{domain}', [GroupDomainController::class, 'destroy'])->name('groups.domains.destroy');
 
             Route::post('groups/{group}/upstreams', [GroupUpstreamController::class, 'store'])->name('groups.upstreams.store');
@@ -83,6 +84,10 @@ Route::prefix('v1')
         // webhooks, the organization/user/robot directory and the system health status
         // have no per-organization dimension.
         Route::middleware('super')->group(function () {
+            // A registry hostname is globally unique and unprovable from inside the app —
+            // see the matching web route for the full reasoning.
+            Route::post('groups/{group}/domains', [GroupDomainController::class, 'store'])->name('groups.domains.store');
+
             Route::get('webhooks', [WebhookController::class, 'index'])->name('webhooks.index');
             Route::post('webhooks', [WebhookController::class, 'store'])->name('webhooks.store');
             Route::delete('webhooks/{webhook}', [WebhookController::class, 'destroy'])->name('webhooks.destroy');

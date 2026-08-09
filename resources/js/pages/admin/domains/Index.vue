@@ -33,6 +33,11 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Domains', href: '/admin/domains
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
+// Attaching a hostname is operator-only server-side (routes/web.php). Mirror that here so
+// a customer-org admin is not offered a form that can only ever return 403. Detaching
+// stays available to the owning organization, so the table's delete button is unguarded.
+const canAttach = computed(() => page.props.auth?.can?.super === true);
+
 const dialogOpen = ref(false);
 
 const form = useForm({
@@ -70,7 +75,7 @@ function destroyDomain(id: string) {
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Domains</h1>
-                <Button @click="dialogOpen = true">
+                <Button v-if="canAttach" @click="dialogOpen = true">
                     <Plus class="size-4" />
                     Domain hinzufügen
                 </Button>
@@ -79,6 +84,9 @@ function destroyDomain(id: string) {
             <p class="text-sm text-muted-foreground">
                 Eine Gruppe ist unter <code class="font-mono">https://&lt;Hostname&gt;/</code> erreichbar, sobald DNS und Reverse-Proxy auf diesen
                 Host zeigen.
+            </p>
+            <p v-if="!canAttach" class="text-sm text-muted-foreground">
+                Neue Hostnamen werden vom Betreiber der Instanz eingetragen — ein Hostname gilt instanzweit. Bitte wende dich an den Betreiber.
             </p>
 
             <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">

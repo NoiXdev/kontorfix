@@ -68,6 +68,20 @@ class MailManager
     }
 
     /**
+     * Whether the active transport can actually put a message in front of a recipient.
+     *
+     * `log` is the setup wizard's default ("kein Versand — später konfigurierbar") and
+     * `array`/`null` are test and disabled transports: they all accept a message and
+     * throw nothing while nobody ever receives it. Any flow that would take something
+     * away from a user until they act on a mail has to know the difference, or it locks
+     * the user out of a door that has no key.
+     */
+    public function canDeliver(): bool
+    {
+        return ! in_array((string) config('mail.default'), ['log', 'array', 'null', ''], true);
+    }
+
+    /**
      * Builds an unsaved setting from validated input so a configuration can be probed
      * before it is persisted. Blank secret fields fall back to the stored values, which
      * is what lets the admin form re-test without retyping the password.

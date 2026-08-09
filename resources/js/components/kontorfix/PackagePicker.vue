@@ -19,7 +19,16 @@ const selected = defineModel<Pkg[]>({ default: () => [] });
 
 // When set, a persistent "Neues Paket anlegen" button is shown (not only when a search
 // yields no results) — used on the registry package tab for an obvious quick-add.
-withDefaults(defineProps<{ createButton?: boolean }>(), { createButton: false });
+//
+// createGroupId is the registry the quick-add belongs to, and it is not optional in
+// practice: a package created with no registry belongs to no organization, which makes it
+// invisible in every listing (they all join through `groups`) and attachable by any tenant
+// that still holds its id. Attaching it in the same request as its creation is what keeps
+// the picker from producing one.
+const props = withDefaults(defineProps<{ createButton?: boolean; createGroupId?: string }>(), {
+    createButton: false,
+    createGroupId: undefined,
+});
 
 const query = ref('');
 const failed = ref(false);
@@ -217,7 +226,10 @@ async function createPackage() {
                 'X-XSRF-TOKEN': xsrfToken(),
             },
             credentials: 'same-origin',
-            body: JSON.stringify(createForm.value),
+            body: JSON.stringify({
+                ...createForm.value,
+                ...(props.createGroupId ? { group_ids: [props.createGroupId] } : {}),
+            }),
         });
 
         if (response.status === 422) {

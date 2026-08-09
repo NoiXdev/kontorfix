@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Support\ActivityPresenter;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Spatie\Activitylog\Models\Activity;
@@ -27,8 +28,18 @@ class ActivityController extends Controller
             ->with(['causer', 'subject'])
             ->when(is_string($log) && $log !== '', fn ($q) => $q->where('log_name', $log))
             ->when(is_string($subjectType) && $subjectType !== '', fn ($q) => $q->where('subject_type', $this->qualify($subjectType)))
-            ->when(is_string($subjectId) && $subjectId !== '', fn ($q) => $q->where('subject_id', $subjectId))
-            ->when(is_string($causer) && $causer !== '', fn ($q) => $q->where('causer_id', $causer))
+            // Both ids are plain query-string values landing on a Postgres `uuid`
+            // comparison, where a malformed one raised an unrendered SQLSTATE[22P02] —
+            // a 500 whose stack trace, with the bound parameters, went to an unrotated
+            // log. Str::isUuid decides it rather than a character class: `[0-9a-fA-F-]{36}`
+            // was tried twice on this branch and 36 dashes satisfy it. An id that cannot
+            // exist selects nothing, so the log comes back empty rather than unfiltered.
+            ->when(is_string($subjectId) && $subjectId !== '', fn ($q) => Str::isUuid($subjectId)
+                ? $q->where('subject_id', $subjectId)
+                : $q->whereRaw('1 = 0'))
+            ->when(is_string($causer) && $causer !== '', fn ($q) => Str::isUuid($causer)
+                ? $q->where('causer_id', $causer)
+                : $q->whereRaw('1 = 0'))
             ->latest('id')
             ->paginate(30)
             ->withQueryString()

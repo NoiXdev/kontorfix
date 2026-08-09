@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\AccountType;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -28,7 +28,7 @@ use Spatie\Activitylog\Support\LogOptions;
  * @property int|null $two_factor_last_timestamp
  * @property-read Collection<int, Passkey> $passkeys
  */
-class User extends Authenticatable implements PasskeyUser
+class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, HasUuids, LogsActivity, Notifiable, PasskeyAuthenticatable;
@@ -200,6 +200,20 @@ class User extends Authenticatable implements PasskeyUser
     }
 
     /**
+     * Whether the account carries privilege from *any* source: the global super-admin flag,
+     * an admin/maintainer role in the home organization, or an admin/maintainer role on a
+     * per-organization membership. Meant for guards that protect a credential path (such as
+     * federated auto-linking), so it deliberately errs wide — the home-org role column counts
+     * even for an account that currently administers no organization.
+     */
+    public function isPrivileged(): bool
+    {
+        return $this->isSuperAdmin()
+            || in_array($this->role, [UserRole::Admin, UserRole::Maintainer], true)
+            || $this->canAdministerConsole();
+    }
+
+    /**
      * All organization ids the user can see registries of: the home org plus every
      * additional membership. This is the set portal visibility and token scoping
      * are built on.
@@ -237,9 +251,44 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(ApiKey::class);
     }
 
+    /**
+     * Personal registry tokens issued by (and for) this account.
+     *
+     * @return HasMany<RegistryToken, $this>
+     */
+    public function registryTokens(): HasMany
+    {
+        return $this->hasMany(RegistryToken::class);
+    }
+
+    /**
+     * Deleting an account must take its personal registry tokens with it. The FK is
+     * `nullOnDelete`, so without this the row survives with `user_id = null` — silently
+     * promoting a departed person's personal credential into an ownerless organization
+     * token that nobody recognises as stale.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (self $user) {
+            $user->registryTokens()->delete();
+        });
+    }
+
     public function isRobot(): bool
     {
         return $this->account_type === AccountType::Robot;
+    }
+
+    /**
+     * A robot is a service account with no mailbox (RobotController stores a null email),
+     * so it can never complete an email verification. Every creation path already stamps
+     * `email_verified_at`, but short-circuiting here makes the guarantee independent of
+     * that column: a robot is never pushed into the verification flow, whatever the data
+     * says.
+     */
+    public function hasVerifiedEmail(): bool
+    {
+        return $this->isRobot() || parent::hasVerifiedEmail();
     }
 
     public function hasEnabledTwoFactor(): bool

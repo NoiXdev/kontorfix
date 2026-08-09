@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useOperatorChannel } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link } from '@inertiajs/vue3';
 import { AlertTriangle, Boxes, CheckCircle2, CloudDownload, Globe, KeyRound, Layers, Package } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -55,7 +55,6 @@ function statusDot(status: string): string {
 }
 
 // Subtle live hint on sync activity via the operator channel.
-const page = usePage<SharedData>();
 const liveHint = ref<{ message: string; failed: boolean } | null>(null);
 let hintTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -65,13 +64,11 @@ function showHint(message: string, failed: boolean) {
     hintTimer = setTimeout(() => (liveHint.value = null), 5000);
 }
 
-const isOperator = page.props.auth.can?.console ?? false;
-if (isOperator) {
-    useOperatorChannel({
-        onSynced: (p) => showHint(`Aktivität: ${p.name} synchronisiert`, false),
-        onFailed: (p) => showHint(`Aktivität: ${p.name}: Sync fehlgeschlagen`, true),
-    });
-}
+// The composable decides whether this account may subscribe at all.
+useOperatorChannel({
+    onSynced: (p) => showHint(`Aktivität: ${p.name} synchronisiert`, false),
+    onFailed: (p) => showHint(`Aktivität: ${p.name}: Sync fehlgeschlagen`, true),
+});
 </script>
 
 <template>

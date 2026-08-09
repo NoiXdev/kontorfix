@@ -20,6 +20,10 @@ it('lets an operator admin create a robot and issue a key', function () {
     expect($robot->account_type)->toBe(AccountType::Robot);
     expect($robot->email)->toBeNull();
 
+    // Issuing the key is behind `password.confirm` (see routes/web.php); the flow under
+    // test here is robot creation plus key issuance, not the gate.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
     $this->actingAs($admin)->post("/admin/robots/{$robot->id}/keys", ['name' => 'k', 'permission' => 'write'])
         ->assertRedirect()->assertSessionHas('plainApiKey');
 });

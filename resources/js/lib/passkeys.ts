@@ -71,6 +71,22 @@ export async function loginWithPasskey(remember: boolean): Promise<string> {
     return redirect;
 }
 
+/**
+ * Satisfies the `password.confirm` gate with an enrolled passkey instead of a password.
+ * The only way in for an account whose owner never knew one. Returns the redirect target.
+ */
+export async function confirmWithPasskey(): Promise<string> {
+    const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(
+        route('passkey.confirm-options'),
+    );
+
+    const credential = await startAuthentication({ optionsJSON: options });
+
+    const { redirect } = await postJson<{ redirect: string }>(route('passkey.confirm'), { credential });
+
+    return redirect;
+}
+
 /** WebAuthn available in the browser? */
 export function passkeysSupported(): boolean {
     return typeof window !== 'undefined' && !!window.PublicKeyCredential;

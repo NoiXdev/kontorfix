@@ -1,3 +1,19 @@
+# The four services below run the same image. `:latest` is a MUTABLE tag: what it resolves
+# to is decided by the registry at pull time, so a `docker compose pull` re-executes whatever
+# is there now — the pull is part of the supply chain, and on a mutable tag it is
+# unauthenticated. The release workflow publishes an immutable version tag and signs the
+# image by digest (keyless cosign, bound to this repository's workflow identity), so an
+# operator can verify what they are about to run and pin it:
+#
+#   cosign verify docker.io/<namespace>/<image>:vX.Y.Z \
+#     --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/release\.yml@' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+#   docker buildx imagetools inspect docker.io/<namespace>/<image>:vX.Y.Z --format '{{.Manifest.Digest}}'
+#
+# Then replace `:latest` below with `@sha256:<digest>` — every service, same digest. The
+# shipped file keeps `:latest` because a digest cannot be committed ahead of the release it
+# names, not because pinning is optional for a production deployment.
+
 services:
   app:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
@@ -12,7 +28,19 @@ services:
         VITE_REVERB_HOST: ${REVERB_HOST:-}
         VITE_REVERB_PORT: ${REVERB_PORT:-443}
         VITE_REVERB_SCHEME: ${REVERB_SCHEME:-https}
-    ports: ['8080:8080']
+    # Deliberately NOT published on the host. The documented deployment (see
+    # docs/development.md, "Deployment & hardening") puts Traefik in front, and Traefik
+    # reaches this service over the Docker network as `app:8080` — publishing the port
+    # as well would expose the app *around* the proxy. Docker installs its own iptables
+    # chain for published ports, which a ufw-style host firewall does not cover, so
+    # "the host is firewalled" is usually not true for them. A request arriving that way
+    # also comes from the Docker gateway, which TRUSTED_PROXIES trusts by default, so an
+    # arbitrary client could spoof X-Forwarded-For/-Host.
+    #
+    # Attach the proxy's network and route to `app:8080` (uncomment the `networks:` at
+    # the bottom of this file). For a host-local deployment without a proxy, publish on
+    # loopback only: ports: ['127.0.0.1:8080:8080']
+    expose: ['8080']
     env_file: .env
     environment:
       CONTAINER_ROLE: app
@@ -36,6 +64,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # SyncPackage keeps the git mirrors under storage/app/vcs and writes package
+    # artifacts, so the worker needs the same volume the app serves them from.
     volumes:
       - artifacts:/app/storage/app
     restart: unless-stopped
@@ -48,17 +78,39 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # `upstream-cache:prune` (routes/console.php) deletes files under
+    # storage/app/artifacts/proxy, and this is the only service that runs the schedule.
+    # Without the volume it iterates the image's own empty directory, reports "0 removed"
+    # and the proxy cache stays at its budget for good — while the byte accounting, which
+    # lives in the shared Redis, keeps looking healthy. The command warns when it sees
+    # that mismatch, but the mount is what prevents it.
+    volumes:
+      - artifacts:/app/storage/app
     restart: unless-stopped
 
   reverb:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    # Opt-in, exactly like the broadcasting block in .env.example that it needs:
+    #   docker compose --profile reverb up -d
+    # Without the profile this service is not created at all. `docker/.env.example` ships
+    # BROADCAST_CONNECTION commented out, so the stock instance runs the `null` driver and
+    # `reverb:start` can only refuse (ReverbConfigGuard) — which under a restart policy is
+    # an invisible, permanent crash loop next to a registry that looks perfectly healthy.
+    profiles: ['reverb']
     environment:
       CONTAINER_ROLE: reverb
     env_file: .env
-    ports: ['8081:8080']
+    # No volume on purpose: `reverb:start` only relays websocket frames via Redis and
+    # never reads or writes storage/app. Channel authorization happens in the app service.
+    # Same reasoning as the app service: the websocket goes through the proxy too
+    # (`reverb:8080`). Host-local alternative: ports: ['127.0.0.1:8081:8080']
+    expose: ['8080']
     depends_on:
       redis: { condition: service_healthy }
-    restart: unless-stopped
+    # Not `unless-stopped`: a refused start is a configuration error, and restarting it
+    # forever is what kept the last one invisible. Five attempts, then the container stays
+    # down with the reason in its logs and on the operator health page.
+    restart: on-failure:5
 
   postgres:
     image: postgres:17-alpine
@@ -90,3 +142,12 @@ volumes:
   pgdata:
   redisdata:
   artifacts:
+# Attach the reverse proxy's network so it can route to `app:8080` / `reverb:8080`
+# without any port being published on the host. Uncomment and name the proxy network:
+#
+# networks:
+#   default:
+#   proxy:
+#     external: true
+#
+# …then add `networks: [default, proxy]` to the `app` and `reverb` services.

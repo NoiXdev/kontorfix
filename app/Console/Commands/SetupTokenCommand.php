@@ -23,14 +23,19 @@ class SetupTokenCommand extends Command
         }
 
         $value = $token->regenerate();
-        $url = rtrim((string) config('app.url'), '/').'/setup?token='.$value;
+        // Bare URL, token on its own line. Putting the token in the URL made every
+        // reverse proxy, CDN and APM in the path record a value that grants the whole
+        // instance, and put it in the operator's browser history as well. The wizard
+        // takes it from a form field and POSTs it instead.
+        $url = rtrim((string) config('app.url'), '/').'/setup';
 
         // Deliberately loud: this is meant to be found in the container startup logs.
         $this->newLine();
         $this->warn('==================================================================');
         $this->warn(' FIRST-RUN SETUP TOKEN (needed to open the setup wizard)');
-        $this->warn(' Token: '.$value);
         $this->warn(' URL:   '.$url);
+        $this->warn(' Token: '.$value);
+        $this->warn(' Paste the token into the wizard — do not append it to the URL.');
         $this->warn('==================================================================');
         $this->newLine();
 

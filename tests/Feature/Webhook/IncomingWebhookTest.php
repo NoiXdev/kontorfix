@@ -89,22 +89,27 @@ it('rejects a gitea push with a bad signature', function () {
     Queue::assertNothingPushed();
 });
 
-it('accepts a valid bitbucket token and matches the html url against a clone url', function () {
+it('accepts a valid bitbucket signature and matches the html url against a clone url', function () {
     Queue::fake();
     // The package is registered with the .git clone URL; Bitbucket delivers the html URL.
     Package::factory()->create(['repository_url' => 'https://bitbucket.org/acme/demo.git']);
 
-    $this->postJson('/webhooks/bitbucket?token=topsecret', [
-        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
-    ])->assertOk()->assertJsonPath('synced', 1);
+    // Bitbucket signs the body with the webhook secret, like github. It used to be
+    // compared against `?token=`, which put the secret in every access log on the path —
+    // see BitbucketSignatureTest.
+    $payload = ['repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]]];
+
+    $this->withHeaders(['X-Hub-Signature' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'topsecret')])
+        ->postJson('/webhooks/bitbucket', $payload)->assertOk()->assertJsonPath('synced', 1);
     Queue::assertPushed(SyncPackage::class);
 });
 
-it('rejects a bitbucket push with a bad token', function () {
+it('rejects a bitbucket push with a bad signature', function () {
     Queue::fake();
-    $this->postJson('/webhooks/bitbucket?token=wrong', [
-        'repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]],
-    ])->assertUnauthorized();
+    $payload = ['repository' => ['links' => ['html' => ['href' => 'https://bitbucket.org/acme/demo']]]];
+
+    $this->withHeaders(['X-Hub-Signature' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'wrong')])
+        ->postJson('/webhooks/bitbucket', $payload)->assertUnauthorized();
     Queue::assertNothingPushed();
 });
 
@@ -114,4 +119,14 @@ it('returns 422 for a valid signature but unparseable payload', function () {
     $this->withHeaders(['X-Hub-Signature-256' => 'sha256='.hash_hmac('sha256', json_encode($payload), 'topsecret')])
         ->postJson('/webhooks/github', $payload)->assertStatus(422);
     Queue::assertNothingPushed();
+});
+
+// A05: an unauthenticated, signature-free request could reach a Postgres uuid column with
+// an arbitrary string, throwing SQLSTATE[22P02] before the intended 404 — an unauthenticated
+// 500 (and, with APP_DEBUG on, a query-text disclosure).
+it('returns 404 for a malformed hook id instead of a 500', function () {
+    foreach (['not-a-uuid', '------------------------------------', '1 OR 1=1', str_repeat('x', 200)] as $hookId) {
+        $this->postJson("/webhooks/github/{$hookId}", githubPush('https://github.com/acme/demo.git'))
+            ->assertNotFound();
+    }
 });

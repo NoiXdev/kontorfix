@@ -12,13 +12,16 @@ use App\Services\Python\PythonName;
 use App\Services\Python\PythonPublishService;
 use App\Services\Python\PythonSimpleIndexBuilder;
 use App\Services\RegistryAccessService;
+use App\Support\CredentialUrl;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -101,6 +104,14 @@ class PypiController extends Controller
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
 
+        // The third ecosystem, closed to match the other two. `[A-Za-z0-9._-]+` admits `.`
+        // and `..`, neither of which can name a project. Measured before this line: PEP 503
+        // normalisation already collapsed them to `-`, so the outbound path was
+        // `/simple/-/` rather than a traversal — the impact the sibling routes had does not
+        // reach here. Refused anyway, and BEFORE normalisation, so that the guarantee rests
+        // on an explicit refusal rather than on a side effect of the normaliser.
+        $this->assertProxyableName($project);
+
         $normalized = PythonName::normalize($project);
 
         /** @var RegistryToken|null $token */
@@ -134,7 +145,33 @@ class PypiController extends Controller
             ->first();
 
         if ($upstream !== null) {
-            return redirect()->away(rtrim($upstream->url, '/').'/simple/'.$normalized.'/', 302);
+            // A 302 hands its `Location` to the client, and this endpoint is readable by
+            // a pull token — or, on a public group, by nobody at all. `upstreams.url` is
+            // the only place a Basic-auth mirror credential can live (UpstreamClient
+            // sends the dedicated `auth_token` as a Bearer header and nothing else), so
+            // concatenating it into a redirect published the mirror's password in
+            // cleartext to the lowest tier the product has, and onward into every CI log
+            // and proxy on the path.
+            //
+            // Redaction is not the fix here: `***@host` is a credential the client would
+            // dial, and it still says a credential exists. The credential is removed —
+            // and where one exists at all, no redirect is emitted. Sending pip to a
+            // private mirror unauthenticated only trades the disclosure for a 401 while
+            // still naming the internal host and the project being resolved. The
+            // condition is reported on the operator health page (HealthService) rather
+            // than failing silently.
+            if (CredentialUrl::carries($upstream->url)) {
+                Log::warning('PyPI simple-index fallthrough declined: upstream URL carries a credential.', [
+                    'upstream_id' => $upstream->id,
+                    'group_id' => $group->id,
+                ]);
+
+                abort(404);
+            }
+
+            $target = rtrim((string) CredentialUrl::strip($upstream->url), '/');
+
+            return redirect()->away($target.'/simple/'.$normalized.'/', 302);
         }
 
         abort(404);
@@ -148,6 +185,12 @@ class PypiController extends Controller
 
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
+
+        // Same reasoning as ProxyDownloadController::resolveUpstream(): whereKey() on a
+        // Postgres `uuid` column raises SQLSTATE[22P02] for anything that is not one,
+        // and an unrendered QueryException is a 500 plus a logged stack trace. The route
+        // pattern refuses those already; this does not rely on it.
+        abort_unless(Str::isUuid($package), 404);
 
         $pkg = Package::where('type', PackageType::Python)->whereKey($package)->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);

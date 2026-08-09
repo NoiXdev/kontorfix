@@ -53,7 +53,10 @@ it('refuses to re-enable two factor while it is already confirmed', function () 
     $user = confirmedTwoFactorUser();
     $secretBefore = $user->two_factor_secret;
 
-    $this->actingAs($user)->post('/settings/two-factor/enable')->assertSessionHasErrors('two_factor');
+    // `password.confirm` guards the route; this test is about the re-enable guard behind
+    // it, so the session starts with a freshly confirmed password.
+    $this->actingAs($user)->withSession(['auth.password_confirmed_at' => time()])
+        ->post('/settings/two-factor/enable')->assertSessionHasErrors('two_factor');
 
     // Secret unchanged, still confirmed — no falling back to the unconfirmed state.
     $fresh = $user->fresh();

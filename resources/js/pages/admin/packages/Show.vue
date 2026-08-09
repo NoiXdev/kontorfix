@@ -9,8 +9,8 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -89,6 +89,7 @@ const props = defineProps<{
     pythonDists: PythonDistRow[];
     gitCredentials: { id: string; name: string; provider: string }[];
     groups: GroupRow[];
+    sharedElsewhere: number;
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
 }>();
@@ -141,7 +142,6 @@ function saveSource() {
 
 // Live update of the sync status for the currently displayed package.
 // Local state, so the live update doesn't mutate the prop.
-const page = usePage<SharedData>();
 const syncStatus = ref(props.package.sync_status);
 const syncError = ref(props.package.sync_error);
 
@@ -153,13 +153,11 @@ function applyStatus(p: PackagePayload) {
     syncError.value = p.error ?? null;
 }
 
-const isOperator = page.props.auth.can?.console ?? false;
-if (isOperator) {
-    useOperatorChannel({
-        onSynced: applyStatus,
-        onFailed: applyStatus,
-    });
-}
+// The composable decides whether this account may subscribe at all.
+useOperatorChannel({
+    onSynced: applyStatus,
+    onFailed: applyStatus,
+});
 </script>
 
 <template>
@@ -253,7 +251,12 @@ if (isOperator) {
                                         </td>
                                         <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
                                     </tr>
-                                    <tr v-if="props.groups.length === 0">
+                                    <tr v-if="props.sharedElsewhere > 0" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                        <td colspan="2" class="px-4 py-3 text-muted-foreground">
+                                            Zusätzlich in {{ props.sharedElsewhere }} Registry(s) außerhalb deines Bereichs.
+                                        </td>
+                                    </tr>
+                                    <tr v-if="props.groups.length === 0 && props.sharedElsewhere === 0">
                                         <td colspan="2" class="px-4 py-8 text-center text-muted-foreground">Keiner Registry zugeordnet.</td>
                                     </tr>
                                 </tbody>

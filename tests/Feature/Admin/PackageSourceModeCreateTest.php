@@ -15,9 +15,11 @@ function sourceAdmin(): User
 
 it('creates a publish-based npm package without a repository', function () {
     Queue::fake();
+    $admin = sourceAdmin();
 
-    $this->actingAs(sourceAdmin())->post('/admin/packages', [
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'npm', 'name' => '@acme/pub', 'source_mode' => 'publish',
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $pkg = Package::where('name', '@acme/pub')->firstOrFail();
@@ -34,10 +36,12 @@ it('requires a repository url for a git-mirror npm package', function () {
 
 it('creates a git-mirror npm package and dispatches a sync', function () {
     Queue::fake();
+    $admin = sourceAdmin();
 
-    $this->actingAs(sourceAdmin())->post('/admin/packages', [
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'npm', 'name' => '@acme/mirror', 'source_mode' => 'git',
         'repository_url' => 'https://github.com/acme/mirror.git',
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $pkg = Package::where('name', '@acme/mirror')->firstOrFail();
@@ -54,10 +58,12 @@ it('requires a repository url for a git-mirror python package', function () {
 
 it('forces composer packages to git source mode', function () {
     Queue::fake();
+    $admin = sourceAdmin();
 
-    $this->actingAs(sourceAdmin())->post('/admin/packages', [
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'composer', 'name' => 'acme/lib', 'source_mode' => 'publish',
         'repository_url' => 'https://github.com/acme/lib.git',
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     expect(Package::where('name', 'acme/lib')->firstOrFail()->source_mode)->toBe(PackageSourceMode::Git);

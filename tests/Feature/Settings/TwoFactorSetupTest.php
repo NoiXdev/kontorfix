@@ -5,6 +5,10 @@ use App\Services\Auth\TwoFactorAuthenticator;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
+    // The two-factor enrollment routes sit behind `password.confirm`; these tests are
+    // about the enrollment mechanics, so they start from a confirmed-password session.
+    // The gate itself is covered in TwoFactorPasswordConfirmationTest.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
 });
 
 it('enables (unconfirmed) then confirms two factor with a valid code', function () {

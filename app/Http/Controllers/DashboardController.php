@@ -63,7 +63,7 @@ class DashboardController extends Controller
                 'npm' => Package::whereKey($packageIds)->where('type', PackageType::Npm)->count(),
                 'versions' => PackageVersion::whereIn('package_id', $packageIds)->count(),
                 'groups' => $groupIds->count(),
-                'tokens' => RegistryToken::whereIn('organization_id', $orgIds)->count(),
+                'tokens' => RegistryToken::notRevoked()->whereIn('organization_id', $orgIds)->count(),
                 'domains' => Domain::whereIn('group_id', $groupIds)->count(),
                 'upstreams' => Upstream::whereIn('group_id', $groupIds)->count(),
                 'failedJobs' => $failedJobs,

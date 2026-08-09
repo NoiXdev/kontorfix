@@ -24,7 +24,7 @@ class TokenController extends Controller
 
         return Inertia::render('admin/tokens/Index', [
             'tokens' => RegistryToken::with(['organization:id,name', 'group:id,name'])
-                ->whereIn('organization_id', $orgIds)->latest()->get()
+                ->notRevoked()->whereIn('organization_id', $orgIds)->latest()->get()
                 ->map(fn (RegistryToken $t) => [
                     'id' => $t->id,
                     'name' => $t->name,
@@ -51,6 +51,7 @@ class TokenController extends Controller
             $request->validated('name'),
             $request->validated('group_id') ? Group::findOrFail($request->validated('group_id')) : null,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            $request->date('expires_at'),
         );
 
         return back()->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");

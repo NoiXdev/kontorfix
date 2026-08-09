@@ -3,6 +3,7 @@
 use App\Enums\ApiKeyPermission;
 use App\Enums\UserRole;
 use App\Models\ApiKey;
+use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -72,12 +73,24 @@ it('lets an org admin write to their own org but not a foreign one', function ()
 
     // Sub-resources honour the same boundary (group_id in the body satisfies the shared
     // form request; the controller authorises against the {group} route + asserts write).
+    $this->withToken($token)->postJson("/api/v1/groups/{$this->groupA->id}/upstreams", [
+        'group_id' => $this->groupA->id, 'type' => 'composer',
+        'url' => 'https://repo.packagist.org', 'policy' => 'proxy',
+    ])->assertCreated();
+    $this->withToken($token)->postJson("/api/v1/groups/{$this->groupB->id}/upstreams", [
+        'group_id' => $this->groupB->id, 'type' => 'composer',
+        'url' => 'https://repo.packagist.org', 'policy' => 'proxy',
+    ])->assertForbidden();
+
+    // Domains are the exception and deliberately so: a hostname is a globally unique,
+    // instance-wide claim that the application cannot verify, so attaching one is
+    // operator-only — refused even on the caller's OWN registry. This case previously
+    // asserted assertCreated() here, which is the behaviour the audit charged.
+    // See tests/Feature/Admin/DomainOwnershipTest.php for the full boundary.
     $this->withToken($token)->postJson("/api/v1/groups/{$this->groupA->id}/domains", [
         'group_id' => $this->groupA->id, 'hostname' => 'a.example.test',
-    ])->assertCreated();
-    $this->withToken($token)->postJson("/api/v1/groups/{$this->groupB->id}/domains", [
-        'group_id' => $this->groupB->id, 'hostname' => 'b.example.test',
     ])->assertForbidden();
+    expect(Domain::where('hostname', 'a.example.test')->exists())->toBeFalse();
 });
 
 it('lets a member read but never write', function () {

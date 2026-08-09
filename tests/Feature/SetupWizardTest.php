@@ -210,7 +210,10 @@ it('locks the wizard when a setup token is configured', function () {
 it('unlocks the wizard with the correct setup token', function () {
     $token = app(SetupToken::class)->regenerate();
 
-    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+    // POST, not `?token=`: the token is an instance-takeover secret and must not land
+    // in an access log or the browser history. See SetupTokenTransportTest.
+    $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
 });
 
 it('refuses to complete setup without the token when one is configured', function () {
@@ -224,7 +227,8 @@ it('completes setup after unlocking with the token', function () {
     $token = app(SetupToken::class)->regenerate();
 
     // Unlock (stores the verification in the session), then submit.
-    $this->get('/setup?token='.$token)->assertInertia(fn ($page) => $page->where('locked', false));
+    $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
+    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
     $this->post('/setup', setupPayload())->assertRedirect(route('dashboard'));
 
     expect(User::query()->count())->toBe(1);

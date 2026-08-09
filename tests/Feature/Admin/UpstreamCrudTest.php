@@ -72,12 +72,17 @@ it('never exposes the auth token in the index payload', function () {
 });
 
 it('updates an upstream and keeps the token when the field is left blank', function () {
-    $up = Upstream::factory()->create(['type' => 'composer', 'policy' => 'proxy', 'priority' => 0, 'auth_token' => 'keep-me']);
+    $up = Upstream::factory()->create([
+        'type' => 'composer', 'policy' => 'proxy', 'priority' => 0,
+        'url' => 'https://registry.npmjs.test', 'auth_token' => 'keep-me',
+    ]);
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
+    // Same host: keeping the stored token is safe (a host change would not be — see
+    // UpstreamTokenRetargetTest).
     $this->actingAs($admin)->put("/admin/upstreams/{$up->id}", [
         'type' => 'npm',
-        'url' => 'https://registry.npmjs.org',
+        'url' => 'https://registry.npmjs.test',
         'policy' => 'proxy',
         'priority' => 7,
         'auth_token' => '',
@@ -85,7 +90,7 @@ it('updates an upstream and keeps the token when the field is left blank', funct
 
     $up->refresh();
     expect($up->type)->toBe(PackageType::Npm)
-        ->and($up->url)->toBe('https://registry.npmjs.org')
+        ->and($up->url)->toBe('https://registry.npmjs.test')
         ->and($up->priority)->toBe(7)
         ->and($up->auth_token)->toBe('keep-me');
 });

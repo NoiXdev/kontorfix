@@ -20,6 +20,7 @@ class AccessTokenController extends Controller
 
         return Inertia::render('settings/AccessTokens', [
             'tokens' => RegistryToken::query()
+                ->notRevoked()
                 ->where('user_id', $user->id)
                 ->with('group:id,name')
                 ->latest()->get()
@@ -46,12 +47,19 @@ class AccessTokenController extends Controller
 
         // Tie the token to the group's organization (possibly an additional-membership
         // org), falling back to the home org for an org-wide token.
+        $organization = $group !== null ? $group->organization : $user->organization;
+        $ability = $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read;
+
+        // A publish token writes into the organization's registries, so it is
+        // admin/maintainer-only — a member may only ever mint a read token.
+        $this->authorize('create', [RegistryToken::class, $organization?->id, $ability]);
+
         [$token, $plain] = RegistryToken::issue(
-            $group !== null ? $group->organization : $user->organization,
+            $organization,
             $request->validated('name'),
             $group,
-            $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
-            null,
+            $ability,
+            $request->date('expires_at'),
             $user,
         );
 

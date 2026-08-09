@@ -66,6 +66,9 @@ it('forbids revoking a foreign orgs token but allows the own', function () {
 });
 
 it('forbids issuing a token for a foreign organization', function () {
+    // Minting is behind `password.confirm`; the cross-org refusal is what is under test.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
     $this->actingAs($this->adminA)->post('/admin/tokens', [
         'name' => 'sneaky', 'organization_id' => $this->orgB->id,
     ])->assertForbidden();

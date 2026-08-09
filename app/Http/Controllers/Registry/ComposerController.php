@@ -10,8 +10,11 @@ use App\Services\Composer\ComposerMetadataBuilder;
 use App\Services\RegistryAccessService;
 use App\Services\Upstream\ComposerProxyService;
 use App\Services\Vcs\GitRepository;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -55,6 +58,7 @@ class ComposerController extends Controller
     {
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
+        $this->assertProxyableName($vendor, $name);
         $fullName = "{$vendor}/{$name}";
         $package = $this->findLocal($request, $group, PackageType::Composer, $fullName);
 
@@ -90,6 +94,18 @@ class ComposerController extends Controller
             ->first();
     }
 
+    /**
+     * Re-read on every call: between the outer check and the one inside the lock, another
+     * request may have finished the build. That is the entire point of the lock, so the
+     * second read must not be folded into the first.
+     *
+     * @phpstan-impure
+     */
+    private function distExists(Filesystem $disk, string $path): bool
+    {
+        return $disk->exists($path);
+    }
+
     public function dist(Request $request, string $vendor, string $name, string $version): StreamedResponse
     {
         $group = $this->registryGroup($request);
@@ -106,30 +122,58 @@ class ComposerController extends Controller
         // the path — the old archive is never mistakenly served again (cache invalidation).
         $path = "dists/{$package->id}/{$pkgVersion->source_reference}.zip";
 
-        if (! $disk->exists($path)) {
+        if (! $this->distExists($disk, $path)) {
             if ($package->repository_url === null) {
                 abort(404);
             }
 
-            $repo = new GitRepository($package->repository_url, $package->id);
-            $repo->sync();
-            $tmp = $repo->archiveZip($pkgVersion->source_reference);
+            // One builder per dist. The first request for a version clones the repository
+            // and builds the archive; without a lock, N concurrent requests for the same
+            // uncached version each run their own clone and their own zip, which is an
+            // amplification any read-token holder (anonymous, on a public registry) can
+            // drive by asking for a cold version in parallel.
+            //
+            // Waiting is strictly cheaper than the duplicate build it replaces, and it is
+            // bounded: if the lock cannot be had in time we build anyway, i.e. we fall back
+            // to exactly the previous behaviour rather than refusing the download.
+            $lock = Cache::lock('dist-build:'.$path, 300);
+            $held = false;
 
-            // Atomic: stream into a unique temp path, then move to the
-            // final path via rename — prevents torn reads on concurrent requests.
-            $staging = "dists/{$package->id}/.{$pkgVersion->source_reference}.".uniqid().'.part';
             try {
-                $handle = fopen($tmp, 'r');
-                $disk->writeStream($staging, $handle);
-                if (is_resource($handle)) {
-                    fclose($handle);
+                $lock->block((int) config('kontorfix.dist_build_lock_wait', 15));
+                $held = true;
+            } catch (LockTimeoutException) {
+                // Fall through and build unlocked.
+            }
+
+            try {
+                // The waiting request usually finds the archive already there.
+                if (! $this->distExists($disk, $path)) {
+                    $repo = new GitRepository($package->repository_url, $package->id);
+                    $repo->sync();
+                    $tmp = $repo->archiveZip($pkgVersion->source_reference);
+
+                    // Atomic: stream into a unique temp path, then move to the
+                    // final path via rename — prevents torn reads on concurrent requests.
+                    $staging = "dists/{$package->id}/.{$pkgVersion->source_reference}.".uniqid().'.part';
+                    try {
+                        $handle = fopen($tmp, 'r');
+                        $disk->writeStream($staging, $handle);
+                        if (is_resource($handle)) {
+                            fclose($handle);
+                        }
+                    } finally {
+                        @unlink($tmp);
+                    }
+                    $disk->move($staging, $path);
+
+                    $pkgVersion->update(['dist_path' => $path]);
                 }
             } finally {
-                @unlink($tmp);
+                if ($held) {
+                    $lock->release();
+                }
             }
-            $disk->move($staging, $path);
-
-            $pkgVersion->update(['dist_path' => $path]);
         }
 
         // Usage stats: record the download and (once) the dist size.

@@ -12,4 +12,6 @@ Artisan::command('inspire', function () {
 Schedule::command('packages:resync')->hourly()->withoutOverlapping();
 Schedule::command('model:prune', ['--model' => [WebhookDelivery::class]])->daily();
 Schedule::command('queue:prune-failed --hours=168')->daily();
+// Keeps the proxied upstream artifact cache under its byte budget over time.
+Schedule::command('upstream-cache:prune')->daily()->withoutOverlapping();
 Schedule::command('horizon:snapshot')->everyFiveMinutes();

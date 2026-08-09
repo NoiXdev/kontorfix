@@ -15,6 +15,7 @@ interface CredentialRow {
     id: string;
     name: string;
     provider: string;
+    host: string | null;
     username: string | null;
     organization: string | null;
     organization_id: string | null;
@@ -25,7 +26,7 @@ interface CredentialRow {
 const props = defineProps<{
     credentials: CredentialRow[];
     organizations: { id: string; name: string }[];
-    providers: { value: string; label: string }[];
+    providers: { value: string; label: string; default_host: string | null }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Git-Tokens', href: '/admin/git-credentials' }];
@@ -34,6 +35,11 @@ const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const providerOptions = computed(() => props.providers.map((p) => ({ value: p.value, label: p.label })));
+
+// A credential's token is only ever sent to this host. Known providers prefill it;
+// self-hosted ("generic") installations must name their host explicitly.
+const defaultHost = computed(() => props.providers.find((p) => p.value === form.provider)?.default_host ?? null);
+const hostPlaceholder = computed(() => defaultHost.value ?? 'z. B. git.example.com');
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
 // --- Create / edit ---
@@ -44,6 +50,7 @@ const form = useForm({
     name: '',
     organization_id: '' as string | null,
     provider: 'github',
+    host: '',
     username: '',
     token: '',
 });
@@ -61,6 +68,7 @@ function openEdit(row: CredentialRow) {
     form.clearErrors();
     form.name = row.name;
     form.provider = row.provider;
+    form.host = row.host ?? '';
     form.username = row.username ?? '';
     form.token = '';
     form.organization_id = row.organization_id;
@@ -245,6 +253,13 @@ async function runTest(id: string) {
                         <Label for="cred_provider">Provider</Label>
                         <SearchableSelect id="cred_provider" v-model="form.provider" :options="providerOptions" />
                         <InputError :message="form.errors.provider" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <Label for="cred_host">Host</Label>
+                        <Input id="cred_host" v-model="form.host" :placeholder="hostPlaceholder" autocomplete="off" />
+                        <p class="text-xs text-muted-foreground">Der Token wird ausschliesslich an diesen Host gesendet.</p>
+                        <InputError :message="form.errors.host" />
                     </div>
 
                     <div class="grid gap-2">

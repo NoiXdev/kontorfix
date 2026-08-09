@@ -159,3 +159,16 @@ webhooks**. Create one per git host/repository under *Webhooks → Eingehend*; e
 its own URL and secret to configure as a webhook on GitHub, GitLab, Gitea or Bitbucket.
 Deliveries (including failures, with payloads) are visible under *Webhooks → Audit* for
 debugging.
+
+The secret goes into the git host's own *Secret* field — never into the URL. Each
+provider is verified through the header it sends when a secret is configured:
+
+| Provider | Verified against |
+| --- | --- |
+| GitHub | `X-Hub-Signature-256: sha256=<hmac>` over the request body |
+| Bitbucket | `X-Hub-Signature: sha256=<hmac>` over the request body |
+| Gitea | `X-Gitea-Signature: <hmac>` over the request body |
+| GitLab | `X-Gitlab-Token: <secret>` |
+
+A secret in a query string would be recorded verbatim by every proxy, CDN and APM on
+the path and would replay indefinitely, so `?token=` is not accepted for any provider.

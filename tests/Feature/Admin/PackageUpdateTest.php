@@ -80,7 +80,9 @@ it('assigns a git credential and clears it when omitted', function () {
     $org = Organization::factory()->create();
     $admin = updateAdmin($org);
     $package = ownedPackage($admin, $org);
-    $cred = GitCredential::factory()->for($org)->create(['provider' => GitProvider::GitLab, 'token' => 'glpat-x']);
+    // The credential is bound to github.com, matching the package's repository host —
+    // a credential for another host may not be assigned at all.
+    $cred = GitCredential::factory()->for($org)->create(['provider' => GitProvider::GitHub, 'token' => 'ghp_x']);
 
     Queue::fake();
 

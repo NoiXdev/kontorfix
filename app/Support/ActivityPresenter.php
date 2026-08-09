@@ -46,9 +46,40 @@ class ActivityPresenter
             'subject_id' => $a->subject_id,
             'subject_label' => $subject?->getAttribute('name') ?? $subject?->getKey(),
             'causer' => $causer?->getAttribute('name'),
-            'changes' => $a->attribute_changes?->toArray() ?? [],
+            'changes' => self::redactChanges($a->attribute_changes?->toArray() ?? []),
             'created_at' => $a->created_at?->diffForHumans(),
             'created_at_exact' => $a->created_at?->toDateTimeString(),
         ];
+    }
+
+    /**
+     * Withholds any userinfo component a logged value carries.
+     *
+     * The activity log is a second copy of whatever a model chose to log, and it is the one
+     * copy that survives rotation: a PAT written into `packages.repository_url` and logged
+     * verbatim is still readable here after the operator has removed it from the live field,
+     * which is precisely when it matters. `Package` redacts at the write side and a
+     * migration scrubbed the rows written before it did; this is the read side, applied to
+     * every subject rather than to one column, because no activity value has any business
+     * rendering a credential.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<string, mixed>
+     */
+    private static function redactChanges(array $changes): array
+    {
+        foreach ($changes as $key => $value) {
+            if (is_array($value)) {
+                $changes[$key] = self::redactChanges($value);
+
+                continue;
+            }
+
+            if (is_string($value) && CredentialUrl::carries($value)) {
+                $changes[$key] = CredentialUrl::redact($value);
+            }
+        }
+
+        return $changes;
     }
 }

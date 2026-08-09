@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Auth;
  */
 trait ScopesToAdministeredOrgs
 {
+    use GuardsPackageAttachment;
+
     /**
      * Organization ids the current request may read/list: the active scope, already
      * clamped to the user's administered organizations.
@@ -87,6 +89,26 @@ trait ScopesToAdministeredOrgs
         $reachable = $package->groups()->whereIn('organization_id', $orgIds)->exists();
 
         abort_unless($reachable, 403);
+    }
+
+    /**
+     * Aborts 403 unless every submitted package may be attached by the current user:
+     * "attachable" means already reachable in the active scope. A package that lives only
+     * in another organization's registries — or in none at all — is refused, otherwise
+     * attaching it would hand the caller write access to it via assertCanTouchPackage().
+     *
+     * The decision itself lives in {@see GuardsPackageAttachment}, shared with `/api/v1`;
+     * only the set of organizations that count as the caller's differs.
+     *
+     * @param  array<int, string>  $packageIds
+     */
+    protected function assertCanAttachPackages(array $packageIds): void
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            return;
+        }
+
+        $this->assertPackagesReachableIn($packageIds, $this->scopedOrgIds());
     }
 
     /**

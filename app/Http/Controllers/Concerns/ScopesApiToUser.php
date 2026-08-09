@@ -20,6 +20,8 @@ use Illuminate\Support\Facades\Auth;
  */
 trait ScopesApiToUser
 {
+    use GuardsPackageAttachment;
+
     private function apiUser(): User
     {
         $user = Auth::user();
@@ -111,6 +113,26 @@ trait ScopesApiToUser
             $package->groups()->whereIn('organization_id', $this->apiUser()->administeredOrganizationIds())->exists(),
             403,
         );
+    }
+
+    /**
+     * Aborts 403 unless every submitted package may be attached by the caller: it must
+     * already be attached to a registry in an organization the key owner administers.
+     * Pulling in a package that lives only in a foreign organization — or in none at all —
+     * would otherwise grant write access to it through assertCanWritePackage().
+     *
+     * The decision itself lives in {@see GuardsPackageAttachment}, shared with the web
+     * console; only the set of organizations that count as the caller's differs.
+     *
+     * @param  array<int, string>  $packageIds
+     */
+    protected function assertCanAttachPackages(array $packageIds): void
+    {
+        if ($this->seesAllOrganizations()) {
+            return;
+        }
+
+        $this->assertPackagesReachableIn($packageIds, $this->apiUser()->administeredOrganizationIds());
     }
 
     /**

@@ -13,15 +13,21 @@ use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
+use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
 use App\Services\Registry\RegistryTypeService;
+use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
+use App\Support\CredentialUrl;
+use App\Support\RepositoryAuthority;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -41,7 +47,16 @@ class PackageController extends Controller
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
             ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('type', $type))
             ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
-            ->when(is_string($group) && $group !== '', fn ($query) => $query->whereHas('groups', fn ($g) => $g->whereKey($group)))
+            // `group` is a plain query-string value on a route with no throttle, and it
+            // lands on a Postgres `uuid` comparison: a malformed one raised
+            // SQLSTATE[22P02], which nothing renders, so every request appended a stack
+            // trace with its bound parameters to an unrotated log. Str::isUuid decides
+            // this — not a character-class pattern; the two attempts at one on this branch
+            // were both satisfied by 36 dashes. A value that cannot be a group id matches
+            // no group, so the answer is an empty list, not an unfiltered one.
+            ->when(is_string($group) && $group !== '', fn ($query) => Str::isUuid($group)
+                ? $query->whereHas('groups', fn ($g) => $g->whereKey($group))
+                : $query->whereRaw('1 = 0'))
             ->latest()
             ->paginate(25)
             ->withQueryString()
@@ -75,7 +90,18 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
-        $package->load(['versions', 'groups:id,name,slug']);
+        $package->load(['versions', 'groups:id,name,slug,organization_id']);
+
+        // `assertCanTouchPackage()` only asserts that ONE of the package's registries is
+        // reachable in the active scope. Serialising the whole relation therefore handed a
+        // customer-org admin the id, name and slug of every *other* organization's registry
+        // the package is shared into. The state needs a super-admin's deliberate cross-org
+        // attach to arise at all, which is why this is small — but the caller has no business
+        // reading it, so they get a count instead.
+        $scope = app(OrgScope::class);
+        $visibleGroups = $scope->spansAllOrganizations()
+            ? $package->groups
+            : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
 
         // Python is file-centric (multiple dists per version), so its "versions" and stats
         // come from the python_dists table rather than package_versions.
@@ -90,7 +116,14 @@ class PackageController extends Controller
                 'is_git_sourced' => $package->isGitSourced(),
                 'name' => $package->name,
                 'description' => $package->description,
-                'repository_url' => $package->repository_url,
+                // The one read path of this column that did not redact. An inline
+                // `https://x-access-token:<PAT>@…` is a supported shape here, and the
+                // reader may be an admin of a *different* tenant sharing the registry —
+                // the prior-#10 shared-pool state. Aligned with the five siblings that
+                // already redact; NotRedactedCredentialUrl on the update route refuses the
+                // marker on its way back in, so a withheld value cannot silently destroy
+                // the credential it was withheld from.
+                'repository_url' => CredentialUrl::redact($package->repository_url),
                 'git_credential_id' => $package->git_credential_id,
                 'has_repository_token' => $package->repository_token !== null,
                 'sync_status' => $package->sync_status->value,
@@ -118,7 +151,8 @@ class PackageController extends Controller
                 'download_count' => $d->download_count,
                 'uploaded_at' => $d->uploaded_at?->toDateString(),
             ]),
-            'groups' => $package->groups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug]),
+            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug])->values(),
+            'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
             'stats' => $isPython ? [
                 'downloads' => (int) $dists->sum('download_count'),
                 'storage_bytes' => (int) $dists->sum('size'),
@@ -147,15 +181,31 @@ class PackageController extends Controller
         $provider = null;
         $username = null;
         if (! empty($data['git_credential_id'])) {
-            $credential = GitCredential::find($data['git_credential_id']);
-            if ($credential !== null && Auth::user()?->administers($credential->organization_id)) {
-                $token = $credential->token;
-                $provider = $credential->provider;
-                $username = $credential->username;
-            }
+            $credential = GitCredential::findOrFail($data['git_credential_id']);
+            // Refuse loudly rather than silently probing without the credential: a
+            // reference to a foreign organization's secret is never a legitimate request.
+            $this->assertAdministersOrg($credential->organization_id);
+            // A stored token is bound to one host and may not be probed against another.
+            $this->assertCredentialPermits($credential, $data['repository_url']);
+
+            $token = $credential->token;
+            $provider = $credential->provider;
+            $username = $credential->username;
         }
 
         $result = $probe->probe(PackageType::from($data['type']), $data['repository_url'], $token, $provider, $username);
+
+        // This endpoint makes the instance dial an address the caller names, and it left no
+        // trace at all — so an org Maintainer sweeping hosts behind the address policy was
+        // indistinguishable from nobody having used the console. The URL is redacted because
+        // an inline `https://x-access-token:<PAT>@…` is a supported shape here, and a token
+        // in the log survives the rotation that is the response to leaking it.
+        Log::info('Repository probe.', [
+            'user_id' => $request->user()?->id,
+            'repository_url' => CredentialUrl::redact($data['repository_url']),
+            'git_credential_id' => $data['git_credential_id'] ?? null,
+            'ok' => $result['ok'],
+        ]);
 
         return response()->json($result);
     }
@@ -169,10 +219,12 @@ class PackageController extends Controller
             $this->assertAdministersGroup(Group::findOrFail($groupId));
         }
 
-        // A referenced credential must belong to an organization the user administers.
+        // A referenced credential must belong to an organization the user administers,
+        // and may only be paired with a repository on the host it is bound to.
         if ($request->filled('git_credential_id')) {
             $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
             $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialPermits($credential, $request->validated('repository_url'));
         }
 
         // The source mode is authoritative (Composer is always git; npm/Python honour the
@@ -206,19 +258,49 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
+        // The detail page is now shown the redacted URL like every other reader, and its
+        // form posts back whatever it was given. A redacted value byte-identical to the
+        // redaction of what is stored is that echo — it means "unchanged", not "erase the
+        // credential" — so it is resolved back to the stored value before validation.
+        // Anything else redacted is still refused by NotRedactedCredentialUrl: an operator
+        // who edited the path around a `***` has to supply the credential for the new URL,
+        // and a client inventing a marker cannot overwrite a secret with it.
+        $submitted = $request->input('repository_url');
+        if (is_string($submitted)
+            && CredentialUrl::isRedacted($submitted)
+            && $submitted === CredentialUrl::redact($package->repository_url)) {
+            $request->merge(['repository_url' => $package->repository_url]);
+        }
+
         $data = $request->validate([
-            'repository_url' => ['nullable', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_url' => ['nullable', 'string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
         ]);
 
+        $url = $data['repository_url'] ?? $package->repository_url;
+
         if (! empty($data['git_credential_id'])) {
-            $this->assertAdministersOrg(GitCredential::findOrFail($data['git_credential_id'])->organization_id);
+            $credential = GitCredential::findOrFail($data['git_credential_id']);
+            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialPermits($credential, $url);
+        }
+
+        // Moving the repository to another host while silently keeping the stored inline
+        // token would ship that token to the new host on the next sync. The operator must
+        // supply a token for the new host or drop the old one explicitly.
+        $keepsInlineToken = $package->repository_token !== null
+            && empty($data['repository_token'])
+            && empty($data['remove_token']);
+        if ($keepsInlineToken && ! $this->sameHost($url, $package->repository_url)) {
+            throw ValidationException::withMessages([
+                'repository_url' => 'Beim Wechsel des Repository-Hosts muss der gespeicherte Token neu gesetzt oder entfernt werden.',
+            ]);
         }
 
         $update = [
-            'repository_url' => $data['repository_url'] ?? $package->repository_url,
+            'repository_url' => $url,
             // An absent/empty credential clears the assignment.
             'git_credential_id' => $data['git_credential_id'] ?? null,
         ];
@@ -245,5 +327,37 @@ class PackageController extends Controller
         $package->delete();
 
         return back()->with('success', 'Paket gelöscht.');
+    }
+
+    /**
+     * A stored git token is bound to exactly one host — pairing it with a repository
+     * elsewhere would transmit the secret to that host as an Authorization header.
+     */
+    private function assertCredentialPermits(GitCredential $credential, ?string $url): void
+    {
+        if (! $credential->permits($url)) {
+            throw ValidationException::withMessages([
+                'repository_url' => $credential->hostMismatchMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Whether two repository URLs point at the same place a token would be sent.
+     *
+     * `parse_url(..., PHP_URL_HOST)` discards the port by construction, so this compared
+     * `https://gitlab.corp/x` and `https://gitlab.corp:9999/x` as equal — and
+     * `GitAuth::origin()` scopes the Authorization header to scheme://host:port, so they are
+     * not. A Maintainer who could bind a listener on another port of the repository host
+     * therefore had the organization's PAT delivered to it, unchanged, on the next sync.
+     * `GitCredential::permits()` was fixed for the managed column; this asks the same
+     * question through the same helper so they cannot drift again.
+     *
+     * Two absent URLs are the same authority (nothing moved). One absent and one present is
+     * not.
+     */
+    private function sameHost(?string $a, ?string $b): bool
+    {
+        return RepositoryAuthority::of($a) === RepositoryAuthority::of($b);
     }
 }

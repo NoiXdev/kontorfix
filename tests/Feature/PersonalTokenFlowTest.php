@@ -10,6 +10,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+// `settings/tokens` sits behind `password.confirm` (see CredentialPasswordConfirmationTest);
+// this flow test is about what the minted token can do afterwards.
+beforeEach(fn () => $this->withSession(['auth.password_confirmed_at' => time()]));
+
 it('creates a personal global token in settings and it authenticates against a group of the same org', function () {
     $org = Organization::factory()->create();
     $user = User::factory()->create(['organization_id' => $org->id]);

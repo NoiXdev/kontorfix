@@ -27,8 +27,10 @@ it('creates a robot account and issues a key for it', function () {
     $robotId = $res->json('data.id');
     expect(User::find($robotId)->account_type)->toBe(AccountType::Robot);
 
+    // Minted by presenting a key, so the successor clamp applies here too: a leaked
+    // super-admin key must not be able to leave perpetual robot keys behind it.
     $this->withToken($this->plain)->postJson("/api/v1/users/{$robotId}/api-keys", [
-        'name' => 'bot-key', 'permission' => 'write',
+        'name' => 'bot-key', 'permission' => 'write', 'expires_at' => now()->addDays(30)->toIso8601String(),
     ])->assertCreated()->assertJsonPath('data.plain_text', fn ($v) => str_starts_with($v, 'kfxapi_'));
 });
 

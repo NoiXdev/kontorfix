@@ -37,12 +37,15 @@ it('lists and shows packages, including their versions', function () {
 
 it('creates a package and dispatches a sync', function () {
     Queue::fake();
-    $plain = operatorWriteToken();
+    $org = Organization::factory()->create(['is_operator' => true]);
+    $admin = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+    [, $plain] = ApiKey::issue($admin, 'w', ApiKeyPermission::Write);
 
     $this->withToken($plain)->postJson('/api/v1/packages', [
         'type' => 'composer',
         'name' => 'acme/new',
         'repository_url' => 'https://github.com/acme/new.git',
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertCreated()->assertJsonPath('data.name', 'acme/new');
 
     Queue::assertPushed(SyncPackage::class);

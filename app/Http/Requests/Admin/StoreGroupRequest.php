@@ -32,6 +32,9 @@ class StoreGroupRequest extends FormRequest
             'portal_enabled' => ['boolean'],
             'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'package_ids' => ['array'],
+            // Existence only — ownership cannot be expressed as a rule here because this
+            // request serves both the console (sidebar scope) and the API (the caller's
+            // administered orgs). The controllers enforce it via assertCanAttachPackages().
             'package_ids.*' => ['uuid', 'exists:packages,id'],
         ];
     }

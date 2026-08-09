@@ -4,7 +4,9 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\AccountType;
 use App\Enums\UserRole;
+use App\Rules\UniqueEmail;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class StoreUserRequest extends FormRequest
@@ -16,8 +18,14 @@ class StoreUserRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
+        // Normalised, because `OidcUserResolver` already treats an address as one identity
+        // whatever its case. Storing what was typed while matching on `lower(email)` is what
+        // let `Root@firma.de` and `root@firma.de` both exist.
         $this->merge([
             'is_super_admin' => $this->boolean('is_super_admin'),
+            ...$this->has('email') && is_string($this->input('email'))
+                ? ['email' => Str::lower(trim($this->input('email')))]
+                : [],
         ]);
     }
 
@@ -31,7 +39,7 @@ class StoreUserRequest extends FormRequest
         // is granted separately via the super-admin flag.
         return [
             'name' => ['required', 'string', 'max:190'],
-            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
+            'email' => ['required', 'email', 'max:190', new UniqueEmail],
             'organization_id' => ['required', 'uuid', 'exists:organizations,id'],
             'role' => ['required', Rule::enum(UserRole::class)],
             'is_super_admin' => ['boolean'],

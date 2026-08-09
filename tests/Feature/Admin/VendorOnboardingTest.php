@@ -26,7 +26,12 @@ it('onboards a customer end-to-end: org -> user -> registry -> portal', function
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('admin/organizations/Show')->has('registries', 1)->has('users', 1));
 
-    // 5) The customer sees exactly their registry in the portal
+    // 5) The customer sees exactly their registry in the portal.
+    // Fresh session: web sessions are pinned to their user's password hash
+    // (AuthenticateSession), so swapping identity means a new browser session — the same
+    // thing a real logout does via session()->invalidate().
+    $this->flushSession();
+
     $this->actingAs($member)->get('/portal')
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registries')->has('registries', 1)->where('registries.0.slug', 'kadenz-reg'));

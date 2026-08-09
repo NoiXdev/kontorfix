@@ -3,7 +3,9 @@
 namespace App\Services\Setup;
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
  * A one-time-ish secret that gates the first-run wizard.
@@ -14,17 +16,31 @@ use Illuminate\Support\Str;
  * complete setup. The token is regenerated on every app start (the entrypoint calls
  * `setup:token`), so a leaked value from a previous boot is useless.
  *
- * When no token is stored (e.g. local dev where the entrypoint never ran), the gate is
- * simply absent and the wizard is open — the token is an added production safeguard,
- * not a hard requirement of the flow.
+ * "No token stored" is deliberately NOT the same as "no gate": whether a token is
+ * demanded is decided by SetupGate from configuration, and a token that cannot be read
+ * locks the wizard rather than opening it. This class only answers "what is stored".
  */
 class SetupToken
 {
     private const KEY = 'setup.token';
 
+    /**
+     * The stored token, or null when there is none — including when the store cannot be
+     * answered at all. Reading must never raise: every caller is a gate, and an
+     * exception escaping here would turn "cannot tell" into a 500 today and, the moment
+     * somebody catches it, into an open wizard. Callers treat null as "locked".
+     */
     public function current(): ?string
     {
-        $value = Cache::get(self::KEY);
+        try {
+            $value = Cache::get(self::KEY);
+        } catch (Throwable $e) {
+            Log::warning('Setup token store unreadable; treating the setup gate as locked.', [
+                'exception' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
 
         return is_string($value) && $value !== '' ? $value : null;
     }

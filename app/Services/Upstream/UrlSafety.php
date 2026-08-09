@@ -43,8 +43,7 @@ class UrlSafety
      * to a private/reserved address is rejected — this closes SSRF via internal
      * hostnames (e.g. a malicious OIDC discovery document with token_endpoint pointing
      * to http://vault.internal) as well as octal/decimal IP encodings that filter_var
-     * treats as hostnames. Hosts that don't resolve are allowed through (the HTTP
-     * fetch then fails harmlessly anyway, since there's no internal target).
+     * treats as hostnames. Hosts that don't resolve are rejected too: see hostIsPublic().
      *
      * Note: does not protect against DNS rebinding (TOCTOU) — that would require a
      * resolver pinned to cURL; this is noted as a follow-up.
@@ -55,14 +54,55 @@ class UrlSafety
             return false;
         }
 
-        $host = self::normalizeHost((string) parse_url((string) $url, PHP_URL_HOST));
-
         // isSafe() has already checked IP literals (including bracketed IPv6).
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return true;
+        return self::hostIsPublic((string) parse_url((string) $url, PHP_URL_HOST));
+    }
+
+    /**
+     * Whether a bare host — an IP literal (optionally bracketed/zone-suffixed) or a
+     * hostname — points exclusively at public addresses.
+     *
+     * The check FAILS CLOSED: a host that is neither a valid IP literal nor resolvable to
+     * at least one address is refused. It used to pass, on the reasoning that an
+     * unresolvable name has no internal target to reach — but that inference is unsound
+     * in both directions:
+     *
+     *  - The client that finally connects does not necessarily go through this resolver.
+     *    libcurl's inet_aton path decodes hex/octal/short numeric forms (`0x7f000001`,
+     *    `0x7f.1`) that filter_var refuses as IPs and that DNS is never asked about, so
+     *    "unresolvable" meant "allowed" for every loopback and RFC1918 address written
+     *    that way.
+     *  - The check and the connection are separated in time (a URL is validated in a
+     *    request, fetched later by a queued job), so a lookup that SERVFAILs or times out
+     *    now says nothing about where the name points when the fetch actually happens.
+     *
+     * The cost is that a transient resolver failure refuses an otherwise legitimate
+     * outbound target; that is the correct direction for an address policy to fail, and
+     * the git path keeps `kontorfix.vcs.allowed_hosts` as the explicit escape hatch.
+     *
+     * Public so callers outside the HTTP path (the git transports, which are neither
+     * http nor https and therefore cannot use isSafe()) share one address policy.
+     */
+    public static function hostIsPublic(string $host): bool
+    {
+        $host = self::normalizeHost($host);
+
+        if ($host === '' || strtolower($host) === 'localhost') {
+            return false;
         }
 
-        foreach (self::resolveIps($host) as $ip) {
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return self::ipIsPublic($host);
+        }
+
+        $ips = self::resolveIps($host);
+
+        // No address to judge — refuse rather than guess.
+        if ($ips === []) {
+            return false;
+        }
+
+        foreach ($ips as $ip) {
             if (! self::ipIsPublic($ip)) {
                 return false;
             }
@@ -94,6 +134,13 @@ class UrlSafety
             return false;
         }
 
+        // filter_var's IPv4 reserved set has holes; close the ones that can address a
+        // real neighbour on the deployment network. Verified empirically to pass the
+        // filter_var check above on PHP 8.4/8.5.
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false && ! self::ipv4IsPublic($ip)) {
+            return false;
+        }
+
         // Explicit IPv6 addition: older PHP versions only cover these ranges
         // patchily with FILTER_FLAG_NO_RES_RANGE. Belt and suspenders.
         if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
@@ -116,6 +163,40 @@ class UrlSafety
 
             // fe80::/10 (Link-Local)
             if ($first === 0xFE && (ord($packed[1]) & 0xC0) === 0x80) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * IPv4 ranges that FILTER_FLAG_NO_PRIV_RANGE|NO_RES_RANGE lets through even though
+     * they are not globally routable unicast, and each of which can name a neighbour on
+     * a real deployment network:
+     *   - 100.64.0.0/10   shared address space / CGNAT (Tailscale, several managed CNIs)
+     *   - 198.18.0.0/15   benchmarking
+     *   - 224.0.0.0/4     multicast
+     *   - 192.0.0.0/24    IETF protocol assignments
+     */
+    private static function ipv4IsPublic(string $ip): bool
+    {
+        $long = ip2long($ip);
+        if ($long === false) {
+            return false;
+        }
+
+        // [network, prefix length] pairs, compared on the masked address.
+        $blocked = [
+            ['100.64.0.0', 10],
+            ['198.18.0.0', 15],
+            ['224.0.0.0', 4],
+            ['192.0.0.0', 24],
+        ];
+
+        foreach ($blocked as [$network, $bits]) {
+            $mask = -1 << (32 - $bits);
+            if ((($long & $mask) & 0xFFFFFFFF) === ((int) ip2long($network) & $mask & 0xFFFFFFFF)) {
                 return false;
             }
         }
@@ -173,26 +254,20 @@ class UrlSafety
     /**
      * All A and AAAA addresses of a hostname (empty if not resolvable).
      *
+     * Delegated to the container-bound HostResolver rather than done here, so the one
+     * decision point of the address policy is a collaborator that a test can swap and
+     * that production code has no global handle on. The fallback covers the case where
+     * the binding is missing — a resolver that is absent must mean "use the real one",
+     * never "resolve nothing", because "nothing" now means "refuse".
+     *
      * @return list<string>
      */
     private static function resolveIps(string $host): array
     {
-        $ips = [];
+        $resolver = app()->bound(HostResolver::class)
+            ? app()->make(HostResolver::class)
+            : new SystemHostResolver;
 
-        $v4 = @gethostbynamel($host);
-        if (is_array($v4)) {
-            $ips = $v4;
-        }
-
-        $aaaa = @dns_get_record($host, DNS_AAAA);
-        if (is_array($aaaa)) {
-            foreach ($aaaa as $record) {
-                if (isset($record['ipv6']) && is_string($record['ipv6'])) {
-                    $ips[] = $record['ipv6'];
-                }
-            }
-        }
-
-        return $ips;
+        return $resolver->resolve($host);
     }
 }

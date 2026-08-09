@@ -15,6 +15,7 @@ use App\Models\Upstream;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
 use App\Support\ActivityPresenter;
+use App\Support\CredentialUrl;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -67,7 +68,7 @@ class GroupController extends Controller
             'packages' => $group->packages()->orderBy('name')->get(['packages.id', 'name', 'type', 'sync_status'])
                 ->map(fn (Package $p) => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type->value, 'sync_status' => $p->sync_status->value]),
             'domains' => $group->domains->map(fn (Domain $d) => ['id' => $d->id, 'hostname' => $d->hostname]),
-            'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => $u->url, 'policy' => $u->policy->value]),
+            'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => CredentialUrl::redact($u->url), 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
             'setup' => $snippets->for($group),
             'stats' => $this->groupStats($group),
@@ -101,6 +102,11 @@ class GroupController extends Controller
         // one) — always validated to be one the user may administer.
         $organizationId = $this->resolveCreationOrg($request->validated('organization_id'));
 
+        // Packages may only be pulled in from the caller's own reach — never out of
+        // another organization's registry.
+        $packageIds = $request->validated('package_ids', []);
+        $this->assertCanAttachPackages($packageIds);
+
         $group = Group::create([
             'name' => $request->validated('name'),
             'slug' => $request->validated('slug'),
@@ -108,7 +114,7 @@ class GroupController extends Controller
             'portal_enabled' => $request->boolean('portal_enabled'),
             'organization_id' => $organizationId,
         ]);
-        $group->packages()->sync($request->validated('package_ids', []));
+        $group->packages()->sync($packageIds);
 
         return back()->with('success', "Gruppe {$group->name} erstellt.");
     }
@@ -134,6 +140,8 @@ class GroupController extends Controller
             'package_ids' => ['required', 'array', 'min:1'],
             'package_ids.*' => ['uuid', 'exists:packages,id'],
         ]);
+
+        $this->assertCanAttachPackages($data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.
         $group->packages()->syncWithoutDetaching($data['package_ids']);

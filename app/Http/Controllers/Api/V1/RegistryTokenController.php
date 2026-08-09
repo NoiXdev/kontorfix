@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\TokenAbility;
+use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreTokenRequest;
@@ -16,18 +17,18 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class RegistryTokenController extends Controller
 {
-    use ScopesApiToUser;
+    use ClampsPageSize, ScopesApiToUser;
 
     public function index(Request $request): AnonymousResourceCollection
     {
         // Registry tokens are organization credentials — only administered orgs are listed.
-        $query = RegistryToken::with(['organization:id,name', 'group:id,name'])->latest();
+        $query = RegistryToken::with(['organization:id,name', 'group:id,name'])->notRevoked()->latest();
         if (! $this->seesAllOrganizations()) {
             $query->whereIn('organization_id', $this->apiUser()->administeredOrganizationIds());
         }
 
         return RegistryTokenResource::collection(
-            $query->paginate(min((int) $request->query('per_page', 25), 100))
+            $query->paginate($this->perPage($request))
         );
     }
 
@@ -42,6 +43,7 @@ class RegistryTokenController extends Controller
             $request->validated('name'),
             $request->validated('group_id') ? Group::findOrFail($request->validated('group_id')) : null,
             $request->enum('ability', TokenAbility::class) ?? TokenAbility::Read,
+            $request->date('expires_at'),
         );
 
         $token->plain_text = $plain;

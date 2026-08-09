@@ -6,6 +6,8 @@ use App\Enums\GitProvider;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Support\CredentialUrl;
+use App\Support\RepositoryAuthority;
 use Database\Factories\PackageFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -19,7 +21,33 @@ use Spatie\Activitylog\Support\LogOptions;
 class Package extends Model
 {
     /** @use HasFactory<PackageFactory> */
-    use HasFactory, HasUuids, LogsActivity;
+    use HasFactory, HasUuids, LogsActivity {
+        // Aliased so the override below can call through: LogsActivity is a trait, so a
+        // method of the same name on the class replaces it outright and `parent::` reaches
+        // Model, which has none.
+        LogsActivity::buildChanges as protected spatieBuildChanges;
+    }
+
+    /**
+     * Keeps `repository_token_host` truthful without any write path having to remember it.
+     *
+     * The binding is stamped exactly when the token itself is written, never when the URL
+     * moves: re-deriving it from a changed URL would rebind the secret to whatever the
+     * caller just typed, which is the retarget this exists to refuse. Entering a token is
+     * the act that names its destination.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $package): void {
+            if (! $package->isDirty('repository_token')) {
+                return;
+            }
+
+            $package->repository_token_host = $package->repository_token === null
+                ? null
+                : RepositoryAuthority::of($package->repository_url);
+        });
+    }
 
     public function getActivitylogOptions(): LogOptions
     {
@@ -28,6 +56,34 @@ class Package extends Model
             ->logOnly(['name', 'type', 'repository_url', 'sync_status'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
+    }
+
+    /**
+     * Keeps a git PAT out of `activity_log.properties`.
+     *
+     * `repository_url` legitimately carries `https://x-access-token:<PAT>@github.com/…` —
+     * that is the supported inline shape and CredentialUrl exists because the column cannot
+     * simply reject it. Logging the raw value put the secret in a second table, in
+     * cleartext, where it outlives the rotation that answers a leak and is rendered to any
+     * reader of the activity view. Redacted rather than dropped: which host a repository
+     * moved to is the audit-relevant fact, and a bare boolean would lose it.
+     *
+     * The dirty comparison in the parent runs on the real values, so what is logged is
+     * still exactly what changed.
+     *
+     * @return array<string, mixed>
+     */
+    protected function buildChanges(string $processingEvent): array
+    {
+        $changes = $this->spatieBuildChanges($processingEvent);
+
+        foreach (['attributes', 'old'] as $bag) {
+            if (is_array($changes[$bag] ?? null) && array_key_exists('repository_url', $changes[$bag])) {
+                $changes[$bag]['repository_url'] = CredentialUrl::redact($changes[$bag]['repository_url']);
+            }
+        }
+
+        return $changes;
     }
 
     protected $fillable = [
@@ -129,9 +185,26 @@ class Package extends Model
     {
         $credential = $this->gitCredential;
         if ($credential !== null) {
+            // Last line of defence: a credential is bound to one host, so a repository URL
+            // that no longer matches gets no token rather than leaking it to that host.
+            if (! $credential->permits($this->repository_url)) {
+                return ['token' => null, 'provider' => $credential->provider, 'username' => $credential->username];
+            }
+
             $credential->forceFill(['last_used_at' => now()])->saveQuietly();
 
             return ['token' => $credential->token, 'provider' => $credential->provider, 'username' => $credential->username];
+        }
+
+        // The inline column gets the check the managed one already has. `repository_token_host`
+        // records the authority the token was entered for, so a repository_url that has since
+        // moved — to another port of the same host, which the old console guard could not
+        // see, or by any writer that does not pass through the console at all — gets no token
+        // rather than shipping the organization's PAT to an address someone else named.
+        // Fails closed on a null binding: a token whose destination is unknown is not sent.
+        if ($this->repository_token !== null
+            && RepositoryAuthority::of($this->repository_url) !== $this->repository_token_host) {
+            return ['token' => null, 'provider' => GitProvider::GitHub, 'username' => null];
         }
 
         return ['token' => $this->repository_token, 'provider' => GitProvider::GitHub, 'username' => null];
