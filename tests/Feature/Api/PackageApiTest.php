@@ -60,6 +60,20 @@ it('triggers a resync', function () {
     Queue::assertPushed(SyncPackage::class);
 });
 
+it('does not dispatch a sync for a resync request against a publish-based package with a reference-only repository url', function () {
+    Queue::fake();
+    $plain = operatorWriteToken();
+    $package = Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.com/acme/reference-only.git',
+    ]);
+
+    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")->assertOk();
+
+    Queue::assertNothingPushed();
+});
+
 it('lets a member read (scoped) but not write packages', function () {
     $org = Organization::factory()->create(['is_operator' => false]);
     $member = User::factory()->create(['organization_id' => $org->id, 'role' => 'member']);

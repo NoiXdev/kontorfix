@@ -96,7 +96,12 @@ class PackageController extends Controller
     {
         $this->assertCanWritePackage($package);
 
-        SyncPackage::dispatch($package);
+        // Publish-based packages (npm, Python) are filled by pushing artifacts; a
+        // repository_url on one is reference-only, so a resync request against it is a
+        // silent no-op rather than a dispatch doomed to fail. Mirrors store() above.
+        if ($package->isGitSourced() && $package->repository_url !== null) {
+            SyncPackage::dispatch($package);
+        }
 
         return new PackageResource($package);
     }

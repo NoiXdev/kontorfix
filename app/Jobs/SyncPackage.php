@@ -42,7 +42,7 @@ class SyncPackage implements ShouldQueue
     public function handle(): void
     {
         if ($this->package->repository_url === null) {
-            $this->markFailed('Package has no repository_url configured.');
+            $this->markFailed('Für dieses Paket ist keine Repository-URL hinterlegt — im Tab „Quelle“ eine Repository-URL eintragen, dann erneut synchronisieren.');
 
             return; // Configuration error — retrying makes no sense
         }
@@ -55,7 +55,7 @@ class SyncPackage implements ShouldQueue
         // not a transient one, so it is failed the same way rather than left to clone.
         if (! $this->package->isGitSourced()) {
             $this->markFailed(sprintf(
-                'Paket ist nicht git-basiert (Quellmodus „%s") — ein Git-Sync ist hierfür nicht vorgesehen.',
+                'Paket ist nicht git-basiert (Quellmodus „%s“) — ein Git-Sync ist hierfür nicht vorgesehen. Repository-URL entfernen, falls sie nur zur Referenz dient, oder den Quellmodus auf Git-Mirror stellen, falls das Paket tatsächlich gespiegelt werden soll.',
                 $this->package->source_mode->label(),
             ));
 
@@ -74,7 +74,7 @@ class SyncPackage implements ShouldQueue
         // being git-synced one way or another, is whether the type permits that at all.
         if (! in_array(PackageSourceMode::Git, PackageSourceMode::allowedFor($this->package->type), true)) {
             $this->markFailed(sprintf(
-                'Der Quellmodus „%s" ist für %s-Pakete nicht mehr zulässig.',
+                'Der Quellmodus „%s“ ist für %s-Pakete nicht mehr zulässig — Paket auf den Quellmodus „Publish“ umstellen.',
                 $this->package->source_mode->label(),
                 $this->package->type->value,
             ));
