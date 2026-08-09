@@ -4,6 +4,7 @@ namespace App\Http\Requests\Auth;
 
 use App\Models\User;
 use App\Services\Auth\KnownClients;
+use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -164,7 +165,7 @@ class LoginRequest extends FormRequest
         }
 
         if (! $matches || ! $user) {
-            $this->penaliseFailure();
+            $this->penaliseFailure($user);
 
             throw ValidationException::withMessages([
                 'email' => trans('auth.failed'),
@@ -263,8 +264,14 @@ class LoginRequest extends FormRequest
      * account holder's correct password takes the other branch and is never slowed, never
      * queued and never refused by anything keyed on their account.
      */
-    private function penaliseFailure(): void
+    private function penaliseFailure(?User $user): void
     {
+        // The per-guess record. Auth::attempt() is never called on this path — the
+        // comparison is a bare Hash::check — so nothing else raises it, and without it a
+        // brute force reaching this line was invisible. LogAuthenticationEvent turns it
+        // into a log line and deliberately reads no credentials out of it.
+        event(new Failed('web', $user, ['email' => (string) $this->string('email')]));
+
         RateLimiter::hit($this->throttleKey());
 
         $accountFailures = RateLimiter::hit($this->accountThrottleKey(), self::DECAY_SECONDS);

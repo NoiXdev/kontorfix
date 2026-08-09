@@ -202,6 +202,14 @@ completing a password reset also marks the browser, and `POST /reset-password` i
 per source address only (see the `password-reset-complete` limiter), so it is the one
 recovery path an attacker flooding the account cannot deny.
 
+**What is written.** `App\Listeners\LogAuthenticationEvent` turns `Failed` into
+`Authentication failed.` (guard, user id, addressee, IP, path — never the credentials, which
+carry the submitted password whenever the framework's own `Auth::attempt()` raises the
+event) and `Lockout` into `Authentication throttled.`, deduplicated to one line per
+(address, target) per minute so an anonymous caller cannot drive one write per request.
+That is what the argument below rests on: what the application declines to refuse, it at
+least reports.
+
 **What is not bounded.** Guesses inside the free allowance are not paced, so an attacker
 with unlimited addresses still gets ten tries per account per 15 minutes for free, and
 credential stuffing — one guess against each of many accounts — is bounded only per source

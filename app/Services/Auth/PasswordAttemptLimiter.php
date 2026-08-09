@@ -7,7 +7,6 @@ use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
@@ -113,13 +112,10 @@ class PasswordAttemptLimiter
         RateLimiter::hit($this->addressKey($request, $user), self::DECAY_SECONDS);
         RateLimiter::hit($this->accountKey($user), self::DECAY_SECONDS);
 
+        // The trace is the event; LogAuthenticationEvent writes the line, for this path
+        // and for the login form alike, so there is one place that decides what a failed
+        // comparison is allowed to put in a log — in particular, never the credentials.
         event(new Failed('web', $user, ['email' => $user->email]));
-
-        Log::warning('Password confirmation failed.', [
-            'user_id' => $user->getKey(),
-            'ip' => $request->ip(),
-            'path' => $request->path(),
-        ]);
 
         if (! RateLimiter::tooManyAttempts($this->accountKey($user), self::ACCOUNT_MAX_ATTEMPTS)) {
             return null;

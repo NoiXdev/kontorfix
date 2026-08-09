@@ -6,11 +6,14 @@ use App\Enums\UserRole;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
+use App\Listeners\LogAuthenticationEvent;
 use App\Models\User;
 use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Upstream\HostResolver;
 use App\Services\Upstream\SystemHostResolver;
 use Dedoc\Scramble\Scramble;
+use Illuminate\Auth\Events\Failed;
+use Illuminate\Auth\Events\Lockout;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Http\Request;
@@ -83,6 +86,13 @@ class AppServiceProvider extends ServiceProvider
         // methods. Hence explicit registration instead of discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
+
+        // Same shape, same reason: one listener, two event types, so discovery cannot
+        // wire it. Without it a login brute force leaves no record whatsoever, and the
+        // login throttle's stated compensating control for what it does not refuse would
+        // be a claim about a listener that does not exist.
+        Event::listen(Failed::class, [LogAuthenticationEvent::class, 'onFailed']);
+        Event::listen(Lockout::class, [LogAuthenticationEvent::class, 'onLockout']);
 
         // The Pusher protocol authorizes private channels inside the websocket server,
         // against the app secret — routes/channels.php never sees a raw wss:// client.
