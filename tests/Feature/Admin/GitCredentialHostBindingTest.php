@@ -61,11 +61,13 @@ it('rejects creating a package whose repository host the credential is not bound
     $org = Organization::factory()->create();
     $cred = GitCredential::factory()->for($org)->create(['provider' => GitProvider::GitHub]);
 
-    $this->actingAs(hostBindingAdmin($org))->post('/admin/packages', [
+    $admin = hostBindingAdmin($org);
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'composer',
         'name' => 'acme/lib',
         'repository_url' => 'https://evil.test/acme/lib.git',
         'git_credential_id' => $cred->id,
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertSessionHasErrors('repository_url');
 
     expect(Package::where('name', 'acme/lib')->exists())->toBeFalse();

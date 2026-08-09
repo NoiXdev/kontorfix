@@ -34,11 +34,14 @@ it('refuses to create a package referencing another organization\'s git credenti
     $theirs = Organization::factory()->create();
     $foreign = GitCredential::factory()->for($theirs)->create(['token' => 'ghp_victim']);
 
+    // group_ids is mandatory now; a valid own registry keeps the 403 coming from the
+    // credential ownership check rather than from validation.
     $this->withToken(credWriteKey($mine))->postJson('/api/v1/packages', [
         'type' => 'composer',
         'name' => 'acme/exfil',
         'repository_url' => 'https://github.com/acme/exfil.git',
         'git_credential_id' => $foreign->id,
+        'group_ids' => [Group::factory()->for($mine)->create()->id],
     ])->assertForbidden();
 
     expect(Package::where('name', 'acme/exfil')->exists())->toBeFalse();
@@ -54,6 +57,7 @@ it('accepts a git credential from an organization the caller administers', funct
         'name' => 'acme/own',
         'repository_url' => 'https://github.com/acme/own.git',
         'git_credential_id' => $cred->id,
+        'group_ids' => [Group::factory()->for($org)->create()->id],
     ])->assertCreated();
 
     expect(Package::where('name', 'acme/own')->firstOrFail()->git_credential_id)->toBe($cred->id);
@@ -71,6 +75,7 @@ it('refuses to create a package on the admin surface with a foreign git credenti
         'name' => 'acme/exfil',
         'repository_url' => 'https://github.com/acme/exfil.git',
         'git_credential_id' => $foreign->id,
+        'group_ids' => [Group::factory()->for($mine)->create()->id],
     ])->assertForbidden();
 });
 

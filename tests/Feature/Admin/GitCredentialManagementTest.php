@@ -96,10 +96,12 @@ it('assigns a credential to a package and resolves its git auth', function () {
     $org = Organization::factory()->create();
     $cred = GitCredential::factory()->for($org)->create(['provider' => GitProvider::GitLab, 'token' => 'glpat-x']);
 
-    $this->actingAs(credAdmin($org))->post('/admin/packages', [
+    $admin = credAdmin($org);
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'composer', 'name' => 'acme/lib',
         'repository_url' => 'https://gitlab.com/acme/lib.git',
         'git_credential_id' => $cred->id,
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $auth = Package::where('name', 'acme/lib')->firstOrFail()->gitAuth();
@@ -113,9 +115,13 @@ it('forbids assigning a foreign-org credential to a package', function () {
     $orgB = Organization::factory()->create();
     $foreign = GitCredential::factory()->for($orgB)->create();
 
-    $this->actingAs(credAdmin($orgA))->post('/admin/packages', [
+    // group_ids is mandatory now; passing a valid own registry keeps the 403 coming from
+    // the credential ownership check rather than from validation.
+    $admin = credAdmin($orgA);
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'composer', 'name' => 'acme/lib',
         'repository_url' => 'https://gitlab.com/acme/lib.git',
         'git_credential_id' => $foreign->id,
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertForbidden();
 });

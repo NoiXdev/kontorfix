@@ -34,9 +34,11 @@ it('creates a package, assigns groups inline and dispatches sync', function () {
 
 it('returns the created package as json for inline picker creation', function () {
     Queue::fake();
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
-    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
+    $this->actingAs($admin)
         ->postJson('/admin/packages', [
+            'group_ids' => [homeRegistryId($admin)],
             'type' => 'npm',
             'name' => '@acme/widget',
             'source_mode' => 'git',
@@ -87,8 +89,10 @@ it('rejects non-https/ssh repository urls to avoid ssrf', function () {
 
 it('drops sync status injection on create (mass assignment guard)', function () {
     Queue::fake();
-    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    $this->actingAs($admin)
         ->post('/admin/packages', [
+            'group_ids' => [homeRegistryId($admin)],
             'type' => 'composer',
             'name' => 'acme/forged',
             'repository_url' => 'https://git.example.com/acme/forged.git',
@@ -131,17 +135,18 @@ it('accepts a scoped npm package name but still requires vendor/name for compose
     Queue::fake();
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
     $url = 'https://git.example.com/acme/demo.git';
+    $registry = [homeRegistryId($admin)];
 
     // npm: scoped name allowed
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/ui-kit', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/ui-kit', 'repository_url' => $url, 'group_ids' => $registry])
         ->assertRedirect()->assertSessionHasNoErrors();
     // npm: bare name allowed
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => 'leftpad', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => 'leftpad', 'repository_url' => $url, 'group_ids' => $registry])
         ->assertSessionHasNoErrors();
     // composer: bare name (without vendor/) rejected
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'leftpad', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'leftpad', 'repository_url' => $url, 'group_ids' => $registry])
         ->assertSessionHasErrors('name');
     // npm: uppercase letters rejected
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/UI-Kit', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'npm', 'name' => '@noixdev/UI-Kit', 'repository_url' => $url, 'group_ids' => $registry])
         ->assertSessionHasErrors('name');
 });

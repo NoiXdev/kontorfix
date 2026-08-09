@@ -17,9 +17,10 @@ function operatorAdmin(): User
 
 it('creates a Python package without a repository and dispatches no sync', function () {
     Queue::fake();
+    $admin = operatorAdmin();
 
-    $this->actingAs(operatorAdmin())->post('/admin/packages', [
-        'type' => 'python', 'name' => 'My.Package',
+    $this->actingAs($admin)->post('/admin/packages', [
+        'type' => 'python', 'name' => 'My.Package', 'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $pkg = Package::where('name', 'My.Package')->first();
@@ -34,9 +35,11 @@ it('creates a Python package without a repository and dispatches no sync', funct
 it('validates the Python project name (PEP 508 shape)', function () {
     $admin = operatorAdmin();
 
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'python', 'name' => 'has spaces'])
+    $registry = [homeRegistryId($admin)];
+
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'python', 'name' => 'has spaces', 'group_ids' => $registry])
         ->assertSessionHasErrors('name');
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'python', 'name' => 'valid_name.0'])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'python', 'name' => 'valid_name.0', 'group_ids' => $registry])
         ->assertSessionHasNoErrors();
 });
 
@@ -52,7 +55,7 @@ it('creates a Python package via the API without a repository', function () {
     [, $plain] = ApiKey::issue($admin, 'w', ApiKeyPermission::Write);
 
     $this->withToken($plain)->postJson('/api/v1/packages', [
-        'type' => 'python', 'name' => 'demo-lib',
+        'type' => 'python', 'name' => 'demo-lib', 'group_ids' => [homeRegistryId($admin)],
     ])->assertCreated()->assertJsonPath('data.type', 'python');
 
     Queue::assertNotPushed(SyncPackage::class);

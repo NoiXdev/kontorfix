@@ -68,9 +68,7 @@ const filterType = ref(props.filters.type ?? '');
 const filterStatus = ref(props.filters.status ?? '');
 const filterGroup = ref(props.filters.group ?? '');
 
-const hasActiveFilters = computed(
-    () => filterQ.value !== '' || filterType.value !== '' || filterStatus.value !== '' || filterGroup.value !== '',
-);
+const hasActiveFilters = computed(() => filterQ.value !== '' || filterType.value !== '' || filterStatus.value !== '' || filterGroup.value !== '');
 
 function applyFilters() {
     router.get(
@@ -239,7 +237,10 @@ async function probeRepository() {
     }
 }
 
-const canSubmit = computed(() => form.name.trim() !== '' && (!isGitMode.value || probeResult.value?.ok === true));
+// A package with no registry is invisible to its own creator and burns its name
+// instance-wide, so at least one is mandatory. The server enforces this (StorePackageRequest);
+// this only spares the operator the round trip.
+const canSubmit = computed(() => form.name.trim() !== '' && form.group_ids.length > 0 && (!isGitMode.value || probeResult.value?.ok === true));
 
 function submit() {
     // Enforce the probe-first gate here too — not only via the disabled button — so a
@@ -399,12 +400,7 @@ function destroyPackage(id: string) {
                 <form class="space-y-4" @submit.prevent="submit">
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <SearchableSelect
-                            id="type"
-                            v-model="form.type"
-                            :options="typeOptions"
-                            @update:model-value="onTypeChange"
-                        />
+                        <SearchableSelect id="type" v-model="form.type" :options="typeOptions" @update:model-value="onTypeChange" />
                         <InputError :message="form.errors.type" />
                     </div>
 
@@ -419,9 +415,8 @@ function destroyPackage(id: string) {
                             @update:model-value="onSourceModeChange"
                         />
                         <p class="text-xs text-muted-foreground">
-                            <strong>Publish (Push):</strong> Versionen entstehen beim Upload.
-                            <strong>Git-Mirror:</strong> Versionen werden aus den Tags eines Repositories gespiegelt
-                            (keine Build-/Prepare-Skripte).
+                            <strong>Publish (Push):</strong> Versionen entstehen beim Upload. <strong>Git-Mirror:</strong> Versionen werden aus den
+                            Tags eines Repositories gespiegelt (keine Build-/Prepare-Skripte).
                         </p>
                     </div>
 
@@ -440,9 +435,9 @@ function destroyPackage(id: string) {
                     <!-- Publish-based: no git repo — the name is the reserved identifier;
                          versions/metadata arrive with each upload. -->
                     <p v-if="!isGitMode" class="text-xs text-muted-foreground">
-                        Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten
-                        entstehen beim Upload (<code>{{ form.type === 'npm' ? 'npm publish' : 'twine upload' }}</code>) —
-                        kein Repository nötig.
+                        Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten entstehen beim Upload (<code
+                            >{{ form.type === 'npm' ? 'npm publish' : 'twine upload' }}</code
+                        >) — kein Repository nötig.
                     </p>
                     <template v-else>
                         <div class="grid gap-2">
@@ -456,7 +451,12 @@ function destroyPackage(id: string) {
                                     @update:model-value="resetProbe"
                                     @keyup.enter.prevent="probeRepository"
                                 />
-                                <Button type="button" variant="outline" :disabled="probing || form.repository_url.trim() === ''" @click="probeRepository">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    :disabled="probing || form.repository_url.trim() === ''"
+                                    @click="probeRepository"
+                                >
                                     {{ probing ? 'Prüfe…' : 'Prüfen' }}
                                 </Button>
                             </div>
@@ -492,14 +492,22 @@ function destroyPackage(id: string) {
                                     autocomplete="off"
                                     @update:model-value="resetProbe"
                                 />
-                                <p class="text-xs text-muted-foreground">Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.</p>
+                                <p class="text-xs text-muted-foreground">
+                                    Nur für HTTPS. Wird verschlüsselt gespeichert und für Prüfen/Sync verwendet.
+                                </p>
                             </div>
                         </template>
 
-                        <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                        <div
+                            v-if="probeResult && !probeResult.ok"
+                            class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                        >
                             {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
                         </div>
-                        <div v-else-if="probeResult && probeResult.ok" class="rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
+                        <div
+                            v-else-if="probeResult && probeResult.ok"
+                            class="rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm"
+                        >
                             <span class="font-medium text-verdigris">Repository erreichbar.</span>
                             <span v-if="probeResult.versions.length" class="text-muted-foreground">
                                 {{ probeResult.versions.length }} Version(en) gefunden.

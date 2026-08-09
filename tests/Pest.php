@@ -3,6 +3,7 @@
 use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\RegistryToken;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -53,6 +54,16 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * A registry in the user's own organization, to be passed as the mandatory `group_ids` of a
+ * package create. Creating a package into no registry is refused (StorePackageRequest): the
+ * row would burn its instance-global name while being invisible to its own creator.
+ */
+function homeRegistryId(User $user): string
+{
+    return (string) Group::factory()->create(['organization_id' => $user->organization_id])->id;
 }
 
 function tokenHeaderFor(Group $group): array

@@ -15,11 +15,13 @@ function tokenAdmin(): User
 it('stores the repository token encrypted and never serialises it', function () {
     Queue::fake();
 
-    $this->actingAs(tokenAdmin())->post('/admin/packages', [
+    $admin = tokenAdmin();
+    $this->actingAs($admin)->post('/admin/packages', [
         'type' => 'composer',
         'name' => 'acme/private',
         'repository_url' => 'https://github.com/acme/private.git',
         'repository_token' => 'ghp_supersecret',
+        'group_ids' => [homeRegistryId($admin)],
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     $package = Package::where('name', 'acme/private')->firstOrFail();
