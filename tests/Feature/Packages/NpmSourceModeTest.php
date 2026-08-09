@@ -166,6 +166,21 @@ it('refuses an npm package in git-mirror mode on the api path', function () {
         ->assertJsonValidationErrors('source_mode');
 });
 
+// …and it says so in German. Rule::in's default message is English, and this refusal is
+// the only one on this route a client can trip that had no messages() entry.
+it('phrases the source-mode refusal in german', function () {
+    Queue::fake();
+    [$user, $groupId, $key] = npmApiFixture();
+
+    $this->withHeader('Authorization', "Bearer {$key}")
+        ->postJson('/api/v1/packages', npmPayload($groupId, [
+            'source_mode' => 'git',
+            'repository_url' => 'https://github.test/acme/demo.git',
+        ]))
+        ->assertStatus(422)
+        ->assertJsonPath('errors.source_mode.0', 'Dieser Quellmodus ist für den gewählten Pakettyp nicht zulässig.');
+});
+
 // A positive control: without this, npmApiFixture() is only ever exercised by a request
 // expected to fail, so a bug that made the API path refuse *everything* for npm (not just
 // git) would not show up as a regression anywhere in this file.

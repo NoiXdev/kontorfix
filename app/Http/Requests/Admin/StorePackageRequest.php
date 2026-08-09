@@ -109,6 +109,10 @@ class StorePackageRequest extends FormRequest
     public function messages(): array
     {
         return [
+            // Rule::in's default reads "The selected source mode is invalid." — English, in
+            // a German UI. Reachable over the API only (the create dialog hides the field
+            // for a type with a single mode), but it is still a user-visible string.
+            'source_mode.in' => 'Dieser Quellmodus ist für den gewählten Pakettyp nicht zulässig.',
             'repository_url.starts_with' => 'Die Repository-URL muss mit https:// oder ssh:// beginnen.',
             'repository_url.url' => 'Bitte eine gültige https- oder ssh-Repository-URL angeben.',
             'group_ids.required' => 'Bitte mindestens eine Registry auswählen.',
