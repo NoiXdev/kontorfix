@@ -249,13 +249,21 @@ function submit() {
     if (!canSubmit.value) {
         return;
     }
-    form.post(route('admin.packages.store'), {
-        onSuccess: () => {
-            dialogOpen.value = false;
-            form.reset();
-            probeResult.value = null;
-        },
-    });
+    form
+        // The source selector is only rendered when canChooseSource is true (Composer
+        // hides it — it has exactly one allowed mode). Drop the field entirely rather
+        // than send the default 'publish' for a type that doesn't allow it: the server
+        // now rejects any explicitly submitted mode a type doesn't allow (StorePackageRequest
+        // / PackageSourceMode::allowedFor), and Composer would otherwise 422 on a field the
+        // user never had a chance to touch.
+        .transform((data) => (canChooseSource.value ? data : { ...data, source_mode: undefined }))
+        .post(route('admin.packages.store'), {
+            onSuccess: () => {
+                dialogOpen.value = false;
+                form.reset();
+                probeResult.value = null;
+            },
+        });
 }
 
 function toggleGroup(groupId: string, checked: boolean) {

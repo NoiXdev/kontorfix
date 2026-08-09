@@ -29,12 +29,16 @@ it('creates a publish-based npm package without a repository', function () {
 });
 
 it('rejects git-mirror mode for npm outright, even with a repository url', function () {
+    // Fake the queue: if this refusal ever regresses, the fallthrough create would
+    // otherwise dispatch a real SyncPackage against github.com.
+    Queue::fake();
     $this->actingAs(sourceAdmin())->post('/admin/packages', [
         'type' => 'npm', 'name' => '@acme/mirror', 'source_mode' => 'git',
         'repository_url' => 'https://github.com/acme/mirror.git',
     ])->assertSessionHasErrors('source_mode');
 
     expect(Package::where('name', '@acme/mirror')->exists())->toBeFalse();
+    Queue::assertNotPushed(SyncPackage::class);
 });
 
 it('creates a git-mirror python package and dispatches a sync', function () {
@@ -63,6 +67,9 @@ it('rejects an explicit non-git source mode for composer', function () {
     // Composer's only allowed mode is Git (PackageSourceMode::allowedFor). An explicit,
     // disallowed submission is now a validation error rather than a silent override —
     // silently coercing bad input hid the same class of mistake this task removes for npm.
+    // Fake the queue: if this refusal ever regresses, the fallthrough create would
+    // otherwise dispatch a real SyncPackage against github.com.
+    Queue::fake();
     $admin = sourceAdmin();
 
     $this->actingAs($admin)->post('/admin/packages', [
@@ -72,4 +79,5 @@ it('rejects an explicit non-git source mode for composer', function () {
     ])->assertSessionHasErrors('source_mode');
 
     expect(Package::where('name', 'acme/lib')->exists())->toBeFalse();
+    Queue::assertNotPushed(SyncPackage::class);
 });

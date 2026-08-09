@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
@@ -66,7 +67,14 @@ class PackageController extends Controller
             }
         }
 
-        $package = Package::create($request->safe()->except('group_ids'));
+        // Mirrors Admin\PackageController::store: the request, not the raw submitted
+        // value, is authoritative for the stored mode — otherwise a type that didn't
+        // submit source_mode at all (or submitted one it doesn't allow) would fall through
+        // to the column's DB default ('publish') instead of the type's real default.
+        $attributes = $request->safe()->except('group_ids');
+        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+
+        $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
         // Publish-based packages (npm, Python) without a repository have nothing to sync
