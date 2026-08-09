@@ -34,13 +34,21 @@ final class AppUrl
      */
     public static function root(): ?string
     {
-        $normalised = self::normalise();
+        return self::normalizeRoot((string) config('app.url'));
+    }
 
-        if ($normalised === null) {
-            return null;
-        }
+    /**
+     * The same normalisation applied to a value the caller already holds.
+     *
+     * Config files are loaded before the container can answer `config()`, so
+     * `config/cors.php` has to read `env('APP_URL')` itself — and it must not read it
+     * unnormalised, which is the whole point of this class.
+     */
+    public static function normalizeRoot(?string $raw): ?string
+    {
+        $normalised = self::normalise($raw);
 
-        return rtrim($normalised, '/');
+        return $normalised === null ? null : rtrim($normalised, '/');
     }
 
     /**
@@ -48,7 +56,7 @@ final class AppUrl
      */
     public static function host(): ?string
     {
-        $normalised = self::normalise();
+        $normalised = self::normalise((string) config('app.url'));
 
         if ($normalised === null) {
             return null;
@@ -60,11 +68,11 @@ final class AppUrl
     }
 
     /**
-     * Returns the configured value with a scheme, or null if no host can be recovered.
+     * Returns the given value with a scheme, or null if no host can be recovered.
      */
-    private static function normalise(): ?string
+    private static function normalise(?string $value): ?string
     {
-        $raw = trim((string) config('app.url'));
+        $raw = trim((string) $value);
 
         if ($raw === '') {
             return null;
