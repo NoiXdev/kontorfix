@@ -27,6 +27,10 @@ export interface TableState<T> {
     matchCount: ComputedRef<number>;
     totalCount: ComputedRef<number>;
     toggleSort: (key: string) => void;
+    // Preferred way for a component to change state it received as a prop: writing
+    // through a method, not mutating a nested ref of the prop object directly.
+    setSearch: (value: string) => void;
+    setFilter: (name: string, value: string) => void;
     reset: () => void;
 }
 
@@ -47,7 +51,7 @@ function readParam(name: string): string {
     return new URLSearchParams(window.location.search).get(name) ?? '';
 }
 
-export function useTableState<T extends Record<string, unknown>>(options: Options<T>): TableState<T> {
+export function useTableState<T>(options: Options<T>): TableState<T> {
     const mode = options.mode ?? 'client';
     const p = options.prefix ? `${options.prefix}_` : '';
 
@@ -110,7 +114,11 @@ export function useTableState<T extends Record<string, unknown>>(options: Option
     function valueFor(row: T, key: string): string | number | null {
         const column = columnByKey.get(key);
         if (column?.sortValue) return column.sortValue(row);
-        const raw = row[key];
+        // The one place T is treated as an arbitrary string-keyed bag: `key` is a column
+        // key, not necessarily `keyof T` (e.g. an "actions" column with no backing field).
+        // Keeping this cast here — instead of constraining T — lets every page keep its
+        // row type's real shape rather than opening it up with an index signature.
+        const raw = (row as Record<string, unknown>)[key];
         if (raw === null || raw === undefined || raw === '') return null;
         if (typeof raw === 'number') return raw;
         return String(raw);
@@ -179,6 +187,15 @@ export function useTableState<T extends Record<string, unknown>>(options: Option
         sortDirection.value = 'asc';
     }
 
+    function setSearch(value: string): void {
+        search.value = value;
+    }
+
+    function setFilter(name: string, value: string): void {
+        const target = filterValues[name];
+        if (target) target.value = value;
+    }
+
     function reset(): void {
         search.value = '';
         for (const value of Object.values(filterValues)) value.value = '';
@@ -198,6 +215,8 @@ export function useTableState<T extends Record<string, unknown>>(options: Option
         matchCount: computed(() => (mode === 'server' ? options.rows().length : filtered.value.length)),
         totalCount: computed(() => options.rows().length),
         toggleSort,
+        setSearch,
+        setFilter,
         reset,
     };
 }

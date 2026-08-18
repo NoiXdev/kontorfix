@@ -28,9 +28,6 @@ interface UserRow {
     organization_id: string | null;
     organization: string | null;
     memberships: Membership[];
-    // Lets UserRow satisfy useTableState's `T extends Record<string, unknown>` — the
-    // composable indexes rows by an arbitrary column key (row[key]).
-    [key: string]: unknown;
 }
 
 interface OrganizationOption {
@@ -237,8 +234,20 @@ function destroyUser(id: string) {
 
             <DataTable :columns="columns" :state="table" empty-message="Noch keine Nutzer angelegt.">
                 <template #filters>
-                    <SearchableSelect v-model="table.filterValues.org.value" :options="orgOptions" placeholder="Organisation" class="w-40" />
-                    <SearchableSelect v-model="table.filterValues.role.value" :options="roleOptions" placeholder="Rolle" class="w-40" />
+                    <SearchableSelect
+                        :model-value="table.filterValues.org.value"
+                        :options="orgOptions"
+                        placeholder="Organisation"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('org', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.role.value"
+                        :options="roleOptions"
+                        placeholder="Rolle"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('role', String(v))"
+                    />
                 </template>
 
                 <template #default="{ rows }">

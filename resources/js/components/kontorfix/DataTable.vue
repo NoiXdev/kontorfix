@@ -1,4 +1,4 @@
-<script setup lang="ts" generic="T extends Record<string, unknown>">
+<script setup lang="ts" generic="T">
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import type { ColumnDef, TableState } from '@/composables/useTableState';
@@ -29,10 +29,11 @@ function ariaSort(key: string): 'ascending' | 'descending' | 'none' {
     <div class="flex flex-col gap-3">
         <div v-if="showFilterBar" class="flex flex-wrap items-center gap-2">
             <Input
-                v-model="state.search.value"
+                :model-value="state.search.value"
                 type="search"
                 :placeholder="searchPlaceholder"
                 class="h-9 w-full sm:max-w-64"
+                @update:model-value="(value) => state.setSearch(String(value))"
             />
             <slot name="filters" />
             <!-- A filtered table that looks short is otherwise indistinguishable from an
