@@ -99,16 +99,13 @@ function destroyToken(id: string) {
 
         <SettingsLayout>
             <div class="space-y-6">
-                <HeadingSmall
-                    title="Zugriffstokens"
-                    description="Persönliche Tokens für Composer/npm — global oder auf eine Registry beschränkt."
-                />
+                <HeadingSmall title="Zugriffstokens" description="Persönliche Tokens für Composer/npm — global oder auf eine Registry beschränkt." />
 
                 <div v-if="showTokenCallout" class="rounded-xl border border-copper/30 bg-copper/10 p-4">
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0 flex-1 space-y-2">
                             <p class="font-medium text-copper-hi">Neuer Token erstellt</p>
-                            <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                            <p class="rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm break-all select-all">
                                 {{ plainTextToken }}
                             </p>
                             <p class="text-sm text-muted-foreground">Dieser Token wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
@@ -138,18 +135,17 @@ function destroyToken(id: string) {
                         <SearchableSelect
                             id="token_group"
                             v-model="form.group_id"
-                            :options="[{ value: '', label: 'Global (alle Registries)' }, ...props.groups.map((g) => ({ value: g.id, label: g.name }))]"
+                            :options="[
+                                { value: '', label: 'Global (alle Registries)' },
+                                ...props.groups.map((g) => ({ value: g.id, label: g.name })),
+                            ]"
                         />
                         <InputError :message="form.errors.group_id" />
                     </div>
 
                     <div class="grid gap-2">
                         <Label for="token_ability">Recht</Label>
-                        <SearchableSelect
-                            id="token_ability"
-                            v-model="form.ability"
-                            :options="abilityOptions"
-                        />
+                        <SearchableSelect id="token_ability" v-model="form.ability" :options="abilityOptions" />
                         <InputError :message="form.errors.ability" />
                     </div>
 

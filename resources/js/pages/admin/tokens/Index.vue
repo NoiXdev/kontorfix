@@ -116,7 +116,7 @@ function destroyToken(id: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -125,7 +125,7 @@ function destroyToken(id: string) {
                 <div class="flex items-start justify-between gap-4">
                     <div class="min-w-0 flex-1 space-y-2">
                         <p class="font-medium text-copper-hi">Neuer Token erstellt</p>
-                        <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                        <p class="rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm break-all select-all">
                             {{ plainTextToken }}
                         </p>
                         <p class="text-sm text-muted-foreground">Dieser Token wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>

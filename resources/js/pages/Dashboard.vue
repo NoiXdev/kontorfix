@@ -36,7 +36,13 @@ const props = defineProps<{
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Dashboard', href: '/dashboard' }];
 
 const tiles = computed(() => [
-    { label: 'Pakete', value: props.stats.packages, sub: `${props.stats.composer} composer · ${props.stats.npm} npm`, icon: Package, href: '/admin/packages' },
+    {
+        label: 'Pakete',
+        value: props.stats.packages,
+        sub: `${props.stats.composer} composer · ${props.stats.npm} npm`,
+        icon: Package,
+        href: '/admin/packages',
+    },
     { label: 'Registries', value: props.stats.groups, sub: `${props.stats.domains} Domains`, icon: Boxes, href: '/admin/groups' },
     { label: 'Tokens', value: props.stats.tokens, sub: `${props.stats.upstreams} Upstreams`, icon: KeyRound, href: '/admin/tokens' },
 ]);
@@ -51,7 +57,10 @@ const syncSegments = computed(() => [
 const syncTotal = computed(() => syncSegments.value.reduce((n, s) => n + s.value, 0));
 
 function statusDot(status: string): string {
-    return { synced: 'bg-[#6CBF8B]', syncing: 'bg-copper', pending: 'bg-muted-foreground/50', failed: 'bg-destructive' }[status] ?? 'bg-muted-foreground/50';
+    return (
+        { synced: 'bg-[#6CBF8B]', syncing: 'bg-copper', pending: 'bg-muted-foreground/50', failed: 'bg-destructive' }[status] ??
+        'bg-muted-foreground/50'
+    );
 }
 
 // Subtle live hint on sync activity via the operator channel.
@@ -78,7 +87,7 @@ useOperatorChannel({
         <div class="flex h-full flex-1 flex-col gap-5 p-4">
             <div
                 v-if="liveHint"
-                class="fixed right-4 top-4 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
                 :class="
                     liveHint.failed
                         ? 'border-destructive/30 bg-destructive/10 text-destructive'
@@ -108,13 +117,23 @@ useOperatorChannel({
                 <Link
                     href="/admin/status"
                     class="group rounded-xl border p-5 transition-colors"
-                    :class="stats.failedJobs > 0 ? 'border-destructive/40 bg-destructive/5 hover:border-destructive/70' : 'border-sidebar-border/70 bg-card hover:border-copper/50 dark:border-sidebar-border'"
+                    :class="
+                        stats.failedJobs > 0
+                            ? 'border-destructive/40 bg-destructive/5 hover:border-destructive/70'
+                            : 'border-sidebar-border/70 bg-card hover:border-copper/50 dark:border-sidebar-border'
+                    "
                 >
                     <div class="flex items-center justify-between">
                         <span class="text-sm font-medium text-muted-foreground">Fehlgeschlagene Jobs</span>
-                        <AlertTriangle class="size-5" :class="stats.failedJobs > 0 ? 'text-destructive' : 'text-muted-foreground/60'" :stroke-width="1.75" />
+                        <AlertTriangle
+                            class="size-5"
+                            :class="stats.failedJobs > 0 ? 'text-destructive' : 'text-muted-foreground/60'"
+                            :stroke-width="1.75"
+                        />
                     </div>
-                    <div class="mt-3 font-display text-3xl font-extrabold tabular-nums" :class="stats.failedJobs > 0 ? 'text-destructive' : ''">{{ stats.failedJobs }}</div>
+                    <div class="mt-3 font-display text-3xl font-extrabold tabular-nums" :class="stats.failedJobs > 0 ? 'text-destructive' : ''">
+                        {{ stats.failedJobs }}
+                    </div>
                     <div class="mt-1 text-xs text-muted-foreground">Zur Statusseite</div>
                 </Link>
             </div>
@@ -122,7 +141,9 @@ useOperatorChannel({
             <!-- Failed packages widget -->
             <section
                 class="rounded-xl border p-5"
-                :class="failedPackages.length ? 'border-destructive/40 bg-destructive/5' : 'border-sidebar-border/70 bg-card dark:border-sidebar-border'"
+                :class="
+                    failedPackages.length ? 'border-destructive/40 bg-destructive/5' : 'border-sidebar-border/70 bg-card dark:border-sidebar-border'
+                "
             >
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
@@ -136,7 +157,11 @@ useOperatorChannel({
                             {{ stats.sync.failed }}
                         </span>
                     </div>
-                    <Link v-if="failedPackages.length" href="/admin/packages?status=failed" class="text-sm text-muted-foreground underline-offset-4 hover:underline">
+                    <Link
+                        v-if="failedPackages.length"
+                        href="/admin/packages?status=failed"
+                        class="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                    >
                         Alle ansehen
                     </Link>
                 </div>
@@ -152,7 +177,7 @@ useOperatorChannel({
                         <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-2">
                                 <span class="truncate font-mono text-sm">{{ p.name }}</span>
-                                <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ p.type }}</span>
+                                <span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">{{ p.type }}</span>
                                 <span v-if="p.synced_at" class="ml-auto shrink-0 text-xs text-muted-foreground">{{ p.synced_at }}</span>
                             </div>
                             <p v-if="p.error" class="mt-0.5 truncate text-xs text-destructive/90" :title="p.error">{{ p.error }}</p>
@@ -192,14 +217,19 @@ useOperatorChannel({
                         <div v-for="r in recent" :key="r.name" class="flex items-center gap-3 py-2.5">
                             <span class="size-2 shrink-0 rounded-full" :class="statusDot(r.status)" />
                             <span class="truncate font-mono text-sm">{{ r.name }}</span>
-                            <span class="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ r.type }}</span>
+                            <span class="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">{{
+                                r.type
+                            }}</span>
                             <span class="shrink-0 text-xs text-muted-foreground">{{ r.synced_at }}</span>
                         </div>
                     </div>
                     <div v-else class="mt-6 flex flex-1 flex-col items-center justify-center gap-3 text-center">
                         <Layers class="size-8 text-muted-foreground/40" :stroke-width="1.5" />
                         <p class="text-sm text-muted-foreground">Noch keine synchronisierten Pakete.</p>
-                        <Link href="/admin/packages" class="rounded-md bg-copper px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-copper-hi">
+                        <Link
+                            href="/admin/packages"
+                            class="rounded-md bg-copper px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-copper-hi"
+                        >
                             Erstes Paket anlegen
                         </Link>
                     </div>
@@ -210,19 +240,31 @@ useOperatorChannel({
             <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <div class="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-card px-4 py-3 dark:border-sidebar-border">
                     <Layers class="size-5 text-muted-foreground" :stroke-width="1.75" />
-                    <div><div class="font-display text-lg font-bold tabular-nums">{{ stats.versions }}</div><div class="text-xs text-muted-foreground">Versionen</div></div>
+                    <div>
+                        <div class="font-display text-lg font-bold tabular-nums">{{ stats.versions }}</div>
+                        <div class="text-xs text-muted-foreground">Versionen</div>
+                    </div>
                 </div>
                 <div class="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-card px-4 py-3 dark:border-sidebar-border">
                     <Globe class="size-5 text-muted-foreground" :stroke-width="1.75" />
-                    <div><div class="font-display text-lg font-bold tabular-nums">{{ stats.domains }}</div><div class="text-xs text-muted-foreground">Domains</div></div>
+                    <div>
+                        <div class="font-display text-lg font-bold tabular-nums">{{ stats.domains }}</div>
+                        <div class="text-xs text-muted-foreground">Domains</div>
+                    </div>
                 </div>
                 <div class="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-card px-4 py-3 dark:border-sidebar-border">
                     <CloudDownload class="size-5 text-muted-foreground" :stroke-width="1.75" />
-                    <div><div class="font-display text-lg font-bold tabular-nums">{{ stats.upstreams }}</div><div class="text-xs text-muted-foreground">Upstreams</div></div>
+                    <div>
+                        <div class="font-display text-lg font-bold tabular-nums">{{ stats.upstreams }}</div>
+                        <div class="text-xs text-muted-foreground">Upstreams</div>
+                    </div>
                 </div>
                 <div class="flex items-center gap-3 rounded-xl border border-sidebar-border/70 bg-card px-4 py-3 dark:border-sidebar-border">
                     <KeyRound class="size-5 text-muted-foreground" :stroke-width="1.75" />
-                    <div><div class="font-display text-lg font-bold tabular-nums">{{ stats.tokens }}</div><div class="text-xs text-muted-foreground">Tokens</div></div>
+                    <div>
+                        <div class="font-display text-lg font-bold tabular-nums">{{ stats.tokens }}</div>
+                        <div class="text-xs text-muted-foreground">Tokens</div>
+                    </div>
                 </div>
             </div>
         </div>

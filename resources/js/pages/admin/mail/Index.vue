@@ -119,7 +119,7 @@ async function sendTest() {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -224,9 +224,7 @@ async function sendTest() {
                         <InputError :message="form.errors.postal_key" />
                     </div>
 
-                    <p class="text-sm text-muted-foreground">
-                        Die Absender-Domain muss im Postal-Server für dieses API-Credential freigegeben sein.
-                    </p>
+                    <p class="text-sm text-muted-foreground">Die Absender-Domain muss im Postal-Server für dieses API-Credential freigegeben sein.</p>
                 </template>
 
                 <div class="grid gap-2 border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">

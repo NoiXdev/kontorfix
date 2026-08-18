@@ -49,8 +49,7 @@ const signInWithPasskey = async () => {
         const redirect = await loginWithPasskey(form.remember);
         window.location.href = redirect;
     } catch (e) {
-        passkeyError.value =
-            e instanceof Error && e.name === 'NotAllowedError' ? 'Anmeldung abgebrochen.' : 'Anmeldung per Passkey fehlgeschlagen.';
+        passkeyError.value = e instanceof Error && e.name === 'NotAllowedError' ? 'Anmeldung abgebrochen.' : 'Anmeldung per Passkey fehlgeschlagen.';
         passkeyPending.value = false;
     }
 };

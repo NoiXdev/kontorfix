@@ -37,11 +37,7 @@ function eventClass(event: string | null): string {
 
 <template>
     <div class="space-y-2">
-        <div
-            v-for="a in activities"
-            :key="a.id"
-            class="rounded-lg border border-sidebar-border/70 px-3 py-2 text-sm dark:border-sidebar-border"
-        >
+        <div v-for="a in activities" :key="a.id" class="rounded-lg border border-sidebar-border/70 px-3 py-2 text-sm dark:border-sidebar-border">
             <div class="flex flex-wrap items-center gap-2">
                 <span :class="cn('inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium', eventClass(a.event))">
                     {{ a.event ?? a.description }}
@@ -54,7 +50,9 @@ function eventClass(event: string | null): string {
             </div>
             <details v-if="hasChanges(a)" class="mt-1">
                 <summary class="cursor-pointer text-xs text-muted-foreground">Änderungen anzeigen</summary>
-                <pre class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border">{{ pretty(a.changes) }}</pre>
+                <pre
+                    class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border"
+                    >{{ pretty(a.changes) }}</pre>
             </details>
         </div>
         <p v-if="activities.length === 0" class="px-1 py-6 text-center text-sm text-muted-foreground">Noch keine Aktivität.</p>

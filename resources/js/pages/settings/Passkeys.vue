@@ -62,7 +62,10 @@ const remove = (id: string) => {
 
         <SettingsLayout>
             <div class="space-y-6">
-                <HeadingSmall title="Passkeys" description="Melde dich passwortlos und phishing-sicher mit einem Passkey an (Touch ID, Windows Hello, Sicherheitsschlüssel)." />
+                <HeadingSmall
+                    title="Passkeys"
+                    description="Melde dich passwortlos und phishing-sicher mit einem Passkey an (Touch ID, Windows Hello, Sicherheitsschlüssel)."
+                />
 
                 <div v-if="!supported" class="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
                     Dieser Browser unterstützt keine Passkeys.

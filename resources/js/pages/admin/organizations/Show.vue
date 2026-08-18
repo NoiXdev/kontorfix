@@ -137,11 +137,14 @@ function detachMember(userId: string) {
                 <div>
                     <h2 class="text-lg font-medium">Registry-Typen</h2>
                     <p class="text-sm text-muted-foreground">
-                        Welche Registry-Typen diese Organisation anbietet — nur innerhalb der instanzweit erlaubten Typen.
-                        Deaktivierte Typen liefern für die Registries dieser Org kein Protokoll aus.
+                        Welche Registry-Typen diese Organisation anbietet — nur innerhalb der instanzweit erlaubten Typen. Deaktivierte Typen liefern
+                        für die Registries dieser Org kein Protokoll aus.
                     </p>
                 </div>
-                <form class="flex flex-wrap items-center gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border" @submit.prevent="saveRegistryTypes">
+                <form
+                    class="flex flex-wrap items-center gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                    @submit.prevent="saveRegistryTypes"
+                >
                     <label v-for="type in props.registryTypes.global" :key="type" class="flex items-center gap-2 text-sm">
                         <input
                             type="checkbox"

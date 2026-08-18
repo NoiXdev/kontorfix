@@ -336,8 +336,10 @@ onUnmounted(() => {
                     class="font-mono"
                 />
                 <p class="text-xs text-muted-foreground">
-                    Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen/Daten entstehen beim
-                    Upload (<code>{{ createForm.type === 'npm' ? 'npm publish' : 'twine upload' }}</code>) — kein Repository.
+                    Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen/Daten entstehen beim Upload (<code>{{
+                        createForm.type === 'npm' ? 'npm publish' : 'twine upload'
+                    }}</code
+                    >) — kein Repository.
                 </p>
                 <InputError :message="createErrors.name" />
             </div>
@@ -356,7 +358,13 @@ onUnmounted(() => {
                             @update:model-value="resetProbe"
                             @keyup.enter="probeRepository"
                         />
-                        <Button type="button" variant="outline" size="sm" :disabled="probing || createForm.repository_url.trim() === ''" @click="probeRepository">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            :disabled="probing || createForm.repository_url.trim() === ''"
+                            @click="probeRepository"
+                        >
                             {{ probing ? 'Prüfe…' : 'Prüfen' }}
                         </Button>
                     </div>
@@ -378,7 +386,10 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Probe failed to reach / read the repo -->
-                <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <div
+                    v-if="probeResult && !probeResult.ok"
+                    class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
                     {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
                 </div>
 
@@ -388,7 +399,14 @@ onUnmounted(() => {
 
                     <div class="grid gap-2">
                         <Label for="new-package-name">Name{{ probeResult.name ? ' (gefunden)' : ' (nicht gefunden — bitte angeben)' }}</Label>
-                        <Input id="new-package-name" v-model="createForm.name" type="text" placeholder="vendor/paket" autocomplete="off" class="font-mono" />
+                        <Input
+                            id="new-package-name"
+                            v-model="createForm.name"
+                            type="text"
+                            placeholder="vendor/paket"
+                            autocomplete="off"
+                            class="font-mono"
+                        />
                         <InputError :message="createErrors.name" />
                     </div>
 
@@ -421,7 +439,7 @@ onUnmounted(() => {
             <span
                 v-for="pkg in selected"
                 :key="pkg.id"
-                class="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 py-1 pl-2 pr-1 text-sm dark:border-sidebar-border"
+                class="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border/70 bg-muted/50 py-1 pr-1 pl-2 text-sm dark:border-sidebar-border"
             >
                 <TypeBadge :type="pkg.type" />
                 <span class="font-mono">{{ pkg.name }}</span>

@@ -88,7 +88,7 @@ function depCount(deps: Record<string, string>): number {
                 <p class="text-sm text-muted-foreground">
                     In Registry
                     <span class="font-medium text-foreground">{{ props.registry.name }}</span>
-                    <span class="ml-2 break-all font-mono text-xs">{{ props.registry.url }}</span>
+                    <span class="ml-2 font-mono text-xs break-all">{{ props.registry.url }}</span>
                 </p>
             </div>
 
@@ -99,8 +99,7 @@ function depCount(deps: Record<string, string>): number {
                     v-if="!props.package.readme_html"
                     class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
                 >
-                    Für dieses Paket liegt keine README vor. Installationsbefehle stehen unten, die
-                    Versionshistorie darunter.
+                    Für dieses Paket liegt keine README vor. Installationsbefehle stehen unten, die Versionshistorie darunter.
                 </div>
             </section>
 
@@ -131,15 +130,8 @@ function depCount(deps: Record<string, string>): number {
                 <template v-else>
                     <div class="flex flex-wrap items-center gap-3">
                         <Label for="version-select" class="text-sm">Version</Label>
-                        <SearchableSelect
-                            id="version-select"
-                            v-model="selectedVersion"
-                            :options="versionOptions"
-                            class="w-64"
-                        />
-                        <span class="text-xs text-muted-foreground">
-                            {{ props.versions.length }} Versionen
-                        </span>
+                        <SearchableSelect id="version-select" v-model="selectedVersion" :options="versionOptions" class="w-64" />
+                        <span class="text-xs text-muted-foreground"> {{ props.versions.length }} Versionen </span>
                     </div>
 
                     <div v-if="currentVersion" class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
@@ -152,15 +144,8 @@ function depCount(deps: Record<string, string>): number {
 
                         <div class="mt-5 grid gap-6 md:grid-cols-2">
                             <div>
-                                <h3 class="text-sm font-medium">
-                                    Abhängigkeiten ({{ depCount(currentVersion.dependencies.runtime) }})
-                                </h3>
-                                <p
-                                    v-if="depCount(currentVersion.dependencies.runtime) === 0"
-                                    class="mt-2 text-sm text-muted-foreground"
-                                >
-                                    Keine
-                                </p>
+                                <h3 class="text-sm font-medium">Abhängigkeiten ({{ depCount(currentVersion.dependencies.runtime) }})</h3>
+                                <p v-if="depCount(currentVersion.dependencies.runtime) === 0" class="mt-2 text-sm text-muted-foreground">Keine</p>
                                 <ul v-else class="mt-2 space-y-1">
                                     <li
                                         v-for="(constraint, name) in currentVersion.dependencies.runtime"
@@ -174,15 +159,8 @@ function depCount(deps: Record<string, string>): number {
                             </div>
 
                             <div>
-                                <h3 class="text-sm font-medium">
-                                    Dev-Abhängigkeiten ({{ depCount(currentVersion.dependencies.dev) }})
-                                </h3>
-                                <p
-                                    v-if="depCount(currentVersion.dependencies.dev) === 0"
-                                    class="mt-2 text-sm text-muted-foreground"
-                                >
-                                    Keine
-                                </p>
+                                <h3 class="text-sm font-medium">Dev-Abhängigkeiten ({{ depCount(currentVersion.dependencies.dev) }})</h3>
+                                <p v-if="depCount(currentVersion.dependencies.dev) === 0" class="mt-2 text-sm text-muted-foreground">Keine</p>
                                 <ul v-else class="mt-2 space-y-1">
                                     <li
                                         v-for="(constraint, name) in currentVersion.dependencies.dev"

@@ -297,14 +297,14 @@ function destroyPackage(id: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
 
             <div
                 v-if="liveHint"
-                class="fixed right-4 top-16 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
+                class="fixed top-16 right-4 z-50 rounded-md border px-4 py-2 text-sm shadow-lg"
                 :class="
                     liveHint.failed
                         ? 'border-destructive/30 bg-destructive/10 text-destructive'

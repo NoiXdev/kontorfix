@@ -132,9 +132,7 @@ function destroyProvider(id: string) {
 const badgeClasses = (on: boolean) =>
     cn(
         'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-        on
-            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-            : 'border-border bg-muted text-muted-foreground',
+        on ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' : 'border-border bg-muted text-muted-foreground',
     );
 </script>
 
@@ -145,7 +143,7 @@ const badgeClasses = (on: boolean) =>
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>

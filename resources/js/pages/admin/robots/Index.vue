@@ -107,23 +107,21 @@ function roleLabel(role: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
 
             <div>
                 <h1 class="text-xl font-semibold">Robots</h1>
-                <p class="mt-1 text-sm text-muted-foreground">
-                    Maschinen-/Service-Accounts für die REST-API — melden sich nur per API-Key an.
-                </p>
+                <p class="mt-1 text-sm text-muted-foreground">Maschinen-/Service-Accounts für die REST-API — melden sich nur per API-Key an.</p>
             </div>
 
             <div v-if="showKeyCallout" class="rounded-xl border border-copper/30 bg-copper/10 p-4">
                 <div class="flex items-start justify-between gap-4">
                     <div class="min-w-0 flex-1 space-y-2">
                         <p class="font-medium text-copper-hi">Neuer API-Key erstellt</p>
-                        <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                        <p class="rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm break-all select-all">
                             {{ plainApiKey }}
                         </p>
                         <p class="text-sm text-muted-foreground">Dieser Key wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
@@ -175,8 +173,8 @@ function roleLabel(role: string) {
                     <span>
                         Global (Super-Admin)
                         <span class="block text-xs text-muted-foreground">
-                            Statt auf die gewählte Organisation begrenzt, erhält der Robot vollen Zugriff auf alle
-                            Organisationen und die Instanz-Verwaltung.
+                            Statt auf die gewählte Organisation begrenzt, erhält der Robot vollen Zugriff auf alle Organisationen und die
+                            Instanz-Verwaltung.
                         </span>
                     </span>
                 </label>

@@ -95,7 +95,9 @@ function close() {
         <SheetContent side="right" class="w-full overflow-y-auto sm:max-w-lg" @escape-key-down="close" @pointer-down-outside="close">
             <SheetHeader>
                 <SheetTitle>Neue Registry (Gruppe)</SheetTitle>
-                <p class="text-sm text-muted-foreground">Jede Gruppe ist eine Registry mit eigenem <span class="font-mono">/r/&lt;slug&gt;</span>-Endpunkt.</p>
+                <p class="text-sm text-muted-foreground">
+                    Jede Gruppe ist eine Registry mit eigenem <span class="font-mono">/r/&lt;slug&gt;</span>-Endpunkt.
+                </p>
             </SheetHeader>
 
             <form class="mt-6 space-y-5" @submit.prevent="submit">

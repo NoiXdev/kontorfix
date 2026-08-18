@@ -27,10 +27,7 @@ interface SearchResults {
     customers: CustomerHit[];
 }
 
-type FlatHit =
-    | { kind: 'package'; item: PackageHit }
-    | { kind: 'registry'; item: RegistryHit }
-    | { kind: 'customer'; item: CustomerHit };
+type FlatHit = { kind: 'package'; item: PackageHit } | { kind: 'registry'; item: RegistryHit } | { kind: 'customer'; item: CustomerHit };
 
 const open = ref(false);
 const query = ref('');
@@ -199,7 +196,9 @@ onBeforeUnmount(() => {
     <div v-if="open" class="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[15vh]" role="dialog" aria-modal="true" aria-label="Suche">
         <div class="fixed inset-0 bg-black/50" @click="closePalette" />
 
-        <div class="relative w-full max-w-lg overflow-hidden rounded-lg border border-sidebar-border/70 bg-background shadow-lg dark:border-sidebar-border">
+        <div
+            class="relative w-full max-w-lg overflow-hidden rounded-lg border border-sidebar-border/70 bg-background shadow-lg dark:border-sidebar-border"
+        >
             <div class="flex items-center gap-2 border-b border-sidebar-border/70 px-3 dark:border-sidebar-border">
                 <input
                     ref="inputEl"
@@ -212,7 +211,9 @@ onBeforeUnmount(() => {
                     @keydown.up.prevent="moveActive(-1)"
                     @keydown.enter.prevent="selectActive"
                 />
-                <kbd class="hidden shrink-0 rounded border border-sidebar-border/70 px-1.5 py-0.5 text-xs text-muted-foreground sm:inline dark:border-sidebar-border">
+                <kbd
+                    class="hidden shrink-0 rounded border border-sidebar-border/70 px-1.5 py-0.5 text-xs text-muted-foreground sm:inline dark:border-sidebar-border"
+                >
                     Esc
                 </kbd>
             </div>

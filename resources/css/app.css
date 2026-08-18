@@ -4,17 +4,16 @@
 @import '@fontsource/jetbrains-mono/500.css';
 
 @import 'tailwindcss';
-
-/* tailwind.config.js only ever set theme.extend + darkMode + plugins; content-source scanning
-   is handled by Tailwind 4's own automatic detection. The legacy JS plugin below still needs an
-   explicit load now that @config is gone — Tailwind 4 does not read package.json for it. */
-@plugin 'tailwindcss-animate';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-display: 'Bricolage Grotesque Variable', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans:
+        'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-display:
+        'Bricolage Grotesque Variable', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 
     --radius-lg: var(--radius);
@@ -57,17 +56,18 @@
     --color-sidebar-ring: hsl(var(--sidebar-ring));
 
     /* Kontorfix-Markenpalette (siehe docs/brand) — feste Hex-Werte, kein Theme-Token-Wechsel. */
-    --color-ink: #0D141F;
-    --color-panel: #151F2E;
-    --color-copper: #D07A45;
-    --color-copper-hi: #E29260;
-    --color-verdigris: #7FB5A2;
-    --color-paper: #E9E4D9;
+    --color-ink: #0d141f;
+    --color-panel: #151f2e;
+    --color-copper: #d07a45;
+    --color-copper-hi: #e29260;
+    --color-verdigris: #7fb5a2;
+    --color-paper: #e9e4d9;
 }
 
 body,
 html {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans:
+        'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 }
 
 @layer base {

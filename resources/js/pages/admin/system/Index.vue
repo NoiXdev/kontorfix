@@ -25,9 +25,7 @@ const form = useForm({
 });
 
 function toggleType(type: string, on: boolean) {
-    form.enabled_registry_types = on
-        ? [...new Set([...form.enabled_registry_types, type])]
-        : form.enabled_registry_types.filter((t) => t !== type);
+    form.enabled_registry_types = on ? [...new Set([...form.enabled_registry_types, type])] : form.enabled_registry_types.filter((t) => t !== type);
 }
 
 function save() {
@@ -42,7 +40,7 @@ function save() {
         <div class="flex flex-1 flex-col gap-6 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -68,9 +66,8 @@ function save() {
                 <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
                     <h2 class="text-sm font-medium">Registry-Typen</h2>
                     <p class="mb-3 text-xs text-muted-foreground">
-                        Instanzweite Obergrenze: deaktivierte Typen liefern kein Protokoll aus (pull/push aus) und
-                        verschwinden aus Anlage-Dialogen. Organisationen können nur innerhalb der hier erlaubten Typen
-                        weiter einschränken.
+                        Instanzweite Obergrenze: deaktivierte Typen liefern kein Protokoll aus (pull/push aus) und verschwinden aus Anlage-Dialogen.
+                        Organisationen können nur innerhalb der hier erlaubten Typen weiter einschränken.
                     </p>
                     <div class="flex flex-wrap gap-4">
                         <label v-for="type in props.registryTypes" :key="type" class="flex items-center gap-2 text-sm">

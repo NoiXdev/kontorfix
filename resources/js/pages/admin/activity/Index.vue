@@ -104,19 +104,27 @@ function hasChanges(a: Activity): boolean {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="a in props.activities.data" :key="a.id" class="border-b border-sidebar-border/70 align-top last:border-0 dark:border-sidebar-border">
+                        <tr
+                            v-for="a in props.activities.data"
+                            :key="a.id"
+                            class="border-b border-sidebar-border/70 align-top last:border-0 dark:border-sidebar-border"
+                        >
                             <td class="px-4 py-3 text-muted-foreground" :title="a.created_at_exact ?? ''">{{ a.created_at }}</td>
                             <td class="px-4 py-3">{{ a.log_name }}</td>
                             <td class="px-4 py-3">{{ a.event ?? a.description }}</td>
                             <td class="px-4 py-3">
-                                <span v-if="a.subject_type">{{ a.subject_type }}<span v-if="a.subject_label"> · {{ a.subject_label }}</span></span>
+                                <span v-if="a.subject_type"
+                                    >{{ a.subject_type }}<span v-if="a.subject_label"> · {{ a.subject_label }}</span></span
+                                >
                                 <span v-else class="text-muted-foreground">—</span>
                             </td>
                             <td class="px-4 py-3">{{ a.causer ?? 'System' }}</td>
                             <td class="px-4 py-3">
                                 <details v-if="hasChanges(a)">
                                     <summary class="cursor-pointer text-muted-foreground">anzeigen</summary>
-                                    <pre class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border">{{ pretty(a.changes) }}</pre>
+                                    <pre
+                                        class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border"
+                                        >{{ pretty(a.changes) }}</pre>
                                 </details>
                                 <span v-else class="text-muted-foreground">—</span>
                             </td>

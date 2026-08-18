@@ -34,14 +34,14 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: '/portal' }]
                     v-for="registry in props.registries"
                     :key="registry.id"
                     :href="route('portal.registries.show', registry.id)"
-                    class="block rounded-xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    class="block rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                 >
                     <Card class="h-full transition-colors hover:border-verdigris/40">
                         <CardHeader>
                             <CardTitle>{{ registry.name }}</CardTitle>
                         </CardHeader>
                         <CardContent class="space-y-3">
-                            <p class="break-all font-mono text-sm text-muted-foreground">{{ registry.url }}</p>
+                            <p class="font-mono text-sm break-all text-muted-foreground">{{ registry.url }}</p>
                             <p class="flex items-center gap-2 text-sm text-muted-foreground">
                                 <Package class="size-4" />
                                 {{ registry.packages_count }} {{ registry.packages_count === 1 ? 'Paket' : 'Pakete' }}

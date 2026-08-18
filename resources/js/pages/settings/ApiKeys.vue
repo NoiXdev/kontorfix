@@ -89,7 +89,7 @@ function destroyApiKey(id: string) {
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0 flex-1 space-y-2">
                             <p class="font-medium text-copper-hi">Neuer API-Key erstellt</p>
-                            <p class="select-all break-all rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm">
+                            <p class="rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm break-all select-all">
                                 {{ plainApiKey }}
                             </p>
                             <p class="text-sm text-muted-foreground">Dieser API-Key wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
@@ -133,7 +133,7 @@ function destroyApiKey(id: string) {
                             id="api_key_expires_at"
                             v-model="form.expires_at"
                             type="date"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                         />
                         <InputError :message="form.errors.expires_at" />
                     </div>

@@ -186,7 +186,7 @@ function destroyUser(id: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -239,7 +239,7 @@ function destroyUser(id: string) {
                                         class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
                                     >
                                         {{ m.name }}
-                                        <span class="rounded bg-copper/20 px-1 text-[10px] uppercase tracking-wide">{{ m.role }}</span>
+                                        <span class="rounded bg-copper/20 px-1 text-[10px] tracking-wide uppercase">{{ m.role }}</span>
                                         <button
                                             type="button"
                                             class="hover:text-destructive"
@@ -338,7 +338,14 @@ function destroyUser(id: string) {
                         <Label>Zugang</Label>
                         <div class="flex flex-col gap-2">
                             <label class="flex items-start gap-2 text-sm">
-                                <input type="radio" name="mode" value="invite" :checked="mode === 'invite'" @change="setMode('invite')" class="mt-1" />
+                                <input
+                                    type="radio"
+                                    name="mode"
+                                    value="invite"
+                                    :checked="mode === 'invite'"
+                                    @change="setMode('invite')"
+                                    class="mt-1"
+                                />
                                 <span>
                                     Einladung per E-Mail senden
                                     <span class="block text-xs text-muted-foreground">
@@ -347,7 +354,14 @@ function destroyUser(id: string) {
                                 </span>
                             </label>
                             <label class="flex items-start gap-2 text-sm">
-                                <input type="radio" name="mode" value="password" :checked="mode === 'password'" @change="setMode('password')" class="mt-1" />
+                                <input
+                                    type="radio"
+                                    name="mode"
+                                    value="password"
+                                    :checked="mode === 'password'"
+                                    @change="setMode('password')"
+                                    class="mt-1"
+                                />
                                 <span>Passwort direkt setzen</span>
                             </label>
                         </div>
@@ -422,7 +436,7 @@ function destroyUser(id: string) {
                                 class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
                             >
                                 {{ m.name }}
-                                <span class="rounded bg-copper/20 px-1 text-[10px] uppercase tracking-wide">{{ m.role }}</span>
+                                <span class="rounded bg-copper/20 px-1 text-[10px] tracking-wide uppercase">{{ m.role }}</span>
                                 <button type="button" class="hover:text-destructive" aria-label="Entfernen" @click="detachOrg(editUser.id, m.id)">
                                     <X class="size-3" />
                                 </button>

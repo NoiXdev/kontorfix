@@ -95,9 +95,7 @@ const stepDefs = [
 
 const steps = computed(() => {
     const show = props.types && props.types.length ? props.types : ['composer', 'npm', 'python'];
-    return stepDefs
-        .filter((s) => show.includes(s.eco))
-        .map((s) => ({ key: s.key, title: s.title, content: substituted.value[s.key] }));
+    return stepDefs.filter((s) => show.includes(s.eco)).map((s) => ({ key: s.key, title: s.title, content: substituted.value[s.key] }));
 });
 
 const copiedKey = ref<string | null>(null);
@@ -128,7 +126,7 @@ function selectSession(value: string) {
                 <Label>Token für die Snippets</Label>
                 <div class="flex flex-wrap items-center gap-2">
                     <select
-                        class="flex h-10 min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        class="flex h-10 min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                         :value="activeToken"
                         @change="selectSession(($event.target as HTMLSelectElement).value)"
                     >
@@ -146,8 +144,8 @@ function selectSession(value: string) {
                     </Button>
                 </div>
                 <p class="text-xs text-muted-foreground">
-                    Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich
-                    daher nicht erneut einsetzen — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
+                    Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
+                    — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
                 </p>
             </div>
 

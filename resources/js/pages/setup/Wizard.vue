@@ -68,7 +68,18 @@ const steps = [
     { title: 'Organisation & Registry', fields: ['organization_name', 'registry_name', 'registry_slug'] },
     {
         title: 'E-Mail',
-        fields: ['mailer', 'from_address', 'from_name', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_encryption', 'postal_domain', 'postal_key'],
+        fields: [
+            'mailer',
+            'from_address',
+            'from_name',
+            'smtp_host',
+            'smtp_port',
+            'smtp_username',
+            'smtp_password',
+            'smtp_encryption',
+            'postal_domain',
+            'postal_key',
+        ],
     },
     {
         title: 'Speicher',
@@ -158,7 +169,12 @@ async function sendTestMail() {
         mailTestResult.value = {
             ok: response.ok && data?.ok === true,
             // A 422 carries the field errors rather than a `message`, so surface those.
-            message: data?.message ?? Object.values(data?.errors ?? {}).flat().join(' ') ?? 'Testmail fehlgeschlagen.',
+            message:
+                data?.message ??
+                Object.values(data?.errors ?? {})
+                    .flat()
+                    .join(' ') ??
+                'Testmail fehlgeschlagen.',
         };
     } catch {
         mailTestResult.value = { ok: false, message: 'Testmail fehlgeschlagen.' };
@@ -180,9 +196,7 @@ function submit() {
             <div class="mb-8 flex flex-col items-center gap-3">
                 <AppLogoIcon class="size-9 fill-current text-[var(--foreground)] dark:text-white" />
                 <h1 class="text-xl font-medium">{{ appName }} einrichten</h1>
-                <p class="text-center text-sm text-muted-foreground">
-                    Diese Instanz hat noch kein Benutzerkonto. Lege jetzt den Administrator an.
-                </p>
+                <p class="text-center text-sm text-muted-foreground">Diese Instanz hat noch kein Benutzerkonto. Lege jetzt den Administrator an.</p>
             </div>
 
             <!-- Locked: a setup token is configured and hasn't been presented yet. -->
@@ -190,9 +204,8 @@ function submit() {
                 <div>
                     <h2 class="text-sm font-medium">Setup-Token erforderlich</h2>
                     <p class="mt-1 text-sm text-muted-foreground">
-                        Aus Sicherheitsgründen ist die Einrichtung durch ein Token geschützt. Es steht in den
-                        Startup-Logs des Containers (Zeile „FIRST-RUN SETUP TOKEN"). Bei jedem App-Start wird ein
-                        neues Token erzeugt.
+                        Aus Sicherheitsgründen ist die Einrichtung durch ein Token geschützt. Es steht in den Startup-Logs des Containers (Zeile
+                        „FIRST-RUN SETUP TOKEN"). Bei jedem App-Start wird ein neues Token erzeugt.
                     </p>
                 </div>
                 <div class="grid gap-2">
@@ -222,13 +235,14 @@ function submit() {
                 </li>
             </ol>
 
-            <form v-if="!props.locked" class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="submit">
+            <form
+                v-if="!props.locked"
+                class="space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border"
+                @submit.prevent="submit"
+            >
                 <!-- Submission errors are otherwise invisible when they land on a field
                      of a hidden conditional block, so surface every message here. -->
-                <div
-                    v-if="form.hasErrors"
-                    class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-                >
+                <div v-if="form.hasErrors" class="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                     <p class="font-medium">Die Einrichtung konnte nicht abgeschlossen werden.</p>
                     <ul class="mt-1 list-inside list-disc space-y-0.5">
                         <li v-for="(message, key) in form.errors" :key="key">{{ message }}</li>
@@ -285,7 +299,9 @@ function submit() {
                     <div class="grid gap-2">
                         <Label for="registry_slug">Slug</Label>
                         <Input id="registry_slug" v-model="form.registry_slug" placeholder="interne-pakete" @input="slugTouched = true" />
-                        <p class="text-xs text-muted-foreground">Erreichbar unter <code>/r/{{ form.registry_slug || 'slug' }}</code></p>
+                        <p class="text-xs text-muted-foreground">
+                            Erreichbar unter <code>/r/{{ form.registry_slug || 'slug' }}</code>
+                        </p>
                         <InputError :message="form.errors.registry_slug" />
                     </div>
 
@@ -389,7 +405,10 @@ function submit() {
                                 Testmail senden
                             </Button>
                         </div>
-                        <p v-if="mailTestResult" :class="['text-sm', mailTestResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive']">
+                        <p
+                            v-if="mailTestResult"
+                            :class="['text-sm', mailTestResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive']"
+                        >
                             {{ mailTestResult.message }}
                         </p>
                     </div>
