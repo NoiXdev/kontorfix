@@ -186,6 +186,14 @@ return [
                 'secret',
                 'client_secret',
                 'api_key',
+
+                // This application's own one-shot credentials, flashed into the
+                // shared `flash` prop by HandleInertiaRequests. Matching is on the
+                // exact key (case-insensitively), so the package defaults above do
+                // not cover them.
+                'plainTextToken',
+                'plainApiKey',
+                'incomingWebhookSecret',
             ],
 
             'headers' => [
