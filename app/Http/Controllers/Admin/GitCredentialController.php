@@ -42,6 +42,10 @@ class GitCredentialController extends Controller
                     'organization_id' => $c->organization_id,
                     'packages_count' => $c->packages_count,
                     'last_used_at' => $c->last_used_at?->diffForHumans(),
+                    // Raw ISO timestamp for sorting only — `last_used_at` above is a relative
+                    // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                    // and the sort value have to travel separately.
+                    'last_used_at_iso' => $c->last_used_at?->toIso8601String(),
                 ]),
             'organizations' => app(OrgScope::class)->organizations(),
             'providers' => GitProvider::metadata(),

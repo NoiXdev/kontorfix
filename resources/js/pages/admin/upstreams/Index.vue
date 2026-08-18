@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { Pencil, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
@@ -50,6 +53,60 @@ const editingHasAuth = ref(false);
 // Upstream types are the registry types — from the single source of truth.
 const { options: registryTypeOptions } = useRegistryTypes();
 const typeOptions = computed(() => registryTypeOptions());
+
+const groupOptions = computed(() => props.groups.map((g) => ({ value: g.id, label: g.name })));
+
+const policyOptions = [
+    { value: 'proxy', label: 'Proxy' },
+    { value: 'strict', label: 'Strict' },
+];
+
+// Derived from the existing `enabled` prop — labels for the two values that
+// boolean already takes, not a separate controller-supplied option list.
+const activeOptions = [
+    { value: 'yes', label: 'Ja' },
+    { value: 'no', label: 'Nein' },
+];
+
+const columns: ColumnDef<UpstreamRow>[] = [
+    { key: 'group', label: 'Gruppe' },
+    { key: 'type', label: 'Typ' },
+    { key: 'url', label: 'URL' },
+    { key: 'policy', label: 'Policy' },
+    { key: 'priority', label: 'Priorität', sortAs: 'number' },
+    { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
+    { key: 'has_auth', label: 'Auth', sortable: false },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const table = useTableState<UpstreamRow>({
+    rows: () => props.upstreams,
+    columns,
+    searchKeys: ['url'],
+    defaultSort: { key: 'url', direction: 'asc' },
+    filters: {
+        group: {
+            label: 'Gruppe',
+            options: groupOptions.value,
+            match: (row, value) => row.group_id === value,
+        },
+        type: {
+            label: 'Typ',
+            options: typeOptions.value,
+            match: (row, value) => row.type === value,
+        },
+        policy: {
+            label: 'Policy',
+            options: policyOptions,
+            match: (row, value) => row.policy === value,
+        },
+        active: {
+            label: 'Aktiv',
+            options: activeOptions,
+            match: (row, value) => (value === 'yes' ? row.enabled : !row.enabled),
+        },
+    },
+});
 
 const form = useForm({
     group_id: '',
@@ -153,82 +210,96 @@ function destroyUpstream(id: string) {
                 </Button>
             </div>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Gruppe</th>
-                            <th class="px-4 py-3 font-medium">Typ</th>
-                            <th class="px-4 py-3 font-medium">URL</th>
-                            <th class="px-4 py-3 font-medium">Policy</th>
-                            <th class="px-4 py-3 font-medium">Priorität</th>
-                            <th class="px-4 py-3 font-medium">Aktiv</th>
-                            <th class="px-4 py-3 font-medium">Auth</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="upstream in props.upstreams"
-                            :key="upstream.id"
-                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                        >
-                            <td class="px-4 py-3">{{ upstream.group ?? '—' }}</td>
-                            <td class="px-4 py-3"><TypeBadge :type="upstream.type" /></td>
-                            <td class="px-4 py-3 font-mono text-xs">{{ upstream.url }}</td>
-                            <td class="px-4 py-3">
-                                <span
-                                    :class="
-                                        cn(
-                                            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                                            policyClasses(upstream.policy),
-                                        )
-                                    "
-                                >
-                                    {{ policyLabel(upstream.policy) }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3">{{ upstream.priority }}</td>
-                            <td class="px-4 py-3">
-                                <span
-                                    :class="
-                                        cn(
-                                            'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-                                            upstream.enabled
-                                                ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                                                : 'border-border bg-muted text-muted-foreground',
-                                        )
-                                    "
-                                >
-                                    {{ upstream.enabled ? 'Ja' : 'Nein' }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span
-                                    v-if="upstream.has_auth"
-                                    class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi"
-                                >
-                                    Token
-                                </span>
-                                <span v-else class="text-muted-foreground">—</span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <div class="flex items-center gap-1">
-                                    <Button variant="ghost" size="icon" @click="openEdit(upstream)" aria-label="Upstream bearbeiten">
-                                        <Pencil class="size-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" @click="destroyUpstream(upstream.id)" aria-label="Upstream löschen">
-                                        <Trash2 class="size-4 text-destructive" />
-                                    </Button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr v-if="props.upstreams.length === 0">
-                            <td colspan="8" class="px-4 py-8 text-center text-muted-foreground">Noch keine Upstreams angelegt.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine Upstreams angelegt." search-placeholder="Suchen…">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.group.value"
+                        :options="groupOptions"
+                        placeholder="Gruppe"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('group', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.type.value"
+                        :options="typeOptions"
+                        placeholder="Typ"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('type', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.policy.value"
+                        :options="policyOptions"
+                        placeholder="Policy"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('policy', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.active.value"
+                        :options="activeOptions"
+                        placeholder="Aktiv"
+                        class="w-32"
+                        @update:model-value="(v) => table.setFilter('active', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <tr
+                        v-for="upstream in rows"
+                        :key="upstream.id"
+                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                    >
+                        <td class="px-4 py-3">{{ upstream.group ?? '—' }}</td>
+                        <td class="px-4 py-3"><TypeBadge :type="upstream.type" /></td>
+                        <td class="px-4 py-3 font-mono text-xs">{{ upstream.url }}</td>
+                        <td class="px-4 py-3">
+                            <span
+                                :class="
+                                    cn(
+                                        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                                        policyClasses(upstream.policy),
+                                    )
+                                "
+                            >
+                                {{ policyLabel(upstream.policy) }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">{{ upstream.priority }}</td>
+                        <td class="px-4 py-3">
+                            <span
+                                :class="
+                                    cn(
+                                        'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                                        upstream.enabled
+                                            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                            : 'border-border bg-muted text-muted-foreground',
+                                    )
+                                "
+                            >
+                                {{ upstream.enabled ? 'Ja' : 'Nein' }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span
+                                v-if="upstream.has_auth"
+                                class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi"
+                            >
+                                Token
+                            </span>
+                            <span v-else class="text-muted-foreground">—</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-1">
+                                <Button variant="ghost" size="icon" @click="openEdit(upstream)" aria-label="Upstream bearbeiten">
+                                    <Pencil class="size-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" @click="destroyUpstream(upstream.id)" aria-label="Upstream löschen">
+                                    <Trash2 class="size-4 text-destructive" />
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </DataTable>
         </div>
 
         <Dialog v-model:open="dialogOpen">

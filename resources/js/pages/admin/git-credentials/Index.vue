@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -21,6 +23,9 @@ interface CredentialRow {
     organization_id: string | null;
     packages_count: number;
     last_used_at: string | null;
+    // Raw ISO timestamp, sort-only — `last_used_at` is a relative string ("vor 3 Tagen")
+    // that Date.parse cannot read.
+    last_used_at_iso: string | null;
 }
 
 const props = defineProps<{
@@ -41,6 +46,34 @@ const providerOptions = computed(() => props.providers.map((p) => ({ value: p.va
 const defaultHost = computed(() => props.providers.find((p) => p.value === form.provider)?.default_host ?? null);
 const hostPlaceholder = computed(() => defaultHost.value ?? 'z. B. git.example.com');
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
+
+const columns: ColumnDef<CredentialRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'provider', label: 'Provider' },
+    { key: 'organization', label: 'Organisation' },
+    { key: 'packages_count', label: 'Pakete', sortAs: 'number' },
+    { key: 'last_used_at', label: 'Zuletzt genutzt', sortAs: 'date', sortValue: (row) => row.last_used_at_iso },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const table = useTableState<CredentialRow>({
+    rows: () => props.credentials,
+    columns,
+    searchKeys: ['name'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        provider: {
+            label: 'Provider',
+            options: providerOptions.value,
+            match: (row, value) => row.provider === value,
+        },
+        org: {
+            label: 'Organisation',
+            options: orgOptions.value,
+            match: (row, value) => row.organization_id === value,
+        },
+    },
+});
 
 // --- Create / edit ---
 const dialogOpen = ref(false);
@@ -167,78 +200,80 @@ async function runTest(id: string) {
                 </Button>
             </div>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">Provider</th>
-                            <th class="px-4 py-3 font-medium">Organisation</th>
-                            <th class="px-4 py-3 font-medium">Pakete</th>
-                            <th class="px-4 py-3 font-medium">Zuletzt genutzt</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine Git-Tokens hinterlegt." search-placeholder="Suchen…">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.provider.value"
+                        :options="providerOptions"
+                        placeholder="Provider"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('provider', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.org.value"
+                        :options="orgOptions"
+                        placeholder="Organisation"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('org', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <template v-for="cred in rows" :key="cred.id">
+                        <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                            <td class="px-4 py-3 font-medium">{{ cred.name }}</td>
+                            <td class="px-4 py-3">
+                                <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">{{
+                                    cred.provider
+                                }}</span>
+                            </td>
+                            <td class="px-4 py-3">{{ cred.organization ?? '—' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ cred.packages_count }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ cred.last_used_at ?? 'nie' }}</td>
+                            <td class="px-4 py-3">
+                                <div class="flex items-center gap-1">
+                                    <Button variant="ghost" size="sm" @click="openTest(cred.id)"><KeyRound class="size-4" /> Testen</Button>
+                                    <Button variant="ghost" size="icon" aria-label="Bearbeiten" @click="openEdit(cred)"
+                                        ><Pencil class="size-4"
+                                    /></Button>
+                                    <Button variant="ghost" size="icon" aria-label="Löschen" @click="destroyCredential(cred.id)">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        <template v-for="cred in props.credentials" :key="cred.id">
-                            <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
-                                <td class="px-4 py-3 font-medium">{{ cred.name }}</td>
-                                <td class="px-4 py-3">
-                                    <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">{{
-                                        cred.provider
-                                    }}</span>
-                                </td>
-                                <td class="px-4 py-3">{{ cred.organization ?? '—' }}</td>
-                                <td class="px-4 py-3 text-muted-foreground">{{ cred.packages_count }}</td>
-                                <td class="px-4 py-3 text-muted-foreground">{{ cred.last_used_at ?? 'nie' }}</td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center gap-1">
-                                        <Button variant="ghost" size="sm" @click="openTest(cred.id)"><KeyRound class="size-4" /> Testen</Button>
-                                        <Button variant="ghost" size="icon" aria-label="Bearbeiten" @click="openEdit(cred)"
-                                            ><Pencil class="size-4"
-                                        /></Button>
-                                        <Button variant="ghost" size="icon" aria-label="Löschen" @click="destroyCredential(cred.id)">
-                                            <Trash2 class="size-4 text-destructive" />
-                                        </Button>
+                        <tr v-if="testOpenFor === cred.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
+                            <td colspan="6" class="px-4 py-3">
+                                <div class="flex flex-wrap items-end gap-3">
+                                    <div class="grid flex-1 gap-1.5">
+                                        <Label :for="`test-url-${cred.id}`">Repository-URL zum Testen (HTTPS)</Label>
+                                        <Input
+                                            :id="`test-url-${cred.id}`"
+                                            v-model="testUrl"
+                                            placeholder="https://github.com/acme/private.git"
+                                            autocomplete="off"
+                                            class="font-mono"
+                                            @keyup.enter="runTest(cred.id)"
+                                        />
                                     </div>
-                                </td>
-                            </tr>
-                            <tr v-if="testOpenFor === cred.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
-                                <td colspan="6" class="px-4 py-3">
-                                    <div class="flex flex-wrap items-end gap-3">
-                                        <div class="grid flex-1 gap-1.5">
-                                            <Label :for="`test-url-${cred.id}`">Repository-URL zum Testen (HTTPS)</Label>
-                                            <Input
-                                                :id="`test-url-${cred.id}`"
-                                                v-model="testUrl"
-                                                placeholder="https://github.com/acme/private.git"
-                                                autocomplete="off"
-                                                class="font-mono"
-                                                @keyup.enter="runTest(cred.id)"
-                                            />
-                                        </div>
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            :disabled="testing || testUrl.trim() === ''"
-                                            @click="runTest(cred.id)"
-                                        >
-                                            {{ testing ? 'Teste…' : 'Test starten' }}
-                                        </Button>
-                                    </div>
-                                    <p v-if="testResult?.ok" class="mt-2 text-sm text-verdigris">Erreichbar — der Token funktioniert.</p>
-                                    <p v-else-if="testResult" class="mt-2 text-sm text-destructive">
-                                        {{ testResult.error ?? 'Zugriff fehlgeschlagen.' }}
-                                    </p>
-                                </td>
-                            </tr>
-                        </template>
-                        <tr v-if="props.credentials.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Git-Tokens hinterlegt.</td>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        :disabled="testing || testUrl.trim() === ''"
+                                        @click="runTest(cred.id)"
+                                    >
+                                        {{ testing ? 'Teste…' : 'Test starten' }}
+                                    </Button>
+                                </div>
+                                <p v-if="testResult?.ok" class="mt-2 text-sm text-verdigris">Erreichbar — der Token funktioniert.</p>
+                                <p v-else-if="testResult" class="mt-2 text-sm text-destructive">
+                                    {{ testResult.error ?? 'Zugriff fehlgeschlagen.' }}
+                                </p>
+                            </td>
                         </tr>
-                    </tbody>
-                </table>
-            </div>
+                    </template>
+                </template>
+            </DataTable>
         </div>
 
         <Dialog v-model:open="dialogOpen">

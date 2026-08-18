@@ -28,6 +28,7 @@ class RobotController extends Controller
                     'role' => $u->role->value,
                     'is_super_admin' => (bool) $u->is_super_admin,
                     'organization' => $u->organization?->name,
+                    'organization_id' => $u->organization_id,
                     'keys_count' => $u->api_keys_count,
                 ]),
             'organizations' => Organization::orderBy('name')->get(['id', 'name']),

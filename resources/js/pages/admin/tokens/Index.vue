@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -15,9 +17,14 @@ interface TokenRow {
     id: string;
     name: string;
     organization: string | null;
+    organization_id: string | null;
     group: string | null;
+    group_id: string | null;
     ability: 'read' | 'publish';
     last_used_at: string | null;
+    // Raw ISO timestamp, sort-only — `last_used_at` is a relative string ("vor 3 Tagen")
+    // that Date.parse cannot read.
+    last_used_at_iso: string | null;
     expires_at: string | null;
 }
 
@@ -70,6 +77,47 @@ async function copyToken() {
         copied.value = false;
     }
 }
+
+const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
+const groupOptions = computed(() => props.groups.map((g) => ({ value: g.id, label: g.name })));
+const abilityOptions = [
+    { value: 'read', label: 'Lesen' },
+    { value: 'publish', label: 'Veröffentlichen' },
+];
+
+const columns: ColumnDef<TokenRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'organization', label: 'Organisation' },
+    { key: 'group', label: 'Gruppe' },
+    { key: 'ability', label: 'Recht' },
+    { key: 'last_used_at', label: 'Zuletzt genutzt', sortAs: 'date', sortValue: (row) => row.last_used_at_iso },
+    { key: 'expires_at', label: 'Läuft ab', sortAs: 'date' },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const table = useTableState<TokenRow>({
+    rows: () => props.tokens,
+    columns,
+    searchKeys: ['name'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        org: {
+            label: 'Organisation',
+            options: orgOptions.value,
+            match: (row, value) => row.organization_id === value,
+        },
+        group: {
+            label: 'Gruppe',
+            options: groupOptions.value,
+            match: (row, value) => row.group_id === value,
+        },
+        ability: {
+            label: 'Recht',
+            options: abilityOptions,
+            match: (row, value) => row.ability === value,
+        },
+    },
+});
 
 const dialogOpen = ref(false);
 
@@ -148,43 +196,51 @@ function destroyToken(id: string) {
                 </Button>
             </div>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">Organisation</th>
-                            <th class="px-4 py-3 font-medium">Gruppe</th>
-                            <th class="px-4 py-3 font-medium">Recht</th>
-                            <th class="px-4 py-3 font-medium">Zuletzt genutzt</th>
-                            <th class="px-4 py-3 font-medium">Läuft ab</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="token in props.tokens"
-                            :key="token.id"
-                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                        >
-                            <td class="px-4 py-3 font-mono">{{ token.name }}</td>
-                            <td class="px-4 py-3">{{ token.organization ?? '—' }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ token.group ?? 'Alle Gruppen' }}</td>
-                            <td class="px-4 py-3">{{ abilityLabel(token.ability) }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ token.last_used_at ?? 'nie' }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ token.expires_at ?? '—' }}</td>
-                            <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" @click="destroyToken(token.id)" aria-label="Token widerrufen">
-                                    <Trash2 class="size-4 text-destructive" />
-                                </Button>
-                            </td>
-                        </tr>
-                        <tr v-if="props.tokens.length === 0">
-                            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground">Noch keine Tokens erstellt.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine Tokens erstellt.">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.org.value"
+                        :options="orgOptions"
+                        placeholder="Organisation"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('org', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.group.value"
+                        :options="groupOptions"
+                        placeholder="Gruppe"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('group', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.ability.value"
+                        :options="abilityOptions"
+                        placeholder="Recht"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('ability', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <tr
+                        v-for="token in rows"
+                        :key="token.id"
+                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                    >
+                        <td class="px-4 py-3 font-mono">{{ token.name }}</td>
+                        <td class="px-4 py-3">{{ token.organization ?? '—' }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ token.group ?? 'Alle Gruppen' }}</td>
+                        <td class="px-4 py-3">{{ abilityLabel(token.ability) }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ token.last_used_at ?? 'nie' }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ token.expires_at ?? '—' }}</td>
+                        <td class="px-4 py-3">
+                            <Button variant="ghost" size="icon" @click="destroyToken(token.id)" aria-label="Token widerrufen">
+                                <Trash2 class="size-4 text-destructive" />
+                            </Button>
+                        </td>
+                    </tr>
+                </template>
+            </DataTable>
         </div>
 
         <Dialog v-model:open="dialogOpen">
