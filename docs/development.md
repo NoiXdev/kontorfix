@@ -59,6 +59,99 @@ ddev exec npm run build                   # Frontend build
 - `routes/{web,api,registry,webhooks,auth,settings,console,channels}.php` — routing.
 - `docker/` — container entrypoint (roles app/worker/scheduler/reverb) + Compose.
 
+## Listing tables: `DataTable` and `useTableState`
+
+Every listing page (fifteen of them, across seventeen backing tables) uses the same pair of
+building blocks instead of a hand-rolled `<table>`:
+
+- **`resources/js/components/kontorfix/DataTable.vue`** — the shell. It owns the filter bar
+  (search input, `filters` slot, active-filter count/reset), the `<table>`/`<thead>` and the
+  sortable column headers, and the empty state (no rows at all vs. no rows matching the
+  current filter). **Cells stay with the page.** `DataTable` renders its default slot with
+  `:rows="state.visibleRows.value"` and the page supplies the `<tr>`/`<td>` markup for its own
+  columns; the component never learns what a package or a token looks like.
+- **`resources/js/composables/useTableState.ts`** — the state machine. It owns sort
+  key/direction, search text, filter values, the filtered/sorted row list, and syncing all of
+  that into the query string. A page calls `useTableState()` with its `columns`, `rows`,
+  `searchKeys` and (for server-mode pages) `filters`, and passes the returned `state` plus a
+  `columns` array into `DataTable`.
+
+### `client` vs. `server` mode
+
+Thirteen of the fifteen listings run in **`client` mode**: the controller ships the full
+dataset in the Inertia response (these tables are small — organizations, users, groups,
+domains, credentials, …), and `useTableState` filters/sorts it in the browser for free.
+
+`admin/packages` and `admin/activity` run in **`server` mode**: both paginate, and sorting a
+paginated table in the browser would only reorder the rows already on the current page —
+which reads as a bug, not a limitation, to whoever is looking at it. In server mode
+`useTableState` skips its own sort/filter and renders `options.rows()` as received; the sort
+key change is written to the query string exactly as in client mode, `router.get` reloads the
+page, and the controller does the ordering in SQL. See `useTableState`'s `visibleRows`
+computed for the branch, and `app/Http/Controllers/Admin/PackageController.php` /
+`Admin/ActivityController.php` for the SQL side.
+
+### State lives in the query string
+
+Sort key/direction, search text and filter values are all mirrored into the URL (`sort`,
+`direction`, `q`, plus one query param per filter). A search edit debounces before it commits;
+sort and filter changes commit immediately. That makes a filtered, sorted view shareable by
+URL and makes it survive a reload — and in server mode, it is *how* the request is made in the
+first place.
+
+**A page hosting two tables needs distinct `prefix` values.** Without a `prefix`, every table
+on the page reads and writes the same `sort`/`direction`/`q`/filter keys, so clicking a header
+in one table silently reorders — or, worse, appears to do nothing to — the other. Two pages
+have this: `admin/webhooks/Index.vue` (`prefix: 'in'` / `'out'` for inbound vs. outbound
+webhooks) and `portal/Registry.vue` (`prefix: 'pkg'` / `'tok'` for packages vs. tokens). Any
+future page with more than one `DataTable` needs the same treatment.
+
+### Server-mode sort keys are whitelisted, never interpolated
+
+`PackageController` and `ActivityController` each keep a private `SORTABLE` map from an
+accepted query-string key to the real column/alias, and `orderBy()` is only ever called with
+a value taken *out of that map* — never with the request value itself, and an unrecognised
+key falls back to the existing default order instead of raising. This is not defensive
+style; both controllers carry a comment recording why, next to `SORTABLE`:  a malformed
+value on an unrelated, differently-typed filter (`group` / `subject_id` — a plain
+query-string value compared against a Postgres `uuid` column) once raised
+`SQLSTATE[22P02]`, and because nothing rendered the error, every subsequent request appended
+a stack trace *with its bound parameters* to an unrotated log. The sort key sits on the same
+untrusted, unthrottled request, so it gets the same whitelist-and-never-interpolate
+treatment rather than a character-class validation that has already been shown to have gaps.
+
+### The relative-date trap
+
+Six timestamp columns (`last_used_at` on `settings/AccessTokens`, `settings/ApiKeys`,
+`admin/tokens`, `admin/git-credentials`, `portal/Registry`; `last_received_at` on
+`admin/webhooks`) display a humanised relative time from `diffForHumans()` — "vor 3 Tagen" —
+because that is what belongs in a table cell. `Date.parse()` cannot read that string, so
+`sortAs: 'date'` on the humanised value alone would silently degrade to an alphabetical
+compare over prose fragments ("vor", "Minuten", "Tagen", …), producing an order that looks
+plausible at a glance and is wrong. Each of those controllers therefore also sends a
+sort-only ISO twin (`last_used_at_iso`, `last_received_at_iso`); the column definition keeps
+`sortAs: 'date'` but points `sortValue` at the ISO field while the template still renders the
+humanised one. Anyone adding a timestamp column should check which of the two shapes they
+actually have before wiring up the column — a plain `row[key]` on a relative-time field is
+the bug this pattern exists to avoid.
+
+### Nulls sort last, in both directions
+
+A column's `sortValue` (or the default `row[key]` lookup) must return `null` — not `''` — for
+a missing value. `useTableState` special-cases `null` to sort after every real value
+regardless of ascending/descending, so reversing the sort direction never surfaces a screen of
+dashes at the top. Returning `''` instead defeats that: an empty string still compares as a
+real value, so it moves to whichever end the current direction happens to sort empty strings
+to, and flips there and back as the direction toggles.
+
+### Known gaps
+
+`useTableState` has unit coverage (`resources/js/composables/useTableState.test.ts` —
+Vitest). `DataTable.vue` itself has none. Manual in-browser verification (client-mode sort,
+server-mode pagination + sort, the dual-`prefix` pages) was planned but could not be carried
+out in this environment — the in-app browser tool cannot load the application — so it still
+wants a pass in a real browser before this is treated as fully verified end to end.
+
 ## Tenancy & role model
 
 - **Operator invariant (security-critical):** the privileged roles `admin`/`maintainer`
