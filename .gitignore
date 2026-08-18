@@ -4,6 +4,7 @@
 /public/hot
 /public/storage
 /storage/*.key
+/storage/inertia-devtools
 /storage/pail
 /vendor
 .env

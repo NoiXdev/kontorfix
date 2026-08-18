@@ -31,12 +31,18 @@ use League\CommonMark\Util\RegexHelper;
  * inline markdown content, rendered and escaped through the same pipeline as the rest of the
  * document, not substituted in raw.
  *
- * Rendering happens once per sync, in a queue worker. league/commonmark currently carries
- * several open denial-of-service advisories around deeply nested structures; doing this off
- * the request path means a hostile repository costs one job rather than every page view.
- * `max_nesting_level` below only bounds *block* nesting (blockquotes, lists) — the inline
- * parser and the GFM table extension have no such cap in this version, so it is a partial
- * mitigation, not a general one.
+ * Rendering happens once per sync, in a queue worker, and that placement is the load-bearing
+ * mitigation — not a reaction to whichever advisory happens to be open. league/commonmark has
+ * no unfixed advisory as of 2.10.0, but the six that were open at 2.8.2 were closed across
+ * 2.9.0, and 2.9.1 and 2.10.0 each closed *more* quadratic-time parsing bugs found afterwards
+ * (unbounded delimiter-cache keys, reference-label normalization, repeated attribute merges).
+ * The pattern, not any one entry, is the reason: a markdown parser fed attacker-authored input
+ * is a place where super-linear parsing keeps being found. Off the request path, a hostile
+ * repository costs one queue job; on it, it would cost every page view.
+ *
+ * `max_nesting_level` below still only bounds *block* nesting (blockquotes, lists) — it is read
+ * by MarkdownParser alone, and neither the inline parser nor the GFM table extension gained a
+ * comparable cap in 2.9/2.10. So it remains a partial mitigation, not a general one.
  *
  * A parse failure is allowed to propagate as a Throwable rather than being swallowed into
  * an empty string indistinguishable from a genuinely empty README. The caller is expected

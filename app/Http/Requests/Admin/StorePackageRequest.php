@@ -39,8 +39,16 @@ class StorePackageRequest extends FormRequest
 
         return [
             'type' => ['required', Rule::enum(PackageType::class)],
-            // Composer is always git; npm/Python default to publish but may mirror git.
-            'source_mode' => ['nullable', Rule::enum(PackageSourceMode::class)],
+            // Which modes a type may use lives on the enum. npm is publish-only: a mirror
+            // of the repository tree is not what `npm publish` uploads.
+            'source_mode' => [
+                'nullable',
+                Rule::enum(PackageSourceMode::class),
+                Rule::in(array_map(
+                    fn (PackageSourceMode $m): string => $m->value,
+                    PackageSourceMode::allowedFor($type ?? PackageType::Composer)
+                )),
+            ],
             'name' => [
                 'required',
                 'string',
@@ -68,16 +76,21 @@ class StorePackageRequest extends FormRequest
     }
 
     /**
-     * The source mode the package will be created with: Composer is always Git; npm/Python
-     * honour the submitted mode, defaulting to Publish.
+     * The source mode the package will be created with. A submitted mode is honoured only
+     * if the type allows it — the rules() constraint rejects anything else before this
+     * runs — and otherwise the type's default applies.
      */
     public function effectiveSourceMode(?PackageType $type): PackageSourceMode
     {
-        if ($type === PackageType::Composer) {
-            return PackageSourceMode::Git;
+        if ($type === null) {
+            return PackageSourceMode::Publish;
         }
 
-        return PackageSourceMode::tryFrom((string) $this->input('source_mode')) ?? PackageSourceMode::Publish;
+        $submitted = PackageSourceMode::tryFrom((string) $this->input('source_mode'));
+
+        return $submitted !== null && in_array($submitted, PackageSourceMode::allowedFor($type), true)
+            ? $submitted
+            : PackageSourceMode::defaultFor($type);
     }
 
     public function withValidator(Validator $validator): void
@@ -96,6 +109,10 @@ class StorePackageRequest extends FormRequest
     public function messages(): array
     {
         return [
+            // Rule::in's default reads "The selected source mode is invalid." — English, in
+            // a German UI. Reachable over the API only (the create dialog hides the field
+            // for a type with a single mode), but it is still a user-visible string.
+            'source_mode.in' => 'Dieser Quellmodus ist für den gewählten Pakettyp nicht zulässig.',
             'repository_url.starts_with' => 'Die Repository-URL muss mit https:// oder ssh:// beginnen.',
             'repository_url.url' => 'Bitte eine gültige https- oder ssh-Repository-URL angeben.',
             'group_ids.required' => 'Bitte mindestens eine Registry auswählen.',

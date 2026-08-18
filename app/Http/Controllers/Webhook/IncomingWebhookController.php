@@ -55,6 +55,7 @@ class IncomingWebhookController extends Controller
         $repoUrl = $valid ? $this->parser->repoUrl($provider, $payload) : null;
 
         $matched = 0;
+        $synced = 0;
         $status = 200;
 
         if (! $valid) {
@@ -65,7 +66,15 @@ class IncomingWebhookController extends Controller
             $packages = $this->matcher->match($repoUrl);
             $matched = $packages->count();
             foreach ($packages as $package) {
-                SyncPackage::dispatch($package);
+                // A repository_url match alone does not mean the package is git-synced —
+                // a publish-based package (npm, Python) may carry one purely for reference
+                // (npm publish/twine upload send the artifact, not the tree). Dispatching
+                // for it would only earn it a bogus sync_status = failed and, once retries
+                // are exhausted, a spurious sync.failed webhook event.
+                if ($package->isGitSourced()) {
+                    SyncPackage::dispatch($package);
+                    $synced++;
+                }
             }
         }
 
@@ -89,6 +98,6 @@ class IncomingWebhookController extends Controller
         abort_unless($valid, 401);
         abort_if($repoUrl === null, 422);
 
-        return response()->json(['synced' => $matched]);
+        return response()->json(['synced' => $synced]);
     }
 }

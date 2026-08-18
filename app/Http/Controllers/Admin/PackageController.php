@@ -78,8 +78,14 @@ class PackageController extends Controller
             'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
-            // Source-mode options (publish vs git-mirror) for the create dialog.
-            'sourceModes' => PackageSourceMode::metadata(),
+            // Source-mode options per package type. npm has exactly one, so the create
+            // dialog hides the selector for it rather than offering a rejected choice.
+            'sourceModes' => collect(PackageType::cases())
+                ->mapWithKeys(fn (PackageType $t): array => [$t->value => array_map(
+                    fn (PackageSourceMode $m): array => ['value' => $m->value, 'label' => $m->label()],
+                    PackageSourceMode::allowedFor($t)
+                )])
+                ->all(),
             // Managed git credentials the user may assign (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
@@ -276,13 +282,22 @@ class PackageController extends Controller
         }
 
         $data = $request->validate([
-            'repository_url' => ['nullable', 'string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_url' => [
+                Rule::requiredIf($package->isGitSourced()),
+                'nullable', 'string', 'max:500', new NotRedactedCredentialUrl,
+                'url:https,ssh', 'starts_with:https://,ssh://',
+            ],
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
         ]);
 
-        $url = $data['repository_url'] ?? $package->repository_url;
+        // `??` could not express "clear it". An emptied field arrives as null (the global
+        // ConvertEmptyStringsToNull), which the null-coalesce read as "not submitted" and
+        // answered by keeping the old URL — so removing a stale repository_url, the remedy
+        // SyncPackage recommends to the operator of a publish-mode package, silently did
+        // nothing. An absent key still means "unchanged".
+        $url = array_key_exists('repository_url', $data) ? $data['repository_url'] : $package->repository_url;
 
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);

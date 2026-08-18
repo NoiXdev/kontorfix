@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
@@ -66,12 +67,20 @@ class PackageController extends Controller
             }
         }
 
-        $package = Package::create($request->safe()->except('group_ids'));
+        // Mirrors Admin\PackageController::store: the request, not the raw submitted
+        // value, is authoritative for the stored mode — otherwise a type that didn't
+        // submit source_mode at all (or submitted one it doesn't allow) would fall through
+        // to the column's DB default ('publish') instead of the type's real default.
+        $attributes = $request->safe()->except('group_ids');
+        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+
+        $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Publish-based packages (npm, Python) without a repository have nothing to sync
-        // from git — they are filled by pushing artifacts.
-        if ($package->repository_url !== null) {
+        // Publish-based packages (npm, Python) are filled by pushing artifacts; a
+        // repository_url on one is reference-only (npm publish uploads a tarball, not the
+        // tree), so it must not queue a sync. Mirrors Admin\PackageController::store.
+        if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
         }
 
@@ -86,6 +95,15 @@ class PackageController extends Controller
     public function resync(Package $package): PackageResource
     {
         $this->assertCanWritePackage($package);
+
+        // Unlike store()/update(), where dispatching is a side effect of a save that
+        // already succeeded, dispatch *is* the entire point of this endpoint — silently
+        // declining it while still returning 200 would tell the caller a resync happened
+        // when nothing was queued. A publish-based package (npm, Python) is filled by
+        // pushing artifacts, not synced from a repository, so reject synchronously instead,
+        // matching the 409 convention NpmController/PypiController already use for "this
+        // package's mode forbids this operation".
+        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
 
         SyncPackage::dispatch($package);
 

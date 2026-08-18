@@ -23,9 +23,13 @@ class PackageFactory extends Factory
     {
         return [
             'type' => PackageType::Composer,
-            // Publish is the neutral default; Composer is git-sourced regardless via the
-            // type override in Package::isGitSourced(). Override for npm/Python git mirrors.
-            'source_mode' => PackageSourceMode::Publish,
+            // Derived from the type exactly as both create paths do, so a factory row is
+            // as truthful as a real one. Override for a Python git mirror.
+            'source_mode' => fn (array $attributes): PackageSourceMode => PackageSourceMode::defaultFor(
+                $attributes['type'] instanceof PackageType
+                    ? $attributes['type']
+                    : PackageType::from((string) $attributes['type']),
+            ),
             'name' => Str::lower(fake()->word().'-'.fake()->unique()->numberBetween(1, 99999).'/'.fake()->word()),
             'description' => fake()->sentence(),
             'repository_url' => null,

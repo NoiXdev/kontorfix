@@ -51,6 +51,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Session Serialization
+    |--------------------------------------------------------------------------
+    |
+    | How the session payload is written to storage. "json" is the stronger
+    | choice — it cannot instantiate a PHP object on read, so a writable session
+    | store stops being an object-injection primitive — but the two formats
+    | cannot read each other: switching logs every signed-in user out, exactly
+    | once, at the moment of the switch.
+    |
+    | Pinned to "php" so the Laravel 13 upgrade is a no-op for running instances.
+    | The framework's own base config carries no "serialization" key at all, so
+    | SessionManager falls back to "php" either way; it is Laravel 13's skeleton
+    | for *new* applications that sets "json". Spelling the key out here means a
+    | later config sync cannot introduce that change unnoticed. Moving to "json"
+    | is a deliberate, announced step — flip SESSION_SERIALIZATION and tell
+    | operators their users will be logged out once.
+    |
+    | Supported: "php", "json"
+    |
+    */
+
+    'serialization' => env('SESSION_SERIALIZATION', 'php'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Session File Location
     |--------------------------------------------------------------------------
     |

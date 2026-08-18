@@ -26,6 +26,21 @@ it('resyncs matching packages on a valid github push', function () {
     Queue::assertPushed(SyncPackage::class, fn ($job) => $job->package->is($pkg));
 });
 
+it('matches but does not dispatch a sync for a publish-based package with a reference-only repository url', function () {
+    Queue::fake();
+    Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.com/acme/demo.git',
+    ]);
+    $payload = githubPush('https://github.com/acme/demo.git');
+
+    $this->withHeaders(['X-Hub-Signature-256' => githubSig($payload)])
+        ->postJson('/webhooks/github', $payload)->assertOk()->assertJsonPath('synced', 0);
+
+    Queue::assertNothingPushed();
+});
+
 it('rejects a github push with a bad signature', function () {
     Queue::fake();
     Package::factory()->create(['repository_url' => 'https://github.com/acme/demo.git']);

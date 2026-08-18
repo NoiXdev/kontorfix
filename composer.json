@@ -11,21 +11,21 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.2",
+        "php": "^8.4.1",
         "chillerlan/php-qrcode": "^6.0",
         "composer/metadata-minifier": "^1.0",
         "composer/semver": "^3.4",
         "dedoc/scramble": "^0.13.36",
         "firebase/php-jwt": "^7.1",
-        "inertiajs/inertia-laravel": "^2.0",
-        "laravel/framework": "^12.0",
+        "inertiajs/inertia-laravel": "^3.3.1",
+        "laravel/framework": "^13.0",
         "laravel/horizon": "^5.47",
         "laravel/passkeys": "^0.2.1",
         "laravel/reverb": "^1.10",
-        "laravel/tinker": "^2.10.1",
+        "laravel/tinker": "^3.0.2",
         "league/flysystem-aws-s3-v3": "^3.0",
         "pragmarx/google2fa-qrcode": "^4.0",
-        "spatie/laravel-activitylog": "^5.0",
+        "spatie/laravel-activitylog": "^5.1.0",
         "synergitech/laravel-postal": "^5.0",
         "tightenco/ziggy": "^2.4"
     },
@@ -36,10 +36,10 @@
         "laravel/pint": "^1.29",
         "laravel/sail": "^1.41",
         "mockery/mockery": "^1.6",
-        "nunomaduro/collision": "^8.6",
-        "pestphp/pest": "^3.8",
-        "pestphp/pest-plugin-laravel": "^3.2",
-        "phpunit/phpunit": "^11.5.3"
+        "nunomaduro/collision": "^8.9.5",
+        "pestphp/pest": "^5.1.1",
+        "pestphp/pest-plugin-laravel": "^5.0.1",
+        "phpunit/phpunit": "^13.3.0"
     },
     "autoload": {
         "psr-4": {

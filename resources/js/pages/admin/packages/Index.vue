@@ -53,13 +53,13 @@ const props = defineProps<{
     filters: Filters;
     registryTypes: string[];
     gitCredentials: { id: string; name: string; provider: string }[];
-    sourceModes: { value: string; label: string }[];
+    sourceModes: Record<string, { value: string; label: string }[]>;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages' }];
 
-// Type metadata (labels, publish-based) comes from the shared single source.
-const { isPublishBased, options: typeOptionsFor } = useRegistryTypes();
+// Type metadata (labels) comes from the shared single source.
+const { options: typeOptionsFor } = useRegistryTypes();
 // Only instance-enabled types are offered in the create dialog and the filter.
 const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
 
@@ -147,13 +147,22 @@ function onPrivateToggle() {
     }
 }
 
-// Composer is always git; npm/python default to publish and may opt into git-mirror.
-const canChooseSource = computed(() => isPublishBased(form.type));
-const isGitMode = computed(() => form.type === 'composer' || form.source_mode === 'git');
+// The modes this package type actually allows, per PackageSourceMode::allowedFor() on the
+// server — the single source of truth. Composer has exactly one (git), npm exactly one
+// (publish), so the selector below only renders when there is a real choice to make.
+const modesForType = computed(() => props.sourceModes[form.type] ?? []);
+const canChooseSource = computed(() => modesForType.value.length > 1);
+// A type whose only/default mode is git (Composer today) is always git-mode, regardless
+// of what form.source_mode happens to hold (its selector is hidden, so nothing sets it
+// deliberately). Derived from modesForType rather than a hardcoded 'composer' check, so
+// this stays correct if allowedFor() ever changes which type that is.
+const isGitMode = computed(() => modesForType.value[0]?.value === 'git' || form.source_mode === 'git');
 
-// Switching type resets the source mode (composer → git implicitly) and the probe.
+// Switching type resets the source mode to that type's first (default) allowed mode —
+// composer → git, npm → publish — instead of a hardcoded 'publish', so a type with no
+// publish option never lands on an invalid value. Also resets the probe.
 function onTypeChange() {
-    form.source_mode = 'publish';
+    form.source_mode = (props.sourceModes[form.type]?.[0]?.value ?? 'publish') as 'publish' | 'git';
     onSourceModeChange();
 }
 
@@ -249,13 +258,21 @@ function submit() {
     if (!canSubmit.value) {
         return;
     }
-    form.post(route('admin.packages.store'), {
-        onSuccess: () => {
-            dialogOpen.value = false;
-            form.reset();
-            probeResult.value = null;
-        },
-    });
+    form
+        // The source selector is only rendered when canChooseSource is true (Composer
+        // hides it — it has exactly one allowed mode). Drop the field entirely rather
+        // than send the default 'publish' for a type that doesn't allow it: the server
+        // now rejects any explicitly submitted mode a type doesn't allow (StorePackageRequest
+        // / PackageSourceMode::allowedFor), and Composer would otherwise 422 on a field the
+        // user never had a chance to touch.
+        .transform((data) => (canChooseSource.value ? data : { ...data, source_mode: undefined }))
+        .post(route('admin.packages.store'), {
+            onSuccess: () => {
+                dialogOpen.value = false;
+                form.reset();
+                probeResult.value = null;
+            },
+        });
 }
 
 function toggleGroup(groupId: string, checked: boolean) {
@@ -404,14 +421,15 @@ function destroyPackage(id: string) {
                         <InputError :message="form.errors.type" />
                     </div>
 
-                    <!-- npm/Python can either receive pushed artifacts (publish) or mirror a
-                         git repository's tags (git). Composer is always git. -->
+                    <!-- Rendered only for a type with more than one allowed mode, which today
+                         means Python. Composer is always git, npm always publish — offering
+                         either a choice would offer one the server refuses. -->
                     <div v-if="canChooseSource" class="grid gap-2">
                         <Label for="source_mode">Quelle</Label>
                         <SearchableSelect
                             id="source_mode"
                             v-model="form.source_mode"
-                            :options="props.sourceModes"
+                            :options="modesForType"
                             @update:model-value="onSourceModeChange"
                         />
                         <p class="text-xs text-muted-foreground">

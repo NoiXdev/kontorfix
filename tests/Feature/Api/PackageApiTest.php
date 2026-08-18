@@ -60,6 +60,25 @@ it('triggers a resync', function () {
     Queue::assertPushed(SyncPackage::class);
 });
 
+it('refuses a resync request against a publish-based package with a reference-only repository url', function () {
+    Queue::fake();
+    $plain = operatorWriteToken();
+    $package = Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => 'https://github.com/acme/reference-only.git',
+    ]);
+
+    // 409, not a silent 200: dispatch IS the point of this endpoint, so declining it must
+    // not be reported as success. Status code asserted explicitly (not assertOk()'s
+    // opposite) so this is the control-removal check for the abort_if() guard — dropping
+    // it would make this assertion fail with 200 instead of 409.
+    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")
+        ->assertStatus(409);
+
+    Queue::assertNothingPushed();
+});
+
 it('lets a member read (scoped) but not write packages', function () {
     $org = Organization::factory()->create(['is_operator' => false]);
     $member = User::factory()->create(['organization_id' => $org->id, 'role' => 'member']);

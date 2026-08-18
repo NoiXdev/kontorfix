@@ -36,20 +36,23 @@ it('returns the created package as json for inline picker creation', function ()
     Queue::fake();
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
+    // Python, not npm: npm is publish-only (StorePackageRequest rejects source_mode=git
+    // for it), so the explicit git-mirror override this test exercises needs a type that
+    // still allows it.
     $this->actingAs($admin)
         ->postJson('/admin/packages', [
             'group_ids' => [homeRegistryId($admin)],
-            'type' => 'npm',
-            'name' => '@acme/widget',
+            'type' => 'python',
+            'name' => 'acme-widget',
             'source_mode' => 'git',
             'repository_url' => 'https://git.example.com/acme/widget.git',
         ])
         ->assertCreated()
-        ->assertJson(['name' => '@acme/widget', 'type' => 'npm'])
+        ->assertJson(['name' => 'acme-widget', 'type' => 'python'])
         ->assertJsonStructure(['id', 'name', 'type']);
 
     Queue::assertPushed(SyncPackage::class);
-    expect(Package::where('name', '@acme/widget')->exists())->toBeTrue();
+    expect(Package::where('name', 'acme-widget')->exists())->toBeTrue();
 });
 
 it('returns json validation errors for inline picker creation', function () {

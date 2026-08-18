@@ -118,9 +118,14 @@ function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
 }
 
-// --- Edit repository source (git-sourced packages only) ---
-// Composer is always git-sourced; npm/Python only when created in git-mirror mode.
+// --- Edit repository source ---
 const isGitSourced = computed(() => props.package.is_git_sourced);
+
+// A publish-mode package may still carry a repository_url — reference-only, and exactly
+// what the npm migration leaves behind. SyncPackage's failure message tells that operator
+// to remove the URL, so the tab holding the field has to open for them too; gating it on
+// is_git_sourced alone made the recommended remedy unreachable.
+const canEditSource = computed(() => isGitSourced.value || props.package.repository_url !== null);
 
 // The README empty state points at the tab that actually replaces "Versionen" for this
 // package type — Python shows "Distributionen" there instead (see the TabsTrigger below).
@@ -229,7 +234,7 @@ useOperatorChannel({
                     <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
-                    <TabsTrigger v-if="isGitSourced" value="quelle">Quelle</TabsTrigger>
+                    <TabsTrigger v-if="canEditSource" value="quelle">Quelle</TabsTrigger>
                     <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
@@ -290,8 +295,13 @@ useOperatorChannel({
                     </section>
                 </TabsContent>
 
-                <TabsContent v-if="isGitSourced" value="quelle">
+                <TabsContent v-if="canEditSource" value="quelle">
                     <form class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border" @submit.prevent="saveSource">
+                        <p v-if="!isGitSourced" class="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                            Dieses Paket wird nicht aus einem Repository gespiegelt — die Repository-URL dient nur als Referenz.
+                            Feld leeren und speichern, um sie zu entfernen.
+                        </p>
+
                         <div class="grid gap-2">
                             <Label for="src_url">Repository-URL</Label>
                             <Input id="src_url" v-model="sourceForm.repository_url" placeholder="https://git.example.com/vendor/paket.git" autocomplete="off" class="font-mono" />
@@ -319,7 +329,9 @@ useOperatorChannel({
                         </template>
 
                         <div>
-                            <Button type="submit" :disabled="sourceForm.processing">Speichern & neu synchronisieren</Button>
+                            <Button type="submit" :disabled="sourceForm.processing">
+                                {{ isGitSourced ? 'Speichern & neu synchronisieren' : 'Speichern' }}
+                            </Button>
                         </div>
                     </form>
                 </TabsContent>
