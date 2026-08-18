@@ -16,13 +16,22 @@ beforeEach(function () {
     $this->group->packages()->attach([$a->id, $b->id]);
 });
 
-it('filters the portal package list by name and type', function () {
+it('always sends the full portal package list — search/type filtering is client-side only', function () {
+    // The controller used to pre-filter on bare `q`/`type` and echo them back in a
+    // `filters` prop. That server-side filter was removed: it left a legacy
+    // `?q=`/`?type=` bookmark silently narrowing the list with no way to see or
+    // reset the filter from the UI (search/type now live entirely in useTableState,
+    // prefix 'pkg', driven by `pkg_q`/`pkg_type`). The full list reaches the client
+    // regardless of what a legacy URL carries, and there is no `filters` prop anymore.
     $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?q=acme")
-        ->assertInertia(fn ($p) => $p->has('packages', 1)->where('packages.0.name', 'acme/alpha'));
+        ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 
     $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?type=npm")
-        ->assertInertia(fn ($p) => $p->has('packages', 1)->where('packages.0.name', 'beta/widget'));
+        ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 
     $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?q=acme&type=composer")
-        ->assertInertia(fn ($p) => $p->where('filters.q', 'acme')->where('filters.type', 'composer'));
+        ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
+
+    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}")
+        ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 });
