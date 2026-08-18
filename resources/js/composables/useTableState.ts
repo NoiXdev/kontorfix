@@ -165,6 +165,12 @@ export function useTableState<T>(options: Options<T>): TableState<T> {
             if (left === null) return 1;
             if (right === null) return -1;
 
+            // Honour a declared sortAs even when the value arrives as a string: a serialised
+            // count would otherwise fall back to a lexicographic compare, where "10" sorts
+            // before "2".
+            if (column?.sortAs === 'number') {
+                return (Number(left) - Number(right)) * factor;
+            }
             if (typeof left === 'number' && typeof right === 'number') {
                 return (left - right) * factor;
             }

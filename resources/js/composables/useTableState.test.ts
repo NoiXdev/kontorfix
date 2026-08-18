@@ -28,6 +28,9 @@ interface Row {
     score?: number | null;
     joinedAt?: string | null;
     team?: string;
+    // A serialised count, exactly the shape Tasks 2/3's Pakete/Keys/Priorität columns
+    // arrive as: a string, not a number, but declared sortAs: 'number' regardless.
+    packageCount?: string;
 }
 
 const nameColumn: ColumnDef<Row> = { key: 'name', label: 'Name' };
@@ -35,6 +38,7 @@ const emailColumn: ColumnDef<Row> = { key: 'email', label: 'E-Mail' };
 const scoreColumn: ColumnDef<Row> = { key: 'score', label: 'Score' };
 const joinedColumn: ColumnDef<Row> = { key: 'joinedAt', label: 'Joined', sortAs: 'date' };
 const lockedColumn: ColumnDef<Row> = { key: 'locked', label: 'Locked', sortable: false };
+const packageCountColumn: ColumnDef<Row> = { key: 'packageCount', label: 'Pakete', sortAs: 'number' };
 
 describe('sorting: empty/null/undefined values sort last', () => {
     // Deliberately mixes all three "missing" shapes into one column: valueFor() folds
@@ -103,6 +107,19 @@ describe('sorting: numeric columns', () => {
         const table = useTableState<Row>({ rows: () => rows, columns: [nameColumn, scoreColumn] });
         table.toggleSort('score');
         expect(table.visibleRows.value.map((r) => r.score)).toEqual([2, 9, 10]);
+    });
+
+    it('honours sortAs: "number" even when the value arrives as a string', () => {
+        // "10", "2", "9" as actual strings — a serialised count, not a real number —
+        // must still order 2, 9, 10, not the lexicographic "10", "2", "9".
+        const rows: Row[] = [
+            { id: 1, name: 'A', packageCount: '10' },
+            { id: 2, name: 'B', packageCount: '9' },
+            { id: 3, name: 'C', packageCount: '2' },
+        ];
+        const table = useTableState<Row>({ rows: () => rows, columns: [nameColumn, packageCountColumn] });
+        table.toggleSort('packageCount');
+        expect(table.visibleRows.value.map((r) => r.packageCount)).toEqual(['2', '9', '10']);
     });
 });
 

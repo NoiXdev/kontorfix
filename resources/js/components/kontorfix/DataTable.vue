@@ -82,7 +82,7 @@ function ariaSort(key: string): 'ascending' | 'descending' | 'none' {
                 <tbody>
                     <slot :rows="state.visibleRows.value" />
                     <tr v-if="state.visibleRows.value.length === 0">
-                        <td :colspan="columns.length" class="px-4 py-6 text-center text-sm text-muted-foreground">
+                        <td :colspan="columns.length" class="px-4 py-8 text-center text-muted-foreground">
                             {{ state.hasActiveFilters.value ? 'Keine Treffer für diese Filter.' : emptyMessage }}
                         </td>
                     </tr>
