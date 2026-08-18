@@ -46,9 +46,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
 /** Registers a new passkey for the logged-in user. */
 export async function registerPasskey(name: string): Promise<void> {
-    const { options } = await getJson<{ options: PublicKeyCredentialCreationOptionsJSON }>(
-        route('passkey.registration-options'),
-    );
+    const { options } = await getJson<{ options: PublicKeyCredentialCreationOptionsJSON }>(route('passkey.registration-options'));
 
     const credential = await startRegistration({ optionsJSON: options });
 
@@ -57,9 +55,7 @@ export async function registerPasskey(name: string): Promise<void> {
 
 /** Signs in passwordlessly via passkey; returns the redirect target. */
 export async function loginWithPasskey(remember: boolean): Promise<string> {
-    const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(
-        route('passkey.login-options'),
-    );
+    const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(route('passkey.login-options'));
 
     const credential = await startAuthentication({ optionsJSON: options });
 
@@ -76,9 +72,7 @@ export async function loginWithPasskey(remember: boolean): Promise<string> {
  * The only way in for an account whose owner never knew one. Returns the redirect target.
  */
 export async function confirmWithPasskey(): Promise<string> {
-    const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(
-        route('passkey.confirm-options'),
-    );
+    const { options } = await getJson<{ options: PublicKeyCredentialRequestOptionsJSON }>(route('passkey.confirm-options'));
 
     const credential = await startAuthentication({ optionsJSON: options });
 

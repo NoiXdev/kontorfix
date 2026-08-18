@@ -124,7 +124,6 @@ it('still ships everything the image and the asset build need', function () {
         'package-lock.json',
         'vite.config.ts',
         'tsconfig.json',
-        'tailwind.config.js',
         'components.json',
     ];
 
@@ -141,7 +140,7 @@ it('excludes every root entry that is not deliberately shipped', function () {
         'app', 'artisan', 'bootstrap', 'components.json', 'composer.json', 'composer.lock',
         'config', 'database', 'docker', 'eslint.config.js', 'package-lock.json',
         'package.json', 'phpstan.neon', 'phpunit.xml', 'public', 'resources', 'routes',
-        'tailwind.config.js', 'tsconfig.json', 'vite.config.ts',
+        'tsconfig.json', 'vite.config.ts',
         'CHANGELOG.md', 'CONTRIBUTING.md', 'LICENSE', 'README.md', 'SECURITY.md',
     ];
 

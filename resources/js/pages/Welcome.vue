@@ -51,9 +51,7 @@ const features = [
                         <path d="M18 78V54h12V42h12V30h12v12h12v12h12v24H18Z" fill="#D07A45" />
                         <rect x="43" y="60" width="10" height="18" fill="#151F2E" />
                     </svg>
-                    <span class="font-display text-xl font-extrabold lowercase tracking-tight">
-                        kontor<span class="text-copper">fix</span>
-                    </span>
+                    <span class="font-display text-xl font-extrabold tracking-tight lowercase"> kontor<span class="text-copper">fix</span> </span>
                 </div>
 
                 <nav class="flex items-center gap-2 text-sm">
@@ -65,7 +63,9 @@ const features = [
                         Zum Dashboard
                     </Link>
                     <template v-else>
-                        <Link :href="route('login')" class="rounded-md px-4 py-2 font-medium text-paper/80 transition-colors hover:text-paper"> Anmelden </Link>
+                        <Link :href="route('login')" class="rounded-md px-4 py-2 font-medium text-paper/80 transition-colors hover:text-paper">
+                            Anmelden
+                        </Link>
                         <Link
                             v-if="registrationEnabled"
                             :href="route('register')"
@@ -80,15 +80,18 @@ const features = [
             <!-- Hero -->
             <main class="grid flex-1 items-center gap-12 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
                 <div>
-                    <p class="kf-rise font-mono text-xs uppercase tracking-[0.2em] text-verdigris" style="animation-delay: 60ms">
+                    <p class="kf-rise font-mono text-xs tracking-[0.2em] text-verdigris uppercase" style="animation-delay: 60ms">
                         Selbst gehostete Paket-Registry
                     </p>
-                    <h1 class="kf-rise mt-5 text-balance font-display text-5xl font-extrabold leading-[1.02] tracking-tight sm:text-6xl" style="animation-delay: 120ms">
+                    <h1
+                        class="kf-rise mt-5 font-display text-5xl leading-[1.02] font-extrabold tracking-tight text-balance sm:text-6xl"
+                        style="animation-delay: 120ms"
+                    >
                         Ein Kontor für<br />deine Pakete.
                     </h1>
                     <p class="kf-rise mt-6 max-w-xl text-lg leading-relaxed text-paper/70" style="animation-delay: 200ms">
-                        Composer- und npm-Pakete zentral verwalten, an Kunden ausliefern und hinter der eigenen Domain
-                        absichern — mit modernem Login und feiner Rechteverwaltung.
+                        Composer- und npm-Pakete zentral verwalten, an Kunden ausliefern und hinter der eigenen Domain absichern — mit modernem Login
+                        und feiner Rechteverwaltung.
                     </p>
                     <div class="kf-rise mt-9 flex flex-wrap items-center gap-3" style="animation-delay: 280ms">
                         <Link
@@ -129,7 +132,7 @@ const features = [
             </main>
 
             <!-- Features -->
-            <section id="features" class="grid gap-4 pb-16 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+            <section id="features" class="grid gap-4 pt-4 pb-16 sm:grid-cols-2 lg:grid-cols-4">
                 <article
                     v-for="f in features"
                     :key="f.title"

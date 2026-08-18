@@ -9,6 +9,9 @@ it('renders the branded invitation mail with a set-password action', function ()
     $rendered = (string) $mail->render();
 
     expect($rendered)->toContain('Passwort setzen');   // Action-Button-Text
-    expect($rendered)->toContain('#D07A45');            // Marken-Kupfer im Theme-CSS inline
+    // Case-insensitive: prettier normalizes hex literals in the mail theme CSS to lowercase
+    // on every `npm run format` run, and CSS hex colors are case-insensitive, so the exact
+    // letter case is not a property worth pinning here.
+    expect(strtolower($rendered))->toContain('#d07a45'); // Marken-Kupfer im Theme-CSS inline
     expect($rendered)->not->toBeEmpty();
 });

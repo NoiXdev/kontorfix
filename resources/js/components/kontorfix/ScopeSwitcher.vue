@@ -43,10 +43,7 @@ watch(selected, (value) => change(value));
 </script>
 
 <template>
-    <div
-        v-if="scope?.canSelectAll"
-        class="px-2 pb-1 group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden"
-    >
+    <div v-if="scope?.canSelectAll" class="px-2 pb-1 group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden">
         <div class="mb-1 flex items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
             <Building2 class="size-3.5" />
             <span>Organisation</span>

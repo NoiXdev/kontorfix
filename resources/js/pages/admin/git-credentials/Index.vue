@@ -151,7 +151,7 @@ async function runTest(id: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -184,7 +184,9 @@ async function runTest(id: string) {
                             <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
                                 <td class="px-4 py-3 font-medium">{{ cred.name }}</td>
                                 <td class="px-4 py-3">
-                                    <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{{ cred.provider }}</span>
+                                    <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">{{
+                                        cred.provider
+                                    }}</span>
                                 </td>
                                 <td class="px-4 py-3">{{ cred.organization ?? '—' }}</td>
                                 <td class="px-4 py-3 text-muted-foreground">{{ cred.packages_count }}</td>
@@ -192,7 +194,9 @@ async function runTest(id: string) {
                                 <td class="px-4 py-3">
                                     <div class="flex items-center gap-1">
                                         <Button variant="ghost" size="sm" @click="openTest(cred.id)"><KeyRound class="size-4" /> Testen</Button>
-                                        <Button variant="ghost" size="icon" aria-label="Bearbeiten" @click="openEdit(cred)"><Pencil class="size-4" /></Button>
+                                        <Button variant="ghost" size="icon" aria-label="Bearbeiten" @click="openEdit(cred)"
+                                            ><Pencil class="size-4"
+                                        /></Button>
                                         <Button variant="ghost" size="icon" aria-label="Löschen" @click="destroyCredential(cred.id)">
                                             <Trash2 class="size-4 text-destructive" />
                                         </Button>
@@ -213,12 +217,19 @@ async function runTest(id: string) {
                                                 @keyup.enter="runTest(cred.id)"
                                             />
                                         </div>
-                                        <Button type="button" variant="outline" :disabled="testing || testUrl.trim() === ''" @click="runTest(cred.id)">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            :disabled="testing || testUrl.trim() === ''"
+                                            @click="runTest(cred.id)"
+                                        >
                                             {{ testing ? 'Teste…' : 'Test starten' }}
                                         </Button>
                                     </div>
                                     <p v-if="testResult?.ok" class="mt-2 text-sm text-verdigris">Erreichbar — der Token funktioniert.</p>
-                                    <p v-else-if="testResult" class="mt-2 text-sm text-destructive">{{ testResult.error ?? 'Zugriff fehlgeschlagen.' }}</p>
+                                    <p v-else-if="testResult" class="mt-2 text-sm text-destructive">
+                                        {{ testResult.error ?? 'Zugriff fehlgeschlagen.' }}
+                                    </p>
                                 </td>
                             </tr>
                         </template>
@@ -270,7 +281,14 @@ async function runTest(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="cred_token">Token{{ editing ? ' (leer lassen = unverändert)' : '' }}</Label>
-                        <Input id="cred_token" v-model="form.token" type="password" placeholder="ghp_… / glpat-… / …" autocomplete="off" class="font-mono" />
+                        <Input
+                            id="cred_token"
+                            v-model="form.token"
+                            type="password"
+                            placeholder="ghp_… / glpat-… / …"
+                            autocomplete="off"
+                            class="font-mono"
+                        />
                         <InputError :message="form.errors.token" />
                     </div>
 

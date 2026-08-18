@@ -4,7 +4,7 @@
     "typescript": true,
     "tsConfigPath": "./tsconfig.json",
     "tailwind": {
-        "config": "tailwind.config.js",
+        "config": "",
         "css": "resources/css/app.css",
         "baseColor": "neutral",
         "cssVariables": true,

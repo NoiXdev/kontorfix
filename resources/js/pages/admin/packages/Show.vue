@@ -202,13 +202,8 @@ useOperatorChannel({
                     <ExternalLink class="size-3.5" />
                     {{ props.package.repository_url }}
                 </a>
-                <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">
-                    Zuletzt synchronisiert: {{ props.package.synced_at }}
-                </div>
-                <div
-                    v-if="syncError"
-                    class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
-                >
+                <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">Zuletzt synchronisiert: {{ props.package.synced_at }}</div>
+                <div v-if="syncError" class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {{ syncError }}
                 </div>
 
@@ -246,8 +241,9 @@ useOperatorChannel({
                         v-if="!props.package.readme_html"
                         class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
                     >
-                        Für dieses Paket liegt keine README vor. Installationsbefehle stehen im Tab „Installation“,
-                        weitere Details unter „{{ secondaryTabLabel }}“.
+                        Für dieses Paket liegt keine README vor. Installationsbefehle stehen im Tab „Installation“, weitere Details unter „{{
+                            secondaryTabLabel
+                        }}“.
                     </div>
                 </TabsContent>
 
@@ -255,8 +251,7 @@ useOperatorChannel({
                     <section class="flex flex-col gap-3">
                         <pre
                             class="overflow-x-auto rounded-md border border-sidebar-border/70 bg-muted/50 px-4 py-3 font-mono text-sm dark:border-sidebar-border"
-                            >{{ installCommand }}</pre
-                        >
+                            >{{ installCommand }}</pre>
                     </section>
                 </TabsContent>
 
@@ -281,7 +276,10 @@ useOperatorChannel({
                                         </td>
                                         <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
                                     </tr>
-                                    <tr v-if="props.sharedElsewhere > 0" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                    <tr
+                                        v-if="props.sharedElsewhere > 0"
+                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                    >
                                         <td colspan="2" class="px-4 py-3 text-muted-foreground">
                                             Zusätzlich in {{ props.sharedElsewhere }} Registry(s) außerhalb deines Bereichs.
                                         </td>
@@ -296,15 +294,24 @@ useOperatorChannel({
                 </TabsContent>
 
                 <TabsContent v-if="canEditSource" value="quelle">
-                    <form class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border" @submit.prevent="saveSource">
+                    <form
+                        class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                        @submit.prevent="saveSource"
+                    >
                         <p v-if="!isGitSourced" class="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                            Dieses Paket wird nicht aus einem Repository gespiegelt — die Repository-URL dient nur als Referenz.
-                            Feld leeren und speichern, um sie zu entfernen.
+                            Dieses Paket wird nicht aus einem Repository gespiegelt — die Repository-URL dient nur als Referenz. Feld leeren und
+                            speichern, um sie zu entfernen.
                         </p>
 
                         <div class="grid gap-2">
                             <Label for="src_url">Repository-URL</Label>
-                            <Input id="src_url" v-model="sourceForm.repository_url" placeholder="https://git.example.com/vendor/paket.git" autocomplete="off" class="font-mono" />
+                            <Input
+                                id="src_url"
+                                v-model="sourceForm.repository_url"
+                                placeholder="https://git.example.com/vendor/paket.git"
+                                autocomplete="off"
+                                class="font-mono"
+                            />
                             <p v-if="sourceForm.errors.repository_url" class="text-sm text-destructive">{{ sourceForm.errors.repository_url }}</p>
                         </div>
 
@@ -320,7 +327,14 @@ useOperatorChannel({
                             </div>
                             <div v-if="!sourceForm.git_credential_id" class="grid gap-2">
                                 <Label for="src_token">Token einfügen{{ props.package.has_repository_token ? ' (leer = unverändert)' : '' }}</Label>
-                                <Input id="src_token" v-model="sourceForm.repository_token" type="password" placeholder="z. B. GitHub PAT (ghp_…)" autocomplete="off" class="font-mono" />
+                                <Input
+                                    id="src_token"
+                                    v-model="sourceForm.repository_token"
+                                    type="password"
+                                    placeholder="z. B. GitHub PAT (ghp_…)"
+                                    autocomplete="off"
+                                    class="font-mono"
+                                />
                                 <p class="text-xs text-muted-foreground">
                                     {{ props.package.has_repository_token ? 'Ein Token ist hinterlegt.' : 'Kein Token hinterlegt.' }}
                                     Wird verschlüsselt gespeichert.
@@ -358,7 +372,7 @@ useOperatorChannel({
                                         <td class="px-4 py-3 font-mono text-xs">{{ dist.filename }}</td>
                                         <td class="px-4 py-3">{{ dist.version }}</td>
                                         <td class="px-4 py-3">
-                                            <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                            <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground uppercase">
                                                 {{ dist.filetype === 'bdist_wheel' ? 'wheel' : 'sdist' }}
                                             </span>
                                         </td>
@@ -388,15 +402,8 @@ useOperatorChannel({
                         <template v-else>
                             <div class="flex flex-wrap items-center gap-3">
                                 <Label for="version-select" class="text-sm">Version</Label>
-                                <SearchableSelect
-                                    id="version-select"
-                                    v-model="selectedVersion"
-                                    :options="versionOptions"
-                                    class="w-64"
-                                />
-                                <span class="text-xs text-muted-foreground">
-                                    {{ props.versions.length }} Versionen
-                                </span>
+                                <SearchableSelect id="version-select" v-model="selectedVersion" :options="versionOptions" class="w-64" />
+                                <span class="text-xs text-muted-foreground"> {{ props.versions.length }} Versionen </span>
                             </div>
 
                             <div v-if="currentVersion" class="rounded-xl border border-sidebar-border/70 p-5 dark:border-sidebar-border">
@@ -416,13 +423,8 @@ useOperatorChannel({
 
                                 <div class="mt-5 grid gap-6 md:grid-cols-2">
                                     <div>
-                                        <h3 class="text-sm font-medium">
-                                            Abhängigkeiten ({{ depCount(currentVersion.dependencies.runtime) }})
-                                        </h3>
-                                        <p
-                                            v-if="depCount(currentVersion.dependencies.runtime) === 0"
-                                            class="mt-2 text-sm text-muted-foreground"
-                                        >
+                                        <h3 class="text-sm font-medium">Abhängigkeiten ({{ depCount(currentVersion.dependencies.runtime) }})</h3>
+                                        <p v-if="depCount(currentVersion.dependencies.runtime) === 0" class="mt-2 text-sm text-muted-foreground">
                                             Keine
                                         </p>
                                         <ul v-else class="mt-2 space-y-1">
@@ -438,15 +440,8 @@ useOperatorChannel({
                                     </div>
 
                                     <div>
-                                        <h3 class="text-sm font-medium">
-                                            Dev-Abhängigkeiten ({{ depCount(currentVersion.dependencies.dev) }})
-                                        </h3>
-                                        <p
-                                            v-if="depCount(currentVersion.dependencies.dev) === 0"
-                                            class="mt-2 text-sm text-muted-foreground"
-                                        >
-                                            Keine
-                                        </p>
+                                        <h3 class="text-sm font-medium">Dev-Abhängigkeiten ({{ depCount(currentVersion.dependencies.dev) }})</h3>
+                                        <p v-if="depCount(currentVersion.dependencies.dev) === 0" class="mt-2 text-sm text-muted-foreground">Keine</p>
                                         <ul v-else class="mt-2 space-y-1">
                                             <li
                                                 v-for="(constraint, name) in currentVersion.dependencies.dev"

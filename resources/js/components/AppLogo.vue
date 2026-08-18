@@ -17,7 +17,7 @@ defineProps<Props>();
         </svg>
     </div>
     <div class="ml-1.5 grid flex-1 text-left">
-        <span class="truncate font-display text-base font-extrabold lowercase leading-none tracking-tight">
+        <span class="truncate font-display text-base leading-none font-extrabold tracking-tight lowercase">
             kontor<span class="text-copper">fix</span>
         </span>
     </div>

@@ -54,9 +54,7 @@ const sectionOpen = computed(() => state.value === 'collapsed' || open.value);
     <SidebarGroup class="px-2 py-0">
         <Collapsible :open="sectionOpen" class="group/section" @update:open="(value) => (open = value)">
             <SidebarGroupLabel as-child>
-                <CollapsibleTrigger
-                    class="flex w-full items-center justify-between hover:text-sidebar-foreground focus-visible:ring-2"
-                >
+                <CollapsibleTrigger class="flex w-full items-center justify-between hover:text-sidebar-foreground focus-visible:ring-2">
                     <span>{{ label }}</span>
                     <ChevronRight class="transition-transform duration-200 group-data-[state=open]/section:rotate-90" />
                 </CollapsibleTrigger>

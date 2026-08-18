@@ -140,7 +140,7 @@ function destroyUpstream(id: string) {
         <div class="flex flex-1 flex-col gap-4 p-4">
             <div
                 v-if="flashSuccess"
-                class="fixed right-4 top-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
             >
                 {{ flashSuccess }}
             </div>
@@ -309,7 +309,7 @@ function destroyUpstream(id: string) {
                             v-model="form.allowed_packages_text"
                             rows="4"
                             placeholder="symfony/console&#10;psr/log"
-                            class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                         />
                         <InputError :message="form.errors.allowed_packages" />
                     </div>

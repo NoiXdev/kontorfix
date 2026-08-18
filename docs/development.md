@@ -6,7 +6,7 @@ README stays deliberately technology-neutral).
 ## Architecture
 
 - **Backend:** Laravel 13 (PHP 8.4+), served via FrankenPHP.
-- **Frontend:** Inertia.js v3 + Vue 3 + TypeScript, Tailwind CSS 3, shadcn-vue.
+- **Frontend:** Inertia.js v3 + Vue 3 + TypeScript, Tailwind CSS 4, shadcn-vue.
 - **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
 - **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
   Scheduler (periodic re-sync + cleanup).
@@ -16,6 +16,17 @@ README stays deliberately technology-neutral).
 
 Registry and webhook endpoints run deliberately **stateless** (outside the `web` middleware
 group, without cookies/CSRF) and are secured solely by token or signature verification.
+
+### Browser support floor
+
+Tailwind CSS 4's engine generates CSS that depends on native cascade layers,
+`color-mix()` and registered custom properties (`@property`), which sets a minimum
+supported browser floor of **Safari 16.4+, Chrome 111+ and Firefox 128+**. The project
+declares no `browserslist` entry and no Vite `build.target`, so nothing here contradicts
+that floor — but it also isn't enforced or checked anywhere. This floor follows from the
+CSS engine itself, not from a decision this project made; it applies as soon as
+`tailwindcss` v4 is in the dependency tree, regardless of what any project-level config
+says.
 
 ## Local environment (DDEV)
 

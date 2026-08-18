@@ -22,8 +22,9 @@ defineProps<{
 </template>
 
 <style scoped>
-/* No Tailwind typography plugin in this project (checked tailwind.config.js) — the
-   stored README HTML gets minimal element styling here instead of `prose` classes.
+/* No Tailwind typography plugin in this project (checked package.json and the
+   @theme block in resources/css/app.css) — the stored README HTML gets minimal
+   element styling here instead of `prose` classes.
    `:deep()` is required because v-html content isn't seen by Vue's scoped-CSS rewrite. */
 .readme :deep(h1),
 .readme :deep(h2),

@@ -7,7 +7,28 @@ import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, Sid
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { Activity, BookOpen, Bot, Boxes, Building2, CloudDownload, Database, Fingerprint, Folder, Gauge, GitBranch, Globe, KeyRound, LayoutGrid, Mail as MailIcon, Package, ScrollText, Settings as SettingsIcon, Users, Webhook } from 'lucide-vue-next';
+import {
+    Activity,
+    BookOpen,
+    Bot,
+    Boxes,
+    Building2,
+    CloudDownload,
+    Database,
+    Fingerprint,
+    Folder,
+    Gauge,
+    GitBranch,
+    Globe,
+    KeyRound,
+    LayoutGrid,
+    Mail as MailIcon,
+    Package,
+    ScrollText,
+    Settings as SettingsIcon,
+    Users,
+    Webhook,
+} from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const page = usePage<SharedData>();
@@ -147,7 +168,10 @@ const footerNavItems = computed<NavItem[]>(() => {
         <SidebarFooter>
             <NavFooter :items="footerNavItems" />
             <NavUser />
-            <p v-if="appVersion" class="px-2 pb-1 text-center text-xs text-muted-foreground group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden">
+            <p
+                v-if="appVersion"
+                class="px-2 pb-1 text-center text-xs text-muted-foreground group-has-[[data-collapsible=icon]]/sidebar-wrapper:hidden"
+            >
                 Kontorfix v{{ appVersion }}
             </p>
         </SidebarFooter>
