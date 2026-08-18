@@ -19,6 +19,7 @@ interface GroupRow {
     packages_count: number;
     domains: string[];
     organization: string | null;
+    organization_id: string | null;
 }
 
 interface OrgOption {
@@ -36,9 +37,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Gruppen', href: '/admin/groups'
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
-// GroupRow carries only the organization's name (no id), so the filter matches on
-// name too — the only field the row and the option list have in common.
-const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.name, label: o.name })));
+const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
 const visibilityOptions = [
     { value: 'public', label: 'Öffentlich' },
@@ -64,7 +63,7 @@ const table = useTableState<GroupRow>({
         org: {
             label: 'Kunde/Org',
             options: orgOptions.value,
-            match: (row, value) => row.organization === value,
+            match: (row, value) => row.organization_id === value,
         },
         visibility: {
             label: 'Sichtbarkeit',
