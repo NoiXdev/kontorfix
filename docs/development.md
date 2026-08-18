@@ -147,10 +147,16 @@ to, and flips there and back as the direction toggles.
 ### Known gaps
 
 `useTableState` has unit coverage (`resources/js/composables/useTableState.test.ts` —
-Vitest). `DataTable.vue` itself has none. Manual in-browser verification (client-mode sort,
-server-mode pagination + sort, the dual-`prefix` pages) was planned but could not be carried
-out in this environment — the in-app browser tool cannot load the application — so it still
-wants a pass in a real browser before this is treated as fully verified end to end.
+Vitest, run via `npm run test`), and that step now runs as its own `Tests (Vitest)` step in
+the `quality` job of `.github/workflows/ci.yml`, alongside `Lint (eslint)`, `Format check
+(Pint)`, `Static analysis (PHPStan)` and `Tests (Pest)` — it was added there specifically
+because it is the only automated check on the sort/filter rules (nulls-last, the `_iso`
+mapping, `prefix` isolation) and is not something the other gates would catch if it broke.
+`DataTable.vue` itself still has no test coverage of its own. Manual in-browser verification
+(client-mode sort, server-mode pagination + sort, the dual-`prefix` pages) was planned but
+could not be carried out in this environment — the in-app browser tool cannot load the
+application — so it still wants a pass in a real browser before this is treated as fully
+verified end to end.
 
 ## Tenancy & role model
 
