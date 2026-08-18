@@ -282,7 +282,11 @@ class PackageController extends Controller
         }
 
         $data = $request->validate([
-            'repository_url' => ['nullable', 'string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_url' => [
+                Rule::requiredIf($package->isGitSourced()),
+                'nullable', 'string', 'max:500', new NotRedactedCredentialUrl,
+                'url:https,ssh', 'starts_with:https://,ssh://',
+            ],
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
