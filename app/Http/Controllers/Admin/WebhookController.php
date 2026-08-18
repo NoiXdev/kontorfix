@@ -42,6 +42,10 @@ class WebhookController extends Controller
                 'enabled' => $w->enabled,
                 'url' => url("/webhooks/{$w->provider}/{$w->id}"),
                 'last_received_at' => $w->last_received_at?->diffForHumans(),
+                // Raw ISO timestamp for sorting only — `last_received_at` above is a relative
+                // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                // and the sort value have to travel separately.
+                'last_received_at_iso' => $w->last_received_at?->toIso8601String(),
             ]),
             // Legacy shared endpoints (env secret) — still shown for reference.
             'legacy' => [

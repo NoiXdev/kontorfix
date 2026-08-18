@@ -22,6 +22,10 @@ class ApiKeyController extends Controller
                     'name' => $k->name,
                     'permission' => $k->permission->value,
                     'last_used_at' => $k->last_used_at?->diffForHumans(),
+                    // Raw ISO timestamp for sorting only — `last_used_at` above is a relative
+                    // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                    // and the sort value have to travel separately.
+                    'last_used_at_iso' => $k->last_used_at?->toIso8601String(),
                     'expires_at' => $k->expires_at?->toDateString(),
                 ]),
         ]);

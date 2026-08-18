@@ -30,6 +30,10 @@ class AccessTokenController extends Controller
                     'ability' => $t->ability->value,
                     'group' => $t->group?->name,
                     'last_used_at' => $t->last_used_at?->diffForHumans(),
+                    // Raw ISO timestamp for sorting only — `last_used_at` above is a relative
+                    // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                    // and the sort value have to travel separately.
+                    'last_used_at_iso' => $t->last_used_at?->toIso8601String(),
                     'expires_at' => $t->expires_at?->toDateString(),
                 ]),
             'groups' => Group::whereIn('organization_id', $user->accessibleOrganizationIds())

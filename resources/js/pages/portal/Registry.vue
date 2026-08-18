@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
@@ -40,6 +42,9 @@ interface TokenRow {
     name: string;
     ability: 'read' | 'publish';
     last_used_at: string | null;
+    // Raw ISO timestamp, sort-only — `last_used_at` is a relative string ("vor 3 Tagen")
+    // that Date.parse cannot read.
+    last_used_at_iso: string | null;
 }
 
 const props = defineProps<{
@@ -47,36 +52,41 @@ const props = defineProps<{
     snippets: Snippets;
     packages: PackageRow[];
     tokens: TokenRow[];
-    filters?: { q: string | null; type: string | null };
 }>();
-
-const filterQ = ref(props.filters?.q ?? '');
-const filterType = ref(props.filters?.type ?? '');
-
-const hasActiveFilters = computed(() => filterQ.value !== '' || filterType.value !== '');
 
 // Ecosystems present in this registry — drives which setup snippets are shown.
 const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
 
-function applyFilters() {
-    router.get(
-        route('portal.registries.show', props.registry.id),
-        { q: filterQ.value, type: filterType.value },
-        { preserveState: true, preserveScroll: true, replace: true },
-    );
-}
+const typeOptions = [
+    { value: 'composer', label: 'composer' },
+    { value: 'npm', label: 'npm' },
+    { value: 'python', label: 'python' },
+];
 
-let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-watch(filterQ, () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(applyFilters, 250);
+// Packages and tokens each get their own useTableState instance with a distinct
+// prefix ('pkg' / 'tok') — without it both tables would read and write the same
+// sort/direction/q query keys, and sorting one would silently reorder the other.
+const packageColumns: ColumnDef<PackageRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'type', label: 'Typ' },
+    { key: 'latest_version', label: 'Letzte Version' },
+    { key: 'description', label: 'Beschreibung' },
+];
+
+const packageTable = useTableState<PackageRow>({
+    rows: () => props.packages,
+    columns: packageColumns,
+    prefix: 'pkg',
+    searchKeys: ['name', 'description'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        type: {
+            label: 'Typ',
+            options: typeOptions,
+            match: (row, value) => row.type === value,
+        },
+    },
 });
-watch(filterType, applyFilters);
-
-function resetFilters() {
-    filterQ.value = '';
-    filterType.value = '';
-}
 
 const page = usePage<SharedData>();
 const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
@@ -91,6 +101,28 @@ const abilityOptions = computed(() =>
           ]
         : [{ value: 'read', label: 'Lesen' }],
 );
+
+const tokenColumns: ColumnDef<TokenRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'ability', label: 'Recht' },
+    { key: 'last_used_at', label: 'Zuletzt genutzt', sortAs: 'date', sortValue: (row) => row.last_used_at_iso },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const tokenTable = useTableState<TokenRow>({
+    rows: () => props.tokens,
+    columns: tokenColumns,
+    prefix: 'tok',
+    searchKeys: ['name'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        ability: {
+            label: 'Recht',
+            options: abilityOptions.value,
+            match: (row, value) => row.ability === value,
+        },
+    },
+});
 
 const tokenCalloutDismissed = ref(false);
 watch(plainTextToken, (value) => {
@@ -179,66 +211,39 @@ const breadcrumbs: BreadcrumbItem[] = [
                 </TabsContent>
 
                 <TabsContent value="pakete">
-                    <div class="mb-3 flex flex-wrap items-center gap-3">
-                        <Input
-                            v-model="filterQ"
-                            type="search"
-                            placeholder="Name suchen…"
-                            autocomplete="off"
-                            class="h-10 w-full sm:w-64"
-                            aria-label="Nach Name suchen"
-                        />
-                        <SearchableSelect
-                            v-model="filterType"
-                            class="w-40"
-                            placeholder="Alle Typen"
-                            :options="[
-                                { value: '', label: 'Alle Typen' },
-                                { value: 'composer', label: 'composer' },
-                                { value: 'npm', label: 'npm' },
-                                { value: 'python', label: 'python' },
-                            ]"
-                        />
-                        <button
-                            v-if="hasActiveFilters"
-                            type="button"
-                            class="text-sm text-muted-foreground underline-offset-4 hover:underline"
-                            @click="resetFilters"
-                        >
-                            Zurücksetzen
-                        </button>
-                    </div>
-                    <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <table class="w-full text-left text-sm">
-                            <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                                <tr>
-                                    <th class="px-4 py-3 font-medium">Name</th>
-                                    <th class="px-4 py-3 font-medium">Typ</th>
-                                    <th class="px-4 py-3 font-medium">Letzte Version</th>
-                                    <th class="px-4 py-3 font-medium">Beschreibung</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="pkg in props.packages"
-                                    :key="pkg.id"
-                                    class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                                >
-                                    <td class="px-4 py-3 font-mono">
-                                        <Link :href="route('portal.registries.package', [props.registry.id, pkg.id])" class="hover:underline">
-                                            {{ pkg.name }}
-                                        </Link>
-                                    </td>
-                                    <td class="px-4 py-3">{{ pkg.type }}</td>
-                                    <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
-                                    <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
-                                </tr>
-                                <tr v-if="props.packages.length === 0">
-                                    <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <DataTable
+                        :columns="packageColumns"
+                        :state="packageTable"
+                        empty-message="Noch keine Pakete in dieser Registry."
+                        search-placeholder="Name suchen…"
+                    >
+                        <template #filters>
+                            <SearchableSelect
+                                :model-value="packageTable.filterValues.type.value"
+                                :options="typeOptions"
+                                placeholder="Alle Typen"
+                                class="w-40"
+                                @update:model-value="(v) => packageTable.setFilter('type', String(v))"
+                            />
+                        </template>
+
+                        <template #default="{ rows }">
+                            <tr
+                                v-for="pkg in rows"
+                                :key="pkg.id"
+                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                            >
+                                <td class="px-4 py-3 font-mono">
+                                    <Link :href="route('portal.registries.package', [props.registry.id, pkg.id])" class="hover:underline">
+                                        {{ pkg.name }}
+                                    </Link>
+                                </td>
+                                <td class="px-4 py-3">{{ pkg.type }}</td>
+                                <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
+                            </tr>
+                        </template>
+                    </DataTable>
                 </TabsContent>
 
                 <TabsContent value="tokens">
@@ -283,37 +288,34 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </Button>
                     </form>
 
-                    <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                        <table class="w-full text-left text-sm">
-                            <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                                <tr>
-                                    <th class="px-4 py-3 font-medium">Name</th>
-                                    <th class="px-4 py-3 font-medium">Recht</th>
-                                    <th class="px-4 py-3 font-medium">Zuletzt genutzt</th>
-                                    <th class="px-4 py-3 font-medium">Aktionen</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="token in props.tokens"
-                                    :key="token.id"
-                                    class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                                >
-                                    <td class="px-4 py-3 font-mono">{{ token.name }}</td>
-                                    <td class="px-4 py-3">{{ abilityLabel(token.ability) }}</td>
-                                    <td class="px-4 py-3 text-muted-foreground">{{ token.last_used_at ?? 'nie' }}</td>
-                                    <td class="px-4 py-3">
-                                        <Button variant="ghost" size="icon" aria-label="Token widerrufen" @click="destroyToken(token.id)">
-                                            <Trash2 class="size-4 text-destructive" />
-                                        </Button>
-                                    </td>
-                                </tr>
-                                <tr v-if="props.tokens.length === 0">
-                                    <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Noch keine Tokens erstellt.</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                    <DataTable :columns="tokenColumns" :state="tokenTable" empty-message="Noch keine Tokens erstellt.">
+                        <template #filters>
+                            <SearchableSelect
+                                :model-value="tokenTable.filterValues.ability.value"
+                                :options="abilityOptions"
+                                placeholder="Recht"
+                                class="w-40"
+                                @update:model-value="(v) => tokenTable.setFilter('ability', String(v))"
+                            />
+                        </template>
+
+                        <template #default="{ rows }">
+                            <tr
+                                v-for="token in rows"
+                                :key="token.id"
+                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                            >
+                                <td class="px-4 py-3 font-mono">{{ token.name }}</td>
+                                <td class="px-4 py-3">{{ abilityLabel(token.ability) }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ token.last_used_at ?? 'nie' }}</td>
+                                <td class="px-4 py-3">
+                                    <Button variant="ghost" size="icon" aria-label="Token widerrufen" @click="destroyToken(token.id)">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </td>
+                            </tr>
+                        </template>
+                    </DataTable>
                 </TabsContent>
             </Tabs>
         </div>

@@ -87,6 +87,10 @@ class RegistryController extends Controller
                 'name' => $t->name,
                 'ability' => $t->ability->value,
                 'last_used_at' => $t->last_used_at?->diffForHumans(),
+                // Raw ISO timestamp for sorting only — `last_used_at` above is a relative
+                // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                // and the sort value have to travel separately.
+                'last_used_at_iso' => $t->last_used_at?->toIso8601String(),
             ]),
         ]);
     }
