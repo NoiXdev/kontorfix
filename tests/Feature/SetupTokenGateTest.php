@@ -5,7 +5,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Setup\SetupGate;
 use App\Services\Setup\SetupToken;
-use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
@@ -191,7 +191,7 @@ it('refuses an anonymous setup submission in production with no token configured
 
     // CSRF verification only self-disables while the app reports the testing
     // environment, and this test deliberately leaves it — 419 would mask the 403.
-    $this->withoutMiddleware(ValidateCsrfToken::class)
+    $this->withoutMiddleware(PreventRequestForgery::class)
         ->post('/setup', gatePayload())->assertForbidden();
 
     expect(User::query()->count())->toBe(0);

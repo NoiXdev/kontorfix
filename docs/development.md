@@ -5,8 +5,8 @@ README stays deliberately technology-neutral).
 
 ## Architecture
 
-- **Backend:** Laravel 12 (PHP 8.2+), served via FrankenPHP.
-- **Frontend:** Inertia.js v2 + Vue 3 + TypeScript, Tailwind CSS 3, shadcn-vue.
+- **Backend:** Laravel 13 (PHP 8.3+), served via FrankenPHP.
+- **Frontend:** Inertia.js v3 + Vue 3 + TypeScript, Tailwind CSS 3, shadcn-vue.
 - **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
 - **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
   Scheduler (periodic re-sync + cleanup).
@@ -175,6 +175,36 @@ as trusted infrastructure. Two deliberate properties:
   influence the endpoint).
 - A broken S3 configuration can interrupt downloads (the `artifacts` disk throws on errors).
   Use the built-in connection test before saving.
+
+### Session and cache identity across upgrades
+
+Three values decide whether a framework upgrade is invisible to the people using the
+instance or reads as an outage, and all three used to be *derived* from `APP_NAME` rather
+than written down:
+
+| Variable       | Value            | What changing it does                                     |
+| -------------- | ---------------- | --------------------------------------------------------- |
+| `SESSION_COOKIE` | `kontorfix_session` | Renaming it logs out every signed-in user, mid-session. |
+| `CACHE_PREFIX`   | `kontorfix_cache_`  | Renaming it orphans the cache; the instance comes back cold and re-fetches from its upstreams. |
+| `REDIS_PREFIX`   | `kontorfix_database_` | Same, for everything else Redis holds under the application prefix. |
+
+Laravel 13 changes the *skeleton's* derivation of all three from `app_name_…` to
+`app-name-…`. It did not change under this instance, because the derivation lives in this
+repository's own published `config/session.php`, `config/cache.php` and
+`config/database.php`, not in the framework. That is a thin guarantee to rely on — a later
+config sync would flip it silently — so the three values are now pinned in
+`.env.example` and `docker/.env.example` instead of derived.
+
+**They no longer follow `APP_NAME`.** Renaming the instance, or pointing a second instance
+at the same Redis, means setting all three per instance; two instances sharing a prefix
+share each other's cache entries and session records.
+
+`SESSION_SERIALIZATION` is the same shape of decision. `json` is the stronger format — it
+cannot instantiate a PHP object on read, so a writable session store stops being an
+object-injection primitive — but `php` and `json` cannot read each other's payloads, so
+switching invalidates every session exactly once. It is pinned to `php`, which is what
+every existing install already runs. Moving to `json` is worth doing; do it as its own
+announced change, not folded into an upgrade.
 
 ## Login guessing
 
