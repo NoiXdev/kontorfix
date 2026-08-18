@@ -1,9 +1,9 @@
 <?php
 
 use App\Enums\UserRole;
-use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
+use Spatie\Activitylog\Models\Activity;
 
 function sortAdmin(): User
 {
@@ -53,13 +53,28 @@ it('keeps sort state on the second page', function () {
 
 it('sorts activity by a whitelisted column', function () {
     $admin = sortAdmin();
-    Organization::factory()->create(['name' => 'Beta org']);
-    Organization::factory()->create(['name' => 'Alpha org']);
+
+    // Two rows whose `log_name` order (descending) is the OPPOSITE of the default
+    // `latest('id')` order, so a test that only checked the echoed filters — or that
+    // happened to agree with the fallback order by coincidence — could not pass here.
+    // 'zebra' is created first (lower id), 'alpha' second (higher id):
+    //   - default (id desc, most recent first):      alpha, zebra
+    //   - sort=log_name&direction=desc (z before a):  zebra, alpha
+    // The two orders disagree on which row comes first, so asserting the first row is
+    // 'zebra' fails outright under the fallback. Neither name collides with the
+    // auto-logged `log_name`s this suite produces ('user', 'organization', 'registry',
+    // 'package' — all alphabetically below 'zebra'), so it stays the true first row
+    // under the real sort too.
+    Activity::create(['log_name' => 'zebra', 'description' => 'first']);
+    Activity::create(['log_name' => 'alpha', 'description' => 'second']);
 
     $this->actingAs($admin)
         ->get(route('admin.activity.index', ['sort' => 'log_name', 'direction' => 'desc']))
         ->assertOk()
-        ->assertInertia(fn ($page) => $page->where('filters.direction', 'desc'));
+        ->assertInertia(fn ($page) => $page
+            ->where('activities.data.0.log_name', 'zebra')
+            ->where('filters.sort', 'log_name')
+            ->where('filters.direction', 'desc'));
 });
 
 it('ignores a direction that is neither asc nor desc for activity too', function () {
