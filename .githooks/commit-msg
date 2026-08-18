@@ -1,0 +1,22 @@
+#!/bin/sh
+# Apply the CI's commit-message rules at commit time.
+#
+# The "commitlint" CI job only sees a message after it has been pushed, and a message that
+# has reached the public main branch cannot be corrected without rewriting history. This
+# hook runs the same .commitlintrc.yml locally, while the message is still editable.
+#
+# Node dependencies are installed inside DDEV because node_modules holds Linux binaries,
+# but commitlint is pure JavaScript, so the host's node runs it from that same tree.
+#
+# This hook is a convenience, not the gate: when node or the dependency tree is missing it
+# warns and lets the commit through. The CI job remains the authority.
+
+cli="$(git rev-parse --show-toplevel)/node_modules/@commitlint/cli/cli.js"
+
+if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+    echo "commit-msg: commitlint unavailable, message not checked." >&2
+    echo "            Run 'ddev exec npm install' to enable this check." >&2
+    exit 0
+fi
+
+exec node "$cli" --edit "$1"
