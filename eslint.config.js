@@ -13,6 +13,10 @@ export default defineConfigWithVueTs(
         rules: {
             'vue/multi-word-component-names': 'off',
             '@typescript-eslint/no-explicit-any': 'off',
+            // Some components (e.g. DataTable) receive a state object made of refs from a
+            // composable and are meant to mutate its leaves (state.search.value = ...) for
+            // two-way binding. shallowOnly still flags reassigning the prop itself.
+            'vue/no-mutating-props': ['error', { shallowOnly: true }],
         },
     },
     prettier,
