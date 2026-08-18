@@ -5,7 +5,7 @@ README stays deliberately technology-neutral).
 
 ## Architecture
 
-- **Backend:** Laravel 13 (PHP 8.3+), served via FrankenPHP.
+- **Backend:** Laravel 13 (PHP 8.4+), served via FrankenPHP.
 - **Frontend:** Inertia.js v3 + Vue 3 + TypeScript, Tailwind CSS 3, shadcn-vue.
 - **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
 - **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
@@ -188,12 +188,17 @@ than written down:
 | `CACHE_PREFIX`   | `kontorfix_cache_`  | Renaming it orphans the cache; the instance comes back cold and re-fetches from its upstreams. |
 | `REDIS_PREFIX`   | `kontorfix_database_` | Same, for everything else Redis holds under the application prefix. |
 
-Laravel 13 changes the *skeleton's* derivation of all three from `app_name_…` to
-`app-name-…`. It did not change under this instance, because the derivation lives in this
-repository's own published `config/session.php`, `config/cache.php` and
-`config/database.php`, not in the framework. That is a thin guarantee to rely on — a later
-config sync would flip it silently — so the three values are now pinned in
-`.env.example` and `docker/.env.example` instead of derived.
+Laravel 13 changes the framework's own derivation of the **two prefixes** from
+`app_name_…` to `app-name-…` (`vendor/laravel/framework/config/cache.php` and
+`config/database.php` now read `Str::slug(APP_NAME).'-cache-'` and `…'-database-'`). The
+session cookie is *not* part of that change — the framework's base `config/session.php`
+still derives `Str::snake(APP_NAME).'_session'`.
+
+Neither reached this instance, because all three derivations live in this repository's own
+published `config/cache.php`, `config/database.php` and `config/session.php`, which win over
+the framework's base config. That is a thin guarantee to rely on — a later config sync would
+flip it silently — so the three values are now pinned in `.env.example` and
+`docker/.env.example` instead of derived.
 
 **They no longer follow `APP_NAME`.** Renaming the instance, or pointing a second instance
 at the same Redis, means setting all three per instance; two instances sharing a prefix

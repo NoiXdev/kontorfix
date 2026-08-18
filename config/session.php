@@ -61,7 +61,9 @@ return [
     | once, at the moment of the switch.
     |
     | Pinned to "php" so the Laravel 13 upgrade is a no-op for running instances.
-    | Laravel 13's own skeleton ships "json"; this key is spelled out here so a
+    | The framework's own base config carries no "serialization" key at all, so
+    | SessionManager falls back to "php" either way; it is Laravel 13's skeleton
+    | for *new* applications that sets "json". Spelling the key out here means a
     | later config sync cannot introduce that change unnoticed. Moving to "json"
     | is a deliberate, announced step — flip SESSION_SERIALIZATION and tell
     | operators their users will be logged out once.

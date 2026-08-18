@@ -11,7 +11,7 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.3",
+        "php": "^8.4.1",
         "chillerlan/php-qrcode": "^6.0",
         "composer/metadata-minifier": "^1.0",
         "composer/semver": "^3.4",
