@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\GitCredential;
 use App\Models\Package;
 use App\Models\PackageVersion;
 
@@ -10,10 +11,12 @@ function runNpmGitMigration(): void
 }
 
 it('flips an npm git package to publish and keeps everything else', function () {
+    $credential = GitCredential::factory()->create();
     $package = Package::factory()->create([
         'type' => 'npm',
         'source_mode' => 'git',
         'repository_url' => 'https://github.test/acme/demo.git',
+        'git_credential_id' => $credential->id,
     ]);
     $version = PackageVersion::factory()->for($package)->create(['version' => '1.0.0']);
 
@@ -22,6 +25,7 @@ it('flips an npm git package to publish and keeps everything else', function () 
     $fresh = $package->fresh();
     expect($fresh->source_mode->value)->toBe('publish')
         ->and($fresh->repository_url)->toBe('https://github.test/acme/demo.git')
+        ->and($fresh->git_credential_id)->toBe($credential->id)
         ->and(PackageVersion::whereKey($version->id)->exists())->toBeTrue();
 });
 
