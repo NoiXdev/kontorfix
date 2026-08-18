@@ -99,6 +99,10 @@ it('keeps developer tooling, internal notes and credentials out of the image', f
         'node_modules/vue/package.json',
         'vendor/autoload.php',
         'public/build/manifest.json',
+        // The JS test runner's config and a test file it points at — drives a test run
+        // that never happens inside the image (the asset stage only runs `vite build`).
+        'vitest.config.ts',
+        'resources/js/composables/useTableState.test.ts',
     ];
 
     foreach ($mustNotShip as $path) {

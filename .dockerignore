@@ -41,3 +41,11 @@ bootstrap/cache
 # suite (which names fixtures, routes and internal behaviour).
 docs
 tests
+
+# The JS test runner's config and the test files it points at (see its `include` glob).
+# The image's asset stage runs `npm run build` (vite), never `npm run test` (vitest) —
+# these exist only to drive a test run that never happens inside the image. Unlike
+# `tests` above, these live inside `resources/js` alongside the source vite does need,
+# so they need their own rule rather than a shared directory exclusion.
+vitest.config.ts
+resources/js/**/*.test.ts
