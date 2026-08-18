@@ -3,9 +3,11 @@
 @import '@fontsource/jetbrains-mono/400.css';
 @import '@fontsource/jetbrains-mono/500.css';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+/* Temporary: the v3 theme is still read from tailwind.config.js. Task 3 dissolves it
+   into an @theme block and deletes both this directive and the file. */
+@config '../../tailwind.config.js';
 
 body,
 html {
