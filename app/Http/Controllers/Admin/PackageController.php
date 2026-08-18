@@ -36,12 +36,30 @@ class PackageController extends Controller
 {
     use ScopesToAdministeredOrgs;
 
+    // The sort column never comes from the request — only a key that selects one. This
+    // route takes untrusted query-string values and is not throttled, and this controller
+    // already carries the scar from that: a malformed `group` value reached a Postgres
+    // uuid comparison, raised SQLSTATE[22P02], and because nothing rendered the error
+    // every request appended a stack trace *with its bound parameters* to an unrotated
+    // log. An unknown key here falls back to the existing default order rather than
+    // raising. `groups_count` is sortable because `withCount('groups')` below puts a real
+    // SQL alias on the query.
+    private const SORTABLE = [
+        'name' => 'name',
+        'type' => 'type',
+        'sync_status' => 'sync_status',
+        'groups_count' => 'groups_count',
+        'synced_at' => 'synced_at',
+    ];
+
     public function index(Request $request): Response
     {
         $q = trim((string) $request->query('q', ''));
         $type = $request->query('type');
         $status = $request->query('status');
         $group = $request->query('group');
+        $sort = (string) $request->query('sort', '');
+        $direction = $request->query('direction') === 'desc' ? 'desc' : 'asc';
 
         $packages = $this->scopePackageQuery(Package::query())
             ->withCount('groups')
@@ -58,7 +76,11 @@ class PackageController extends Controller
             ->when(is_string($group) && $group !== '', fn ($query) => Str::isUuid($group)
                 ? $query->whereHas('groups', fn ($g) => $g->whereKey($group))
                 : $query->whereRaw('1 = 0'))
-            ->latest()
+            ->when(
+                isset(self::SORTABLE[$sort]),
+                fn ($query) => $query->orderBy(self::SORTABLE[$sort], $direction),
+                fn ($query) => $query->latest(),
+            )
             ->paginate(25)
             ->withQueryString()
             ->through(fn (Package $p) => [
@@ -75,7 +97,14 @@ class PackageController extends Controller
         return Inertia::render('admin/packages/Index', [
             'packages' => $packages,
             'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'slug']),
-            'filters' => ['q' => $q, 'type' => $type, 'status' => $status, 'group' => $group],
+            'filters' => [
+                'q' => $q,
+                'type' => $type,
+                'status' => $status,
+                'group' => $group,
+                'sort' => isset(self::SORTABLE[$sort]) ? $sort : null,
+                'direction' => $direction,
+            ],
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
             // Source-mode options per package type. npm has exactly one, so the create
