@@ -34,7 +34,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: '/portal' }]
                     v-for="registry in props.registries"
                     :key="registry.id"
                     :href="route('portal.registries.show', registry.id)"
-                    class="block rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    class="block rounded-xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 >
                     <Card class="h-full transition-colors hover:border-verdigris/40">
                         <CardHeader>

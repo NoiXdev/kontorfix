@@ -128,7 +128,7 @@ function selectSession(value: string) {
                 <Label>Token für die Snippets</Label>
                 <div class="flex flex-wrap items-center gap-2">
                     <select
-                        class="flex h-10 min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        class="flex h-10 min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         :value="activeToken"
                         @change="selectSession(($event.target as HTMLSelectElement).value)"
                     >

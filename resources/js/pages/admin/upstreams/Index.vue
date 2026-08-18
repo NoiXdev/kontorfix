@@ -309,7 +309,7 @@ function destroyUpstream(id: string) {
                             v-model="form.allowed_packages_text"
                             rows="4"
                             placeholder="symfony/console&#10;psr/log"
-                            class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         />
                         <InputError :message="form.errors.allowed_packages" />
                     </div>

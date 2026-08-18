@@ -310,7 +310,7 @@ async function copyToken() {
                                     id="registry-name"
                                     v-model="form.name"
                                     type="text"
-                                    class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                    class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring"
                                 />
                                 <p v-if="form.errors.name" class="text-sm text-destructive">{{ form.errors.name }}</p>
                             </div>
@@ -426,7 +426,7 @@ async function copyToken() {
                                     v-model="newDomain"
                                     type="text"
                                     placeholder="packages.example.test"
-                                    class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                    class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring"
                                 />
                             </div>
                             <Button type="submit">Hinzufügen</Button>
@@ -491,7 +491,7 @@ async function copyToken() {
                                     v-model="newUpstream.url"
                                     type="text"
                                     placeholder="https://repo.packagist.org"
-                                    class="w-full min-w-64 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                    class="w-full min-w-64 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring"
                                 />
                             </div>
                             <div class="flex flex-col gap-1.5">
@@ -513,7 +513,7 @@ async function copyToken() {
                                     v-model.number="newUpstream.priority"
                                     type="number"
                                     min="0"
-                                    class="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                    class="w-24 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring"
                                 />
                             </div>
                             <div class="flex flex-col gap-1.5">
@@ -524,7 +524,7 @@ async function copyToken() {
                                     type="password"
                                     autocomplete="off"
                                     placeholder="für private Upstreams"
-                                    class="w-full min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+                                    class="w-full min-w-56 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring"
                                 />
                             </div>
                             <Button type="submit">Hinzufügen</Button>

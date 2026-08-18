@@ -133,7 +133,7 @@ function destroyApiKey(id: string) {
                             id="api_key_expires_at"
                             v-model="form.expires_at"
                             type="date"
-                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         />
                         <InputError :message="form.errors.expires_at" />
                     </div>

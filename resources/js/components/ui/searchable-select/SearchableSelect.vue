@@ -152,7 +152,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentClick)
             :disabled="disabled"
             :class="
                 cn(
-                    'flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+                    'flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
                 )
             "
             @click="toggle"
@@ -176,7 +176,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentClick)
                     v-model="query"
                     type="text"
                     :placeholder="searchPlaceholder"
-                    class="h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    class="h-9 w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
                     @keydown.down.prevent="move(1)"
                     @keydown.up.prevent="move(-1)"
                     @keydown.enter.prevent="onEnter"
