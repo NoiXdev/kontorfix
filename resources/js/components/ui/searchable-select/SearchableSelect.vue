@@ -27,7 +27,14 @@ const props = withDefaults(
     },
 );
 
-const model = defineModel<T>();
+// `required: true`: every caller (whether via `v-model` on a form field or the explicit
+// `:model-value`/`@update:model-value` pair some filter dropdowns use) always supplies a
+// concrete value — `pick()` below only ever writes a real `Option['value']`, never
+// `undefined`. Without `required: true`, `defineModel` still types the prop (and so the
+// emitted value) as `T | undefined`, which is a strictVModel mismatch against every
+// caller's plain, always-defined `T` field. This corrects the declared type to match what
+// the component has always actually done; it doesn't change any behaviour.
+const model = defineModel<T>({ required: true });
 
 const open = ref(false);
 const query = ref('');

@@ -3,7 +3,15 @@ import { cn } from '@/lib/utils';
 import { Separator, type SeparatorProps } from 'radix-vue';
 import { computed, type HTMLAttributes } from 'vue';
 
-const props = defineProps<SeparatorProps & { class?: HTMLAttributes['class']; label?: string }>();
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. the `data-sidebar` marker the sidebar
+// separator sets) for the checker only; it already reaches the root via `delegatedProps`'
+// implicit `$attrs` fallthrough (radix-vue's own `SeparatorProps` doesn't declare it).
+interface Props extends SeparatorProps, /* @vue-ignore */ HTMLAttributes {
+    class?: HTMLAttributes['class'];
+    label?: string;
+}
+
+const props = defineProps<Props>();
 
 const delegatedProps = computed(() => {
     const { class: _, ...delegated } = props;

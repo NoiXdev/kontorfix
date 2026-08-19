@@ -5,7 +5,15 @@ import { Check } from 'lucide-vue-next'
 import { CheckboxIndicator, CheckboxRoot, useForwardPropsEmits } from 'radix-vue'
 import { computed, type HTMLAttributes } from 'vue'
 
-const props = defineProps<CheckboxRootProps & { class?: HTMLAttributes['class'] }>()
+// Native attrs (`id`, `tabindex`, ...) were never declared here — they reached the
+// rendered element via Vue's implicit `$attrs` fallthrough onto radix-vue's `CheckboxRoot`.
+// `/* @vue-ignore */` types `HTMLAttributes` for the checker only, without turning its
+// members into actual runtime props, so that fallthrough is unaffected.
+interface Props extends CheckboxRootProps, /* @vue-ignore */ HTMLAttributes {
+  class?: HTMLAttributes['class']
+}
+
+const props = defineProps<Props>()
 const emits = defineEmits<CheckboxRootEmits>()
 
 const delegatedProps = computed(() => {

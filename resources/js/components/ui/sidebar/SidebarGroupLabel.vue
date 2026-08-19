@@ -4,16 +4,26 @@ import type { PrimitiveProps } from 'radix-vue';
 import { Primitive } from 'radix-vue';
 import type { HTMLAttributes } from 'vue';
 
-const props = defineProps<
-    PrimitiveProps & {
-        class?: HTMLAttributes['class'];
-    }
->();
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. this file's own `data-sidebar` marker)
+// for the checker only; it already reaches `Primitive` via Vue's implicit `$attrs`
+// fallthrough.
+interface Props extends PrimitiveProps, /* @vue-ignore */ HTMLAttributes {
+    class?: HTMLAttributes['class'];
+}
+
+const props = defineProps<Props>();
+
+// `Primitive`'s own exported type (radix-vue) only declares `as`/`asChild` — it has no
+// index signature for arbitrary attrs, even though it forwards everything it receives at
+// runtime. Binding `data-sidebar` as a literal template attribute would run into that
+// (real, third-party) type gap; going through a `v-bind` object sidesteps the excess-
+// property check without changing what actually reaches the DOM.
+const dataAttrs = { 'data-sidebar': 'group-label' };
 </script>
 
 <template>
     <Primitive
-        data-sidebar="group-label"
+        v-bind="dataAttrs"
         :as="as"
         :as-child="asChild"
         :class="

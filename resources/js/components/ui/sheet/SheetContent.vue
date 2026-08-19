@@ -13,7 +13,10 @@ import {
 import { computed, type HTMLAttributes } from 'vue';
 import { sheetVariants, type SheetVariants } from '.';
 
-interface SheetContentProps extends DialogContentProps {
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. the `data-sidebar`/`data-mobile`
+// markers the sidebar component sets on this content) for the checker only; the explicit
+// `...$attrs` spread below (with `inheritAttrs: false`) already forwards them at runtime.
+interface SheetContentProps extends DialogContentProps, /* @vue-ignore */ HTMLAttributes {
     class?: HTMLAttributes['class'];
     side?: SheetVariants['side'];
 }

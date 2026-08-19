@@ -7,7 +7,13 @@ defineOptions({
     inheritAttrs: false,
 });
 
-const props = withDefaults(defineProps<TooltipContentProps & { class?: HTMLAttributes['class'] }>(), {
+// `/* @vue-ignore */` types `HTMLAttributes` (native attrs like `hidden`) for the checker
+// only; the explicit `...$attrs` spread below already forwards them at runtime.
+interface Props extends TooltipContentProps, /* @vue-ignore */ HTMLAttributes {
+    class?: HTMLAttributes['class'];
+}
+
+const props = withDefaults(defineProps<Props>(), {
     sideOffset: 4,
 });
 

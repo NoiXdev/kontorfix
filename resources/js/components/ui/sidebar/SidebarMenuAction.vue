@@ -3,22 +3,29 @@ import { cn } from '@/lib/utils';
 import { Primitive, type PrimitiveProps } from 'radix-vue';
 import type { HTMLAttributes } from 'vue';
 
-const props = withDefaults(
-    defineProps<
-        PrimitiveProps & {
-            showOnHover?: boolean;
-            class?: HTMLAttributes['class'];
-        }
-    >(),
-    {
-        as: 'button',
-    },
-);
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. this file's own `data-sidebar` marker)
+// for the checker only; it already reaches `Primitive` via Vue's implicit `$attrs`
+// fallthrough.
+interface Props extends PrimitiveProps, /* @vue-ignore */ HTMLAttributes {
+    showOnHover?: boolean;
+    class?: HTMLAttributes['class'];
+}
+
+const props = withDefaults(defineProps<Props>(), {
+    as: 'button',
+});
+
+// `Primitive`'s own exported type (radix-vue) only declares `as`/`asChild` — it has no
+// index signature for arbitrary attrs, even though it forwards everything it receives at
+// runtime. Binding `data-sidebar` as a literal template attribute would run into that
+// (real, third-party) type gap; going through a `v-bind` object sidesteps the excess-
+// property check without changing what actually reaches the DOM.
+const dataAttrs = { 'data-sidebar': 'menu-action' };
 </script>
 
 <template>
     <Primitive
-        data-sidebar="menu-action"
+        v-bind="dataAttrs"
         :class="
             cn(
                 'absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-hidden ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0',
