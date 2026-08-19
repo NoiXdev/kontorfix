@@ -41,6 +41,13 @@ class UpstreamController extends Controller
         ]);
     }
 
+    public function create(): Response
+    {
+        return Inertia::render('admin/upstreams/Create', [
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
     public function store(StoreUpstreamRequest $request): RedirectResponse
     {
         $data = $request->validated();
@@ -62,6 +69,31 @@ class UpstreamController extends Controller
         }
 
         return back()->with('success', 'Upstream erstellt.');
+    }
+
+    public function edit(Upstream $upstream): Response
+    {
+        $this->assertAdministersOrg($upstream->group?->organization_id);
+
+        // Loaded fresh from the record, not from the index listing's mapped row: this page
+        // is reached directly (URL, bookmark, back button), so it cannot rely on anything
+        // the listing already had in memory. `auth_token` itself never leaves the server —
+        // only `has_auth`, exactly like the index listing.
+        $upstream->loadMissing(['group:id,name', 'allowedPackages']);
+
+        return Inertia::render('admin/upstreams/Edit', [
+            'upstream' => [
+                'id' => $upstream->id,
+                'group_id' => $upstream->group_id,
+                'type' => $upstream->type,
+                'url' => $upstream->url,
+                'policy' => $upstream->policy,
+                'priority' => $upstream->priority,
+                'has_auth' => (bool) $upstream->auth_token,
+                'allowed_packages' => $upstream->allowedPackages->pluck('name'),
+            ],
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name']),
+        ]);
     }
 
     public function update(UpdateUpstreamRequest $request, Upstream $upstream): RedirectResponse

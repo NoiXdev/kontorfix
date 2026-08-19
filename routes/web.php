@@ -75,10 +75,10 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // harder than issuance. On refusal the operator is returned to the form page.
     Route::post('tokens', [Admin\TokenController::class, 'store'])
         ->middleware('password.confirm')->name('tokens.store');
-    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'destroy']);
     // Reusable git access tokens (for syncing private repositories), org-scoped.
-    Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::post('git-credentials/{gitCredential}/test', [Admin\GitCredentialController::class, 'test'])->name('git-credentials.test');
     // Switch the active organization scope (sidebar). Clamped server-side to the orgs the
     // user administers, so it can filter/redirect context but never widen access.
