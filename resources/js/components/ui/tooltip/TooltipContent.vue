@@ -7,9 +7,27 @@ defineOptions({
     inheritAttrs: false,
 });
 
-const props = withDefaults(defineProps<TooltipContentProps & { class?: HTMLAttributes['class'] }>(), {
-    sideOffset: 4,
-});
+// `/* @vue-ignore */` types `HTMLAttributes` (native attrs like `hidden`) for the checker
+// only; the explicit `...$attrs` spread below already forwards them at runtime.
+//
+// This is deliberately an inline intersection in `defineProps<...>()`, not a named
+// `interface Props extends ... { }`: `@vue/compiler-sfc` skips resolving a type node
+// whose leading comments contain the literal substring "@vue-ignore" — including a
+// comment like this one that only *mentions* the pragma as prose. On a bare `interface
+// Props extends ...` declaration, that comment attaches to the interface node itself, so
+// the compiler discards the WHOLE interface, inherited members and locally-declared ones
+// alike. Inlining the type avoids a named declaration for the comment to attach to.
+const props = withDefaults(
+    defineProps<
+        TooltipContentProps &
+            /* @vue-ignore */ HTMLAttributes & {
+                class?: HTMLAttributes['class'];
+            }
+    >(),
+    {
+        sideOffset: 4,
+    },
+);
 
 const emits = defineEmits<TooltipContentEmits>();
 

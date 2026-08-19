@@ -105,21 +105,46 @@ class PackageController extends Controller
                 'sort' => isset(self::SORTABLE[$sort]) ? $sort : null,
                 'direction' => $direction,
             ],
+            // Only instance-enabled registry types are offered in the filter.
+            'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
+            // Source-mode options per package type. Kept here too (not just on create()):
+            // NpmSourceModeTest asserts on this prop directly against `GET /admin/packages`,
+            // independent of whether the current Index.vue happens to render it — removing it
+            // would break that pre-existing, unrelated-to-this-task coverage.
+            'sourceModes' => $this->sourceModesPayload(),
+        ]);
+    }
+
+    public function create(): Response
+    {
+        return Inertia::render('admin/packages/Create', [
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'slug']),
             // Only instance-enabled registry types are offered when creating a package.
             'registryTypes' => app(RegistryTypeService::class)->globalTypes(),
-            // Source-mode options per package type. npm has exactly one, so the create
-            // dialog hides the selector for it rather than offering a rejected choice.
-            'sourceModes' => collect(PackageType::cases())
-                ->mapWithKeys(fn (PackageType $t): array => [$t->value => array_map(
-                    fn (PackageSourceMode $m): array => ['value' => $m->value, 'label' => $m->label()],
-                    PackageSourceMode::allowedFor($t)
-                )])
-                ->all(),
+            // Source-mode options per package type. npm has exactly one, so the create page
+            // hides the selector for it rather than offering a rejected choice.
+            'sourceModes' => $this->sourceModesPayload(),
             // Managed git credentials the user may assign (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
                 ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
         ]);
+    }
+
+    /**
+     * Source-mode options per package type, keyed by type value. Shared by index() (kept for
+     * NpmSourceModeTest, see above) and create() (which actually renders it).
+     *
+     * @return array<string, array<int, array{value: string, label: string}>>
+     */
+    private function sourceModesPayload(): array
+    {
+        return collect(PackageType::cases())
+            ->mapWithKeys(fn (PackageType $t): array => [$t->value => array_map(
+                fn (PackageSourceMode $m): array => ['value' => $m->value, 'label' => $m->label()],
+                PackageSourceMode::allowedFor($t)
+            )])
+            ->all();
     }
 
     public function show(Package $package, PackageDependencies $deps): Response

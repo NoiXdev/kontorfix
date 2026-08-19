@@ -7,7 +7,7 @@ export default defineConfigWithVueTs(
     vue.configs['flat/essential'],
     vueTsConfigs.recommended,
     {
-        ignores: ['vendor', 'node_modules', 'public', 'bootstrap/ssr', '.claude', 'resources/js/components/ui/*'],
+        ignores: ['vendor', 'node_modules', 'public', 'bootstrap/ssr', '.claude', '.superpowers', 'resources/js/components/ui/*'],
     },
     {
         rules: {

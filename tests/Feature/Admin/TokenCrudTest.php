@@ -21,16 +21,38 @@ it('lists tokens for admins', function () {
         ->assertInertia(fn ($page) => $page->component('admin/tokens/Index')->has('tokens', 1));
 });
 
-it('creates a token and flashes the plaintext exactly once', function () {
+it('creates a token and flashes its real plaintext to the tokens index it redirects to', function () {
     $org = Organization::factory()->create();
     $group = Group::factory()->for($org)->create();
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 
-    $res = $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
+    $response = $this->actingAs($admin)
         ->post('/admin/tokens', ['name' => 'kadenz-ci', 'organization_id' => $org->id, 'group_id' => $group->id]);
 
-    $res->assertRedirect()->assertSessionHas('plainTextToken');
-    expect(session('plainTextToken'))->toStartWith('kfx_')
-        ->and(RegistryToken::where('name', 'kadenz-ci')->exists())->toBeTrue();
+    // The redirect target is itself the thing under test: minting now happens from its own
+    // `admin/tokens/create` page (TokenController::store() used to `back()`, which — once
+    // the form left the index — would land there instead of the index, and that page
+    // renders no flash at all). It must land specifically on the index, the only page that
+    // shows the one-time reveal.
+    $response->assertRedirect(route('admin.tokens.index'));
+
+    $token = RegistryToken::where('name', 'kadenz-ci')->firstOrFail();
+    $plain = session('plainTextToken');
+
+    // Not merely "a string shaped like a token" — the actual credential that authenticates
+    // as the row just created, checked against the real hash/lookup path
+    // (RegistryToken::issue()'s stored token_hash and findByPlainText()), not a loose
+    // prefix check.
+    expect(hash('sha256', $plain))->toBe($token->token_hash)
+        ->and(RegistryToken::findByPlainText($plain)?->is($token))->toBeTrue();
+
+    // Follow the redirect and confirm the Inertia page actually carries it under the same
+    // key `tokens/Index.vue` reads (`page.props.flash.plainTextToken`).
+    $this->actingAs($admin)
+        ->get(route('admin.tokens.index'))
+        ->assertInertia(fn ($page) => $page
+            ->component('admin/tokens/Index')
+            ->where('flash.plainTextToken', $plain));
 });
 
 it('creates an org-wide token when no group is given', function () {

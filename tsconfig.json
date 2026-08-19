@@ -41,8 +41,7 @@
         // "typeRoots": [],                                  /* Specify multiple folders that act like './node_modules/@types'. */
         "types": [
             "vite/client",
-            "vue/tsx",
-            "./resources/js/types"
+            "vue/jsx"
         ] /* Specify type package names to be included without being referenced in a source file. */,
         // "allowUmdGlobalAccess": true,                     /* Allow accessing UMD globals from modules. */
         // "moduleSuffixes": [],                             /* List of file name suffixes to search when resolving a module. */
@@ -118,6 +117,9 @@
         /* Completeness */
         // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
         "skipLibCheck": true /* Skip type checking all .d.ts files. */
+    },
+    "vueCompilerOptions": {
+        "strictTemplates": true
     },
     "include": ["resources/js/**/*.ts", "resources/js/**/*.d.ts", "resources/js/**/*.tsx", "resources/js/**/*.vue"]
 }

@@ -10,10 +10,16 @@ import { Switch } from '@/components/ui/switch';
 import { useForm } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 
+// Must match `PackagePicker.vue`'s own (correct, wider) local `Pkg` — this component only
+// ever receives package objects from `<PackagePicker v-model="selected">` below, and that
+// component's search can return Python packages too. This file never reads `.type` (only
+// `.id`, for `form.package_ids`), so the missing `'python'` member was never a live bug —
+// strictVModel caught the two interfaces having silently drifted apart, not a behaviour
+// difference.
 interface Pkg {
     id: string;
     name: string;
-    type: 'composer' | 'npm';
+    type: 'composer' | 'npm' | 'python';
 }
 
 interface OrgOption {

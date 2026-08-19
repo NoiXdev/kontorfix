@@ -3,22 +3,41 @@ import { cn } from '@/lib/utils';
 import { Primitive, type PrimitiveProps } from 'radix-vue';
 import type { HTMLAttributes } from 'vue';
 
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. this file's own `data-sidebar` marker)
+// for the checker only; it already reaches `Primitive` via Vue's implicit `$attrs`
+// fallthrough.
+//
+// This is deliberately an inline intersection in `defineProps<...>()`, not a named
+// `interface Props extends ... { }`: `@vue/compiler-sfc` skips resolving a type node
+// whose leading comments contain the literal substring "@vue-ignore" — including a
+// comment like this one that only *mentions* the pragma as prose. On a bare `interface
+// Props extends ...` declaration, that comment attaches to the interface node itself, so
+// the compiler discards the WHOLE interface, inherited members and locally-declared ones
+// alike. Inlining the type avoids a named declaration for the comment to attach to.
 const props = withDefaults(
     defineProps<
-        PrimitiveProps & {
-            showOnHover?: boolean;
-            class?: HTMLAttributes['class'];
-        }
+        PrimitiveProps &
+            /* @vue-ignore */ HTMLAttributes & {
+                showOnHover?: boolean;
+                class?: HTMLAttributes['class'];
+            }
     >(),
     {
         as: 'button',
     },
 );
+
+// `Primitive`'s own exported type (radix-vue) only declares `as`/`asChild` — it has no
+// index signature for arbitrary attrs, even though it forwards everything it receives at
+// runtime. Binding `data-sidebar` as a literal template attribute would run into that
+// (real, third-party) type gap; going through a `v-bind` object sidesteps the excess-
+// property check without changing what actually reaches the DOM.
+const dataAttrs = { 'data-sidebar': 'menu-action' };
 </script>
 
 <template>
     <Primitive
-        data-sidebar="menu-action"
+        v-bind="dataAttrs"
         :class="
             cn(
                 'absolute right-1 top-1.5 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground outline-hidden ring-sidebar-ring transition-transform hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0',
@@ -33,7 +52,7 @@ const props = withDefaults(
                 props.class,
             )
         "
-        :as="as"
+        :as="as ?? 'button'"
         :as-child="asChild"
     >
         <slot />

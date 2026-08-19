@@ -8,6 +8,7 @@ import { type SharedData } from '@/types';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import { type RouteList } from 'ziggy-js';
 
 interface Snippets {
     composer: string;
@@ -25,7 +26,7 @@ interface PersonalToken {
 
 const props = defineProps<{
     snippets: Snippets;
-    storeRoute: string;
+    storeRoute: keyof RouteList;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
     // Which ecosystems to show setup steps for. Omitted → all.

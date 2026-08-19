@@ -56,8 +56,18 @@ jobs:
           php artisan key:generate
       - name: Lint (eslint)
         run: npm run lint:check
+      - name: Type check (vue-tsc)
+        run: npm run types
       - name: Tests (Vitest)
         run: npm run test
+
+      # Compiles every component under resources/js/components/ui and fails when one
+      # declares props through a type argument but emits none at runtime. Nothing else
+      # detects that: vue-tsc resolves the types on a different code path and reports them
+      # present. It shipped twice — once leaving every button inert, once leaving every
+      # bound input blank — with every other gate green.
+      - name: Runtime props (Vue components)
+        run: npm run check:props
       - name: Format check (Pint)
         run: vendor/bin/pint --test
       - name: Static analysis (PHPStan)

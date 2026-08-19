@@ -93,7 +93,11 @@ const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
 
 // Publish tokens are organization write credentials and are admin/maintainer-only on the
 // server (RegistryTokenPolicy::create). Do not offer the option to plain members.
-const abilityOptions = computed(() =>
+//
+// The explicit return type keeps `value` as the literal `'read' | 'publish'` union (what
+// `tokenForm.ability` is actually typed as) rather than the widened `string` a plain object
+// literal would infer — `SearchableSelect`'s `v-model` needs the two to line up exactly.
+const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
     page.props.auth.can?.console
         ? [
               { value: 'read', label: 'Lesen' },

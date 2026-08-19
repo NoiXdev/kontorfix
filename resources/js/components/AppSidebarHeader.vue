@@ -4,9 +4,14 @@ import { SidebarTrigger } from '@/components/ui/sidebar';
 import type { BreadcrumbItemType } from '@/types';
 import { Search } from 'lucide-vue-next';
 
-defineProps<{
-    breadcrumbs?: BreadcrumbItemType[];
-}>();
+withDefaults(
+    defineProps<{
+        breadcrumbs?: BreadcrumbItemType[];
+    }>(),
+    {
+        breadcrumbs: () => [],
+    },
+);
 
 // Detect the platform modifier for the keyboard hint (⌘ on macOS, otherwise Ctrl).
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);

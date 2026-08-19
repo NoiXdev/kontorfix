@@ -52,6 +52,14 @@ class GitCredentialController extends Controller
         ]);
     }
 
+    public function create(): Response
+    {
+        return Inertia::render('admin/git-credentials/Create', [
+            'organizations' => app(OrgScope::class)->organizations(),
+            'providers' => GitProvider::metadata(),
+        ]);
+    }
+
     public function store(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -73,6 +81,30 @@ class GitCredentialController extends Controller
         ]);
 
         return back()->with('success', 'Git-Token gespeichert.');
+    }
+
+    public function edit(GitCredential $gitCredential): Response
+    {
+        $this->assertAdministersOrg($gitCredential->organization_id);
+
+        // Loaded fresh from the record, not from the index listing's mapped row: this page
+        // is reached directly (URL, bookmark, back button), so it cannot rely on anything
+        // the listing already had in memory. The stored token itself is deliberately
+        // excluded — it must never travel back to the browser to pre-fill a field; the
+        // edit page's token input starts blank and only a filled value replaces it,
+        // exactly like the dialog this page replaces.
+        return Inertia::render('admin/git-credentials/Edit', [
+            'credential' => [
+                'id' => $gitCredential->id,
+                'name' => $gitCredential->name,
+                'provider' => $gitCredential->provider->value,
+                'host' => $gitCredential->host,
+                'username' => $gitCredential->username,
+                'organization_id' => $gitCredential->organization_id,
+            ],
+            'organizations' => app(OrgScope::class)->organizations(),
+            'providers' => GitProvider::metadata(),
+        ]);
     }
 
     public function update(Request $request, GitCredential $gitCredential): RedirectResponse

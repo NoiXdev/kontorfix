@@ -182,6 +182,202 @@ could not be carried out in this environment — the in-app browser tool cannot 
 application — so it still wants a pass in a real browser before this is treated as fully
 verified end to end.
 
+## Admin create and edit pages
+
+Seven `/admin` sections — `users`, `oidc`, `webhooks` (both the outgoing and the incoming
+kind), `packages`, `tokens`, `upstreams`, `git-credentials` — moved their create/edit UI out
+of a `<DialogContent>` on the listing page and onto their own routed pages. Two sections,
+`organizations` and `domains`, deliberately kept their dialogs: three fields each, and a full
+page load to type two values and click back is worse than a dialog. Do not add an eighth
+migrated section's worth of ceremony to a three-field form, and do not add a twelfth dialog
+to a form with more than that — check the field count against the seven vs. two split above
+before choosing.
+
+### File layout and the `Form.vue` / `Create.vue` / `Edit.vue` split
+
+Each migrated section's directory under `resources/js/pages/admin/<section>/` holds:
+
+- **`Create.vue` / `Edit.vue`** — one per route, each a full `AppLayout` page with its own
+  breadcrumbs and `<Head title>`. Each owns the Inertia `useForm()` call (seeded empty for
+  create, seeded from the loaded record for edit), the submit handler
+  (`form.post(...)`/`form.put(...)`, usually via `form.transform()` to reshape the client
+  model into the request payload), and the Abbrechen/submit button row. `Edit.vue` additionally
+  receives the record as a prop and reads it into the form's initial state.
+- **`Form.vue`** — the shared field markup (labels, inputs, selects, switches, inline errors)
+  used by both `Create.vue` and `Edit.vue`. It takes a `mode: 'create' | 'edit'` prop where
+  behaviour genuinely differs (e.g. a group picker disabled once an upstream exists), plus
+  whatever read-only option lists it renders (`groups`, `organizations`, `providers`, …). It
+  does **not** own a `useForm()` — see the next section.
+- **`<x>Form.ts`** — the section's shared TypeScript module: the form's data-shape interface,
+  a typed `InjectionKey` for that shape, and any payload-building/transform helper both pages
+  need identically (e.g. `upstreamForm.ts`'s `buildUpstreamPayload`, shared by both submits
+  rather than duplicated).
+
+### The form travels by `provide`/`inject`, never as a prop
+
+`Create.vue`/`Edit.vue` call `provide(xFormKey, form)` right after constructing their
+`useForm()`; `Form.vue` calls `inject(xFormKey)` and throws immediately if nothing was
+provided ("`Form.vue` requires a form to be provided via `xFormKey` — see Create.vue /
+Edit.vue."), rather than failing silently on `undefined`. This is deliberate, not
+incidental: `Form.vue`'s `v-model="form.field"` bindings write into the form object, and a
+plain prop would trip the repository's `vue/no-mutating-props` ESLint rule. Weakening that
+rule to allow it was attempted twice on this codebase and reverted twice — an injected value
+isn't a prop as far as that rule (or Vue) is concerned, so it sidesteps the conflict rather
+than fighting it. Follow the existing `<x>Form.ts` pattern for a new section instead of
+re-deriving this.
+
+### `Form.vue` may own a side-effecting request — but only for a section-specific sub-resource
+
+`admin/users`' `Form.vue` posts to `admin.users.organizations.store`/`.destroy` directly
+(attaching/detaching an organisation membership) rather than queuing that as part of the
+parent form's submit. That's correct there: memberships are a distinct sub-resource with
+their own lifecycle, independent of whether the name/role edit on the same page is ever
+saved. **This is the one exception, not a precedent.** No other migrated section's `Form.vue`
+makes a request of its own — business logic belongs in the controller/`store()`/`update()`,
+reached through the one `form.post()`/`form.put()` that `Create.vue`/`Edit.vue` own. Adding a
+second inline request to a future `Form.vue` needs the same justification users has: a
+genuinely separate sub-resource, not a shortcut around the parent form's submit.
+
+### Shared row and option types belong in the section's `<x>Form.ts`
+
+Declare `interface FooOption { id: string; name: string }`-shaped types once, in the
+section's `<x>Form.ts`, and import them into `Index.vue`/`Create.vue`/`Edit.vue`/`Form.vue`
+rather than re-declaring the same shape in each file. Several sections currently still
+redeclare `OrganizationOption` (and `users` redeclares `Membership`) in three or four files
+instead of importing one; TypeScript's structural typing makes the duplication harmless today,
+but it is a drift risk the moment one copy gains or loses a field and the others don't. Treat
+this as the standard to converge toward, not as evidence the duplication is fine.
+
+### New routes go in the same middleware group as the `store` they feed
+
+`routes/web.php` groups `/admin` routes by two middleware stacks. A new `create`/`edit` GET
+route belongs in whichever group already holds that resource's `store`/`update` — it must
+match, not merely resemble it:
+
+- `['auth', 'super']` — `users`, `oidc`, `webhooks` (both outgoing and incoming).
+- `['auth', 'operator']` — `packages`, `tokens`, `upstreams`, `git-credentials`.
+
+**A new GET route inherits nothing else.** The middleware group gives you the coarse
+auth/role gate, but a per-record authorisation check is a separate decision that has to be
+made again for every new action, including a `GET` that merely renders a form. `edit()` on
+`upstreams` and `git-credentials` both needed a `$this->assertAdministersOrg(...)` call added
+that `index()` never needed (index only ever lists records already scoped to the caller's
+organizations) and that `update()`/`destroy()` already had. Without it, any operator-console
+admin — someone who passes the `operator` middleware for their own organization — could open
+another organization's upstream or git-credential edit page directly by URL. `FormPagesTest.php`
+carries the regression tests for this ("refuses the upstream edit page for an admin of a
+different organization" and the git-credential equivalent).
+
+**Testing note:** `User::factory()->operator()` is not what it sounds like for these tests.
+That state's home organization has `is_operator: true`, which makes the resulting user an
+effective super-admin (`User::isSuperAdmin()`) regardless of role, and a super-admin passes
+every per-organization scoping check (`assertAdministersOrg`, `scopeGroupQuery`) — silently
+defeating a test meant to prove that scoping. `FormPagesTest.php` uses `->operator()` only for
+the `users`/`oidc`/`webhooks` cases (which sit behind `super` and are supposed to see
+everything); the `upstreams`/`git-credentials` cross-organization-refusal cases construct a
+plain `User::factory()->create(['role' => UserRole::Admin])` instead, so the fixture actually
+exercises the scoping it claims to.
+
+### `edit()` loads from the record, never from the listing's mapped row
+
+The listing's `index()` maps each row into exactly the shape its table needs — which may omit
+fields the edit form binds to (a token's `has_auth` boolean vs. its actual presence, a
+package's redacted vs. raw URL, …). `edit()` re-queries and re-maps the single record instead
+of assuming the browser already has an equivalent object in memory; the edit page is also
+reachable directly (a bookmark, a shared link, back/forward), where no listing state exists
+at all. `git-credentials`' `edit()` additionally illustrates the mirror image of this: fields
+that must be *excluded* from the fresh load (the stored token itself, write-only from the UI)
+stay excluded there exactly as they were in `index()`.
+
+### A one-time secret reveal dictates the redirect target
+
+`admin/tokens`' and `admin/incoming-webhooks`' `store()` actions mint a plaintext secret that
+only their respective index page renders (via a `flash()` value read on that page alone).
+Both used to `return back()`, which — once minting moved to its own `create` page — would
+return the browser to `create`, where the reveal has nowhere to render and the plaintext is
+gone for good since it's never stored. Both now `redirect()->route('admin.<x>.index')`
+explicitly. **Four other places use the identical `back()`-plus-flash pattern and are safe
+only because they still mint from an inline form on their own index page, not a separate
+create route:** `settings/tokens`, `settings/api-keys`, `portal/tokens`, `admin/robots`. Giving
+any of those a dedicated create page reproduces this exact defect — check the redirect target
+before splitting the form out.
+
+### Check props against their real consumers, tests included
+
+A dialog on the old listing page could read an option list the table itself never touched; if
+that prop doesn't reach the new page, the corresponding `<select>` just renders empty — no
+error, nothing to notice in a diff. Two things fell out of checking this for every migrated
+section:
+
+- `users`' `index()` needed `organizations` **added**, not merely left in place, because the
+  listing's own filter uses it too — it wasn't only the dialog's dependency.
+- `packages`' `index()` still sends `sourceModes` even though `Index.vue` no longer reads it
+  (the create form moved to its own page and that's the only consumer now) — because
+  `NpmSourceModeTest` asserts on that prop directly against `GET /admin/packages`,
+  independent of the Vue component. Removing it would pass every frontend check and break
+  that unrelated, pre-existing test.
+
+Neither of these is visible from `Index.vue` alone. Grep what a controller's `index()` sends,
+then check every consumer — the page's `<script setup>` *and* the test suite — before
+deciding a prop is dead.
+
+### A named props interface can silently emit no runtime props at all
+
+`@vue/compiler-sfc` skips resolving a type node whose **leading comments contain the
+substring `@vue-ignore`**. On a named declaration that comment attaches to the interface
+itself, so the compiler discards the whole thing — the inherited members *and* the locally
+declared ones — and the component ends up with no runtime props whatsoever:
+
+```ts
+// BROKEN: emits zero runtime props, including `variant` and `size`
+interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes {
+    variant?: ButtonVariants['variant'];
+}
+const props = withDefaults(defineProps<Props>(), { as: 'button' });
+```
+
+Inline the type into `defineProps<…>()` instead of declaring a named interface:
+
+```ts
+// The shape the twelve restored components use
+const props = defineProps<
+    { variant?: ButtonVariants['variant'] } & /* @vue-ignore */ ButtonHTMLAttributes
+>();
+```
+
+**The exact trigger is not fully pinned down, and this section deliberately does not claim
+it is.** Two explanations were proposed while fixing this — that member order inside the
+intersection decides it, and that whether the interface is `export`ed decides it — and
+neither reproduced in a minimal test case. What IS established: the twelve components
+emitted zero runtime props in the named-interface form and emit their full set in the
+inlined form, verified by compiling each one. Treat the inlined shape as the known-good
+form and the harness below as the arbiter, not any mental model of the compiler.
+
+This is not a style rule. It shipped twice in this codebase and both times the symptom was
+severe and silent:
+
+- `Button` lost `variant`, `size`, `class` and `as`. Every button rendered with cva's
+  default styling, and `as` fell back to radix's own default element — a `<div
+  type="submit">`, which looks and hovers like a button and submits nothing. No form in the
+  application could be submitted.
+- `Input` lost `modelValue`, so `useVModel` never saw a value. Bound inputs rendered blank
+  and the value landed on the DOM as a meaningless `modelvalue="…"` attribute instead of
+  `value` — which meant every edit page showed empty fields.
+
+**No gate detects this.** `vue-tsc` resolves `extends` on a different code path from the
+runtime compiler and reports the props as present and correctly typed, so a strict type
+check passes clean. ESLint, Vite, Vitest and Pest never mount a component. The first
+attempt at a fix patched only the `as` symptom in the template and concluded the class of
+bug was handled; it was not.
+
+Run `node scripts/check-runtime-props.mjs` after touching any component's props. It
+compiles every component under `resources/js/components/ui` and reports the runtime props
+each one emits, exiting non-zero when a component declares props through a type argument
+and emits none. A component that chooses its element or binds a model is also worth one
+look in a real browser — check the rendered `tagName` and that a bound value appears as
+`value`, not as a stray attribute.
+
+
 ## Tenancy & role model
 
 - **Operator invariant (security-critical):** the privileged roles `admin`/`maintainer`

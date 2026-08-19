@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -40,11 +38,6 @@ const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const providerOptions = computed(() => props.providers.map((p) => ({ value: p.value, label: p.label })));
-
-// A credential's token is only ever sent to this host. Known providers prefill it;
-// self-hosted ("generic") installations must name their host explicitly.
-const defaultHost = computed(() => props.providers.find((p) => p.value === form.provider)?.default_host ?? null);
-const hostPlaceholder = computed(() => defaultHost.value ?? 'z. B. git.example.com');
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
 const columns: ColumnDef<CredentialRow>[] = [
@@ -74,53 +67,6 @@ const table = useTableState<CredentialRow>({
         },
     },
 });
-
-// --- Create / edit ---
-const dialogOpen = ref(false);
-const editing = ref<CredentialRow | null>(null);
-
-const form = useForm({
-    name: '',
-    organization_id: '' as string | null,
-    provider: 'github',
-    host: '',
-    username: '',
-    token: '',
-});
-
-function openCreate() {
-    editing.value = null;
-    form.reset();
-    form.clearErrors();
-    form.organization_id = props.organizations[0]?.id ?? '';
-    dialogOpen.value = true;
-}
-
-function openEdit(row: CredentialRow) {
-    editing.value = row;
-    form.clearErrors();
-    form.name = row.name;
-    form.provider = row.provider;
-    form.host = row.host ?? '';
-    form.username = row.username ?? '';
-    form.token = '';
-    form.organization_id = row.organization_id;
-    dialogOpen.value = true;
-}
-
-function submit() {
-    if (editing.value) {
-        form.put(route('admin.git-credentials.update', editing.value.id), {
-            preserveScroll: true,
-            onSuccess: () => (dialogOpen.value = false),
-        });
-    } else {
-        form.post(route('admin.git-credentials.store'), {
-            preserveScroll: true,
-            onSuccess: () => (dialogOpen.value = false),
-        });
-    }
-}
 
 function destroyCredential(id: string) {
     router.delete(route('admin.git-credentials.destroy', id), {
@@ -194,9 +140,11 @@ async function runTest(id: string) {
                     <h1 class="text-xl font-semibold">Git-Tokens</h1>
                     <p class="text-sm text-muted-foreground">Zugriffs-Tokens für private Repositories, wiederverwendbar und Paketen zuweisbar.</p>
                 </div>
-                <Button @click="openCreate">
-                    <Plus class="size-4" />
-                    Token hinterlegen
+                <Button as-child>
+                    <Link :href="route('admin.git-credentials.create')">
+                        <Plus class="size-4" />
+                        Token hinterlegen
+                    </Link>
                 </Button>
             </div>
 
@@ -233,9 +181,9 @@ async function runTest(id: string) {
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-1">
                                     <Button variant="ghost" size="sm" @click="openTest(cred.id)"><KeyRound class="size-4" /> Testen</Button>
-                                    <Button variant="ghost" size="icon" aria-label="Bearbeiten" @click="openEdit(cred)"
-                                        ><Pencil class="size-4"
-                                    /></Button>
+                                    <Button as-child variant="ghost" size="icon" aria-label="Bearbeiten">
+                                        <Link :href="route('admin.git-credentials.edit', cred.id)"><Pencil class="size-4" /></Link>
+                                    </Button>
                                     <Button variant="ghost" size="icon" aria-label="Löschen" @click="destroyCredential(cred.id)">
                                         <Trash2 class="size-4 text-destructive" />
                                     </Button>
@@ -275,64 +223,5 @@ async function runTest(id: string) {
                 </template>
             </DataTable>
         </div>
-
-        <Dialog v-model:open="dialogOpen">
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>{{ editing ? 'Git-Token bearbeiten' : 'Git-Token hinterlegen' }}</DialogTitle>
-                </DialogHeader>
-
-                <form class="space-y-4" @submit.prevent="submit">
-                    <div class="grid gap-2">
-                        <Label for="cred_name">Name</Label>
-                        <Input id="cred_name" v-model="form.name" placeholder="z. B. GitHub Deploy" autocomplete="off" />
-                        <InputError :message="form.errors.name" />
-                    </div>
-
-                    <div v-if="!editing && orgOptions.length > 1" class="grid gap-2">
-                        <Label for="cred_org">Organisation</Label>
-                        <SearchableSelect id="cred_org" v-model="form.organization_id" :options="orgOptions" />
-                        <InputError :message="form.errors.organization_id" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="cred_provider">Provider</Label>
-                        <SearchableSelect id="cred_provider" v-model="form.provider" :options="providerOptions" />
-                        <InputError :message="form.errors.provider" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="cred_host">Host</Label>
-                        <Input id="cred_host" v-model="form.host" :placeholder="hostPlaceholder" autocomplete="off" />
-                        <p class="text-xs text-muted-foreground">Der Token wird ausschliesslich an diesen Host gesendet.</p>
-                        <InputError :message="form.errors.host" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="cred_username">Benutzername <span class="text-muted-foreground">(optional)</span></Label>
-                        <Input id="cred_username" v-model="form.username" placeholder="leer = Provider-Standard" autocomplete="off" />
-                        <InputError :message="form.errors.username" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="cred_token">Token{{ editing ? ' (leer lassen = unverändert)' : '' }}</Label>
-                        <Input
-                            id="cred_token"
-                            v-model="form.token"
-                            type="password"
-                            placeholder="ghp_… / glpat-… / …"
-                            autocomplete="off"
-                            class="font-mono"
-                        />
-                        <InputError :message="form.errors.token" />
-                    </div>
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="form.processing">Speichern</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
     </AppLayout>
 </template>

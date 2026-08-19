@@ -46,6 +46,15 @@ class TokenController extends Controller
         ]);
     }
 
+    public function create(): Response
+    {
+        return Inertia::render('admin/tokens/Create', [
+            // Only organizations (and their registries) the user may administer.
+            'organizations' => app(OrgScope::class)->organizations(),
+            'groups' => $this->scopeGroupQuery(Group::query())->orderBy('name')->get(['id', 'name', 'organization_id']),
+        ]);
+    }
+
     public function store(StoreTokenRequest $request): RedirectResponse
     {
         // A token may only ever be issued for an organization the user administers; the
@@ -60,7 +69,12 @@ class TokenController extends Controller
             $request->date('expires_at'),
         );
 
-        return back()->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");
+        // Explicitly to the index, not back(): the mint now happens from its own
+        // `admin/tokens/create` page, and `back()` would return there — where the
+        // one-time plaintext reveal has nowhere to render. The index is the only page
+        // that shows it.
+        return redirect()->route('admin.tokens.index')
+            ->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");
     }
 
     public function destroy(RegistryToken $token): RedirectResponse

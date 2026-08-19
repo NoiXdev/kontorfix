@@ -48,7 +48,7 @@ Route::get('dashboard', [DashboardController::class, 'index'])
 // the active sidebar scope) via the ScopesToAdministeredOrgs trait — so a customer-org
 // admin only ever sees and touches their own registries, packages, tokens and domains.
 Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(function () {
-    Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('packages', Admin\PackageController::class)->only(['index', 'create', 'store', 'destroy']);
     // Preview a repository (reachability + discovered name/description/versions) before
     // creating. Throttled: it shells out to git against a caller-named address and can hold
     // a worker for the full `ls-remote` timeout, so an unbudgeted loop parks the worker pool
@@ -68,17 +68,17 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
-    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'destroy']);
+    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'create', 'destroy']);
     // Minting is gated like `settings/tokens`: the same RegistryToken::issue() hands out a
     // long-lived bearer credential that outlives the session, so a stolen session alone
     // must not produce one. Listing and revoking stay ungated — revocation must never be
     // harder than issuance. On refusal the operator is returned to the form page.
     Route::post('tokens', [Admin\TokenController::class, 'store'])
         ->middleware('password.confirm')->name('tokens.store');
-    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('upstreams', Admin\UpstreamController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::resource('domains', Admin\DomainController::class)->only(['index', 'destroy']);
     // Reusable git access tokens (for syncing private repositories), org-scoped.
-    Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::post('git-credentials/{gitCredential}/test', [Admin\GitCredentialController::class, 'test'])->name('git-credentials.test');
     // Switch the active organization scope (sidebar). Clamped server-side to the orgs the
     // user administers, so it can filter/redirect context but never widen access.
@@ -98,14 +98,20 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // never be harder than creation, or a mistaken attachment needs an operator to undo.
     Route::post('domains', [Admin\DomainController::class, 'store'])->name('domains.store');
 
+    // Declared before the resource below: no `webhooks/{webhook}` GET route exists (the
+    // resource only registers index/store/destroy, and destroy is DELETE), so there is
+    // nothing for the literal `create` segment to collide with today — but the order still
+    // guards against one being added later without the same care `packages/{package}` needed.
+    Route::get('webhooks/create', [Admin\WebhookController::class, 'create'])->name('webhooks.create');
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
     // Incoming webhook endpoints (per-source secret + URL) and audit.
+    Route::get('incoming-webhooks/create', [Admin\WebhookController::class, 'createIncoming'])->name('incoming-webhooks.create');
     Route::post('incoming-webhooks', [Admin\WebhookController::class, 'storeIncoming'])->name('incoming-webhooks.store');
     Route::post('incoming-webhooks/{incoming}/regenerate', [Admin\WebhookController::class, 'regenerateIncoming'])->name('incoming-webhooks.regenerate');
     Route::delete('incoming-webhooks/{incoming}', [Admin\WebhookController::class, 'destroyIncoming'])->name('incoming-webhooks.destroy');
     Route::get('status', [Admin\StatusController::class, 'index'])->name('status');
 
-    Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
+    Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'create', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
 
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
@@ -135,7 +141,7 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // keeps it after their own access is revoked. The middleware engages only when the
     // address actually changes, so role and organization edits are untouched — this is
     // not the whole `super` group being gated, it is the one field that outlives the gate.
-    Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('users', Admin\UserController::class)->only(['index', 'create', 'store', 'edit', 'destroy']);
     Route::match(['put', 'patch'], 'users/{user}', [Admin\UserController::class, 'update'])
         ->middleware(ConfirmPasswordOnEmailChange::class)
         ->name('users.update');

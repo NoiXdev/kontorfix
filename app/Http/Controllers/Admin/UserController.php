@@ -49,6 +49,13 @@ class UserController extends Controller
         ]);
     }
 
+    public function create(): Response
+    {
+        return Inertia::render('admin/users/Create', [
+            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
+        ]);
+    }
+
     public function store(StoreUserRequest $request): RedirectResponse
     {
         $validated = $request->validated();
@@ -75,6 +82,33 @@ class UserController extends Controller
         $user->notify(new UserInvitation);
 
         return back()->with('success', 'Einladung erneut gesendet.');
+    }
+
+    public function edit(User $user): Response
+    {
+        // Loaded fresh from the record, not from the index listing's mapped row: this page
+        // is reached directly (URL, bookmark, back button), so it cannot rely on anything
+        // the listing already had in memory.
+        $user->loadMissing(['organization:id,name', 'organizations:id,name']);
+
+        return Inertia::render('admin/users/Edit', [
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role->value,
+                'is_super_admin' => (bool) $user->is_super_admin,
+                'organization_id' => $user->organization_id,
+                // The edit page manages additional-org memberships (attach/detach), so it
+                // needs the same per-org role data the index listing computes.
+                'memberships' => $user->organizations->map(fn (Organization $org) => [
+                    'id' => $org->id,
+                    'name' => $org->name,
+                    'role' => $org->getRelationValue('pivot')?->getAttribute('role') ?? UserRole::Member->value,
+                ])->values(),
+            ],
+            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
+        ]);
     }
 
     public function update(UpdateUserRequest $request, User $user): RedirectResponse

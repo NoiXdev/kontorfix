@@ -13,16 +13,29 @@ import {
 import { computed, type HTMLAttributes } from 'vue';
 import { sheetVariants, type SheetVariants } from '.';
 
-interface SheetContentProps extends DialogContentProps {
-    class?: HTMLAttributes['class'];
-    side?: SheetVariants['side'];
-}
-
+// `/* @vue-ignore */` types `HTMLAttributes` (e.g. the `data-sidebar`/`data-mobile`
+// markers the sidebar component sets on this content) for the checker only; the explicit
+// `...$attrs` spread below (with `inheritAttrs: false`) already forwards them at runtime.
+//
+// This is deliberately an inline intersection in `defineProps<...>()`, not a named
+// `interface SheetContentProps extends ... { }`: `@vue/compiler-sfc` skips resolving a
+// type node whose leading comments contain the literal substring "@vue-ignore" —
+// including a comment like this one that only *mentions* the pragma as prose. On a bare
+// `interface X extends ...` declaration, that comment attaches to the interface node
+// itself, so the compiler discards the WHOLE interface, inherited members and
+// locally-declared ones alike. Inlining the type avoids a named declaration for the
+// comment to attach to.
 defineOptions({
     inheritAttrs: false,
 });
 
-const props = defineProps<SheetContentProps>();
+const props = defineProps<
+    DialogContentProps &
+        /* @vue-ignore */ HTMLAttributes & {
+            class?: HTMLAttributes['class'];
+            side?: SheetVariants['side'];
+        }
+>();
 
 const emits = defineEmits<DialogContentEmits>();
 
