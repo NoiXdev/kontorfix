@@ -321,32 +321,57 @@ Neither of these is visible from `Index.vue` alone. Grep what a controller's `in
 then check every consumer — the page's `<script setup>` *and* the test suite — before
 deciding a prop is dead.
 
-### The `as`-prop trap: a component silently rendering the wrong element
+### A named props interface can silently emit no runtime props at all
 
-The symptom is a component that renders as a `<div>` instead of the `<button>` or `<a>` it was
-supposed to be — it can still look right and even hover right, but it isn't keyboard reachable,
-isn't announced correctly, and a `<div type="submit">` inside a form takes the click and
-submits nothing. Nothing errors. `Button`, both sidebar menu buttons
-(`SidebarMenuButtonChild.vue`, `SidebarMenuAction.vue`), `SidebarMenuSubButton` and
-`BreadcrumbLink` all did exactly this at once on this branch — every form in the application
-was unsubmittable — and all seven gates, including the strict type check, stayed green through
-it. It was found only by checking the live DOM in a real browser.
+`@vue/compiler-sfc` skips resolving a type node whose **leading comments contain the
+substring `@vue-ignore`**. On a named declaration that comment attaches to the interface
+itself, so the compiler discards the whole thing — the inherited members *and* the locally
+declared ones — and the component ends up with no runtime props whatsoever:
 
-The cause is `withDefaults(defineProps<Props>(), { as: 'button' })` where `Props` extends an
-imported type such as radix-vue's `PrimitiveProps`: the Vue SFC compiler cannot resolve an
-imported base type into runtime props, so `as` is never actually declared, `withDefaults` has
-no prop to apply its default to, and radix's `Primitive` silently falls back to its own default
-element instead. The rule: put the default in the **template**, not in `withDefaults` —
-
-```vue
-<Primitive :as="as ?? 'button'" ... />
+```ts
+// BROKEN: emits zero runtime props, including `variant` and `size`
+interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes {
+    variant?: ButtonVariants['variant'];
+}
+const props = withDefaults(defineProps<Props>(), { as: 'button' });
 ```
 
-— which works regardless of whether the compiler generated a runtime default for `as`.
-`SidebarGroupLabel` and `SidebarGroupAction` are deliberately left without either kind of
-default: a `div` is genuinely their intended element, not a fallback. No gate catches this
-class of bug — a new component that picks its element via an `as` prop should be clicked once
-in a real browser before being trusted.
+Inline the type into `defineProps<…>()` instead, so there is no named declaration for the
+comment to attach to. **Order matters inside the intersection:** with `/* @vue-ignore */` on
+the first member it is again the leading comment of the whole node and everything is
+discarded, so put the declared members first and the ignored type last.
+
+```ts
+// CORRECT
+const props = defineProps<
+    { variant?: ButtonVariants['variant'] } & /* @vue-ignore */ ButtonHTMLAttributes
+>();
+```
+
+This is not a style rule. It shipped twice in this codebase and both times the symptom was
+severe and silent:
+
+- `Button` lost `variant`, `size`, `class` and `as`. Every button rendered with cva's
+  default styling, and `as` fell back to radix's own default element — a `<div
+  type="submit">`, which looks and hovers like a button and submits nothing. No form in the
+  application could be submitted.
+- `Input` lost `modelValue`, so `useVModel` never saw a value. Bound inputs rendered blank
+  and the value landed on the DOM as a meaningless `modelvalue="…"` attribute instead of
+  `value` — which meant every edit page showed empty fields.
+
+**No gate detects this.** `vue-tsc` resolves `extends` on a different code path from the
+runtime compiler and reports the props as present and correctly typed, so a strict type
+check passes clean. ESLint, Vite, Vitest and Pest never mount a component. The first
+attempt at a fix patched only the `as` symptom in the template and concluded the class of
+bug was handled; it was not.
+
+Run `node scripts/check-runtime-props.mjs` after touching any component's props. It
+compiles every component under `resources/js/components/ui` and reports the runtime props
+each one emits, exiting non-zero when a component declares props through a type argument
+and emits none. A component that chooses its element or binds a model is also worth one
+look in a real browser — check the rendered `tagName` and that a bound value appears as
+`value`, not as a stray attribute.
+
 
 ## Tenancy & role model
 
