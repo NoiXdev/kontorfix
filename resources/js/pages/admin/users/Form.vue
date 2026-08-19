@@ -5,9 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
-import { router, type InertiaForm } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import { X } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, inject, ref } from 'vue';
+import { userFormKey } from './userForm';
 
 interface OrganizationOption {
     id: string;
@@ -20,20 +21,7 @@ interface Membership {
     role: string;
 }
 
-// `password` is optional because the edit form never carries it — the edit dialog never
-// managed passwords, only create did, and moving the markup must not add a field the
-// controller never validated for updates.
-export interface UserFormData {
-    name: string;
-    email: string;
-    organization_id: string;
-    role: string;
-    is_super_admin: boolean;
-    password?: string;
-}
-
 const props = defineProps<{
-    form: InertiaForm<UserFormData>;
     organizations: OrganizationOption[];
     roleOptions: { value: string; label: string }[];
     mode: 'create' | 'edit';
@@ -48,6 +36,15 @@ const props = defineProps<{
     homeOrganizationId?: string | null;
 }>();
 
+// Provided by Create.vue / Edit.vue (see userForm.ts) rather than passed as a prop: this form
+// object is meant to be written into (`v-model="form.name"`), and an injected value is not
+// subject to Vue's no-mutating-props rule the way a prop would be.
+const injectedForm = inject(userFormKey);
+if (!injectedForm) {
+    throw new Error('Form.vue requires a form to be provided via userFormKey — see Create.vue / Edit.vue.');
+}
+const form = injectedForm;
+
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
 // --- Create-only: invite vs. set-password-directly ---
@@ -56,7 +53,7 @@ const accessMode = defineModel<'invite' | 'password'>('accessMode', { default: '
 function setAccessMode(next: 'invite' | 'password') {
     accessMode.value = next;
     if (next === 'invite') {
-        props.form.password = '';
+        form.password = '';
     }
 }
 

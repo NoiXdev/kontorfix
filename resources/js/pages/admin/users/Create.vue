@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
-import Form, { type UserFormData } from './Form.vue';
+import { provide, ref } from 'vue';
+import Form from './Form.vue';
+import { userFormKey, type UserFormData } from './userForm';
 
 interface OrganizationOption {
     id: string;
@@ -35,6 +36,8 @@ const form = useForm<UserFormData>({
     password: '',
 });
 
+provide(userFormKey, form);
+
 const accessMode = ref<'invite' | 'password'>('invite');
 
 function submit() {
@@ -58,7 +61,7 @@ function submit() {
                 <h1 class="text-xl font-semibold">Nutzer anlegen</h1>
 
                 <form class="space-y-4" @submit.prevent="submit">
-                    <Form :form="form" :organizations="props.organizations" :role-options="roleOptions" mode="create" v-model:access-mode="accessMode" />
+                    <Form :organizations="props.organizations" :role-options="roleOptions" mode="create" v-model:access-mode="accessMode" />
 
                     <div class="flex justify-end gap-2">
                         <Button as-child variant="outline">
