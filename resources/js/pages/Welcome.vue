@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { SharedData } from '@/types';
 import { Head, Link, usePage } from '@inertiajs/vue3';
 import { Boxes, RefreshCw, ShieldCheck, Webhook } from 'lucide-vue-next';
 import { computed } from 'vue';
 
-const page = usePage();
+const page = usePage<SharedData>();
 const user = computed(() => page.props.auth?.user ?? null);
 const registrationEnabled = computed(() => page.props.registrationEnabled === true);
 

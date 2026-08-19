@@ -383,7 +383,10 @@ function destroyUpstream(id: string) {
                             placeholder="symfony/console&#10;psr/log"
                             class="flex w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                         />
-                        <InputError :message="form.errors.allowed_packages" />
+                        <!-- `form.transform()` submits this field under the server-side key `allowed_packages`
+                             (see UpstreamController), which isn't part of the form's own data shape, so
+                             `form.errors` doesn't statically know about it. -->
+                        <InputError :message="(form.errors as Record<string, string | undefined>).allowed_packages" />
                     </div>
 
                     <DialogFooter>

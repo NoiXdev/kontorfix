@@ -88,6 +88,14 @@ const form = useForm({
     token: '',
 });
 
+// The organization picker only renders while creating (never editing, where
+// `organization_id` may be null coming from the row), so this always reads
+// back a plain string — the fallback here never actually fires.
+const createOrgId = computed({
+    get: () => form.organization_id ?? '',
+    set: (value: string) => (form.organization_id = value),
+});
+
 function openCreate() {
     editing.value = null;
     form.reset();
@@ -291,7 +299,7 @@ async function runTest(id: string) {
 
                     <div v-if="!editing && orgOptions.length > 1" class="grid gap-2">
                         <Label for="cred_org">Organisation</Label>
-                        <SearchableSelect id="cred_org" v-model="form.organization_id" :options="orgOptions" />
+                        <SearchableSelect id="cred_org" v-model="createOrgId" :options="orgOptions" />
                         <InputError :message="form.errors.organization_id" />
                     </div>
 

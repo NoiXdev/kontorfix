@@ -8,8 +8,10 @@ import { createApp, h } from 'vue';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
 import { initializeTheme } from './composables/useAppearance';
 
-// Extend ImportMeta interface for Vite...
-declare module 'vite/client' {
+// Extend Vite's ImportMetaEnv with this app's custom env vars. `ImportMeta` itself
+// (including `env` and `glob`) is already declared by the "vite/client" ambient
+// types pulled in via tsconfig's `compilerOptions.types`.
+declare global {
     interface ImportMetaEnv {
         readonly VITE_APP_NAME: string;
         readonly VITE_REVERB_APP_KEY: string;
@@ -17,11 +19,6 @@ declare module 'vite/client' {
         readonly VITE_REVERB_PORT: string;
         readonly VITE_REVERB_SCHEME: string;
         [key: string]: string | boolean | undefined;
-    }
-
-    interface ImportMeta {
-        readonly env: ImportMetaEnv;
-        readonly glob: <T>(pattern: string) => Record<string, () => Promise<T>>;
     }
 }
 
