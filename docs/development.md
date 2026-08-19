@@ -130,6 +130,17 @@ have this: `admin/webhooks/Index.vue` (`prefix: 'in'` / `'out'` for inbound vs. 
 webhooks) and `portal/Registry.vue` (`prefix: 'pkg'` / `'tok'` for packages vs. tokens). Any
 future page with more than one `DataTable` needs the same treatment.
 
+**Never rebuild the query from the control that changed** — merge into it. `mergeQuery()`
+(`resources/js/lib/listingQuery.ts`) starts from `window.location.search`, overwrites only the
+keys it is handed, drops the ones set to `undefined` or `''`, and always removes `page`.
+`useTableState` and `admin/activity` both go through it. The alternative has already been a
+bug here: the activity filter bar rebuilt the whole query from its own refs and had to read
+`sort` back out of the URL by hand so that changing the log name would not silently reset the
+order — a workaround that would have needed repeating for every parameter added afterwards,
+and that would have dropped the page size the moment one existed. Dropping `page` is part of
+the same contract: after a sort, filter or page-size change, page 4 does not hold the rows it
+held before.
+
 ### Server-mode sort keys are whitelisted, never interpolated
 
 `PackageController` and `ActivityController` each keep a private `SORTABLE` map from an
@@ -143,6 +154,36 @@ query-string value compared against a Postgres `uuid` column) once raised
 a stack trace *with its bound parameters* to an unrotated log. The sort key sits on the same
 untrusted, unthrottled request, so it gets the same whitelist-and-never-interpolate
 treatment rather than a character-class validation that has already been shown to have gaps.
+
+### The page size is whitelisted the same way, and the direction reported is the one applied
+
+`ActivityController` also keeps `PAGE_SIZES = [25, 50, 100]`. `->paginate()` is only ever
+called with a value out of that list — an unlisted `per_page` falls back to 50 rather than
+raising, so a stale link still renders. Same reasoning as `SORTABLE`: the parameter arrives
+on an unthrottled route, and `->paginate($raw)` would let a caller ask Postgres for 100000
+rows and the presenter to build 100000 arrays. The check is `ctype_digit()` *before* the int
+cast, because `(int) "25abc"` is a perfectly valid 25 and `?per_page[]=…` casts to 1. The
+list is also sent to the page as `pageSizes`, so the selector cannot offer an option the
+server would reject.
+
+The payload reports `per_page` and `direction` **as applied, not as requested**. The
+direction one is easy to get wrong: with no `sort` key the controller falls back to
+`latest('id')` — newest first — while `$direction` still holds its raw `asc` default, so the
+old payload had the timeline's direction toggle labelled "Älteste zuerst" over a
+newest-first list. Any control that renders server state has this hazard; report what the
+query actually did.
+
+### A timeline cannot carry sortable column headers
+
+`admin/activity` renders `ActivityTimeline`, not `DataTable`, so the per-column sort headers
+went with the table. Only the direction came back, as an explicit toggle: entries are grouped
+under day headings, and grouping by day only reads in chronological order — sorting the same
+list by `log_name` would produce day headings in a random order, which is worse than no
+sorting. `log_name` and `description` therefore have no UI any more (the log-name filter
+above the list covers the first, and `subject_type · subject_label` on each entry covers the
+second), even though both remain in `SORTABLE` and reachable by query string. This is a
+deliberate narrowing, not an oversight — a listing that grows a timeline gives up
+per-column sorting.
 
 ### The relative-date trap
 
@@ -406,6 +447,22 @@ Two rules follow, and both have caught real mistakes here:
 Also note that a naive `/\sonerror=/` matches the *escaped* text `&lt;img src=x
 onerror=alert(1)&gt;` and reports a handler that does not exist. Match the tag:
 `/<[a-z][^>]*\sonerror\s*=/`.
+
+**SSR renders what a control shows, never what it does.** Event handlers are stripped from
+the server render entirely, so a button wired to nothing produces byte-identical output to a
+correctly wired one — the exact "renders perfectly, does nothing" failure this file already
+records twice. The compiled *client* module is where the binding is visible: with a Vite dev
+server in middleware mode, `server.transformRequest('/resources/js/pages/…/Index.vue')`
+returns code containing `onClick: … $setup.toggleDirection` and `"onUpdate:modelValue":
+$setup.setPerPage`. Checking the parameters those functions then build belongs in Vitest, on
+a composable — which is the reason `admin/activity`'s query-string state lives in
+`useActivityQuery` rather than inside the page.
+
+Two more mechanics for the next harness: user `enforce: 'pre'` plugins run *after* Vite's
+alias plugin, so a stub for `@/layouts/AppLayout.vue` must match the already-resolved
+absolute path; and `ssrLoadModule` externalises anything under `node_modules`, so stubbing
+`@inertiajs/vue3` needs `ssr: { noExternal: ['@inertiajs/vue3'] }` or the real module loads
+and `Head` fails on a missing head manager.
 
 
 ## Tenancy & role model

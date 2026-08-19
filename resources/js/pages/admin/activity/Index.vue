@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useActivityQuery, type ActivityFilters } from '@/composables/useActivityQuery';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide } from 'lucide-vue-next';
+import { computed } from 'vue';
 
 interface Activity {
     id: number;
@@ -25,56 +27,29 @@ interface Paginated<T> {
     links: { url: string | null; label: string; active: boolean }[];
 }
 
-interface Filters {
-    log: string | null;
-    subject_type: string | null;
-    subject_id: string | null;
-    causer: string | null;
-    sort: string | null;
-    direction: 'asc' | 'desc';
-}
-
 const props = defineProps<{
     activities: Paginated<Activity>;
-    filters: Filters;
+    filters: ActivityFilters;
     logNames: string[];
+    pageSizes: number[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Aktivität', href: '/admin/activity' }];
 
-const logFilter = ref(props.filters.log ?? '');
-
-// Sort/direction are not among the refs this filter bar owns — the controller's whitelist
-// decides them and they arrive in the URL — so they are read back from the current URL
-// rather than reset, or changing the log-name filter while a sort is active would silently
-// drop it back to the default order.
-function currentSort(): { sort: string | undefined; direction: string | undefined } {
-    const current = new URLSearchParams(window.location.search);
-    return { sort: current.get('sort') || undefined, direction: current.get('direction') || undefined };
-}
-
-// Preserve any subject/causer scoping while changing the log-name filter.
-watch(logFilter, (value) => {
-    router.get(
-        route('admin.activity.index'),
-        {
-            log: value || undefined,
-            subject_type: props.filters.subject_type || undefined,
-            subject_id: props.filters.subject_id || undefined,
-            causer: props.filters.causer || undefined,
-            ...currentSort(),
-        },
-        { preserveState: true, replace: true },
-    );
-});
+// Every control on this page writes into the query string and nothing else — no local
+// filtering. `useActivityQuery` builds those parameters (and is where they are tested);
+// the page only renders the current values and hands changes back.
+const { logFilter, direction, perPage, setLog, toggleDirection, setPerPage, clearScope } = useActivityQuery(() => props.filters);
 
 const scoped = computed(() => props.filters.subject_id || props.filters.causer);
 
-function clearScope() {
-    router.get(route('admin.activity.index'), { log: logFilter.value || undefined, ...currentSort() }, { preserveState: true });
-}
-
 const logOptions = [{ value: '', label: 'Alle Bereiche' }, ...props.logNames.map((n) => ({ value: n, label: n }))];
+
+// The options come from the server's whitelist, so the selector cannot offer a size the
+// controller would reject and silently replace with the default.
+const sizeOptions = computed(() => props.pageSizes.map((size) => ({ value: size, label: `${size} pro Seite` })));
+
+const directionLabel = computed(() => (direction.value === 'desc' ? 'Neueste zuerst' : 'Älteste zuerst'));
 </script>
 
 <template>
@@ -87,8 +62,38 @@ const logOptions = [{ value: '', label: 'Alle Bereiche' }, ...props.logNames.map
                     <h1 class="text-xl font-semibold">Aktivitätsprotokoll</h1>
                     <p class="text-sm text-muted-foreground">Wer hat was geändert — über Organisationen, Registries, Pakete und Nutzer.</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <SearchableSelect v-model="logFilter" class="w-48" :options="logOptions" />
+                <div class="flex flex-wrap items-center gap-2">
+                    <SearchableSelect
+                        :model-value="logFilter"
+                        class="w-48"
+                        :options="logOptions"
+                        @update:model-value="setLog"
+                    />
+
+                    <!--
+                        What is left of the sortable column headers the timeline replaced: the
+                        day grouping only reads in chronological order, so the direction is the
+                        part of that sorting still worth reaching. It writes `sort`/`direction`,
+                        the same query parameters the headers wrote.
+                    -->
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm hover:bg-muted/50"
+                        :title="direction === 'desc' ? 'Nach Datum sortiert, neueste zuerst' : 'Nach Datum sortiert, älteste zuerst'"
+                        :aria-label="`Sortierrichtung umschalten — aktuell: ${directionLabel}`"
+                        @click="toggleDirection"
+                    >
+                        <component :is="direction === 'desc' ? ArrowDownWideNarrow : ArrowUpNarrowWide" class="size-4 text-muted-foreground" />
+                        {{ directionLabel }}
+                    </button>
+
+                    <SearchableSelect
+                        :model-value="perPage"
+                        class="w-36"
+                        :options="sizeOptions"
+                        @update:model-value="setPerPage"
+                    />
+
                     <button v-if="scoped" type="button" class="text-sm text-muted-foreground underline-offset-4 hover:underline" @click="clearScope">
                         Filter zurücksetzen
                     </button>
