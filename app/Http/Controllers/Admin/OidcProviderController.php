@@ -31,6 +31,12 @@ class OidcProviderController extends Controller
                     'default_role' => $p->default_role,
                     'default_organization_id' => $p->default_organization_id,
                 ]),
+        ]);
+    }
+
+    public function create(): Response
+    {
+        return Inertia::render('admin/oidc/Create', [
             'organizations' => Organization::orderBy('name')->get(['id', 'name']),
         ]);
     }

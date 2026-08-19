@@ -188,3 +188,101 @@ it('never sends the stored token back to the browser on the git-credential edit 
                 ->etc()
             ));
 });
+
+// --- OIDC: ['auth', 'super'] — same reasoning, and the same operator()-side-effect
+// accounting, as the users section above (not upstreams/git-credentials): OidcProviderController
+// sits behind `super`, not `operator`.
+
+it('renders the oidc create page for a super admin', function () {
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    Organization::factory()->create(['name' => 'Acme']);
+
+    $this->actingAs($admin)
+        ->get(route('admin.oidc.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('admin/oidc/Create')
+            // The select's options must reach the page. Without this the field renders
+            // empty and nothing errors — the failure mode this whole task risks.
+            ->has('organizations', 2));
+});
+
+it('refuses the oidc create page for a non-super user', function () {
+    // Same reasoning as the users-section refusal test: an org admin passes `operator`
+    // (they administer their own org) but not `super`.
+    $orgAdmin = User::factory()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($orgAdmin)
+        ->get(route('admin.oidc.create'))
+        ->assertForbidden();
+});
+
+// --- Tokens: ['auth', 'operator'] — same reasoning as upstreams/git-credentials above.
+// `POST admin/tokens` (store) additionally sits behind `password.confirm`, but the create
+// *page* itself (GET) does not — matching the dialog this replaces, which rendered
+// unconfirmed and only asked for a password on submit.
+
+it('renders the token create page for a permitted operator', function () {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    Group::factory()->for($admin->organization)->create();
+
+    $this->actingAs($admin)
+        ->get(route('admin.tokens.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('admin/tokens/Create')
+            // Both select's options must reach the page. Without this a field renders
+            // empty and nothing errors — the failure mode this whole task risks.
+            ->has('organizations', 1)
+            ->has('groups', 1));
+});
+
+it('refuses the token create page for a non-operator user', function () {
+    $member = User::factory()->create(['role' => UserRole::Member]);
+
+    $this->actingAs($member)
+        ->get(route('admin.tokens.create'))
+        ->assertForbidden();
+});
+
+// --- Packages: ['auth', 'operator'] — same reasoning as upstreams/git-credentials above.
+
+it('renders the package create page for a permitted operator', function () {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    Group::factory()->for($admin->organization)->create();
+
+    $this->actingAs($admin)
+        ->get(route('admin.packages.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('admin/packages/Create')
+            // The groups checkbox list's options must reach the page. Without this the
+            // list renders empty and nothing errors — the failure mode this whole task risks.
+            ->has('groups', 1));
+});
+
+it('refuses the package create page for a non-operator user', function () {
+    $member = User::factory()->create(['role' => UserRole::Member]);
+
+    $this->actingAs($member)
+        ->get(route('admin.packages.create'))
+        ->assertForbidden();
+});
+
+it('resolves admin/packages/create to the create page, not the model-bound show route', function () {
+    // `packages` is the only section here with a model-bound GET route at the same depth
+    // (`GET admin/packages/{package}` → PackageController::show, named `packages.show`).
+    // `Route::resource(...)->only([..., 'create', ...])` registers `GET packages/create`
+    // before that explicit route, so the literal segment wins — but that ordering is a
+    // fact about routes/web.php, not something PHP enforces, so it needs its own test.
+    // Mutation: move the explicit `Route::get('packages/{package}', ...)` above the
+    // `Route::resource(...)` call in routes/web.php — this test goes red (the request
+    // binds `{package}` to the literal string "create", which fails to resolve to a
+    // Package and 404s instead of rendering the create page).
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)
+        ->get(route('admin.packages.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/packages/Create'));
+});

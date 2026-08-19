@@ -48,7 +48,7 @@ Route::get('dashboard', [DashboardController::class, 'index'])
 // the active sidebar scope) via the ScopesToAdministeredOrgs trait — so a customer-org
 // admin only ever sees and touches their own registries, packages, tokens and domains.
 Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(function () {
-    Route::resource('packages', Admin\PackageController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('packages', Admin\PackageController::class)->only(['index', 'create', 'store', 'destroy']);
     // Preview a repository (reachability + discovered name/description/versions) before
     // creating. Throttled: it shells out to git against a caller-named address and can hold
     // a worker for the full `ls-remote` timeout, so an unbudgeted loop parks the worker pool
@@ -68,7 +68,7 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
-    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'destroy']);
+    Route::resource('tokens', Admin\TokenController::class)->only(['index', 'create', 'destroy']);
     // Minting is gated like `settings/tokens`: the same RegistryToken::issue() hands out a
     // long-lived bearer credential that outlives the session, so a stolen session alone
     // must not produce one. Listing and revoking stay ungated — revocation must never be
@@ -105,7 +105,7 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::delete('incoming-webhooks/{incoming}', [Admin\WebhookController::class, 'destroyIncoming'])->name('incoming-webhooks.destroy');
     Route::get('status', [Admin\StatusController::class, 'index'])->name('status');
 
-    Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
+    Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'create', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
 
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');

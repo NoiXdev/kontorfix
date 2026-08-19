@@ -1,15 +1,11 @@
 <script setup lang="ts">
-import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -119,33 +115,6 @@ const table = useTableState<TokenRow>({
     },
 });
 
-const dialogOpen = ref(false);
-
-const form = useForm({
-    name: '',
-    organization_id: '',
-    group_id: '',
-    ability: 'read' as 'read' | 'publish',
-});
-
-const filteredGroups = computed(() => props.groups.filter((g) => g.organization_id === form.organization_id));
-
-watch(
-    () => form.organization_id,
-    () => {
-        form.group_id = '';
-    },
-);
-
-function submit() {
-    form.post(route('admin.tokens.store'), {
-        onSuccess: () => {
-            dialogOpen.value = false;
-            form.reset();
-        },
-    });
-}
-
 function abilityLabel(ability: 'read' | 'publish') {
     return ability === 'publish' ? 'Veröffentlichen' : 'Lesen';
 }
@@ -190,9 +159,11 @@ function destroyToken(id: string) {
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Tokens</h1>
-                <Button @click="dialogOpen = true">
-                    <Plus class="size-4" />
-                    Token erstellen
+                <Button as-child>
+                    <Link :href="route('admin.tokens.create')">
+                        <Plus class="size-4" />
+                        Token erstellen
+                    </Link>
                 </Button>
             </div>
 
@@ -242,60 +213,5 @@ function destroyToken(id: string) {
                 </template>
             </DataTable>
         </div>
-
-        <Dialog v-model:open="dialogOpen">
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Token erstellen</DialogTitle>
-                </DialogHeader>
-
-                <form class="space-y-4" @submit.prevent="submit">
-                    <div class="grid gap-2">
-                        <Label for="name">Name</Label>
-                        <Input id="name" v-model="form.name" placeholder="kadenz-ci" autocomplete="off" />
-                        <InputError :message="form.errors.name" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="organization_id">Organisation</Label>
-                        <SearchableSelect
-                            id="organization_id"
-                            v-model="form.organization_id"
-                            placeholder="Bitte wählen"
-                            :options="props.organizations.map((o) => ({ value: o.id, label: o.name }))"
-                        />
-                        <InputError :message="form.errors.organization_id" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="group_id">Gruppe</Label>
-                        <SearchableSelect
-                            id="group_id"
-                            v-model="form.group_id"
-                            :options="[{ value: '', label: 'Alle Gruppen' }, ...filteredGroups.map((g) => ({ value: g.id, label: g.name }))]"
-                        />
-                        <InputError :message="form.errors.group_id" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="ability">Recht</Label>
-                        <SearchableSelect
-                            id="ability"
-                            v-model="form.ability"
-                            :options="[
-                                { value: 'read', label: 'Lesen' },
-                                { value: 'publish', label: 'Veröffentlichen' },
-                            ]"
-                        />
-                        <InputError :message="form.errors.ability" />
-                    </div>
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="form.processing">Erstellen</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
     </AppLayout>
 </template>
