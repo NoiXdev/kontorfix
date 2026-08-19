@@ -1,3 +1,4 @@
+import { mergeQuery } from '@/lib/listingQuery';
 import { router } from '@inertiajs/vue3';
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue';
 
@@ -66,29 +67,21 @@ export function useTableState<T>(options: Options<T>): TableState<T> {
         filterValues[name] = ref(readParam(`${p}${name}`));
     }
 
-    // Start from what is already in the URL and overwrite only this table's own keys.
-    // Replacing the query wholesale would be a bug with two visible faces: on a page that
-    // hosts two tables, sorting one would erase the other's state, and on admin/packages it
-    // would drop the q/type/status/group filters the page manages itself.
-    function currentQuery(): Record<string, string | undefined> {
-        const query: Record<string, string | undefined> = {};
-        if (typeof window !== 'undefined') {
-            for (const [key, value] of new URLSearchParams(window.location.search)) {
-                query[key] = value;
-            }
-        }
-
-        // A sort or filter change means the current page number no longer points at the
-        // same rows, so paging restarts rather than landing somewhere arbitrary.
-        delete query.page;
-
-        query[`${p}sort`] = sortKey.value ?? undefined;
-        query[`${p}direction`] = sortKey.value ? sortDirection.value : undefined;
-        query[`${p}q`] = search.value || undefined;
+    // Only this table's own keys are written; `mergeQuery` keeps everything else that is
+    // already in the URL and drops `page`. Replacing the query wholesale would be a bug
+    // with two visible faces: on a page that hosts two tables, sorting one would erase the
+    // other's state, and on admin/packages it would drop the q/type/status/group filters
+    // the page manages itself.
+    function currentQuery(): Record<string, string> {
+        const updates: Record<string, string | undefined> = {
+            [`${p}sort`]: sortKey.value ?? undefined,
+            [`${p}direction`]: sortKey.value ? sortDirection.value : undefined,
+            [`${p}q`]: search.value || undefined,
+        };
         for (const [name, value] of Object.entries(filterValues)) {
-            query[`${p}${name}`] = value.value || undefined;
+            updates[`${p}${name}`] = value.value || undefined;
         }
-        return query;
+        return mergeQuery(updates);
     }
 
     // Mirror state into the URL so a sorted, filtered view is shareable and survives a
