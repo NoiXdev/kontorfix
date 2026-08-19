@@ -5,7 +5,6 @@ import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import type { CheckboxCheckedState } from 'radix-vue';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -570,8 +569,8 @@ const table = useTableState<PackageRow>({
                             <div v-for="group in props.groups" :key="group.id" class="flex items-center gap-2">
                                 <Checkbox
                                     :id="`group-${group.id}`"
-                                    :model-value="form.group_ids.includes(group.id)"
-                                    @update:model-value="(checked: CheckboxCheckedState) => toggleGroup(group.id, checked === true)"
+                                    :checked="form.group_ids.includes(group.id)"
+                                    @update:checked="(checked) => toggleGroup(group.id, checked === true)"
                                 />
                                 <Label :for="`group-${group.id}`" class="font-normal">{{ group.name }}</Label>
                             </div>
