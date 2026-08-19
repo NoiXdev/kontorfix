@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
@@ -50,6 +52,37 @@ const roleOptions = [
 ];
 
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
+
+const columns: ColumnDef<UserRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'email', label: 'E-Mail' },
+    { key: 'organization', label: 'Organisation' },
+    { key: 'memberships', label: 'Weitere Orgs', sortable: false },
+    { key: 'role', label: 'Rolle' },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+// Real role values come from UserRole (app/Enums/UserRole.php) as put into `role` by
+// UserController::index: admin, maintainer, member — reusing roleOptions above rather
+// than inventing a second admin/member-only list.
+const table = useTableState<UserRow>({
+    rows: () => props.users,
+    columns,
+    searchKeys: ['name', 'email'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        org: {
+            label: 'Organisation',
+            options: orgOptions.value,
+            match: (row, value) => row.organization_id === value,
+        },
+        role: {
+            label: 'Rolle',
+            options: roleOptions,
+            match: (row, value) => row.role === value,
+        },
+    },
+});
 
 // --- Create ---
 const dialogOpen = ref(false);
@@ -199,95 +232,97 @@ function destroyUser(id: string) {
                 </Button>
             </div>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">E-Mail</th>
-                            <th class="px-4 py-3 font-medium">Organisation</th>
-                            <th class="px-4 py-3 font-medium">Weitere Orgs</th>
-                            <th class="px-4 py-3 font-medium">Rolle</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="user in props.users"
-                            :key="user.id"
-                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                        >
-                            <td class="px-4 py-3 font-medium">
-                                <span class="flex items-center gap-2">
-                                    {{ user.name }}
-                                    <span
-                                        v-if="user.is_super_admin"
-                                        class="inline-flex items-center gap-1 rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
-                                    >
-                                        <ShieldCheck class="size-3" />
-                                        Super-Admin
-                                    </span>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine Nutzer angelegt.">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.org.value"
+                        :options="orgOptions"
+                        placeholder="Organisation"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('org', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.role.value"
+                        :options="roleOptions"
+                        placeholder="Rolle"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('role', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <tr
+                        v-for="user in rows"
+                        :key="user.id"
+                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                    >
+                        <td class="px-4 py-3 font-medium">
+                            <span class="flex items-center gap-2">
+                                {{ user.name }}
+                                <span
+                                    v-if="user.is_super_admin"
+                                    class="inline-flex items-center gap-1 rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
+                                >
+                                    <ShieldCheck class="size-3" />
+                                    Super-Admin
                                 </span>
-                            </td>
-                            <td class="px-4 py-3 font-mono text-xs">{{ user.email ?? '—' }}</td>
-                            <td class="px-4 py-3">{{ user.organization ?? '—' }}</td>
-                            <td class="px-4 py-3">
-                                <div class="flex flex-wrap gap-1">
-                                    <span
-                                        v-for="m in user.memberships"
-                                        :key="m.id"
-                                        class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
+                            </span>
+                        </td>
+                        <td class="px-4 py-3 font-mono text-xs">{{ user.email ?? '—' }}</td>
+                        <td class="px-4 py-3">{{ user.organization ?? '—' }}</td>
+                        <td class="px-4 py-3">
+                            <div class="flex flex-wrap gap-1">
+                                <span
+                                    v-for="m in user.memberships"
+                                    :key="m.id"
+                                    class="inline-flex items-center gap-1 rounded-md border border-copper/30 bg-copper/10 px-2 py-0.5 text-xs text-copper-hi"
+                                >
+                                    {{ m.name }}
+                                    <span class="rounded bg-copper/20 px-1 text-[10px] tracking-wide uppercase">{{ m.role }}</span>
+                                    <button
+                                        type="button"
+                                        class="hover:text-destructive"
+                                        aria-label="Organisation entfernen"
+                                        @click="detachOrg(user.id, m.id)"
                                     >
-                                        {{ m.name }}
-                                        <span class="rounded bg-copper/20 px-1 text-[10px] tracking-wide uppercase">{{ m.role }}</span>
-                                        <button
-                                            type="button"
-                                            class="hover:text-destructive"
-                                            aria-label="Organisation entfernen"
-                                            @click="detachOrg(user.id, m.id)"
-                                        >
-                                            <X class="size-3" />
-                                        </button>
-                                    </span>
-                                    <span v-if="user.memberships.length === 0" class="text-xs text-muted-foreground">—</span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-3">
-                                <SearchableSelect
-                                    :model-value="user.role"
-                                    :options="roleOptions"
-                                    @update:model-value="(v) => changeRole(user.id, String(v))"
-                                />
-                            </td>
-                            <td class="px-4 py-3">
-                                <div class="flex items-center gap-1">
-                                    <Button variant="ghost" size="sm" @click="openEdit(user)">
-                                        <Pencil class="size-4" />
-                                        Bearbeiten
-                                    </Button>
-                                    <Button variant="ghost" size="icon" @click="sendInvite(user.id)" aria-label="Einladung senden">
-                                        <Mail class="size-4" />
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        aria-label="Aktivität ansehen"
-                                        @click="router.get(route('admin.activity.index'), { causer: user.id })"
-                                    >
-                                        <ScrollText class="size-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" @click="destroyUser(user.id)" aria-label="Nutzer löschen">
-                                        <Trash2 class="size-4 text-destructive" />
-                                    </Button>
-                                </div>
-                            </td>
-                        </tr>
-                        <tr v-if="props.users.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Nutzer angelegt.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                                        <X class="size-3" />
+                                    </button>
+                                </span>
+                                <span v-if="user.memberships.length === 0" class="text-xs text-muted-foreground">—</span>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3">
+                            <SearchableSelect
+                                :model-value="user.role"
+                                :options="roleOptions"
+                                @update:model-value="(v) => changeRole(user.id, String(v))"
+                            />
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-1">
+                                <Button variant="ghost" size="sm" @click="openEdit(user)">
+                                    <Pencil class="size-4" />
+                                    Bearbeiten
+                                </Button>
+                                <Button variant="ghost" size="icon" @click="sendInvite(user.id)" aria-label="Einladung senden">
+                                    <Mail class="size-4" />
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label="Aktivität ansehen"
+                                    @click="router.get(route('admin.activity.index'), { causer: user.id })"
+                                >
+                                    <ScrollText class="size-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" @click="destroyUser(user.id)" aria-label="Nutzer löschen">
+                                    <Trash2 class="size-4 text-destructive" />
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </template>
+            </DataTable>
         </div>
 
         <!-- Create -->

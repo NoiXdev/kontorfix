@@ -42,6 +42,7 @@ class GroupController extends Controller
                     'packages_count' => $g->packages_count,
                     'domains' => $g->domains->pluck('hostname'),
                     'organization' => $g->organization?->name,
+                    'organization_id' => $g->organization_id,
                 ]),
             // The org picker only offers organizations the user may create registries in.
             'organizations' => app(OrgScope::class)->organizations(),

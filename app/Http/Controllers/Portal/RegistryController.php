@@ -50,15 +50,14 @@ class RegistryController extends Controller
         $this->authorize('view', $group);
         $group->load('domains');
 
-        $q = trim((string) $request->query('q', ''));
-        $type = $request->query('type');
-
         // Load versions descending by released_at and pick the newest one in PHP —
         // NO limit(1) in the eager load (that would constrain across all packages, not per package).
         // Qualify columns because of the belongsToMany join (packages.*), to avoid ambiguity.
+        // The full (unpaginated) list is sent to the client, which does its own
+        // search/type filtering via useTableState (prefix 'pkg') — no server-side
+        // pre-filter here, so there is no bare q/type param that could silently and
+        // invisibly narrow the list with no way to see or reset it from the UI.
         $packages = $group->packages()
-            ->when($q !== '', fn ($query) => $query->where('packages.name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
-            ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('packages.type', $type))
             ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
             ->orderBy('packages.name')
             ->get();
@@ -69,10 +68,6 @@ class RegistryController extends Controller
                 'name' => $group->name,
                 'slug' => $group->slug,
                 'url' => $this->url->base($group),
-            ],
-            'filters' => [
-                'q' => $q,
-                'type' => $type,
             ],
             'snippets' => $this->snippets->for($group),
             'packages' => $packages->map(fn (Package $p) => [
@@ -87,6 +82,10 @@ class RegistryController extends Controller
                 'name' => $t->name,
                 'ability' => $t->ability->value,
                 'last_used_at' => $t->last_used_at?->diffForHumans(),
+                // Raw ISO timestamp for sorting only — `last_used_at` above is a relative
+                // string ("vor 3 Tagen") that Date.parse cannot read, so the display value
+                // and the sort value have to travel separately.
+                'last_used_at_iso' => $t->last_used_at?->toIso8601String(),
             ]),
         ]);
     }

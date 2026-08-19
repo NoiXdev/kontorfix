@@ -7,7 +7,7 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
 
-it('shows the admin registry detail and lets the customer filter their portal package list', function () {
+it('shows the admin registry detail and the customer portal package list', function () {
     config(['app.url' => 'https://reg.example.test']);
 
     $operatorAdmin = User::factory()->operator()->create(['role' => UserRole::Admin]);
@@ -25,13 +25,15 @@ it('shows the admin registry detail and lets the customer filter their portal pa
         ->assertInertia(fn ($p) => $p->component('admin/groups/Show')
             ->where('group.name', 'Kadenz')->has('packages', 2)->has('domains', 1)->has('setup.composer'));
 
-    // Kunde filtert seine Portal-Paketliste
+    // Kunde sieht seine Portal-Paketliste — Suche/Filter laufen client-seitig
+    // (useTableState, prefix 'pkg'), der Server liefert immer die volle Liste, auch
+    // wenn eine alte Bookmark-URL noch bare q/type-Parameter mitschickt.
     $this->actingAs($member)->get("/portal/registries/{$group->id}?q=acme")
         ->assertOk()
-        ->assertInertia(fn ($p) => $p->component('portal/Registry')->has('packages', 1)->where('packages.0.name', 'acme/alpha'));
+        ->assertInertia(fn ($p) => $p->component('portal/Registry')->has('packages', 2));
 
     $this->actingAs($member)->get("/portal/registries/{$group->id}?type=npm")
-        ->assertInertia(fn ($p) => $p->has('packages', 1)->where('packages.0.name', 'beta/widget'));
+        ->assertInertia(fn ($p) => $p->has('packages', 2));
 
     // Fremde Registry-Detail im Portal bleibt dicht
     $foreign = Group::factory()->for(Organization::factory()->create())->create();

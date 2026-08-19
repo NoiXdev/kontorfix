@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -40,6 +42,37 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'OIDC-Provider', href: '/admin/o
 
 const page = usePage<SharedData>();
 const flashSuccess = computed(() => page.props.flash?.success ?? null);
+
+// Derived from the existing `enabled` prop — labels for the two values that
+// boolean already takes, not a separate controller-supplied option list.
+const activeOptions = [
+    { value: 'yes', label: 'Ja' },
+    { value: 'no', label: 'Nein' },
+];
+
+const columns: ColumnDef<ProviderRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'slug', label: 'Slug' },
+    { key: 'issuer', label: 'Issuer' },
+    { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
+    { key: 'allow_registration', label: 'Registrierung', sortValue: (row) => (row.allow_registration ? 'Erlaubt' : 'Gesperrt') },
+    { key: 'has_secret', label: 'Secret', sortable: false },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const table = useTableState<ProviderRow>({
+    rows: () => props.providers,
+    columns,
+    searchKeys: ['name', 'slug', 'issuer'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        active: {
+            label: 'Aktiv',
+            options: activeOptions,
+            match: (row, value) => (value === 'yes' ? row.enabled : !row.enabled),
+        },
+    },
+});
 
 const dialogOpen = ref(false);
 const discoveryError = ref<string | null>(null);
@@ -156,57 +189,51 @@ const badgeClasses = (on: boolean) =>
                 </Button>
             </div>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">Slug</th>
-                            <th class="px-4 py-3 font-medium">Issuer</th>
-                            <th class="px-4 py-3 font-medium">Aktiv</th>
-                            <th class="px-4 py-3 font-medium">Registrierung</th>
-                            <th class="px-4 py-3 font-medium">Secret</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="provider in props.providers"
-                            :key="provider.id"
-                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                        >
-                            <td class="px-4 py-3">{{ provider.name }}</td>
-                            <td class="px-4 py-3 font-mono text-xs">{{ provider.slug }}</td>
-                            <td class="px-4 py-3 font-mono text-xs">{{ provider.issuer }}</td>
-                            <td class="px-4 py-3">
-                                <span :class="badgeClasses(provider.enabled)">{{ provider.enabled ? 'Ja' : 'Nein' }}</span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span :class="badgeClasses(provider.allow_registration)">
-                                    {{ provider.allow_registration ? 'Erlaubt' : 'Gesperrt' }}
-                                </span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <span
-                                    v-if="provider.has_secret"
-                                    class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi"
-                                >
-                                    Gesetzt
-                                </span>
-                                <span v-else class="text-muted-foreground">—</span>
-                            </td>
-                            <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" @click="destroyProvider(provider.id)" aria-label="Provider löschen">
-                                    <Trash2 class="size-4 text-destructive" />
-                                </Button>
-                            </td>
-                        </tr>
-                        <tr v-if="props.providers.length === 0">
-                            <td colspan="7" class="px-4 py-8 text-center text-muted-foreground">Noch keine OIDC-Provider angelegt.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine OIDC-Provider angelegt.">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.active.value"
+                        :options="activeOptions"
+                        placeholder="Aktiv"
+                        class="w-32"
+                        @update:model-value="(v) => table.setFilter('active', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <tr
+                        v-for="provider in rows"
+                        :key="provider.id"
+                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                    >
+                        <td class="px-4 py-3">{{ provider.name }}</td>
+                        <td class="px-4 py-3 font-mono text-xs">{{ provider.slug }}</td>
+                        <td class="px-4 py-3 font-mono text-xs">{{ provider.issuer }}</td>
+                        <td class="px-4 py-3">
+                            <span :class="badgeClasses(provider.enabled)">{{ provider.enabled ? 'Ja' : 'Nein' }}</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span :class="badgeClasses(provider.allow_registration)">
+                                {{ provider.allow_registration ? 'Erlaubt' : 'Gesperrt' }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span
+                                v-if="provider.has_secret"
+                                class="inline-flex items-center rounded-md border border-copper/30 bg-copper/15 px-2 py-0.5 text-xs font-medium text-copper-hi"
+                            >
+                                Gesetzt
+                            </span>
+                            <span v-else class="text-muted-foreground">—</span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <Button variant="ghost" size="icon" @click="destroyProvider(provider.id)" aria-label="Provider löschen">
+                                <Trash2 class="size-4 text-destructive" />
+                            </Button>
+                        </td>
+                    </tr>
+                </template>
+            </DataTable>
         </div>
 
         <Dialog v-model:open="dialogOpen">

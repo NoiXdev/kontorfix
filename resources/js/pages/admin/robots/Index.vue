@@ -1,17 +1,29 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/vue3';
 import { Copy, KeyRound, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
+interface RobotRow {
+    id: string;
+    name: string;
+    role: string;
+    is_super_admin: boolean;
+    organization: string | null;
+    organization_id: string | null;
+    keys_count: number;
+}
+
 const props = defineProps<{
-    robots: { id: string; name: string; role: string; is_super_admin: boolean; organization: string | null; keys_count: number }[];
+    robots: RobotRow[];
     organizations: { id: string; name: string }[];
 }>();
 
@@ -50,6 +62,36 @@ const roleOptions = [
     { value: 'maintainer', label: 'Maintainer' },
     { value: 'admin', label: 'Admin' },
 ];
+
+const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
+
+const columns: ColumnDef<RobotRow>[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'role', label: 'Rolle' },
+    { key: 'is_super_admin', label: 'Scope', sortValue: (row) => (row.is_super_admin ? 'Global' : 'Organisation') },
+    { key: 'organization', label: 'Organisation' },
+    { key: 'keys_count', label: 'Keys', sortAs: 'number' },
+    { key: 'actions', label: 'Aktionen', sortable: false },
+];
+
+const table = useTableState<RobotRow>({
+    rows: () => props.robots,
+    columns,
+    searchKeys: ['name'],
+    defaultSort: { key: 'name', direction: 'asc' },
+    filters: {
+        role: {
+            label: 'Rolle',
+            options: roleOptions,
+            match: (row, value) => row.role === value,
+        },
+        org: {
+            label: 'Organisation',
+            options: orgOptions.value,
+            match: (row, value) => row.organization_id === value,
+        },
+    },
+});
 
 const createForm = useForm({
     name: '',
@@ -181,78 +223,80 @@ function roleLabel(role: string) {
                 <InputError :message="createForm.errors.is_super_admin" class="sm:col-span-full" />
             </form>
 
-            <div class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                <table class="w-full text-left text-sm">
-                    <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
-                        <tr>
-                            <th class="px-4 py-3 font-medium">Name</th>
-                            <th class="px-4 py-3 font-medium">Rolle</th>
-                            <th class="px-4 py-3 font-medium">Scope</th>
-                            <th class="px-4 py-3 font-medium">Organisation</th>
-                            <th class="px-4 py-3 font-medium">Keys</th>
-                            <th class="px-4 py-3 font-medium">Aktionen</th>
+            <DataTable :columns="columns" :state="table" empty-message="Noch keine Robots angelegt.">
+                <template #filters>
+                    <SearchableSelect
+                        :model-value="table.filterValues.role.value"
+                        :options="roleOptions"
+                        placeholder="Rolle"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('role', String(v))"
+                    />
+                    <SearchableSelect
+                        :model-value="table.filterValues.org.value"
+                        :options="orgOptions"
+                        placeholder="Organisation"
+                        class="w-40"
+                        @update:model-value="(v) => table.setFilter('org', String(v))"
+                    />
+                </template>
+
+                <template #default="{ rows }">
+                    <template v-for="robot in rows" :key="robot.id">
+                        <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                            <td class="px-4 py-3 font-medium">{{ robot.name }}</td>
+                            <td class="px-4 py-3">{{ roleLabel(robot.role) }}</td>
+                            <td class="px-4 py-3">
+                                <span
+                                    v-if="robot.is_super_admin"
+                                    class="inline-flex items-center rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
+                                >
+                                    Global
+                                </span>
+                                <span v-else class="text-xs text-muted-foreground">Organisation</span>
+                            </td>
+                            <td class="px-4 py-3">{{ robot.organization ?? '—' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ robot.keys_count }}</td>
+                            <td class="px-4 py-3">
+                                <div class="flex items-center gap-1">
+                                    <Button variant="ghost" size="sm" @click="toggleKeyForm(robot.id)">
+                                        <KeyRound class="size-4" />
+                                        Key ausstellen
+                                    </Button>
+                                    <Button variant="ghost" size="icon" aria-label="Robot löschen" @click="destroyRobot(robot.id)">
+                                        <Trash2 class="size-4 text-destructive" />
+                                    </Button>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        <template v-for="robot in props.robots" :key="robot.id">
-                            <tr class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
-                                <td class="px-4 py-3 font-medium">{{ robot.name }}</td>
-                                <td class="px-4 py-3">{{ roleLabel(robot.role) }}</td>
-                                <td class="px-4 py-3">
-                                    <span
-                                        v-if="robot.is_super_admin"
-                                        class="inline-flex items-center rounded-md border border-verdigris/40 bg-verdigris/15 px-2 py-0.5 text-xs font-medium text-verdigris"
-                                    >
-                                        Global
-                                    </span>
-                                    <span v-else class="text-xs text-muted-foreground">Organisation</span>
-                                </td>
-                                <td class="px-4 py-3">{{ robot.organization ?? '—' }}</td>
-                                <td class="px-4 py-3 text-muted-foreground">{{ robot.keys_count }}</td>
-                                <td class="px-4 py-3">
-                                    <div class="flex items-center gap-1">
-                                        <Button variant="ghost" size="sm" @click="toggleKeyForm(robot.id)">
-                                            <KeyRound class="size-4" />
-                                            Key ausstellen
-                                        </Button>
-                                        <Button variant="ghost" size="icon" aria-label="Robot löschen" @click="destroyRobot(robot.id)">
-                                            <Trash2 class="size-4 text-destructive" />
-                                        </Button>
+                        <tr v-if="openKeyForm === robot.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
+                            <td colspan="6" class="px-4 py-3">
+                                <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitKey(robot.id)">
+                                    <div class="grid gap-2">
+                                        <Label :for="`key_name_${robot.id}`">Key-Name</Label>
+                                        <Input :id="`key_name_${robot.id}`" v-model="keyForm.name" placeholder="deploy-key" autocomplete="off" />
+                                        <InputError :message="keyForm.errors.name" />
                                     </div>
-                                </td>
-                            </tr>
-                            <tr v-if="openKeyForm === robot.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
-                                <td colspan="6" class="px-4 py-3">
-                                    <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitKey(robot.id)">
-                                        <div class="grid gap-2">
-                                            <Label :for="`key_name_${robot.id}`">Key-Name</Label>
-                                            <Input :id="`key_name_${robot.id}`" v-model="keyForm.name" placeholder="deploy-key" autocomplete="off" />
-                                            <InputError :message="keyForm.errors.name" />
-                                        </div>
-                                        <div class="grid gap-2">
-                                            <Label :for="`key_perm_${robot.id}`">Recht</Label>
-                                            <SearchableSelect
-                                                :id="`key_perm_${robot.id}`"
-                                                v-model="keyForm.permission"
-                                                :options="[
-                                                    { value: 'read', label: 'Lesen' },
-                                                    { value: 'write', label: 'Schreiben' },
-                                                ]"
-                                            />
-                                            <InputError :message="keyForm.errors.permission" />
-                                        </div>
-                                        <Button type="submit" :disabled="keyForm.processing">Key erstellen</Button>
-                                        <Button type="button" variant="ghost" @click="toggleKeyForm(robot.id)">Abbrechen</Button>
-                                    </form>
-                                </td>
-                            </tr>
-                        </template>
-                        <tr v-if="props.robots.length === 0">
-                            <td colspan="6" class="px-4 py-8 text-center text-muted-foreground">Noch keine Robots angelegt.</td>
+                                    <div class="grid gap-2">
+                                        <Label :for="`key_perm_${robot.id}`">Recht</Label>
+                                        <SearchableSelect
+                                            :id="`key_perm_${robot.id}`"
+                                            v-model="keyForm.permission"
+                                            :options="[
+                                                { value: 'read', label: 'Lesen' },
+                                                { value: 'write', label: 'Schreiben' },
+                                            ]"
+                                        />
+                                        <InputError :message="keyForm.errors.permission" />
+                                    </div>
+                                    <Button type="submit" :disabled="keyForm.processing">Key erstellen</Button>
+                                    <Button type="button" variant="ghost" @click="toggleKeyForm(robot.id)">Abbrechen</Button>
+                                </form>
+                            </td>
                         </tr>
-                    </tbody>
-                </table>
-            </div>
+                    </template>
+                </template>
+            </DataTable>
         </div>
     </AppLayout>
 </template>
