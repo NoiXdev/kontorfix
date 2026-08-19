@@ -381,6 +381,33 @@ worth one look in a real browser — check the rendered `tagName` and that a bou
 appears as `value`, not as a stray attribute.
 
 
+### An SSR harness that renders nothing passes every negative assertion
+
+The in-app browser cannot load this application, so escaping is verified by compiling a
+component with `@vue/compiler-sfc` and rendering it through `@vue/server-renderer`. That
+works, but it has one silent failure mode worth knowing before you write the next one.
+
+radix-vue's `DialogPortal` renders **nothing** under SSR unless it is force-mounted. A
+harness around any dialog therefore produces an empty string, and every check of the form
+"the payload does not appear as a live tag" passes — against no output at all. This
+happened while building `ActivityDetailDialog`: zero occurrences of the payload, zero live
+`<img>`, all green, nothing rendered. Alias `radix-vue` to a stub that re-exports the real
+package with a force-mounted `DialogPortal`; everything else stays the real code.
+
+Two rules follow, and both have caught real mistakes here:
+
+- **Assert presence before absence.** Check that the expected content *is* in the output
+  first. A negative assertion alone cannot distinguish "safe" from "empty".
+- **Scope every assertion to the element it is about.** `html.includes('emerald')` matched
+  the timeline's marker dot as well as its badge, so stripping the badge colouring entirely
+  left the check green. The same mistake in the detail dialog matched text that `JsonViewer`
+  had rendered elsewhere on the page rather than the table under test.
+
+Also note that a naive `/\sonerror=/` matches the *escaped* text `&lt;img src=x
+onerror=alert(1)&gt;` and reports a handler that does not exist. Match the tag:
+`/<[a-z][^>]*\sonerror\s*=/`.
+
+
 ## Tenancy & role model
 
 - **Operator invariant (security-critical):** the privileged roles `admin`/`maintainer`
