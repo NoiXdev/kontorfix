@@ -1,21 +1,13 @@
 <script setup lang="ts">
 import JsonViewer from '@/components/kontorfix/JsonViewer.vue';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { eventLabel } from '@/lib/activityEvents';
 import type { ActivityEntry } from '@/lib/activityGroups';
 import { computed } from 'vue';
 
 const props = defineProps<{ entry: ActivityEntry | null }>();
 
 const open = defineModel<boolean>('open', { default: false });
-
-// Spatie stores the event in English. One map for the whole component so the wording
-// cannot drift between the title and the marker, and so an event nobody mapped yet shows
-// its raw name rather than disappearing.
-const EVENT_LABELS: Record<string, string> = {
-    created: 'Erstellt',
-    updated: 'Aktualisiert',
-    deleted: 'Gelöscht',
-};
 
 interface ChangeRow {
     key: string;
@@ -44,13 +36,7 @@ const title = computed(() => {
         return '';
     }
 
-    const event = props.entry.event;
-
-    if (!event) {
-        return props.entry.description;
-    }
-
-    return EVENT_LABELS[event] ?? event;
+    return eventLabel(props.entry.event, props.entry.description);
 });
 
 const subject = computed(() => {
