@@ -54,6 +54,11 @@ const editingHasAuth = ref(false);
 // Upstream types are the registry types — from the single source of truth.
 const { options: registryTypeOptions } = useRegistryTypes();
 const typeOptions = computed(() => registryTypeOptions());
+// `registryTypeOptions()` is generically `{ value: string; label: string }[]` (it's shared
+// across call sites with different literal-union needs); `form.type` is the narrower
+// `'composer' | 'npm' | 'python'`. This asserts the already-true invariant — the options
+// always come from the registry-type enum — so `SearchableSelect`'s `v-model` lines up.
+const upstreamTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python'; label: string }[]);
 
 const groupOptions = computed(() => props.groups.map((g) => ({ value: g.id, label: g.name })));
 
@@ -116,7 +121,14 @@ const form = useForm({
     policy: 'proxy' as 'proxy' | 'strict',
     auth_token: '',
     remove_auth_token: false,
-    priority: 0,
+    // `string | number`, not just `number`: despite the `v-model.number` at the call site,
+    // `Input.vue` doesn't implement modifier coercion (it never reads `modelModifiers`), so
+    // the field is always a string once the user edits it — a native `<input>`'s `v-model`
+    // never yields a number regardless of modifiers applied to a *component*. The `number`
+    // default reflects the actual initial value; the wider type reflects what this field
+    // actually holds after an edit. Laravel's `integer` validation accepts either form the
+    // same way, so this changes nothing about what gets submitted or accepted.
+    priority: 0 as string | number,
     allowed_packages_text: '',
 });
 
@@ -324,7 +336,7 @@ function destroyUpstream(id: string) {
 
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <SearchableSelect id="type" v-model="form.type" :options="typeOptions" />
+                        <SearchableSelect id="type" v-model="form.type" :options="upstreamTypeOptions" />
                         <InputError :message="form.errors.type" />
                     </div>
 

@@ -39,7 +39,13 @@ const form = useForm({
     from_address: props.settings.from_address ?? '',
     from_name: props.settings.from_name ?? '',
     smtp_host: props.settings.smtp_host ?? '',
-    smtp_port: props.settings.smtp_port ?? 587,
+    // `string | number`, not just `number`: `Input.vue`'s `v-model` always emits a string
+    // once the user edits the field (a native `<input>`'s `v-model` never yields a number,
+    // even for `type="number"` — only `.valueAsNumber` is numeric). The `number` default
+    // reflects the actual initial value; the wider type reflects what this field actually
+    // holds after an edit. Laravel's `integer`/`numeric` validation accepts either form the
+    // same way, so this changes nothing about what gets submitted or accepted.
+    smtp_port: (props.settings.smtp_port ?? 587) as string | number,
     smtp_username: props.settings.smtp_username ?? '',
     smtp_password: '',
     smtp_encryption: props.settings.smtp_encryption ?? 'tls',

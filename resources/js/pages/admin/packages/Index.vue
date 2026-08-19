@@ -67,6 +67,12 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/admin/packages
 const { options: typeOptionsFor } = useRegistryTypes();
 // Only instance-enabled types are offered in the create dialog and the filter.
 const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
+// `typeOptionsFor()` is generically `{ value: string; label: string }[]` (it's shared across
+// call sites with different literal-union needs); the create-dialog's `form.type` is the
+// narrower `'composer' | 'npm' | 'python'`. This asserts the already-true invariant — the
+// options always come from the registry-type enum — so `SearchableSelect`'s `v-model`
+// lines up with it.
+const packageTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python'; label: string }[]);
 
 const filterQ = ref(props.filters.q ?? '');
 const filterType = ref(props.filters.type ?? '');
@@ -172,6 +178,11 @@ watch(() => form.is_private, onPrivateToggle);
 // server — the single source of truth. Composer has exactly one (git), npm exactly one
 // (publish), so the selector below only renders when there is a real choice to make.
 const modesForType = computed(() => props.sourceModes[form.type] ?? []);
+// Same reasoning as `packageTypeOptions` above: `props.sourceModes` is generically typed
+// (`Record<string, { value: string; label: string }[]>`), but `form.source_mode` is the
+// narrower `'publish' | 'git'` — the only two modes `PackageSourceMode::allowedFor()` on
+// the server ever returns.
+const sourceModeOptions = computed(() => modesForType.value as { value: 'publish' | 'git'; label: string }[]);
 const canChooseSource = computed(() => modesForType.value.length > 1);
 // A type whose only/default mode is git (Composer today) is always git-mode, regardless
 // of what form.source_mode happens to hold (its selector is hidden, so nothing sets it
@@ -445,7 +456,7 @@ const table = useTableState<PackageRow>({
                 <form class="space-y-4" @submit.prevent="submit">
                     <div class="grid gap-2">
                         <Label for="type">Typ</Label>
-                        <SearchableSelect id="type" v-model="form.type" :options="typeOptions" @update:model-value="onTypeChange" />
+                        <SearchableSelect id="type" v-model="form.type" :options="packageTypeOptions" @update:model-value="onTypeChange" />
                         <InputError :message="form.errors.type" />
                     </div>
 
@@ -457,7 +468,7 @@ const table = useTableState<PackageRow>({
                         <SearchableSelect
                             id="source_mode"
                             v-model="form.source_mode"
-                            :options="modesForType"
+                            :options="sourceModeOptions"
                             @update:model-value="onSourceModeChange"
                         />
                         <p class="text-xs text-muted-foreground">
