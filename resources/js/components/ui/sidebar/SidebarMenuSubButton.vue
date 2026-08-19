@@ -33,7 +33,7 @@ const dataAttrs = computed(() => ({
 <template>
     <Primitive
         v-bind="dataAttrs"
-        :as="as"
+        :as="as ?? 'a'"
         :as-child="asChild"
         :class="
             cn(

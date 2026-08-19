@@ -40,7 +40,7 @@ const dataAttrs = { 'data-sidebar': 'menu-action' };
                 props.class,
             )
         "
-        :as="as"
+        :as="as ?? 'button'"
         :as-child="asChild"
     >
         <slot />

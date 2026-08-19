@@ -38,7 +38,7 @@ const dataAttrs = computed(() => ({
     <Primitive
         v-bind="dataAttrs"
         :class="cn(sidebarMenuButtonVariants({ variant, size }), props.class)"
-        :as="as"
+        :as="as ?? 'button'"
         :as-child="asChild"
     >
         <slot />
