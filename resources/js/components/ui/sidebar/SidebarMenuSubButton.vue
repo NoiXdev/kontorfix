@@ -7,16 +7,28 @@ import { computed, type HTMLAttributes } from 'vue';
 // `/* @vue-ignore */` types `HTMLAttributes` (e.g. this file's own `data-sidebar` marker)
 // for the checker only; it already reaches `Primitive` via Vue's implicit `$attrs`
 // fallthrough.
-interface Props extends PrimitiveProps, /* @vue-ignore */ HTMLAttributes {
-    size?: 'sm' | 'md';
-    isActive?: boolean;
-    class?: HTMLAttributes['class'];
-}
-
-const props = withDefaults(defineProps<Props>(), {
-    as: 'a',
-    size: 'md',
-});
+//
+// This is deliberately an inline intersection in `defineProps<...>()`, not a named
+// `interface Props extends ... { }`: `@vue/compiler-sfc` skips resolving a type node
+// whose leading comments contain the literal substring "@vue-ignore" — including a
+// comment like this one that only *mentions* the pragma as prose. On a bare `interface
+// Props extends ...` declaration, that comment attaches to the interface node itself, so
+// the compiler discards the WHOLE interface, inherited members and locally-declared ones
+// alike. Inlining the type avoids a named declaration for the comment to attach to.
+const props = withDefaults(
+    defineProps<
+        PrimitiveProps &
+            /* @vue-ignore */ HTMLAttributes & {
+                size?: 'sm' | 'md';
+                isActive?: boolean;
+                class?: HTMLAttributes['class'];
+            }
+    >(),
+    {
+        as: 'a',
+        size: 'md',
+    },
+);
 
 // `Primitive`'s own exported type (radix-vue) only declares `as`/`asChild` — it has no
 // index signature for arbitrary attrs, even though it forwards everything it receives at

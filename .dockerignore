@@ -49,3 +49,8 @@ tests
 # so they need their own rule rather than a shared directory exclusion.
 vitest.config.ts
 resources/js/**/*.test.ts
+
+# Developer tooling, never executed inside the image. check-runtime-props.mjs compiles the
+# Vue components and reports which runtime props each one actually emits — a class of defect
+# no other gate detects, but a check that belongs on a workstation, not in a container.
+scripts

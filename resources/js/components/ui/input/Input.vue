@@ -7,19 +7,26 @@ import type { HTMLAttributes, InputHTMLAttributes } from 'vue';
 // here — they reached the rendered `<input>` via Vue's implicit `$attrs` fallthrough.
 // `/* @vue-ignore */` declares `InputHTMLAttributes` for the type checker only, without
 // turning its members into actual runtime props, so that fallthrough is unaffected.
-interface Props extends /* @vue-ignore */ InputHTMLAttributes {
-    defaultValue?: string | number;
-    modelValue?: string | number;
-    class?: HTMLAttributes['class'];
-    // Two call sites use `v-model.number="..."` on this component. Vue always passes the
-    // modifiers object for whatever a `v-model` target is, component or native element, so
-    // this prop already arrives at runtime today — it's just undeclared. This component has
-    // never read it (no coercion happens here), so declaring it changes no behaviour; it
-    // only makes the type checker aware of a prop Vue already sends.
-    modelModifiers?: Record<string, boolean>;
-}
-
-const props = defineProps<Props>();
+//
+// Inlined into `defineProps<...>()` rather than declared as a named `interface Props
+// extends ...`: `@vue/compiler-sfc` skips a type node whose leading comments contain the
+// substring "@vue-ignore", and on a named interface that comment attaches to the whole
+// declaration. The compiler then emitted NO runtime props — including `modelValue`, so
+// `useVModel` never saw a value and every bound input rendered blank, with the value
+// landing on the DOM as a meaningless `modelvalue="..."` attribute instead of `value`.
+// `vue-tsc` cannot see this; `scripts/check-runtime-props.mjs` can.
+const props = defineProps<
+    {
+        defaultValue?: string | number;
+        modelValue?: string | number;
+        class?: HTMLAttributes['class'];
+        // Two call sites use `v-model.number="..."`. Vue always passes the modifiers object
+        // for a `v-model` target, so this prop already arrives at runtime — it was simply
+        // undeclared. This component never reads it (no coercion here), so declaring it
+        // changes no behaviour.
+        modelModifiers?: Record<string, boolean>;
+    } & /* @vue-ignore */ InputHTMLAttributes
+>();
 
 // The payload is typed `string`, not `string | number`: the template below drives
 // `modelValue` off a plain `<input v-model>` with no `.number` modifier, and a native
