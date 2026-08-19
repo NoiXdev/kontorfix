@@ -336,17 +336,22 @@ interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes {
 const props = withDefaults(defineProps<Props>(), { as: 'button' });
 ```
 
-Inline the type into `defineProps<…>()` instead, so there is no named declaration for the
-comment to attach to. **Order matters inside the intersection:** with `/* @vue-ignore */` on
-the first member it is again the leading comment of the whole node and everything is
-discarded, so put the declared members first and the ignored type last.
+Inline the type into `defineProps<…>()` instead of declaring a named interface:
 
 ```ts
-// CORRECT
+// The shape the twelve restored components use
 const props = defineProps<
     { variant?: ButtonVariants['variant'] } & /* @vue-ignore */ ButtonHTMLAttributes
 >();
 ```
+
+**The exact trigger is not fully pinned down, and this section deliberately does not claim
+it is.** Two explanations were proposed while fixing this — that member order inside the
+intersection decides it, and that whether the interface is `export`ed decides it — and
+neither reproduced in a minimal test case. What IS established: the twelve components
+emitted zero runtime props in the named-interface form and emit their full set in the
+inlined form, verified by compiling each one. Treat the inlined shape as the known-good
+form and the harness below as the arbiter, not any mental model of the compiler.
 
 This is not a style rule. It shipped twice in this codebase and both times the symptom was
 severe and silent:

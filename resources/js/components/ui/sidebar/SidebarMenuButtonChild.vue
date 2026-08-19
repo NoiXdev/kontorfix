@@ -4,17 +4,25 @@ import { Primitive, type PrimitiveProps } from 'radix-vue';
 import { computed, useAttrs, type HTMLAttributes } from 'vue';
 import { sidebarMenuButtonVariants, type SidebarMenuButtonVariants } from '.';
 
-// `/* @vue-ignore */` types `HTMLAttributes` (e.g. this file's own `data-sidebar` marker,
-// and whatever `SidebarMenuButton.vue`'s explicit `...$attrs` spread passes down) for the
-// checker only; it already reaches `Primitive` via the explicit `v-bind="$attrs"` below.
-export interface SidebarMenuButtonProps extends PrimitiveProps, /* @vue-ignore */ HTMLAttributes {
+// The exported interface carries NO `@vue-ignore` pragma: that annotation, on a named
+// interface declaration, is what made twelve components in this codebase emit zero runtime
+// props at all — see "A named props interface can silently emit no runtime props at all" in
+// docs/development.md. The pragma sits on the inlined intersection below instead, where it
+// applies only to the type it annotates.
+//
+// The interface stays exported because `SidebarMenuButton.vue` consumes it.
+export interface SidebarMenuButtonProps extends PrimitiveProps {
     variant?: SidebarMenuButtonVariants['variant'];
     size?: SidebarMenuButtonVariants['size'];
     isActive?: boolean;
     class?: HTMLAttributes['class'];
 }
 
-const props = withDefaults(defineProps<SidebarMenuButtonProps>(), {
+// `HTMLAttributes` — this file's own `data-sidebar` marker, and whatever
+// `SidebarMenuButton.vue`'s explicit `...$attrs` spread passes down — is typed for the
+// checker only; it already reaches `Primitive` through the `v-bind="$attrs"` below.
+const props = withDefaults(
+    defineProps<SidebarMenuButtonProps & /* @vue-ignore */ HTMLAttributes>(), {
     as: 'button',
     variant: 'default',
     size: 'default',

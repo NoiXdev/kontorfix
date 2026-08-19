@@ -13,7 +13,8 @@
         "lint": "eslint . --fix",
         "lint:check": "eslint .",
         "test": "vitest run",
-        "types": "php artisan ziggy:generate --types-only && vue-tsc --noEmit"
+        "types": "php artisan ziggy:generate --types-only && vue-tsc --noEmit",
+        "check:props": "node scripts/check-runtime-props.mjs"
     },
     "devDependencies": {
         "@commitlint/cli": "^21.2.2",
