@@ -13,6 +13,11 @@ export default defineConfigWithVueTs(
         rules: {
             'vue/multi-word-component-names': 'off',
             '@typescript-eslint/no-explicit-any': 'off',
+            // Shared Form.vue components (admin/*/Form.vue) receive an Inertia `useForm()`
+            // object as a prop and bind directly into its fields (`v-model="form.name"`) —
+            // that is how Inertia forms work, the object itself is never reassigned. Only
+            // flag reassigning the prop reference, not writing into its fields.
+            'vue/no-mutating-props': ['error', { shallowOnly: true }],
         },
     },
     prettier,

@@ -135,7 +135,7 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // keeps it after their own access is revoked. The middleware engages only when the
     // address actually changes, so role and organization edits are untouched — this is
     // not the whole `super` group being gated, it is the one field that outlives the gate.
-    Route::resource('users', Admin\UserController::class)->only(['index', 'store', 'destroy']);
+    Route::resource('users', Admin\UserController::class)->only(['index', 'create', 'store', 'edit', 'destroy']);
     Route::match(['put', 'patch'], 'users/{user}', [Admin\UserController::class, 'update'])
         ->middleware(ConfirmPasswordOnEmailChange::class)
         ->name('users.update');
