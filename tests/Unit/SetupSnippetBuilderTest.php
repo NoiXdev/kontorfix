@@ -19,7 +19,10 @@ it('builds composer, auth and npm snippets for a slug-based registry', function 
         ->toContain('https://reg.example.test/r/acme');
     expect($snips['auth'])->toContain('reg.example.test')
         ->toContain('<dein-token>');
-    expect($snips['npm'])->toContain('registry=https://reg.example.test/r/acme/')
+    // Scoped, not global: a bare `registry=` line would route every public package
+    // through this registry and make each one depend on an upstream proxy.
+    expect($snips['npm'])->toContain('@<dein-scope>:registry=https://reg.example.test/r/acme/')
+        ->and($snips['npm'])->not->toContain("\nregistry=")
         ->toContain('//reg.example.test/r/acme/:_authToken=<dein-token>');
 });
 
