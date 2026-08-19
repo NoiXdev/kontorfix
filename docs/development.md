@@ -321,37 +321,40 @@ Neither of these is visible from `Index.vue` alone. Grep what a controller's `in
 then check every consumer — the page's `<script setup>` *and* the test suite — before
 deciding a prop is dead.
 
-### A named props interface can silently emit no runtime props at all
+### A leading `@vue-ignore` comment silently emits no runtime props at all
 
 `@vue/compiler-sfc` skips resolving a type node whose **leading comments contain the
-substring `@vue-ignore`**. On a named declaration that comment attaches to the interface
-itself, so the compiler discards the whole thing — the inherited members *and* the locally
-declared ones — and the component ends up with no runtime props whatsoever:
+substring `@vue-ignore`**. When that comment sits at the front of the whole type node
+`defineProps` resolves, the compiler discards everything — the inherited members *and* the
+locally declared ones — and the component ends up with no runtime props whatsoever.
+
+Position is the trigger. Whether the type is a named `interface`, a named `type` alias or
+inlined into `defineProps<…>()` makes no difference. These three emit **zero** props:
 
 ```ts
-// BROKEN: emits zero runtime props, including `variant` and `size`
-interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes {
-    variant?: ButtonVariants['variant'];
-}
-const props = withDefaults(defineProps<Props>(), { as: 'button' });
+/* @vue-ignore */                             // leads the declaration
+interface Props extends ButtonHTMLAttributes { variant?: string }
+defineProps<Props>();
+
+type Props = /* @vue-ignore */ ButtonHTMLAttributes & { variant?: string };
+defineProps<Props>();                         // leads the intersection
+
+defineProps</* @vue-ignore */ ButtonHTMLAttributes & { variant?: string }>();
 ```
 
-Inline the type into `defineProps<…>()` instead of declaring a named interface:
+Anywhere but the front is fine — an `extends` member, or any intersection member after the
+first:
 
 ```ts
-// The shape the twelve restored components use
-const props = defineProps<
-    { variant?: ButtonVariants['variant'] } & /* @vue-ignore */ ButtonHTMLAttributes
->();
+interface Props extends /* @vue-ignore */ ButtonHTMLAttributes { variant?: string }
+interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes { … }
+defineProps<{ variant?: string } & /* @vue-ignore */ ButtonHTMLAttributes>();
 ```
 
-**The exact trigger is not fully pinned down, and this section deliberately does not claim
-it is.** Two explanations were proposed while fixing this — that member order inside the
-intersection decides it, and that whether the interface is `export`ed decides it — and
-neither reproduced in a minimal test case. What IS established: the twelve components
-emitted zero runtime props in the named-interface form and emit their full set in the
-inlined form, verified by compiling each one. Treat the inlined shape as the known-good
-form and the harness below as the arbiter, not any mental model of the compiler.
+Each of the seven forms above was compiled through the harness below and behaves as stated.
+An earlier revision of this section blamed the named interface and prescribed inlining;
+that is wrong in both directions — inlining does not help when the comment leads, and a
+named interface is safe when it does not.
 
 This is not a style rule. It shipped twice in this codebase and both times the symptom was
 severe and silent:
@@ -364,18 +367,18 @@ severe and silent:
   and the value landed on the DOM as a meaningless `modelvalue="…"` attribute instead of
   `value` — which meant every edit page showed empty fields.
 
-**No gate detects this.** `vue-tsc` resolves `extends` on a different code path from the
-runtime compiler and reports the props as present and correctly typed, so a strict type
+**No type check detects this.** `vue-tsc` resolves the type on a different code path from
+the runtime compiler and reports the props as present and correctly typed, so a strict type
 check passes clean. ESLint, Vite, Vitest and Pest never mount a component. The first
 attempt at a fix patched only the `as` symptom in the template and concluded the class of
 bug was handled; it was not.
 
-Run `node scripts/check-runtime-props.mjs` after touching any component's props. It
-compiles every component under `resources/js/components/ui` and reports the runtime props
-each one emits, exiting non-zero when a component declares props through a type argument
-and emits none. A component that chooses its element or binds a model is also worth one
-look in a real browser — check the rendered `tagName` and that a bound value appears as
-`value`, not as a stray attribute.
+Run `npm run check:props` after touching any component's props. It compiles every component
+under `resources/js/components` — `ui/` and `kontorfix/` alike — and reports the runtime
+props each one emits, exiting non-zero when a component declares props through a type
+argument and emits none. A component that chooses its element or binds a model is also
+worth one look in a real browser — check the rendered `tagName` and that a bound value
+appears as `value`, not as a stray attribute.
 
 
 ## Tenancy & role model
