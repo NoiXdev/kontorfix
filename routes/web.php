@@ -98,8 +98,14 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // never be harder than creation, or a mistaken attachment needs an operator to undo.
     Route::post('domains', [Admin\DomainController::class, 'store'])->name('domains.store');
 
+    // Declared before the resource below: no `webhooks/{webhook}` GET route exists (the
+    // resource only registers index/store/destroy, and destroy is DELETE), so there is
+    // nothing for the literal `create` segment to collide with today — but the order still
+    // guards against one being added later without the same care `packages/{package}` needed.
+    Route::get('webhooks/create', [Admin\WebhookController::class, 'create'])->name('webhooks.create');
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
     // Incoming webhook endpoints (per-source secret + URL) and audit.
+    Route::get('incoming-webhooks/create', [Admin\WebhookController::class, 'createIncoming'])->name('incoming-webhooks.create');
     Route::post('incoming-webhooks', [Admin\WebhookController::class, 'storeIncoming'])->name('incoming-webhooks.store');
     Route::post('incoming-webhooks/{incoming}/regenerate', [Admin\WebhookController::class, 'regenerateIncoming'])->name('incoming-webhooks.regenerate');
     Route::delete('incoming-webhooks/{incoming}', [Admin\WebhookController::class, 'destroyIncoming'])->name('incoming-webhooks.destroy');

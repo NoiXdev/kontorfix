@@ -90,6 +90,11 @@ class WebhookController extends Controller
         ]);
     }
 
+    public function create(): Response
+    {
+        return Inertia::render('admin/webhooks/Create');
+    }
+
     public function store(StoreWebhookRequest $request): RedirectResponse
     {
         $data = $request->validated();
@@ -111,6 +116,11 @@ class WebhookController extends Controller
         return back()->with('success', 'Webhook gelöscht.');
     }
 
+    public function createIncoming(): Response
+    {
+        return Inertia::render('admin/webhooks/IncomingCreate');
+    }
+
     public function storeIncoming(StoreIncomingWebhookRequest $request): RedirectResponse
     {
         // Generate the secret server-side and reveal it once — it has to be copied into
@@ -123,7 +133,11 @@ class WebhookController extends Controller
             'secret' => $secret,
         ]);
 
-        return back()
+        // Explicitly to the index, not back(): the mint now happens from its own
+        // `admin/incoming-webhooks/create` page, and `back()` would return there — where
+        // the one-time plaintext reveal has nowhere to render. The index is the only page
+        // that shows it.
+        return redirect()->route('admin.webhooks.index')
             ->with('success', "Eingehender Webhook {$hook->name} erstellt.")
             ->with('incomingWebhookSecret', $secret)
             ->with('incomingWebhookUrl', url("/webhooks/{$hook->provider}/{$hook->id}"));

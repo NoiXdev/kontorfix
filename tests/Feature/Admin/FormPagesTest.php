@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\IncomingWebhook;
 use App\Models\Organization;
 use App\Models\Upstream;
 use App\Models\User;
@@ -285,4 +286,77 @@ it('resolves admin/packages/create to the create page, not the model-bound show 
         ->get(route('admin.packages.create'))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/packages/Create'));
+});
+
+// --- Webhooks: ['auth', 'super'] — same reasoning and the same operator()-side-effect
+// accounting as the users/oidc sections above. The section hosts two unrelated creates — an
+// outgoing webhook (`store`) and an incoming endpoint (`storeIncoming`) — sharing a listing
+// page and nothing else (different fields, different controller actions, different
+// meaning), so each gets its own route and its own create-page test pair rather than one
+// page with a mode switch.
+
+it('renders the webhook create page for a super admin', function () {
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)
+        ->get(route('admin.webhooks.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/webhooks/Create'));
+});
+
+it('refuses the webhook create page for a non-super user', function () {
+    // Same reasoning as the users-section refusal test: an org admin passes `operator`
+    // (they administer their own org) but not `super`.
+    $orgAdmin = User::factory()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($orgAdmin)
+        ->get(route('admin.webhooks.create'))
+        ->assertForbidden();
+});
+
+it('renders the incoming webhook create page for a super admin', function () {
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)
+        ->get(route('admin.incoming-webhooks.create'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/webhooks/IncomingCreate'));
+});
+
+it('refuses the incoming webhook create page for a non-super user', function () {
+    $orgAdmin = User::factory()->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($orgAdmin)
+        ->get(route('admin.incoming-webhooks.create'))
+        ->assertForbidden();
+});
+
+it('redirects incoming webhook creation to the index that can render its one-time secret', function () {
+    // The incoming endpoint's secret is generated server-side and shown exactly once — the
+    // reveal-once callout lives on admin/webhooks/Index.vue, reading
+    // `flash.incomingWebhookSecret` / `flash.incomingWebhookUrl`. Now that minting happens
+    // from its own `admin/incoming-webhooks/create` page, a bare `back()` would return
+    // there instead of the index — a page with no reveal UI at all — exactly the defect
+    // fixed for admin/tokens last round.
+    // Mutation: revert WebhookController::storeIncoming()'s `redirect()->route('admin.webhooks.index')`
+    // back to `back()` — this test goes red on the `assertRedirect(route('admin.webhooks.index'))` line.
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+
+    $response = $this->actingAs($admin)->post(route('admin.incoming-webhooks.store'), [
+        'name' => 'GitHub acme',
+        'provider' => 'github',
+    ]);
+
+    $response->assertRedirect(route('admin.webhooks.index'));
+
+    $hook = IncomingWebhook::sole();
+    $secret = session('incomingWebhookSecret');
+    expect($secret)->toStartWith('whsec_');
+
+    $this->actingAs($admin)
+        ->get(route('admin.webhooks.index'))
+        ->assertInertia(fn ($page) => $page
+            ->component('admin/webhooks/Index')
+            ->where('flash.incomingWebhookSecret', $secret)
+            ->where('flash.incomingWebhookUrl', url("/webhooks/{$hook->provider}/{$hook->id}")));
 });

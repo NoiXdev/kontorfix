@@ -1,19 +1,15 @@
 <script setup lang="ts">
-import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, router, useForm, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { Copy, Plus, RefreshCw, Trash2 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 
 type WebhookEventKey = 'package.synced' | 'sync.failed' | 'version.released';
 
@@ -176,53 +172,11 @@ const outgoingTable = useTableState<WebhookRow>({
     },
 });
 
-// --- Outgoing create ---
-const dialogOpen = ref(false);
-const form = useForm({
-    url: '',
-    secret: '',
-    events: [] as WebhookEventKey[],
-});
-
-function toggleEvent(value: WebhookEventKey, checked: boolean) {
-    if (checked) {
-        if (!form.events.includes(value)) {
-            form.events.push(value);
-        }
-    } else {
-        form.events = form.events.filter((e) => e !== value);
-    }
-}
-
-function submit() {
-    form.transform((data) => ({ url: data.url, secret: data.secret || null, events: data.events })).post(route('admin.webhooks.store'), {
-        onSuccess: () => {
-            dialogOpen.value = false;
-            form.reset();
-        },
-    });
-}
-
 function destroyWebhook(id: string) {
     router.delete(route('admin.webhooks.destroy', id), { onBefore: () => confirm('Webhook wirklich löschen?') });
 }
 
-// --- Incoming create/manage ---
-const incomingDialogOpen = ref(false);
-const incomingForm = useForm({
-    name: '',
-    provider: 'github' as 'github' | 'gitlab' | 'gitea' | 'bitbucket',
-});
-
-function submitIncoming() {
-    incomingForm.post(route('admin.incoming-webhooks.store'), {
-        preserveScroll: true,
-        onSuccess: () => {
-            incomingDialogOpen.value = false;
-            incomingForm.reset();
-        },
-    });
-}
+// --- Incoming manage ---
 
 function regenerateIncoming(id: string) {
     router.post(
@@ -295,9 +249,11 @@ function destroyIncoming(id: string) {
                                 Pro Git-Host/Repo ein eigener Endpunkt mit eigenem Secret. Push löst den Sync passender Pakete aus.
                             </p>
                         </div>
-                        <Button @click="incomingDialogOpen = true">
-                            <Plus class="size-4" />
-                            Endpunkt anlegen
+                        <Button as-child>
+                            <Link :href="route('admin.incoming-webhooks.create')">
+                                <Plus class="size-4" />
+                                Endpunkt anlegen
+                            </Link>
                         </Button>
                     </div>
 
@@ -371,9 +327,11 @@ function destroyIncoming(id: string) {
                 <TabsContent value="outgoing" class="space-y-4">
                     <div class="flex items-center justify-between">
                         <h1 class="text-xl font-semibold">Ausgehende Webhooks</h1>
-                        <Button @click="dialogOpen = true">
-                            <Plus class="size-4" />
-                            Webhook hinzufügen
+                        <Button as-child>
+                            <Link :href="route('admin.webhooks.create')">
+                                <Plus class="size-4" />
+                                Webhook hinzufügen
+                            </Link>
                         </Button>
                     </div>
 
@@ -535,90 +493,5 @@ function destroyIncoming(id: string) {
                 </TabsContent>
             </Tabs>
         </div>
-
-        <!-- Outgoing dialog -->
-        <Dialog v-model:open="dialogOpen">
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Webhook hinzufügen</DialogTitle>
-                </DialogHeader>
-
-                <form class="space-y-4" @submit.prevent="submit">
-                    <div class="grid gap-2">
-                        <Label for="url">URL</Label>
-                        <Input id="url" v-model="form.url" placeholder="https://hooks.example.com/kfx" autocomplete="off" />
-                        <InputError :message="form.errors.url" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="secret">Secret (optional)</Label>
-                        <Input id="secret" v-model="form.secret" type="password" autocomplete="off" />
-                        <InputError :message="form.errors.secret" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label>Events</Label>
-                        <div class="space-y-2">
-                            <label v-for="option in eventOptions" :key="option.value" class="flex items-center gap-2 text-sm">
-                                <input
-                                    type="checkbox"
-                                    :checked="form.events.includes(option.value)"
-                                    class="size-4 rounded border-input"
-                                    @change="toggleEvent(option.value, ($event.target as HTMLInputElement).checked)"
-                                />
-                                {{ option.label }}
-                            </label>
-                        </div>
-                        <InputError :message="form.errors.events" />
-                    </div>
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" @click="dialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="form.processing">Anlegen</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
-
-        <!-- Incoming dialog -->
-        <Dialog v-model:open="incomingDialogOpen">
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Eingehenden Endpunkt anlegen</DialogTitle>
-                </DialogHeader>
-
-                <form class="space-y-4" @submit.prevent="submitIncoming">
-                    <div class="grid gap-2">
-                        <Label for="incoming_name">Name</Label>
-                        <Input id="incoming_name" v-model="incomingForm.name" placeholder="GitHub – acme/tools" autocomplete="off" />
-                        <InputError :message="incomingForm.errors.name" />
-                    </div>
-
-                    <div class="grid gap-2">
-                        <Label for="incoming_provider">Provider</Label>
-                        <SearchableSelect
-                            id="incoming_provider"
-                            v-model="incomingForm.provider"
-                            :options="[
-                                { value: 'github', label: 'GitHub' },
-                                { value: 'gitlab', label: 'GitLab' },
-                                { value: 'gitea', label: 'Gitea' },
-                                { value: 'bitbucket', label: 'Bitbucket' },
-                            ]"
-                        />
-                        <InputError :message="incomingForm.errors.provider" />
-                    </div>
-
-                    <p class="text-xs text-muted-foreground">
-                        Nach dem Anlegen werden URL und Secret einmalig angezeigt — trage beides im Git-Host als Webhook ein.
-                    </p>
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" @click="incomingDialogOpen = false">Abbrechen</Button>
-                        <Button type="submit" :disabled="incomingForm.processing">Anlegen</Button>
-                    </DialogFooter>
-                </form>
-            </DialogContent>
-        </Dialog>
     </AppLayout>
 </template>
