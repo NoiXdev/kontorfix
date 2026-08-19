@@ -3,25 +3,25 @@
 namespace App\Providers;
 
 use App\Services\Mail\MailManager;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\ServiceProvider;
-use Throwable;
 
 class MailServiceProvider extends ServiceProvider
 {
+    public function register(): void
+    {
+        // Mirrors StorageServiceProvider: the "already applied" flag has to be shared.
+        $this->app->singleton(MailManager::class);
+    }
+
     public function boot(): void
     {
-        // Mirrors StorageServiceProvider: the table is absent during the very first
-        // `migrate` run (and while artisan boots against an empty DB), so a missing
-        // table must not be fatal — the .env config stays in effect until then.
-        try {
-            if (! Schema::hasTable('mail_settings')) {
-                return;
-            }
-        } catch (Throwable) {
-            return;
-        }
-
-        app(MailManager::class)->apply();
+        // Same reasoning as StorageServiceProvider: applying the persisted settings at
+        // boot put a database round-trip into every application boot, and it silently
+        // overrode the environment-configured mailer before anyone asked to send
+        // anything. Laravel resolves `mail.manager` on the first send (the `mailer`
+        // binding goes through it too), which is exactly when the settings matter.
+        $this->app->resolving('mail.manager', function ($manager, $app): void {
+            $app->make(MailManager::class)->applyPersisted();
+        });
     }
 }

@@ -3,11 +3,50 @@
 namespace App\Services\Storage;
 
 use App\Models\StorageSetting;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class StorageManager
 {
+    /**
+     * Whether the persisted disk configuration has already replaced the one from
+     * config/filesystems.php in this container.
+     */
+    private bool $applied = false;
+
+    /**
+     * Puts the operator's stored disk configuration in front of the file-based default.
+     *
+     * Runs on the first filesystem resolution rather than at boot (see
+     * StorageServiceProvider) and at most once per container: the probe in testConfig()
+     * deliberately installs a *different* config and would otherwise have it overwritten
+     * by this the moment it reaches for the disk.
+     *
+     * A missing table is not an error — during the very first `migrate` there is nothing
+     * to read yet, and the config/filesystems.php default has to stay in effect.
+     */
+    public function applyPersisted(): void
+    {
+        if ($this->applied) {
+            return;
+        }
+
+        // Set before the first query: resolving the filesystem from inside this callback
+        // would otherwise re-enter it, because the singleton is not cached yet.
+        $this->applied = true;
+
+        try {
+            if (! Schema::hasTable('storage_settings')) {
+                return;
+            }
+        } catch (Throwable) {
+            return;
+        }
+
+        config(['filesystems.disks.artifacts' => $this->diskConfig()]);
+    }
+
     public function current(): StorageSetting
     {
         return StorageSetting::current();
@@ -62,6 +101,10 @@ class StorageManager
      */
     public function testConfig(array $config): array
     {
+        // Claim the one-shot application first, so reaching for the disk below does not
+        // trigger it and overwrite the very config being probed.
+        $this->applyPersisted();
+
         try {
             config(['filesystems.disks.artifacts' => $config]);
             Storage::forgetDisk('artifacts');

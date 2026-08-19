@@ -202,3 +202,35 @@ it('denies mail settings to a non-operator admin', function () {
 
     $this->actingAs($outsider)->get('/admin/mail')->assertForbidden();
 });
+
+// canDeliver() runs before anything is sent, at a point where the persisted settings
+// may not have reached the running config yet — they are applied when Laravel's mail
+// manager is first resolved. It therefore reads the setting itself, and must not
+// mutate config or the settings table on the way.
+
+it('reports deliverability from the persisted transport, not the running config', function () {
+    MailSetting::query()->delete();
+    MailSetting::query()->create(['mailer' => 'smtp']);
+    config(['mail.default' => 'log']);
+
+    expect(app(MailManager::class)->canDeliver())->toBeTrue()
+        ->and(config('mail.default'))->toBe('log');
+});
+
+it('falls back to the configured mailer when nothing is persisted', function () {
+    MailSetting::query()->delete();
+
+    config(['mail.default' => 'smtp']);
+    expect(app(MailManager::class)->canDeliver())->toBeTrue();
+
+    config(['mail.default' => 'log']);
+    expect(app(MailManager::class)->canDeliver())->toBeFalse();
+});
+
+it('does not create a mail settings row just to answer whether it can deliver', function () {
+    MailSetting::query()->delete();
+
+    app(MailManager::class)->canDeliver();
+
+    expect(MailSetting::query()->count())->toBe(0);
+});

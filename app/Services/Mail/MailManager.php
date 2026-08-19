@@ -4,10 +4,45 @@ namespace App\Services\Mail;
 
 use App\Models\MailSetting;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class MailManager
 {
+    /** Whether the persisted settings have already been applied in this container. */
+    private bool $applied = false;
+
+    /**
+     * Puts the operator's stored mail configuration in front of the one from .env.
+     *
+     * Runs on the first resolution of Laravel's mail manager rather than at boot (see
+     * App\Providers\MailServiceProvider) and at most once per container, so that
+     * sendTest() can install a probe configuration without this overwriting it.
+     *
+     * A missing table is not an error: until the first `migrate` there is nothing to
+     * read, and the .env configuration has to stay in effect.
+     */
+    public function applyPersisted(): void
+    {
+        if ($this->applied) {
+            return;
+        }
+
+        // Set before the first query: sending from inside this callback would otherwise
+        // re-enter it, because the mail manager is not cached yet.
+        $this->applied = true;
+
+        try {
+            if (! Schema::hasTable('mail_settings')) {
+                return;
+            }
+        } catch (Throwable) {
+            return;
+        }
+
+        $this->apply();
+    }
+
     public function current(): MailSetting
     {
         return MailSetting::current();
@@ -78,7 +113,21 @@ class MailManager
      */
     public function canDeliver(): bool
     {
-        return ! in_array((string) config('mail.default'), ['log', 'array', 'null', ''], true);
+        // Read straight from the setting rather than from the running config. The check
+        // happens before anything is sent, so the persisted settings may not have been
+        // applied yet (they are applied when Laravel's mail manager is first resolved);
+        // applying them here instead would make a question mutate the configuration and
+        // overwrite a transport the caller deliberately selected.
+        //
+        // `first()`, not `current()`: an instance that has never opened the mail settings
+        // has no row, and answering "can we deliver?" must not create one. A blank or
+        // absent setting means the .env-configured transport is in effect — the same
+        // fallback configFor() applies.
+        $persisted = MailSetting::query()->first()?->mailer;
+
+        $mailer = filled($persisted) ? (string) $persisted : (string) config('mail.default');
+
+        return ! in_array($mailer, ['log', 'array', 'null', ''], true);
     }
 
     /**
@@ -114,6 +163,11 @@ class MailManager
      */
     public function sendTest(MailSetting $setting, string $recipient): array
     {
+        // Claim the one-shot application first: Mail::forgetMailers() below resolves the
+        // mail manager, which would otherwise apply the persisted settings on top of the
+        // probe configuration.
+        $this->applyPersisted();
+
         try {
             config($this->configFor($setting));
             // The mailer is resolved once per manager instance and caches the
