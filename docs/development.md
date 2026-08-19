@@ -321,6 +321,33 @@ Neither of these is visible from `Index.vue` alone. Grep what a controller's `in
 then check every consumer — the page's `<script setup>` *and* the test suite — before
 deciding a prop is dead.
 
+### The `as`-prop trap: a component silently rendering the wrong element
+
+The symptom is a component that renders as a `<div>` instead of the `<button>` or `<a>` it was
+supposed to be — it can still look right and even hover right, but it isn't keyboard reachable,
+isn't announced correctly, and a `<div type="submit">` inside a form takes the click and
+submits nothing. Nothing errors. `Button`, both sidebar menu buttons
+(`SidebarMenuButtonChild.vue`, `SidebarMenuAction.vue`), `SidebarMenuSubButton` and
+`BreadcrumbLink` all did exactly this at once on this branch — every form in the application
+was unsubmittable — and all seven gates, including the strict type check, stayed green through
+it. It was found only by checking the live DOM in a real browser.
+
+The cause is `withDefaults(defineProps<Props>(), { as: 'button' })` where `Props` extends an
+imported type such as radix-vue's `PrimitiveProps`: the Vue SFC compiler cannot resolve an
+imported base type into runtime props, so `as` is never actually declared, `withDefaults` has
+no prop to apply its default to, and radix's `Primitive` silently falls back to its own default
+element instead. The rule: put the default in the **template**, not in `withDefaults` —
+
+```vue
+<Primitive :as="as ?? 'button'" ... />
+```
+
+— which works regardless of whether the compiler generated a runtime default for `as`.
+`SidebarGroupLabel` and `SidebarGroupAction` are deliberately left without either kind of
+default: a `div` is genuinely their intended element, not a fallback. No gate catches this
+class of bug — a new component that picks its element via an `as` prop should be clicked once
+in a real browser before being trusted.
+
 ## Tenancy & role model
 
 - **Operator invariant (security-critical):** the privileged roles `admin`/`maintainer`
