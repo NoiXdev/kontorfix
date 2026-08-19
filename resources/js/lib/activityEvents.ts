@@ -44,3 +44,20 @@ export function eventClass(event: string | null | undefined): string {
 
     return EVENT_CLASSES[event] ?? DEFAULT_EVENT_CLASS;
 }
+
+/**
+ * The description, for the rare entry whose description says something the label does not.
+ *
+ * None of the logged models set a description of their own, so Spatie writes the event name
+ * into it — printing label and description side by side would put "Aktualisiert updated" on
+ * every row, reintroducing the raw English word `eventLabel` exists to replace. `null` means
+ * the label already covers it, including the no-event case where the label *is* the
+ * description. A custom description added later shows up.
+ */
+export function extraDescription(event: string | null | undefined, description: string | null | undefined): string | null {
+    if (!event || !description || description === event) {
+        return null;
+    }
+
+    return description;
+}

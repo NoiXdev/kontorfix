@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ActivityList from '@/components/kontorfix/ActivityList.vue';
+import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
@@ -462,7 +462,7 @@ useOperatorChannel({
 
                 <TabsContent value="aktivitaet">
                     <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                        <ActivityList :activities="props.activities" />
+                        <ActivityTimeline :activities="props.activities" compact />
                     </div>
                 </TabsContent>
             </Tabs>

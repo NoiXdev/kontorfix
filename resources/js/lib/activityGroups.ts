@@ -98,3 +98,20 @@ export function groupByDay(entries: ActivityEntry[], now: Date = new Date()): Ac
 
     return groups;
 }
+
+/**
+ * The `HH:MM` an entry was logged at, or `—` when it carries no timestamp.
+ *
+ * Read straight out of the `Y-m-d H:i:s` string rather than through `Date`, so the time
+ * shown is the one `groupByDay` grouped on: that reading treats the value as local
+ * wall-clock time, and the string carries no offset for either to reinterpret. Going
+ * through `Date` here would put an entry under `Heute` at a time from another day the
+ * moment the two readings disagree.
+ */
+export function timeOfDay(exact: string | null | undefined): string {
+    if (!exact || exact.length < 16) {
+        return '—';
+    }
+
+    return exact.slice(11, 16);
+}

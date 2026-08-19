@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByDay, type ActivityEntry } from './activityGroups';
+import { groupByDay, timeOfDay, type ActivityEntry } from './activityGroups';
 
 const at = (id: number, exact: string): ActivityEntry => ({
     id,
@@ -56,5 +56,29 @@ describe('groupByDay', () => {
 
     it('returns nothing for no entries', () => {
         expect(groupByDay([], now)).toEqual([]);
+    });
+});
+
+describe('timeOfDay', () => {
+    it('reads the hour and minute out of the exact timestamp', () => {
+        expect(timeOfDay('2026-08-19 09:05:00')).toBe('09:05');
+        expect(timeOfDay('2026-08-19 23:59:59')).toBe('23:59');
+    });
+
+    it('does not shift the time the way a Date parse would', () => {
+        // The grouping reads the same string as local wall-clock time. If this went through
+        // `Date` in a UTC-offset environment, an entry could sit under `Heute` showing a
+        // time from the previous day.
+        const exact = '2026-08-19 00:30:00';
+
+        expect(timeOfDay(exact)).toBe('00:30');
+        expect(groupByDay([{ ...at(1, exact) }], now)[0].label).toBe('Heute');
+    });
+
+    it('marks a missing or unusable timestamp rather than slicing garbage out of it', () => {
+        expect(timeOfDay(null)).toBe('—');
+        expect(timeOfDay(undefined)).toBe('—');
+        expect(timeOfDay('')).toBe('—');
+        expect(timeOfDay('2026-08-19')).toBe('—');
     });
 });

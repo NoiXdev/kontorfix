@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
-import ActivityList from '@/components/kontorfix/ActivityList.vue';
+import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
@@ -627,7 +627,7 @@ async function copyToken() {
 
                 <TabsContent value="aktivitaet">
                     <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                        <ActivityList :activities="props.activities" />
+                        <ActivityTimeline :activities="props.activities" compact />
                     </div>
                 </TabsContent>
             </Tabs>

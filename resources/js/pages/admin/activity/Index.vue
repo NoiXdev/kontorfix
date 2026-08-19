@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import DataTable from '@/components/kontorfix/DataTable.vue';
+import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
@@ -45,9 +44,10 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Aktivität', href: '/admin/acti
 
 const logFilter = ref(props.filters.log ?? '');
 
-// Sort/direction are not among the refs this filter bar owns — they live in `table`
-// below — so they are read back from the current URL rather than reset, or changing the
-// log-name filter while a sort is active would silently drop it back to the default order.
+// Sort/direction are not among the refs this filter bar owns — the controller's whitelist
+// decides them and they arrive in the URL — so they are read back from the current URL
+// rather than reset, or changing the log-name filter while a sort is active would silently
+// drop it back to the default order.
 function currentSort(): { sort: string | undefined; direction: string | undefined } {
     const current = new URLSearchParams(window.location.search);
     return { sort: current.get('sort') || undefined, direction: current.get('direction') || undefined };
@@ -75,40 +75,6 @@ function clearScope() {
 }
 
 const logOptions = [{ value: '', label: 'Alle Bereiche' }, ...props.logNames.map((n) => ({ value: n, label: n }))];
-
-// This listing paginates (30/page), so sorting the current page client-side would only
-// reorder the 30 rows already on it — page 2 would keep entries that belong on page 1. The
-// column whitelist and the actual ordering live in ActivityController::index (server-side);
-// mode: 'server' tells useTableState to hand back `activities.data` untouched instead of
-// re-sorting it. `causer` and `subject` are relations, not plain columns, so they are not
-// sortable here — the same reason the controller leaves them out of its whitelist.
-const columns: ColumnDef<Activity>[] = [
-    { key: 'created_at', label: 'Zeit' },
-    { key: 'log_name', label: 'Bereich' },
-    { key: 'description', label: 'Ereignis' },
-    { key: 'subject', label: 'Objekt', sortable: false },
-    { key: 'causer', label: 'Von', sortable: false },
-    { key: 'changes', label: 'Änderungen', sortable: false },
-];
-
-const table = useTableState<Activity>({
-    rows: () => props.activities.data,
-    columns,
-    mode: 'server',
-    defaultSort: props.filters.sort ? { key: props.filters.sort, direction: props.filters.direction } : undefined,
-});
-
-function pretty(value: unknown): string {
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
-}
-
-function hasChanges(a: Activity): boolean {
-    return a.changes && Object.keys(a.changes).length > 0;
-}
 </script>
 
 <template>
@@ -133,35 +99,9 @@ function hasChanges(a: Activity): boolean {
                 Gefiltert auf ein bestimmtes Objekt / einen Nutzer.
             </div>
 
-            <DataTable :columns="columns" :state="table" :show-filter-bar="false" empty-message="Noch keine Aktivität protokolliert.">
-                <template #default="{ rows }">
-                    <tr
-                        v-for="a in rows"
-                        :key="a.id"
-                        class="border-b border-sidebar-border/70 align-top last:border-0 dark:border-sidebar-border"
-                    >
-                        <td class="px-4 py-3 text-muted-foreground" :title="a.created_at_exact ?? ''">{{ a.created_at }}</td>
-                        <td class="px-4 py-3">{{ a.log_name }}</td>
-                        <td class="px-4 py-3">{{ a.event ?? a.description }}</td>
-                        <td class="px-4 py-3">
-                            <span v-if="a.subject_type"
-                                >{{ a.subject_type }}<span v-if="a.subject_label"> · {{ a.subject_label }}</span></span
-                            >
-                            <span v-else class="text-muted-foreground">—</span>
-                        </td>
-                        <td class="px-4 py-3">{{ a.causer ?? 'System' }}</td>
-                        <td class="px-4 py-3">
-                            <details v-if="hasChanges(a)">
-                                <summary class="cursor-pointer text-muted-foreground">anzeigen</summary>
-                                <pre
-                                    class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border"
-                                    >{{ pretty(a.changes) }}</pre>
-                            </details>
-                            <span v-else class="text-muted-foreground">—</span>
-                        </td>
-                    </tr>
-                </template>
-            </DataTable>
+            <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                <ActivityTimeline :activities="props.activities.data" show-subject />
+            </div>
 
             <!-- Pagination -->
             <div v-if="props.activities.links.length > 3" class="flex flex-wrap gap-1">
