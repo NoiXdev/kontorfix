@@ -2,6 +2,7 @@
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
@@ -15,13 +16,13 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { getInitials } from '@/composables/useInitials';
-import type { BreadcrumbItem, NavItem, SharedData } from '@/types';
+import type { BreadcrumbItemType, NavItem, SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { BookOpen, Folder, LayoutGrid, Menu, Search } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 interface Props {
-    breadcrumbs?: BreadcrumbItem[];
+    breadcrumbs?: BreadcrumbItemType[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -182,7 +183,23 @@ const rightNavItems: NavItem[] = [
 
         <div v-if="props.breadcrumbs.length > 1" class="flex w-full border-b border-sidebar-border/70">
             <div class="mx-auto flex h-12 w-full items-center justify-start px-4 text-neutral-500 md:max-w-7xl">
-                <Breadcrumbs :breadcrumbs="breadcrumbs" />
+                <Breadcrumb>
+                    <BreadcrumbList>
+                        <template v-for="(item, index) in breadcrumbs" :key="index">
+                            <BreadcrumbItem>
+                                <template v-if="index === breadcrumbs.length - 1">
+                                    <BreadcrumbPage>{{ item.title }}</BreadcrumbPage>
+                                </template>
+                                <template v-else>
+                                    <BreadcrumbLink :href="item.href">
+                                        {{ item.title }}
+                                    </BreadcrumbLink>
+                                </template>
+                            </BreadcrumbItem>
+                            <BreadcrumbSeparator v-if="index !== breadcrumbs.length - 1" />
+                        </template>
+                    </BreadcrumbList>
+                </Breadcrumb>
             </div>
         </div>
     </div>
