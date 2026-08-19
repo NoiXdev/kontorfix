@@ -13,8 +13,9 @@
  *
  * The matcher below implements the subset of `.dockerignore` syntax this file uses —
  * segment-wise glob matching where a pattern that matches a path's leading segments
- * excludes everything beneath it. Negations are not supported, so the test asserts the
- * file contains none; add support here before adding a `!` line there.
+ * excludes everything beneath it, plus `**` for a run of zero or more segments.
+ * Negations are not supported, so the test asserts the file contains none; add support
+ * here before adding a `!` line there.
  */
 function dockerignorePatterns(): array
 {
@@ -26,23 +27,53 @@ function dockerignorePatterns(): array
     ));
 }
 
+/**
+ * Match a pattern against the *leading* segments of a path. Consuming every pattern
+ * segment is a match whatever remains of the path, because excluding a directory
+ * excludes its whole subtree.
+ *
+ * `**` stands for a run of zero or more segments, so the two lists cannot be walked by
+ * one shared index — this tries each split point instead. An earlier version compared
+ * segment `$i` to segment `$i`, so the colocated-test rule matched only at the single
+ * depth where its `**` happened to line up, and silently missed every other depth.
+ *
+ * @param  list<string>  $patternSegments
+ * @param  list<string>  $pathSegments
+ */
+function matchesLeadingSegments(array $patternSegments, array $pathSegments): bool
+{
+    while ($patternSegments !== []) {
+        $segment = array_shift($patternSegments);
+
+        if ($segment === '**') {
+            for ($consumed = 0; $consumed <= count($pathSegments); $consumed++) {
+                if (matchesLeadingSegments($patternSegments, array_slice($pathSegments, $consumed))) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if ($pathSegments === []) {
+            return false;
+        }
+
+        if (! fnmatch($segment, array_shift($pathSegments), FNM_PATHNAME)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function entersImage(string $path): bool
 {
     foreach (dockerignorePatterns() as $pattern) {
-        $patternSegments = explode('/', trim($pattern, '/'));
-        $pathSegments = explode('/', trim($path, '/'));
-
-        if (count($patternSegments) > count($pathSegments)) {
-            continue;
-        }
-
-        $matches = true;
-        foreach ($patternSegments as $i => $segment) {
-            if (! fnmatch($segment, $pathSegments[$i], FNM_PATHNAME)) {
-                $matches = false;
-                break;
-            }
-        }
+        $matches = matchesLeadingSegments(
+            explode('/', trim($pattern, '/')),
+            explode('/', trim($path, '/')),
+        );
 
         if ($matches) {
             return false;
@@ -99,10 +130,15 @@ it('keeps developer tooling, internal notes and credentials out of the image', f
         'node_modules/vue/package.json',
         'vendor/autoload.php',
         'public/build/manifest.json',
-        // The JS test runner's config and a test file it points at — drives a test run
-        // that never happens inside the image (the asset stage only runs `vite build`).
+        // The JS test runner's config and the test files it points at — they drive a test
+        // run that never happens inside the image (the asset stage only runs `vite build`).
+        // The three depths are the point: their pattern's `**` stands for a run of zero or
+        // more directories, and a matcher that treated it as exactly one would still pass
+        // on the real file while letting a test moved one level in or out slip through.
         'vitest.config.ts',
+        'resources/js/shallow.test.ts',
         'resources/js/composables/useTableState.test.ts',
+        'resources/js/deeply/nested/somewhere/else.test.ts',
     ];
 
     foreach ($mustNotShip as $path) {
@@ -122,6 +158,9 @@ it('still ships everything the image and the asset build need', function () {
         'public/index.php',
         'routes/web.php',
         'resources/js/app.ts',
+        // The source file sitting next to a colocated test, pinning that the `**` rule
+        // above stops at `*.test.ts` instead of swallowing the directory it lives in.
+        'resources/js/composables/useTableState.ts',
         'resources/views/app.blade.php',
         'docker/entrypoint.sh',
         'package.json',
