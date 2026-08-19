@@ -49,6 +49,30 @@ ddev exec npm run lint                    # ESLint
 ddev exec npm run build                   # Frontend build
 ```
 
+### Test isolation
+
+The suite gives every checkout its own Postgres database and its own temp directory,
+both derived from the working directory (`tests/bootstrap.php`, `Tests\Support\TestDatabase`,
+`Tests\Support\TestTempDir`). The database is created on first use, so a fresh clone or
+git worktree needs no setup step.
+
+This is load-bearing, not tidiness. `RefreshDatabase` runs `migrate:fresh` once per
+process; when two checkouts shared the one `testing` database, two suites running at the
+same time deadlocked each other's migration (`SQLSTATE[40P01]`), leaving a half-built
+schema behind — every later test that touched a dropped table then failed with
+`42P01 relation … does not exist`, in whichever files the migration happened to die.
+The fixtures had the same problem in `/tmp`: the cleanups glob `kfx-fixture-*`, which
+matched every checkout's repositories.
+
+Two consequences worth knowing:
+
+- Set `DB_DATABASE` in the environment to override the derived name — CI does this, so it
+  runs against the database its service container provisions.
+- Each worktree leaves a `testing_<slug>_<hash>` database behind. Drop the stale ones with
+  `ddev exec psql -h db -U db -d postgres -c 'drop database <name>'` when a worktree goes
+  away. Two suites started from the *same* directory still share a database; run them from
+  separate checkouts, or give one an explicit `DB_DATABASE`.
+
 ## Directory layout (overview)
 
 - `app/Http/Controllers/{Registry,Api/V1,Admin,Portal,Auth,Settings}` — endpoints per area.

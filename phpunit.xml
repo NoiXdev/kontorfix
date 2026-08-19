@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
-         bootstrap="vendor/autoload.php"
+         bootstrap="tests/bootstrap.php"
          colors="true"
 >
     <testsuites>
@@ -25,7 +25,10 @@
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
         <env name="DB_CONNECTION" value="pgsql"/>
-        <env name="DB_DATABASE" value="testing"/>
+        <!-- DB_DATABASE is deliberately absent: tests/bootstrap.php derives one database
+             per checkout, so the main clone and a git worktree cannot run migrate:fresh
+             against the same schema. Set DB_DATABASE in the environment (as CI does) to
+             override that. See Tests\Support\TestDatabase. -->
         <!-- The git fixtures are local bare repos cloned over file://. Production ships
              https,ssh; the tests that assert the scheme gate reset it to that default. -->
         <env name="KONTORFIX_VCS_ALLOWED_SCHEMES" value="https,ssh,file"/>
