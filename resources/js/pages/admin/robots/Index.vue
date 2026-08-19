@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -211,7 +212,7 @@ function roleLabel(role: string) {
                 </Button>
 
                 <label class="flex items-start gap-2 text-sm sm:col-span-full">
-                    <input type="checkbox" v-model="createForm.is_super_admin" class="mt-1" />
+                    <Switch v-model="createForm.is_super_admin" class="mt-1" />
                     <span>
                         Global (Super-Admin)
                         <span class="block text-xs text-muted-foreground">

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
@@ -154,7 +155,9 @@ const form = useForm({
     group_ids: [] as string[],
 });
 
-// Clearing the private toggle discards any entered token/credential.
+// Clearing the private toggle discards any entered token/credential. `Switch` has no
+// `change` event of its own — it only updates `form.is_private` — so this now runs off a
+// watcher on that value instead of the old `<input type="checkbox" @change="...">`.
 function onPrivateToggle() {
     if (!form.is_private) {
         form.repository_token = '';
@@ -162,6 +165,8 @@ function onPrivateToggle() {
         resetProbe();
     }
 }
+
+watch(() => form.is_private, onPrivateToggle);
 
 // The modes this package type actually allows, per PackageSourceMode::allowedFor() on the
 // server — the single source of truth. Composer has exactly one (git), npm exactly one
@@ -505,7 +510,7 @@ const table = useTableState<PackageRow>({
                         </div>
 
                         <label class="flex items-center gap-2 text-sm">
-                            <input type="checkbox" v-model="form.is_private" class="size-4 rounded border-input" @change="onPrivateToggle" />
+                            <Switch v-model="form.is_private" />
                             Privates Repository (Token nötig)
                         </label>
 

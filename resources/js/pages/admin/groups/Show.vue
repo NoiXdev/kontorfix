@@ -8,6 +8,7 @@ import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -316,12 +317,12 @@ async function copyToken() {
                             </div>
 
                             <label class="flex items-center gap-2 text-sm">
-                                <input v-model="form.public" type="checkbox" class="size-4 rounded border-input" />
+                                <Switch v-model="form.public" />
                                 Öffentlich (ohne Token lesbar)
                             </label>
 
                             <label class="flex items-start gap-2 text-sm">
-                                <input v-model="form.portal_enabled" type="checkbox" class="mt-1 size-4 rounded border-input" />
+                                <Switch v-model="form.portal_enabled" class="mt-1" />
                                 <span>
                                     Im Kundenportal als Registry anzeigen
                                     <span class="block text-xs text-muted-foreground">

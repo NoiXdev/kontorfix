@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Check, LoaderCircle, Send } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
@@ -306,7 +307,7 @@ function submit() {
                     </div>
 
                     <div class="flex items-center gap-2">
-                        <input id="registry_public" v-model="form.registry_public" type="checkbox" class="size-4 rounded border-input" />
+                        <Switch id="registry_public" v-model="form.registry_public" />
                         <Label for="registry_public">Öffentlich lesbar (ohne Token)</Label>
                     </div>
                 </template>
@@ -468,12 +469,7 @@ function submit() {
                         </div>
 
                         <div class="flex items-center gap-2">
-                            <input
-                                id="storage_use_path_style"
-                                v-model="form.storage_use_path_style"
-                                type="checkbox"
-                                class="size-4 rounded border-input"
-                            />
+                            <Switch id="storage_use_path_style" v-model="form.storage_use_path_style" />
                             <Label for="storage_use_path_style">Path-Style-Endpoint verwenden</Label>
                         </div>
                     </template>

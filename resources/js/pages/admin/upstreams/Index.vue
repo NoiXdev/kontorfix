@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -361,7 +362,7 @@ function destroyUpstream(id: string) {
                             :placeholder="editingHasAuth ? 'Leer lassen, um den bestehenden Token zu behalten' : 'für private Upstreams'"
                         />
                         <label v-if="editingHasAuth" class="flex items-center gap-2 text-sm text-muted-foreground">
-                            <input v-model="form.remove_auth_token" type="checkbox" class="rounded border-input" />
+                            <Switch v-model="form.remove_auth_token" />
                             Gespeicherten Token entfernen
                         </label>
                         <InputError :message="form.errors.auth_token" />
