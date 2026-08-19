@@ -2,11 +2,11 @@
 import InputError from '@/components/InputError.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Switch } from '@/components/ui/switch';
 import { useForm } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 
@@ -127,13 +127,13 @@ function close() {
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <Checkbox id="group-public" v-model:model-value="form.public" />
+                    <Switch id="group-public" v-model="form.public" />
                     <Label for="group-public" class="font-normal">Öffentlich zugänglich</Label>
                 </div>
                 <InputError :message="form.errors.public" />
 
                 <div class="flex items-start gap-2">
-                    <Checkbox id="group-portal" v-model:model-value="form.portal_enabled" class="mt-1" />
+                    <Switch id="group-portal" v-model="form.portal_enabled" class="mt-1" />
                     <Label for="group-portal" class="font-normal">
                         Im Kundenportal als Registry anzeigen
                         <span class="block text-xs text-muted-foreground">

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -316,7 +317,7 @@ useOperatorChannel({
                         </div>
 
                         <label class="flex items-center gap-2 text-sm">
-                            <input type="checkbox" v-model="sourceForm.is_private" class="size-4 rounded border-input" />
+                            <Switch v-model="sourceForm.is_private" />
                             Privates Repository (Token nötig)
                         </label>
 

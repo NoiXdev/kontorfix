@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, useForm, usePage } from '@inertiajs/vue3';
@@ -179,7 +180,7 @@ async function testConnection() {
                     </div>
 
                     <div class="flex items-center gap-2">
-                        <input id="use_path_style" v-model="form.use_path_style" type="checkbox" class="size-4 rounded border-input" />
+                        <Switch id="use_path_style" v-model="form.use_path_style" />
                         <Label for="use_path_style">Path-Style-Endpoint verwenden</Label>
                     </div>
                 </template>

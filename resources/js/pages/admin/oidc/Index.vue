@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -335,12 +336,12 @@ const badgeClasses = (on: boolean) =>
                     </div>
 
                     <div class="flex items-center gap-2">
-                        <input id="enabled" v-model="form.enabled" type="checkbox" class="size-4 rounded border-input" />
+                        <Switch id="enabled" v-model="form.enabled" />
                         <Label for="enabled">Aktiv</Label>
                     </div>
 
                     <div class="flex items-center gap-2">
-                        <input id="allow_registration" v-model="form.allow_registration" type="checkbox" class="size-4 rounded border-input" />
+                        <Switch id="allow_registration" v-model="form.allow_registration" />
                         <Label for="allow_registration">Selbstregistrierung erlauben</Label>
                     </div>
 

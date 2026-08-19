@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
@@ -54,7 +55,7 @@ function save() {
             <form class="max-w-2xl space-y-4 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border" @submit.prevent="save">
                 <h2 class="text-sm font-medium">Zugang</h2>
                 <label class="flex items-start gap-2 text-sm">
-                    <input v-model="form.registration_enabled" type="checkbox" class="mt-1 size-4 rounded border-input" />
+                    <Switch v-model="form.registration_enabled" class="mt-1" />
                     <span>
                         Selbst-Registrierung erlauben
                         <span class="block text-xs text-muted-foreground">

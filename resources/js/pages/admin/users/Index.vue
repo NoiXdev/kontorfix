@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
@@ -359,7 +360,7 @@ function destroyUser(id: string) {
                     </div>
 
                     <label class="flex items-start gap-2 rounded-md border border-sidebar-border/70 p-3 text-sm dark:border-sidebar-border">
-                        <input type="checkbox" v-model="form.is_super_admin" class="mt-1" />
+                        <Switch v-model="form.is_super_admin" class="mt-1" />
                         <span>
                             Super-Admin
                             <span class="block text-xs text-muted-foreground">
@@ -451,7 +452,7 @@ function destroyUser(id: string) {
                     </div>
 
                     <label class="flex items-start gap-2 rounded-md border border-sidebar-border/70 p-3 text-sm dark:border-sidebar-border">
-                        <input type="checkbox" v-model="editForm.is_super_admin" class="mt-1" />
+                        <Switch v-model="editForm.is_super_admin" class="mt-1" />
                         <span>
                             Super-Admin
                             <span class="block text-xs text-muted-foreground">
