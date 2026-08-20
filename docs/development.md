@@ -444,9 +444,23 @@ Two rules follow, and both have caught real mistakes here:
   left the check green. The same mistake in the detail dialog matched text that `JsonViewer`
   had rendered elsewhere on the page rather than the table under test.
 
-Also note that a naive `/\sonerror=/` matches the *escaped* text `&lt;img src=x
-onerror=alert(1)&gt;` and reports a handler that does not exist. Match the tag:
-`/<[a-z][^>]*\sonerror\s*=/`.
+Choosing the pattern is harder than it looks, and two attempts here were wrong.
+
+A naive `/\sonerror=/` matches the *escaped* text `&lt;img src=x onerror=alert(1)&gt;` and
+reports a handler that does not exist. The obvious repair, `/<[a-z][^>]*\sonerror\s*=/`,
+is also wrong: it holds for escaped payload in **text content**, but false-positives when
+the payload sits inside an **attribute value**. Escaped output contains no literal `>`, so
+`[^>]*` runs straight past the attribute boundary and reaches the inert `onerror=` inside
+the escaped string — which is how a correctly escaped `pypi:project-status-reason` meta tag
+was reported as an injection.
+
+Match something that cannot survive escaping at all — the tag name itself:
+
+```
+/<img\b/i          matches a live tag, never `&lt;img …&gt;`, in text or in an attribute
+```
+
+Pair it with the presence assertion: the escaped form appears, the live tag does not.
 
 **SSR renders what a control shows, never what it does.** Event handlers are stripped from
 the server render entirely, so a button wired to nothing produces byte-identical output to a
