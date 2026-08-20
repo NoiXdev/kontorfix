@@ -60,3 +60,24 @@ it('orders the newest failure first', function () {
 it('returns nothing for no events', function () {
     expect(DigestSummary::fold([]))->toBe([]);
 });
+
+it('breaks a within-group tie on identical occurred_at by letting the later-iterated event win', function () {
+    $lines = DigestSummary::fold([
+        evt('sync.failed', 'acme/demo', 'first seen', '2026-08-20 09:00:00'),
+        evt('sync.failed', 'acme/demo', 'seen again', '2026-08-20 09:00:00'),
+    ]);
+
+    expect($lines)->toHaveCount(1)
+        ->and($lines[0]->latestSummary)->toBe('seen again');
+});
+
+it('breaks a cross-group tie on identical occurred_at by first-appearance order', function () {
+    $lines = DigestSummary::fold([
+        evt('sync.failed', 'first-in-input', 'x', '2026-08-20 09:00:00'),
+        evt('sync.failed', 'second-in-input', 'y', '2026-08-20 09:00:00'),
+    ]);
+
+    expect($lines)->toHaveCount(2)
+        ->and($lines[0]->subjectLabel)->toBe('first-in-input')
+        ->and($lines[1]->subjectLabel)->toBe('second-in-input');
+});

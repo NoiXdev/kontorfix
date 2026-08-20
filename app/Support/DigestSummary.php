@@ -25,6 +25,11 @@ final readonly class DigestLine
  *
  * The grouping key is (type, subject): the same package failing to sync and failing to
  * reach a webhook are two different problems with two different fixes.
+ *
+ * Tie-breaking on identical `occurred_at` (plausible: `packages:resync` runs hourly) is
+ * "newest first" by iteration order, not by a secondary key: within a group `>=` lets the
+ * later-iterated event win the summary/timestamp, and across groups the equal-timestamp
+ * lines keep the input's first-appearance order (PHP's `usort` is stable since 8.0).
  */
 final class DigestSummary
 {
