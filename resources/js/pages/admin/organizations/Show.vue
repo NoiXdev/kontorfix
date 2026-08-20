@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
@@ -44,6 +45,7 @@ const props = defineProps<{
         name: string;
         slug: string;
         is_operator: boolean;
+        notification_cadence: string;
     };
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
@@ -66,6 +68,23 @@ function toggleRegistryType(type: string, on: boolean) {
 
 function saveRegistryTypes() {
     typesForm.put(route('admin.organizations.registry-types.update', props.organization.id), { preserveScroll: true });
+}
+
+const cadenceOptions = [
+    { value: 'hourly', label: 'Stündlich' },
+    { value: 'daily', label: 'Täglich' },
+    { value: 'off', label: 'Aus' },
+];
+
+// Cadence lives on the same `update()` route as the organization's name, so the current
+// name travels along unchanged rather than the form clobbering it with an empty value.
+const cadenceForm = useForm<{ name: string; notification_cadence: string }>({
+    name: props.organization.name,
+    notification_cadence: props.organization.notification_cadence,
+});
+
+function saveCadence() {
+    cadenceForm.put(route('admin.organizations.update', props.organization.id), { preserveScroll: true });
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -158,6 +177,26 @@ function detachMember(userId: string) {
                         Instanzweit sind aktuell keine Registry-Typen aktiviert.
                     </span>
                     <Button type="submit" :disabled="typesForm.processing" class="ml-auto">Speichern</Button>
+                </form>
+            </section>
+
+            <section class="flex flex-col gap-3">
+                <div>
+                    <h2 class="text-lg font-medium">Ausfall-Digest</h2>
+                    <p class="text-sm text-muted-foreground">
+                        Wie oft diese Organisation eine Sammel-Mail über neue Hintergrund-Fehlschläge erhält. „Aus“ stoppt jede Mail für diese
+                        Organisation, unabhängig davon, wie viele Empfänger eingetragen sind.
+                    </p>
+                </div>
+                <form
+                    class="flex flex-wrap items-end gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                    @submit.prevent="saveCadence"
+                >
+                    <div class="grid gap-2">
+                        <SearchableSelect v-model="cadenceForm.notification_cadence" class="w-48" :options="cadenceOptions" />
+                        <InputError :message="cadenceForm.errors.notification_cadence" />
+                    </div>
+                    <Button type="submit" :disabled="cadenceForm.processing" class="ml-auto">Speichern</Button>
                 </form>
             </section>
 
