@@ -17,8 +17,10 @@ class ComposerMetadataBuilder
     {
         $registryBaseUrl = rtrim($registryBaseUrl, '/');
 
+        $notice = $package->abandonmentNotice();
+
         $versions = $package->versions()->get()
-            ->map(function (PackageVersion $v) use ($package, $registryBaseUrl): array {
+            ->map(function (PackageVersion $v) use ($package, $registryBaseUrl, $notice): array {
                 // The tag's complete composer.json is passed through (like Packagist);
                 // name/version/dist/source are authoritatively overwritten by us, so
                 // a malicious tag can forge neither the dist URL nor the version.
@@ -42,6 +44,13 @@ class ComposerMetadataBuilder
                         'url' => CredentialUrl::redact($package->repository_url),
                         'reference' => $v->source_reference,
                     ];
+                }
+
+                // Composer reads this off each version entry. The minifier collapses it onto the
+                // first one; expansion restores it to all of them, which is how Packagist serves
+                // an abandoned package.
+                if ($notice !== null) {
+                    $entry['abandoned'] = $notice->composerValue();
                 }
 
                 return $entry;

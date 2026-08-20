@@ -84,3 +84,48 @@ it('overrides malicious dist, source and version keys from the stored composer.j
         ->and($v['dist']['url'])->toBe('https://registry.test/r/kadenz/dists/acme/demo/1.0.0.0.zip')
         ->and($v['source']['url'])->toBe('https://git.test/acme/demo.git');
 });
+
+it('omits abandoned entirely for a live package', function () {
+    $package = Package::factory()->create(['name' => 'acme/demo']);
+    PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
+
+    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+
+    $entries = $doc['packages'][$package->name];
+
+    foreach ($entries as $entry) {
+        expect($entry)->not->toHaveKey('abandoned');
+    }
+});
+
+it('carries the replacement onto every version after the deltas are expanded', function () {
+    $package = Package::factory()->create([
+        'name' => 'acme/demo',
+        'abandoned_at' => now(),
+        'replacement_package' => 'symfony/mailer',
+    ]);
+    foreach (['1.0.0.0' => 'v1.0.0', '1.1.0.0' => 'v1.1.0', '2.0.0.0' => 'v2.0.0'] as $norm => $pretty) {
+        PackageVersion::factory()->for($package)->create(['version' => $norm, 'version_pretty' => $pretty]);
+    }
+
+    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+
+    // Expand exactly the way Composer's MetadataMinifier does, so this asserts what a
+    // client sees rather than what we happened to build before minification.
+    $expanded = MetadataMinifier::expand($doc['packages'][$package->name]);
+
+    expect($expanded)->toHaveCount(3);
+    foreach ($expanded as $entry) {
+        expect($entry['abandoned'])->toBe('symfony/mailer');
+    }
+});
+
+it('emits a bare true when no replacement is named', function () {
+    $package = Package::factory()->create(['name' => 'acme/demo', 'abandoned_at' => now()]);
+    PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
+
+    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+    $expanded = MetadataMinifier::expand($doc['packages'][$package->name]);
+
+    expect($expanded[0]['abandoned'])->toBe(true);
+});
