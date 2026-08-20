@@ -17,6 +17,13 @@ return new class extends Migration
             // Delivery is a fact about this (event, recipient) pair: the constraint is what
             // makes a double-send structurally impossible rather than merely unlikely.
             $table->unique(['notification_event_id', 'notification_recipient_id']);
+
+            // The composite unique index above only serves lookups that lead with
+            // notification_event_id. PostgreSQL does not automatically index a foreign key
+            // column, so without this, deleting a recipient — or an organization, which
+            // cascades down to its recipients — sequentially scans this table to find the
+            // rows to cascade-delete.
+            $table->index('notification_recipient_id');
         });
     }
 

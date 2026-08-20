@@ -372,6 +372,47 @@ it('implements ShouldBeUnique so a slow-running instance cannot overlap a newly 
     expect(new SendNotificationDigest)->toBeInstanceOf(ShouldBeUnique::class);
 });
 
+// Finding 1: the bulk insert used to sit outside the per-recipient try/catch, so an insert
+// failure (a unique violation from a concurrent run, a connection blip, ...) propagated out
+// of digestFor() and aborted the whole handle() run for every organization not yet
+// processed — after mail had already gone out. This reproduces that race for real: while
+// $failingOrg's recipient's mail is "sending", a concurrent run wins and writes the exact
+// (event, recipient) delivery row this job is about to write itself, so this job's own
+// insert hits the unique constraint. $okOrg comes after $failingOrg in this run and must
+// still be processed rather than the whole run aborting.
+it('does not abort the run when a delivery insert throws: the mail already sent, and later organizations still get processed', function () {
+    $failingOrg = operatorOrgWithCadence('hourly');
+    $failingEvent = recordFailure($failingOrg, 'sync.failed', 'acme/broken');
+    $failingRecipient = subscriber($failingOrg, 'broken@example.test', ['sync.failed']);
+
+    $okOrg = operatorOrgWithCadence('hourly');
+    $okEvent = recordFailure($okOrg, 'sync.failed', 'acme/fine');
+    subscriber($okOrg, 'ok@example.test', ['sync.failed']);
+
+    Mail::shouldReceive('to')->andReturnUsing(function (string $email) use ($failingEvent, $failingRecipient) {
+        return tap(Mockery::mock(PendingMail::class), function ($pending) use ($email, $failingEvent, $failingRecipient) {
+            $pending->shouldReceive('send')->andReturnUsing(function () use ($email, $failingEvent, $failingRecipient) {
+                if ($email === 'broken@example.test') {
+                    NotificationEventDelivery::create([
+                        'notification_event_id' => $failingEvent->id,
+                        'notification_recipient_id' => $failingRecipient->id,
+                        'delivered_at' => now(),
+                    ]);
+                }
+
+                return null;
+            });
+        });
+    });
+
+    // Must complete without throwing: an insert failure for one recipient is not the
+    // caller's problem to handle, it is this job's problem to isolate and retry later.
+    (new SendNotificationDigest)->handle();
+
+    expect($okEvent->fresh()->notified_at)->not->toBeNull()
+        ->and($failingEvent->fresh()->notified_at)->toBeNull();
+});
+
 // Per-recipient-delivery brief, test 1. Two recipients subscribe to the same event; the
 // second's mailbox rejects delivery. The org-wide `whereNull('notified_at')` set that both
 // recipients used to share is exactly what let recipient A's success cost recipient B their

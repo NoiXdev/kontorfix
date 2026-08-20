@@ -13,9 +13,9 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Str;
 use Throwable;
 
 class SendNotificationDigest implements ShouldBeUnique, ShouldQueue
@@ -154,18 +154,56 @@ class SendNotificationDigest implements ShouldBeUnique, ShouldQueue
 
             // Written only after the send returned, one row per (event, recipient) pair.
             $rows = $theirs->map(fn (NotificationEventRecord $event): array => [
-                'id' => (string) Str::uuid(),
+                'id' => (string) (new NotificationEventDelivery)->newUniqueId(),
                 'notification_event_id' => $event->id,
                 'notification_recipient_id' => $recipient->id,
                 'delivered_at' => $deliveredAt,
             ])->all();
 
-            // Chunked well under PostgreSQL's ~65535 bind-parameter limit, matching the
-            // chunking below: $theirs is bounded by $pending (at most
-            // MAX_PENDING_PER_DIGEST rows), but a larger cap in the future should not have
-            // to remember to also raise this number.
-            foreach (array_chunk($rows, 1000) as $chunk) {
-                NotificationEventDelivery::insert($chunk);
+            try {
+                // This DB::transaction() wrapper is not decoration — do not remove it as
+                // "redundant" just because a single insert doesn't look like it needs one.
+                // On PostgreSQL, catching the QueryException below is not enough by itself:
+                // once one statement inside an open transaction fails, PostgreSQL marks that
+                // *entire* transaction aborted and refuses every further statement ("current
+                // transaction is aborted, commands ignored until end of transaction block")
+                // until it is rolled back — a plain try/catch around the insert does not
+                // undo that. Whenever this job runs inside an ambient transaction it did not
+                // open itself — RefreshDatabase wraps every test in exactly such a
+                // transaction, and any future caller could run handle() inside one of its
+                // own — that would poison every query for the rest of the run, including the
+                // very next recipient's insert and the org's last_digest_sent_at update, the
+                // instant one recipient's insert fails. Wrapping the insert in its own nested
+                // DB::transaction() gives PostgreSQL a SAVEPOINT to roll back to instead (via
+                // Laravel's automatic savepoint support for nested transactions), so only
+                // this recipient's insert is undone and the surrounding transaction — ours or
+                // an ambient one — stays healthy for everything that runs after it.
+                DB::transaction(function () use ($rows): void {
+                    // Chunked well under PostgreSQL's ~65535 bind-parameter limit,
+                    // matching the chunking below: $theirs is bounded by $pending (at
+                    // most MAX_PENDING_PER_DIGEST rows), but a larger cap in the future
+                    // should not have to remember to also raise this number.
+                    foreach (array_chunk($rows, 1000) as $chunk) {
+                        NotificationEventDelivery::insert($chunk);
+                    }
+                });
+            } catch (Throwable $e) {
+                // Mirrors the send's own isolation above: a unique violation from a
+                // concurrent run (ShouldBeUnique's lock is best-effort — $uniqueFor is a
+                // safety net, not a guarantee — and handle() is directly callable) or a
+                // connection blip must not propagate out of digestFor() and abort every
+                // organization not yet processed in this run. The mail has already gone
+                // out, so failing to record the delivery here means the next run will not
+                // see it as delivered and will mail this recipient the same digest again —
+                // a duplicate mail, not a silently dropped notification. That is the safe
+                // direction to fail in, so $deliveredTo is deliberately left unmarked below.
+                Log::error('Failed to record failure digest delivery', [
+                    'organization_id' => $organization->id,
+                    'recipient' => $recipient->email,
+                    'exception' => $e->getMessage(),
+                ]);
+
+                continue;
             }
 
             foreach ($theirs as $event) {
