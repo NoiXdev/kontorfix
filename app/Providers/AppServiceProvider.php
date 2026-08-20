@@ -5,8 +5,10 @@ namespace App\Providers;
 use App\Enums\UserRole;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
+use App\Events\WebhookDeliveryFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
 use App\Listeners\LogAuthenticationEvent;
+use App\Listeners\RecordNotificationEvent;
 use App\Models\User;
 use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Upstream\HostResolver;
@@ -79,6 +81,12 @@ class AppServiceProvider extends ServiceProvider
         // methods. Hence explicit registration instead of discovery.
         Event::listen(PackageSynced::class, [DispatchOutgoingWebhooks::class, 'onSynced']);
         Event::listen(PackageSyncFailed::class, [DispatchOutgoingWebhooks::class, 'onFailed']);
+
+        // Same shape, same reason: captures the failure the moment it happens, before
+        // `packages.sync_error` (or the webhook's own state) is overwritten by whatever
+        // runs next.
+        Event::listen(PackageSyncFailed::class, [RecordNotificationEvent::class, 'onSyncFailed']);
+        Event::listen(WebhookDeliveryFailed::class, [RecordNotificationEvent::class, 'onWebhookDeliveryFailed']);
 
         // Same shape, same reason: one listener, two event types, so discovery cannot
         // wire it. Without it a login brute force leaves no record whatsoever, and the
