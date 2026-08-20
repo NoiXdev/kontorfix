@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Compiles every .vue SFC under resources/js/components with
+ * Compiles every .vue SFC under resources/js with
  * @vue/compiler-sfc's parse + compileScript, and reports the runtime prop
  * names each component actually emits.
  *
@@ -36,10 +36,11 @@ const require = createRequire(import.meta.url);
 registerTS(() => require('typescript'));
 
 const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-// All components, not just components/ui: the project's own components under
-// components/kontorfix declare props the same way and are just as exposed to the
-// defect this checks for. Scoping to ui/ meant the gate silently skipped them.
-const defaultTarget = join(repoRoot, 'resources/js/components');
+// Every SFC under resources/js, not just components/. Pages declare props the same
+// way and are just as exposed to the defect this checks for; scoping to components/
+// meant an admin page's props were never inspected, and the gate reported green for
+// a file it had not opened. Two separate reviews caught that gap the hard way.
+const defaultTarget = join(repoRoot, 'resources/js');
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
