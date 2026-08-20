@@ -62,6 +62,29 @@ it('rejects a second recipient with the same address in the same organization', 
         ->assertSessionHasErrors('email');
 });
 
+it('allows the same address that already exists in a different organization', function () {
+    $otherOrg = Organization::factory()->create();
+    NotificationRecipient::create([
+        'organization_id' => $otherOrg->id,
+        'email' => 'shared@example.test',
+        'events' => [],
+        'enabled' => true,
+    ]);
+
+    $admin = notificationOperatorAdmin();
+
+    $this->actingAs($admin)
+        ->post(route('admin.notification-recipients.store'), [
+            'email' => 'shared@example.test',
+            'events' => ['sync.failed'],
+        ])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect();
+
+    expect(NotificationRecipient::where('email', 'shared@example.test')->count())->toBe(2)
+        ->and(NotificationRecipient::where('organization_id', $admin->organization_id)->where('email', 'shared@example.test')->exists())->toBeTrue();
+});
+
 it('rejects an event value that is not in the enum', function () {
     $admin = notificationOperatorAdmin();
 
