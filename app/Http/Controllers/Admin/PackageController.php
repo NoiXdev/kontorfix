@@ -93,6 +93,7 @@ class PackageController extends Controller
                 'sync_error' => $p->sync_error,
                 'groups_count' => $p->groups_count,
                 'synced_at' => $p->synced_at?->diffForHumans(),
+                'is_abandoned' => $p->isAbandoned(),
             ]);
 
         return Inertia::render('admin/packages/Index', [
@@ -416,7 +417,7 @@ class PackageController extends Controller
             'abandonment_reason' => $abandoned ? $request->validated('abandonment_reason') : null,
         ]);
 
-        return back()->with('success', $abandoned ? 'Paket als verwaist markiert.' : 'Abandonment-Markierung entfernt.');
+        return back()->with('success', $abandoned ? 'Paket als verwaist markiert.' : 'Markierung als verwaist entfernt.');
     }
 
     public function destroy(Package $package): RedirectResponse

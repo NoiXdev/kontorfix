@@ -25,6 +25,9 @@ class PackageResource extends JsonResource
             'sync_status' => $this->sync_status->value,
             'sync_error' => $this->sync_error,
             'synced_at' => $this->synced_at?->toIso8601String(),
+            'abandoned_at' => $this->abandoned_at?->toIso8601String(),
+            'replacement_package' => $this->replacement_package,
+            'abandonment_reason' => $this->abandonment_reason,
             'versions' => PackageVersionResource::collection($this->whenLoaded('versions')),
         ];
     }

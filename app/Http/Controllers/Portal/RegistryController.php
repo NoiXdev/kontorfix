@@ -113,6 +113,9 @@ class RegistryController extends Controller
                 'description' => $package->description,
                 'readme_html' => $package->readme_html,
                 'sync_status' => $package->sync_status->value,
+                'abandoned_at' => $package->abandoned_at?->toDateString(),
+                'replacement_package' => $package->replacement_package,
+                'abandonment_reason' => $package->abandonment_reason,
             ],
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,

@@ -36,10 +36,15 @@ const props = defineProps<{
         description: string | null;
         readme_html: string | null;
         sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
+        abandoned_at: string | null;
+        replacement_package: string | null;
+        abandonment_reason: string | null;
     };
     versions: VersionRow[];
     install: string;
 }>();
+
+const isAbandoned = computed(() => props.package.abandoned_at !== null);
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Registries', href: '/portal' },
@@ -90,6 +95,20 @@ function depCount(deps: Record<string, string>): number {
                     <span class="font-medium text-foreground">{{ props.registry.name }}</span>
                     <span class="ml-2 font-mono text-xs break-all">{{ props.registry.url }}</span>
                 </p>
+            </div>
+
+            <div
+                v-if="isAbandoned"
+                class="flex flex-col gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400"
+            >
+                <span>
+                    Dieses Paket ist seit {{ props.package.abandoned_at }} als verwaist markiert.
+                    <template v-if="props.package.replacement_package">
+                        Empfohlener Ersatz: <strong>{{ props.package.replacement_package }}</strong
+                        >.
+                    </template>
+                </span>
+                <span v-if="props.package.abandonment_reason">{{ props.package.abandonment_reason }}</span>
             </div>
 
             <section class="flex flex-col gap-3">

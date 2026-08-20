@@ -23,6 +23,7 @@ interface PackageRow {
     sync_error: string | null;
     groups_count: number;
     synced_at: string | null;
+    is_abandoned: boolean;
 }
 
 interface GroupOption {
@@ -249,7 +250,15 @@ const table = useTableState<PackageRow>({
                         class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                     >
                         <td class="px-4 py-3 font-mono">
-                            <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">{{ pkg.name }}</Link>
+                            <div class="flex items-center gap-2">
+                                <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">{{ pkg.name }}</Link>
+                                <span
+                                    v-if="pkg.is_abandoned"
+                                    class="inline-flex items-center rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-sans text-xs font-medium text-amber-700 dark:text-amber-400"
+                                >
+                                    verwaist
+                                </span>
+                            </div>
                         </td>
                         <td class="px-4 py-3"><TypeBadge :type="pkg.type" /></td>
                         <td class="px-4 py-3">
