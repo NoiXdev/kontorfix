@@ -190,6 +190,18 @@ it('declares the same version in the HTML representation', function () {
     expect($html)->toContain('<meta name="pypi:repository-version" content="1.1">');
 });
 
+it('declares the same version on the root index route', function () {
+    Storage::fake('artifacts');
+    [$group] = pythonRegistry();
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('<meta name="pypi:repository-version" content="1.1">');
+});
+
 it('downloads a stored distribution and counts the download', function () {
     Storage::fake('artifacts');
     [$group, $pkg] = pythonRegistry();

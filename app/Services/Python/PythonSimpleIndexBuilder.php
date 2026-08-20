@@ -14,6 +14,14 @@ use Illuminate\Support\Collection;
 class PythonSimpleIndexBuilder
 {
     /**
+     * The single source of truth for the Simple API version this builder claims to
+     * implement, shared by the JSON `meta.api-version` field and both HTML
+     * `pypi:repository-version` meta tags. Raise it only together with the fields the
+     * new version requires — see the note on `projectJson()`.
+     */
+    private const SIMPLE_API_VERSION = '1.1';
+
+    /**
      * The project detail page. `$baseUrl` is the registry root (…/r/{slug} or the custom
      * domain), used to build absolute file URLs.
      *
@@ -22,6 +30,7 @@ class PythonSimpleIndexBuilder
     public function projectHtml(Package $package, Collection $dists, string $baseUrl): string
     {
         $name = e(PythonName::normalize($package->name));
+        $apiVersion = self::SIMPLE_API_VERSION;
         $links = $dists->map(function (PythonDist $d) use ($package, $baseUrl): string {
             $href = e($this->fileUrl($package, $d, $baseUrl));
             $attrs = '';
@@ -38,7 +47,7 @@ class PythonSimpleIndexBuilder
         return <<<HTML
 <!DOCTYPE html>
 <html>
-  <head><meta name="pypi:repository-version" content="1.1"><title>Links for {$name}</title></head>
+  <head><meta name="pypi:repository-version" content="{$apiVersion}"><title>Links for {$name}</title></head>
   <body>
     <h1>Links for {$name}</h1>
 {$links}
@@ -61,7 +70,7 @@ HTML;
             // 1.3 (provenance) are optional and stay absent, which the specification permits.
             // The number is a claim about what this response contains — raise it only together
             // with the fields the version requires.
-            'meta' => ['api-version' => '1.1'],
+            'meta' => ['api-version' => self::SIMPLE_API_VERSION],
             'name' => PythonName::normalize($package->name),
             'versions' => $dists->pluck('version')->unique()->values()->all(),
             'files' => $dists->map(fn (PythonDist $d): array => array_filter([
@@ -83,6 +92,7 @@ HTML;
      */
     public function rootHtml(Collection $projectNames, string $baseUrl): string
     {
+        $apiVersion = self::SIMPLE_API_VERSION;
         $links = $projectNames->unique()->sort()->map(
             fn (string $n): string => '    <a href="'.e($baseUrl).'/simple/'.e($n).'/">'.e($n).'</a><br/>'
         )->implode("\n");
@@ -90,7 +100,7 @@ HTML;
         return <<<HTML
 <!DOCTYPE html>
 <html>
-  <head><meta name="pypi:repository-version" content="1.1"><title>Simple index</title></head>
+  <head><meta name="pypi:repository-version" content="{$apiVersion}"><title>Simple index</title></head>
   <body>
 {$links}
   </body>
