@@ -107,6 +107,10 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // guards against one being added later without the same care `packages/{package}` needed.
     Route::get('webhooks/create', [Admin\WebhookController::class, 'create'])->name('webhooks.create');
     Route::resource('webhooks', Admin\WebhookController::class)->only(['index', 'store', 'destroy']);
+    // Failure-digest recipients: same shape as outgoing webhooks — a per-organization
+    // subscriber with an events array — so the route order follows the same guard.
+    Route::get('notification-recipients/create', [Admin\NotificationRecipientController::class, 'create'])->name('notification-recipients.create');
+    Route::resource('notification-recipients', Admin\NotificationRecipientController::class)->only(['index', 'store', 'destroy']);
     // Incoming webhook endpoints (per-source secret + URL) and audit.
     Route::get('incoming-webhooks/create', [Admin\WebhookController::class, 'createIncoming'])->name('incoming-webhooks.create');
     Route::post('incoming-webhooks', [Admin\WebhookController::class, 'storeIncoming'])->name('incoming-webhooks.store');
