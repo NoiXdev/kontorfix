@@ -27,3 +27,22 @@ it('rewrites tarball urls and caches the raw packument', function () {
     app(NpmProxyService::class)->packument($group, $up, 'left-pad', 'https://registry.test/r/kadenz');
     Http::assertNothingSent();
 });
+
+it('passes through an upstream package own deprecated marker untouched', function () {
+    $group = Group::factory()->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Npm, 'url' => 'https://reg.test']);
+    Http::fake(['*/left-pad' => Http::response([
+        'name' => 'left-pad', 'dist-tags' => ['latest' => '1.0.0'],
+        'versions' => ['1.0.0' => [
+            'name' => 'left-pad', 'version' => '1.0.0',
+            'dist' => ['tarball' => 'https://reg.test/left-pad/-/left-pad-1.0.0.tgz', 'shasum' => 'x'],
+            'deprecated' => 'use string-pad instead',
+        ]],
+    ], 200)]);
+
+    $doc = app(NpmProxyService::class)->packument($group, $up, 'left-pad', 'https://registry.test/r/kadenz');
+
+    // The proxy is a pass-through for upstream's own signal: it must neither strip it
+    // nor overwrite it with a notice of our own.
+    expect($doc['versions']['1.0.0']['deprecated'])->toBe('use string-pad instead');
+});

@@ -50,3 +50,54 @@ it('overrides malicious name/version/dist from stored metadata', function () {
         ->and($doc['versions']['1.0.0']['version'])->toBe('1.0.0')
         ->and($doc['versions']['1.0.0']['dist']['tarball'])->toBe('https://registry.test/r/kadenz/safe/-/safe-1.0.0.tgz');
 });
+
+it('omits deprecated entirely for a live package', function () {
+    $package = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'thing']);
+    PackageVersion::factory()->for($package)->create(['version' => '1.0.0']);
+
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+
+    expect($doc['versions']['1.0.0'])->not->toHaveKey('deprecated');
+});
+
+it('puts the composed sentence on every version', function () {
+    $package = Package::factory()->create([
+        'type' => PackageType::Npm,
+        'name' => 'thing',
+        'abandoned_at' => now(),
+        'replacement_package' => '@scope/nachfolger',
+        'abandonment_reason' => 'Wird nicht mehr gepflegt.',
+    ]);
+    foreach (['1.0.0', '1.1.0'] as $v) {
+        PackageVersion::factory()->for($package)->create(['version' => $v]);
+    }
+
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+
+    foreach (['1.0.0', '1.1.0'] as $v) {
+        expect($doc['versions'][$v]['deprecated'])
+            ->toBe('Wird nicht mehr gepflegt. Bitte stattdessen @scope/nachfolger verwenden.');
+    }
+});
+
+it('uses the default sentence when only the switch is set', function () {
+    $package = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'thing', 'abandoned_at' => now()]);
+    PackageVersion::factory()->for($package)->create(['version' => '1.0.0']);
+
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+
+    expect($doc['versions']['1.0.0']['deprecated'])->toBe('Dieses Paket wird nicht mehr gepflegt.');
+});
+
+it('does not let a published manifest forge its own deprecation', function () {
+    $package = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'thing']);
+    PackageVersion::factory()->for($package)->create([
+        'version' => '1.0.0',
+        'metadata' => ['deprecated' => 'gefälschte Warnung'],
+    ]);
+
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+
+    // The registry decides this field, not the uploaded package.json.
+    expect($doc['versions']['1.0.0'])->not->toHaveKey('deprecated');
+});
