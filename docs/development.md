@@ -559,6 +559,25 @@ from the redirect instead would only trade the disclosure for a 401 at the mirro
 still naming the internal host. For a credentialled Python mirror there is currently no
 fallthrough; use a credential-free mirror URL, or mirror the projects locally.
 
+**The Simple API version number is a claim about the payload, not a free label.**
+`PythonSimpleIndexBuilder::SIMPLE_API_VERSION` is served as `meta.api-version` in the PEP 691
+JSON and as both `pypi:repository-version` HTML meta tags, and it must only be raised together
+with the fields the new version actually requires:
+
+- **1.1** requires the `versions` key and makes `size` mandatory on every file — both were
+  already unconditional here, which is why 1.1 was the starting point.
+- **1.2** (tracks) and **1.3** (provenance) are optional per the specification and are
+  deliberately absent — this registry has nothing to say about either yet.
+- **1.4** adds PEP 792's `project-status` object, always present with a `status` of `active` or
+  `deprecated` and, when deprecated, a `reason`. The JSON key is **`status`** despite PEP 792's
+  own prose saying `state` — PyPI's live responses and the normative PyPA Simple Repository API
+  specification both serve `status`, and that is what clients parse. The HTML representation
+  carries the same information as `pypi:project-status`/`pypi:project-status-reason` meta tags.
+  This registry never emits `archived` or `quarantined`, only `active`/`deprecated`: an
+  abandonment is exactly PEP 792's definition of `deprecated` (obsolete, possibly superseded),
+  not merely "no further updates expected" (`archived`) or a security incident
+  (`quarantined`).
+
 The lookup itself is one container binding, `App\Services\Upstream\HostResolver`, bound to
 `SystemHostResolver` in `AppServiceProvider::register()`. It is the single decision point
 of the address policy for every outbound sink, so it deliberately has no public setter —

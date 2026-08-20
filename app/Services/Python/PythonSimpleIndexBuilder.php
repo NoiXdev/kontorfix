@@ -19,7 +19,7 @@ class PythonSimpleIndexBuilder
      * `pypi:repository-version` meta tags. Raise it only together with the fields the
      * new version requires — see the note on `projectJson()`.
      */
-    private const SIMPLE_API_VERSION = '1.1';
+    private const SIMPLE_API_VERSION = '1.4';
 
     /**
      * The project detail page. `$baseUrl` is the registry root (…/r/{slug} or the custom
@@ -44,10 +44,16 @@ class PythonSimpleIndexBuilder
             return '    <a href="'.$href.'"'.$attrs.'>'.e($d->filename).'</a><br/>';
         })->implode("\n");
 
+        $status = $this->projectStatus($package);
+        $statusTags = '<meta name="pypi:project-status" content="'.e($status['status']).'">';
+        if (isset($status['reason'])) {
+            $statusTags .= '<meta name="pypi:project-status-reason" content="'.e($status['reason']).'">';
+        }
+
         return <<<HTML
 <!DOCTYPE html>
 <html>
-  <head><meta name="pypi:repository-version" content="{$apiVersion}"><title>Links for {$name}</title></head>
+  <head><meta name="pypi:repository-version" content="{$apiVersion}">{$statusTags}<title>Links for {$name}</title></head>
   <body>
     <h1>Links for {$name}</h1>
 {$links}
@@ -67,9 +73,10 @@ HTML;
     {
         return [
             // 1.1 adds the `versions` key and makes `size` mandatory per file; 1.2 (tracks) and
-            // 1.3 (provenance) are optional and stay absent, which the specification permits.
-            // The number is a claim about what this response contains — raise it only together
-            // with the fields the version requires.
+            // 1.3 (provenance) are optional and stay absent, which the specification permits;
+            // 1.4 (PEP 792) adds `project-status`, which is always present below. The number is
+            // a claim about what this response contains — raise it only together with the
+            // fields the version requires.
             'meta' => ['api-version' => self::SIMPLE_API_VERSION],
             'name' => PythonName::normalize($package->name),
             'versions' => $dists->pluck('version')->unique()->values()->all(),
@@ -82,7 +89,27 @@ HTML;
                 'upload-time' => $d->uploaded_at?->toIso8601String(),
                 'yanked' => $d->yanked ? ($d->yanked_reason ?? true) : false,
             ], fn (mixed $v): bool => $v !== null))->values()->all(),
+            'project-status' => $this->projectStatus($package),
         ];
+    }
+
+    /**
+     * PEP 792 project status. The key inside the object is `status` — the PEP's prose says
+     * `state`, but PyPI and the normative PyPA specification both serve `status`, and that is
+     * what clients read. We always emit `deprecated` rather than `archived` or `quarantined`:
+     * the PEP defines `deprecated` as obsolete and possibly superseded, which is what an
+     * abandonment with a replacement is; `archived` means only "no further updates expected"
+     * and `quarantined` signals a security incident.
+     *
+     * @return array{status: string, reason?: string}
+     */
+    private function projectStatus(Package $package): array
+    {
+        $notice = $package->abandonmentNotice();
+
+        return $notice === null
+            ? ['status' => 'active']
+            : ['status' => 'deprecated', 'reason' => $notice->message()];
     }
 
     /**
