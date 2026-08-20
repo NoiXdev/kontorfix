@@ -7,6 +7,7 @@ use App\Http\Controllers\Concerns\ClampsPageSize;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
+use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
 use App\Http\Resources\Api\PackageResource;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
@@ -106,6 +107,27 @@ class PackageController extends Controller
         abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
 
         SyncPackage::dispatch($package);
+
+        return new PackageResource($package);
+    }
+
+    /**
+     * Marks or unmarks a package as abandoned. Mirrors Admin\PackageController::abandonment
+     * (same request, same "don't reset abandoned_at on a re-mark" rule) — kept as its own
+     * action here too, alongside resync()/destroy(), rather than folded into a general
+     * update() this controller does not have.
+     */
+    public function abandonment(UpdatePackageAbandonmentRequest $request, Package $package): PackageResource
+    {
+        $this->assertCanWritePackage($package);
+
+        $abandoned = $request->boolean('abandoned');
+
+        $package->update([
+            'abandoned_at' => $abandoned ? ($package->abandoned_at ?? now()) : null,
+            'replacement_package' => $abandoned ? $request->validated('replacement_package') : null,
+            'abandonment_reason' => $abandoned ? $request->validated('abandonment_reason') : null,
+        ]);
 
         return new PackageResource($package);
     }

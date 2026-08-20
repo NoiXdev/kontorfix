@@ -36,6 +36,26 @@ it('sends the portal detail page its versions newest first', function () {
         )->where('versions.1.version', '1.9.0'));
 });
 
+it('sends the portal detail page the abandonment marker props', function () {
+    $this->pkg->update([
+        'abandoned_at' => '2026-01-15 00:00:00',
+        'replacement_package' => 'symfony/mailer',
+        'abandonment_reason' => 'Nicht mehr gepflegt.',
+    ]);
+
+    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+        ->assertInertia(fn ($p) => $p->where('package.abandoned_at', '2026-01-15')
+            ->where('package.replacement_package', 'symfony/mailer')
+            ->where('package.abandonment_reason', 'Nicht mehr gepflegt.'));
+});
+
+it('sends null abandonment markers for a live package', function () {
+    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+        ->assertInertia(fn ($p) => $p->where('package.abandoned_at', null)
+            ->where('package.replacement_package', null)
+            ->where('package.abandonment_reason', null));
+});
+
 it('forbids a package not in the members registry', function () {
     $otherGroup = Group::factory()->for(Organization::factory()->create())->create();
     $otherPkg = Package::factory()->create();

@@ -7,6 +7,7 @@ use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
+use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
@@ -92,6 +93,7 @@ class PackageController extends Controller
                 'sync_error' => $p->sync_error,
                 'groups_count' => $p->groups_count,
                 'synced_at' => $p->synced_at?->diffForHumans(),
+                'is_abandoned' => $p->isAbandoned(),
             ]);
 
         return Inertia::render('admin/packages/Index', [
@@ -192,6 +194,9 @@ class PackageController extends Controller
                 'sync_status' => $package->sync_status->value,
                 'sync_error' => $package->sync_error,
                 'synced_at' => $package->synced_at?->diffForHumans(),
+                'abandoned_at' => $package->abandoned_at?->toDateString(),
+                'replacement_package' => $package->replacement_package,
+                'abandonment_reason' => $package->abandonment_reason,
             ],
             // Managed credentials assignable to this package (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
@@ -390,6 +395,29 @@ class PackageController extends Controller
         }
 
         return back()->with('success', 'Paket aktualisiert.');
+    }
+
+    /**
+     * Marks or unmarks a package as abandoned. Kept separate from update() rather than
+     * folding into it: update() backs the narrow repository form and carries
+     * credential-retarget logic that has nothing to do with abandonment, and widening it
+     * would drag that logic into an unrelated write path.
+     */
+    public function abandonment(UpdatePackageAbandonmentRequest $request, Package $package): RedirectResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        $abandoned = $request->boolean('abandoned');
+
+        $package->update([
+            // Re-marking an already-abandoned package must not reset the date — the banner
+            // says "since", and an edit to the reason is not a new abandonment.
+            'abandoned_at' => $abandoned ? ($package->abandoned_at ?? now()) : null,
+            'replacement_package' => $abandoned ? $request->validated('replacement_package') : null,
+            'abandonment_reason' => $abandoned ? $request->validated('abandonment_reason') : null,
+        ]);
+
+        return back()->with('success', $abandoned ? 'Paket als verwaist markiert.' : 'Markierung als verwaist entfernt.');
     }
 
     public function destroy(Package $package): RedirectResponse

@@ -92,6 +92,256 @@ it('serves PEP 691 JSON when the client asks for it', function () {
         ->assertJsonPath('files.0.hashes.sha256', str_repeat('b', 64));
 });
 
+it('declares Simple API version 1.4 in the JSON representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['meta']['api-version'])->toBe('1.4');
+});
+
+it('lists every project version once, in the versions key', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.1.0', 'filename' => 'my_package-1.1.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.1.0.tar.gz", 'sha256' => str_repeat('c', 64), 'size' => 30, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['versions'])->toEqualCanonicalizing(['1.0.0', '1.1.0']);
+});
+
+it('reports the mandatory size on every file', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    foreach ($json['files'] as $file) {
+        expect($file['size'])->toBeInt()->toBeGreaterThan(0);
+    }
+});
+
+it('reports upload-time as an ISO 8601 instant', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['files'][0]['upload-time'])->toMatch('/^\d{4}-\d{2}-\d{2}T/');
+});
+
+it('declares the same version in the HTML representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('<meta name="pypi:repository-version" content="1.4">');
+});
+
+it('declares the same version on the root index route', function () {
+    Storage::fake('artifacts');
+    [$group] = pythonRegistry();
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('<meta name="pypi:repository-version" content="1.4">');
+});
+
+it('lists a readable project by its normalised name on the root index', function () {
+    [$group] = pythonRegistry(name: 'My.Package');
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    // PEP 503 normalisation collapses '.', '_', '-' runs to a single '-' and lowercases.
+    expect($html)->toContain('<a href="http://localhost/r/kadenz/simple/my-package/">my-package</a>');
+});
+
+it('does not list a project the caller cannot access on the root index', function () {
+    [$group, $pkg] = pythonRegistry(name: 'visible-package');
+    $hidden = Package::factory()->create(['type' => PackageType::Python, 'name' => 'hidden-package', 'repository_url' => null]);
+    // Attached to the same group but expired: RegistryAccessService::canAccessPackage()
+    // excludes it, independent of group membership — the filter this test protects.
+    $group->packages()->attach($hidden, ['available_until' => now()->subDay()]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('visible-package')
+        ->and($html)->not->toContain('hidden-package');
+});
+
+it('reports an active status for a live package', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['project-status'])->toBe(['status' => 'active'])
+        ->and($json['meta']['api-version'])->toBe('1.4');
+});
+
+it('omits the reason key for a live package', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['project-status'])->not->toHaveKey('reason');
+});
+
+it('reports deprecated with the composed reason for an abandoned package', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->update([
+        'abandoned_at' => now(),
+        'replacement_package' => 'nachfolger',
+        'abandonment_reason' => 'Wird nicht mehr gepflegt.',
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['project-status'])->toBe([
+        'status' => 'deprecated',
+        'reason' => 'Wird nicht mehr gepflegt. Bitte stattdessen nachfolger verwenden.',
+    ]);
+});
+
+it('puts both markers in the HTML representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->update([
+        'abandoned_at' => now(),
+        'replacement_package' => 'nachfolger',
+        'abandonment_reason' => 'Wird nicht mehr gepflegt.',
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)
+        ->toContain('<meta name="pypi:project-status" content="deprecated">')
+        ->toContain('<meta name="pypi:project-status-reason" content="Wird nicht mehr gepflegt. Bitte stattdessen nachfolger verwenden.">');
+});
+
+it('escapes the reason in the HTML representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->update([
+        'abandoned_at' => now(),
+        'abandonment_reason' => '<img src=x onerror=alert(1)>',
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->getContent();
+
+    // The escaped form must actually be present first — a negative assertion alone cannot
+    // tell "safe" from "empty response".
+    //
+    // Match the tag, not the text — but precisely: `/<[a-z][^>]*\sonerror\s*=/` (the pattern
+    // one might reach for first) still false-positives here, because our escaped payload has
+    // no literal `>` (it became `&gt;`). That lets `[^>]*` run straight through the closing
+    // `"` of the `content` attribute and back into the escaped text of this very meta tag,
+    // matching the literal-but-inert "onerror=" substring inside it before the tag's real `>`
+    // is ever reached. Anchoring on a literal `<img` sidesteps that: escaping guarantees that
+    // substring never appears verbatim, so only a genuinely unescaped `<img ... onerror=...>`
+    // can match.
+    expect($html)->toContain('&lt;img src=x')
+        ->and($html)->not->toMatch('/<img\b[^>]*\bonerror\s*=/i');
+});
+
 it('downloads a stored distribution and counts the download', function () {
     Storage::fake('artifacts');
     [$group, $pkg] = pythonRegistry();

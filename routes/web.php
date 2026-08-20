@@ -60,6 +60,9 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     // Edit a package's repository source (URL, private-repo credential/token).
     Route::put('packages/{package}', [Admin\PackageController::class, 'update'])->name('packages.update');
+    // Mark/unmark a package as abandoned. Split from the repository-source update above:
+    // that one carries credential-retarget logic abandonment has nothing to do with.
+    Route::put('packages/{package}/abandonment', [Admin\PackageController::class, 'abandonment'])->name('packages.abandonment');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');

@@ -55,6 +55,7 @@ Route::prefix('v1')
         Route::middleware('operator')->group(function () {
             Route::post('packages', [PackageController::class, 'store'])->name('packages.store');
             Route::post('packages/{package}/resync', [PackageController::class, 'resync'])->name('packages.resync');
+            Route::put('packages/{package}/abandonment', [PackageController::class, 'abandonment'])->name('packages.abandonment');
             Route::delete('packages/{package}', [PackageController::class, 'destroy'])->name('packages.destroy');
 
             // Registries (groups) — the same form requests as the admin GUI, hence

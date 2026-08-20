@@ -80,7 +80,7 @@ Everything below is under `https://<host>/api/v1`.
 | Area | Endpoints |
 | --- | --- |
 | Identity | `GET me`, `GET/POST/DELETE me/api-keys` |
-| Packages | `GET/POST packages`, `GET/DELETE packages/{package}`, `POST packages/{package}/resync` |
+| Packages | `GET/POST packages`, `GET/DELETE packages/{package}`, `POST packages/{package}/resync`, `PUT packages/{package}/abandonment` |
 | Registries | `GET/POST groups`, `GET/PUT/DELETE groups/{group}` |
 | Registry sub-resources | `…/domains`, `…/upstreams`, `PUT …/packages` (assignment) |
 | Registry tokens | `GET/POST registry-tokens`, `DELETE registry-tokens/{token}` |
@@ -150,6 +150,27 @@ package, and the field is create-only.
 ```bash
 curl -s "${auth[@]}" -X POST "$KFX/packages/$PACKAGE_ID/resync"
 ```
+
+**Mark or unmark a package as abandoned**
+
+```bash
+curl -s "${auth[@]}" -H "Content-Type: application/json" \
+  -X PUT "$KFX/packages/$PACKAGE_ID/abandonment" \
+  -d '{"abandoned":true,"replacement_package":"symfony/mailer","abandonment_reason":"Nicht mehr gepflegt."}'
+```
+
+- `abandoned` (required, boolean) drives the switch. `replacement_package` (optional —
+  a valid name for the package's own ecosystem) and `abandonment_reason` (optional, up
+  to 1000 characters) are only stored when `abandoned` is `true`; setting it to `false`
+  clears both, even if the request body still sends stale values for them.
+- Re-marking an already-abandoned package keeps its original `abandoned_at` timestamp
+  rather than resetting it.
+- The response is the updated `PackageResource`, which carries three fields not shown
+  above: `abandoned_at` (ISO 8601, `null` when live), `replacement_package` and
+  `abandonment_reason`.
+- The notice this produces reaches package managers directly: Composer's `abandoned`
+  key on every version, npm's `deprecated` field, and a PEP 792 `project-status` of
+  `deprecated` for the Simple API — not just the admin UI and portal.
 
 **Create a registry (group) and assign packages**
 

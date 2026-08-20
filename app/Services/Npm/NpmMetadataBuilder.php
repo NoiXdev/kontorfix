@@ -14,6 +14,7 @@ class NpmMetadataBuilder
     public function build(Package $package, string $registryBaseUrl): array
     {
         $registryBaseUrl = rtrim($registryBaseUrl, '/');
+        $notice = $package->abandonmentNotice();
         $versions = [];
 
         foreach ($package->versions()->get() as $v) {
@@ -30,6 +31,16 @@ class NpmMetadataBuilder
                     'integrity' => $v->dist_integrity,
                 ], fn (mixed $x): bool => $x !== null),
             ]);
+
+            // The registry owns this field. npm has no structured replacement, so the whole
+            // sentence is composed here — and an uploaded package.json must not be able to
+            // plant its own deprecation notice, which the array_merge above would otherwise
+            // pass through.
+            unset($manifest['deprecated']);
+            if ($notice !== null) {
+                $manifest['deprecated'] = $notice->message();
+            }
+
             $versions[$v->version] = $manifest;
         }
 

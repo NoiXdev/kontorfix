@@ -32,3 +32,20 @@ it('rewrites every version dist url to the proxy route and caches the payload', 
     app(ComposerProxyService::class)->metadata($group, $up, 'acme/demo', 'https://registry.test/r/kadenz');
     Http::assertNothingSent();
 });
+
+it('passes an upstream abandoned marker through untouched without adding or stripping our own', function () {
+    $group = Group::factory()->create(['slug' => 'kadenz']);
+    $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
+    // This name is not a package held locally by the registry, so the proxy is the only
+    // path that can serve it — there is no Package row and thus no abandonmentNotice() to consult.
+    Http::fake(['*/p2/upstream/only.json' => Http::response([
+        'packages' => ['upstream/only' => MetadataMinifier::minify([
+            ['name' => 'upstream/only', 'version' => 'v1.0.0', 'version_normalized' => '1.0.0.0', 'abandoned' => 'upstream/replacement', 'dist' => ['type' => 'zip', 'url' => 'https://cdn.test/a.zip', 'reference' => 'r1']],
+        ])],
+    ], 200)]);
+
+    $doc = app(ComposerProxyService::class)->metadata($group, $up, 'upstream/only', 'https://registry.test/r/kadenz');
+    $versions = MetadataMinifier::expand($doc['packages']['upstream/only']);
+
+    expect($versions[0]['abandoned'])->toBe('upstream/replacement');
+});

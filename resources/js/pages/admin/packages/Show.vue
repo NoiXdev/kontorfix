@@ -14,7 +14,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 interface Dependencies {
     runtime: Record<string, string>;
@@ -87,6 +87,9 @@ const props = defineProps<{
         sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
         sync_error: string | null;
         synced_at: string | null;
+        abandoned_at: string | null;
+        replacement_package: string | null;
+        abandonment_reason: string | null;
     };
     versions: VersionRow[];
     pythonDists: PythonDistRow[];
@@ -159,6 +162,36 @@ function saveSource() {
         });
 }
 
+// --- Abandonment ---
+const isAbandoned = computed(() => props.package.abandoned_at !== null);
+
+const abandonmentForm = useForm({
+    abandoned: isAbandoned.value,
+    replacement_package: props.package.replacement_package ?? '',
+    abandonment_reason: props.package.abandonment_reason ?? '',
+});
+
+// Clearing the switch discards the dependent fields — same pattern as Form.vue's
+// onPrivateToggle for the repository token.
+function onAbandonedToggle() {
+    if (!abandonmentForm.abandoned) {
+        abandonmentForm.replacement_package = '';
+        abandonmentForm.abandonment_reason = '';
+    }
+}
+
+watch(() => abandonmentForm.abandoned, onAbandonedToggle);
+
+function saveAbandonment() {
+    abandonmentForm
+        .transform((d) => ({
+            abandoned: d.abandoned,
+            replacement_package: d.abandoned ? d.replacement_package || null : null,
+            abandonment_reason: d.abandoned ? d.abandonment_reason || null : null,
+        }))
+        .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
+}
+
 // Live update of the sync status for the currently displayed package.
 // Local state, so the live update doesn't mutate the prop.
 const syncStatus = ref(props.package.sync_status);
@@ -225,6 +258,20 @@ useOperatorChannel({
                 </div>
             </div>
 
+            <div
+                v-if="isAbandoned"
+                class="flex flex-col gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400"
+            >
+                <span>
+                    Dieses Paket ist seit {{ props.package.abandoned_at }} als verwaist markiert.
+                    <template v-if="props.package.replacement_package">
+                        Empfohlener Ersatz: <strong>{{ props.package.replacement_package }}</strong
+                        >.
+                    </template>
+                </span>
+                <span v-if="props.package.abandonment_reason">{{ props.package.abandonment_reason }}</span>
+            </div>
+
             <Tabs default-value="uebersicht">
                 <TabsList>
                     <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
@@ -234,6 +281,7 @@ useOperatorChannel({
                     <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
+                    <TabsTrigger value="verwaltung">Verwaltung</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="uebersicht">
@@ -464,6 +512,52 @@ useOperatorChannel({
                     <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
                         <ActivityTimeline :activities="props.activities" compact />
                     </div>
+                </TabsContent>
+
+                <TabsContent value="verwaltung">
+                    <form
+                        class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                        @submit.prevent="saveAbandonment"
+                    >
+                        <label class="flex items-center gap-2 text-sm">
+                            <Switch v-model="abandonmentForm.abandoned" />
+                            Paket als verwaist markieren
+                        </label>
+
+                        <template v-if="abandonmentForm.abandoned">
+                            <div class="grid gap-2">
+                                <Label for="abandon_replacement">Empfohlener Ersatz (optional)</Label>
+                                <Input
+                                    id="abandon_replacement"
+                                    v-model="abandonmentForm.replacement_package"
+                                    :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname' }[props.package.type]"
+                                    autocomplete="off"
+                                    class="font-mono"
+                                />
+                                <p v-if="abandonmentForm.errors.replacement_package" class="text-sm text-destructive">
+                                    {{ abandonmentForm.errors.replacement_package }}
+                                </p>
+                            </div>
+
+                            <div class="grid gap-2">
+                                <Label for="abandon_reason">Begründung (optional)</Label>
+                                <textarea
+                                    id="abandon_reason"
+                                    v-model="abandonmentForm.abandonment_reason"
+                                    rows="3"
+                                    placeholder="Wird nicht mehr gepflegt, siehe …"
+                                    class="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
+                                />
+                                <p v-if="abandonmentForm.errors.abandonment_reason" class="text-sm text-destructive">
+                                    {{ abandonmentForm.errors.abandonment_reason }}
+                                </p>
+                            </div>
+                        </template>
+
+                        <div>
+                            <Button type="submit" :disabled="abandonmentForm.processing">Speichern</Button>
+                        </div>
+                    </form>
                 </TabsContent>
             </Tabs>
         </div>
