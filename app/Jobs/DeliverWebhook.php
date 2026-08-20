@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Events\WebhookDeliveryFailed;
 use App\Models\Webhook;
 use App\Models\WebhookDelivery;
 use App\Services\Upstream\UrlSafety;
@@ -9,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
+use Throwable;
 
 class DeliverWebhook implements ShouldQueue
 {
@@ -72,5 +74,12 @@ class DeliverWebhook implements ShouldQueue
         if (! $response->successful()) {
             throw new RuntimeException("Webhook delivery to {$this->webhook->url} failed with {$response->status()}.");
         }
+    }
+
+    public function failed(Throwable $e): void
+    {
+        // Only after the last of $tries attempts — one event per permanently undelivered
+        // webhook, not one per retry.
+        WebhookDeliveryFailed::dispatch($this->webhook, $this->event, $e->getMessage());
     }
 }
