@@ -15,10 +15,17 @@ use Carbon\CarbonInterface;
  * The grouping key is (type, subject): the same package failing to sync and failing to
  * reach a webhook are two different problems with two different fixes.
  *
- * Tie-breaking on identical `occurred_at` (plausible: `packages:resync` runs hourly) is
- * "newest first" by iteration order, not by a secondary key: within a group `>=` lets the
- * later-iterated event win the summary/timestamp, and across groups the equal-timestamp
- * lines keep the input's first-appearance order (PHP's `usort` is stable since 8.0).
+ * Tie-breaking on identical `occurred_at` is "newest first" by iteration order, not by a
+ * secondary key: within a group `>=` lets the later-iterated event win the summary/
+ * timestamp, and across groups the equal-timestamp lines keep the input's first-appearance
+ * order (PHP's `usort` is stable since 8.0).
+ *
+ * Ties are not a rare edge case: `occurred_at` is `timestamp(0)` — second resolution, per
+ * Laravel's `Builder::$defaultTimePrecision` — so any two failures recorded in the same
+ * second collide. One `packages:resync` pass failing several packages produces exactly
+ * that; the fix is `SendNotificationDigest`'s query ordering `occurred_at` then `id`, which
+ * makes the input order (and so this tie-break) deterministic instead of leaving it to
+ * whatever order PostgreSQL happens to return.
  */
 final class DigestSummary
 {

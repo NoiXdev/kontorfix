@@ -13,6 +13,12 @@ Artisan::command('inspire', function () {
 
 Schedule::command('packages:resync')->hourly()->withoutOverlapping();
 Schedule::command('model:prune', ['--model' => [WebhookDelivery::class]])->daily();
+// withoutOverlapping() here only guards the (millisecond) dispatch call, not the queued
+// job it enqueues — a run still executing when the next dispatch fires would still get a
+// second, concurrent instance queued behind it. Unlike the packages:resync line above,
+// where the command itself runs synchronously inside the scheduler process,
+// SendNotificationDigest is a queued job, so what actually prevents concurrent execution
+// is SendNotificationDigest implementing ShouldBeUnique, not this call.
 Schedule::job(new SendNotificationDigest)->hourly()->withoutOverlapping();
 Schedule::command('model:prune', ['--model' => [NotificationEventRecord::class]])->daily();
 Schedule::command('queue:prune-failed --hours=168')->daily();

@@ -820,13 +820,19 @@ webhook delivery that exhausts its retries, …) are recorded as they happen
 periodic digest (`App\Jobs\SendNotificationDigest`) rather than one-at-a-time — see
 `App\Support\DigestSummary` below for why a batch, not a stream.
 
-**Exactly once, never silently dropped.** A `notification_events` row is marked
-`notified_at` only *after* the mail carrying it has actually been sent
-(`SendNotificationDigest::digestFor()` marks rows from the recipients loop, once
-`Mail::send()` has returned). An unreachable mailer throws before that update runs, so the
-rows it was trying to report stay `notified_at = null` and the next scheduled run retries
-them — the backlog survives a mail outage instead of being consumed by the attempt that
-failed to deliver it.
+**Exactly once, never silently dropped, one bad recipient does not block the rest.** A
+`notification_events` row is marked `notified_at` only *after* the mail carrying it has
+actually been sent (`SendNotificationDigest::digestFor()` marks rows from the recipients
+loop, once `Mail::send()` has returned). The send is wrapped in its own `try`/`catch`: a
+mailer that throws for one recipient (an SMTP `550` at `RCPT TO`, a timeout, …) is logged
+and skipped, and the loop moves on to the next recipient rather than aborting the whole run.
+Rows a failed send was trying to report stay `notified_at = null`, so the next scheduled run
+retries exactly them — the backlog survives a mail outage instead of being consumed by the
+attempt that failed to deliver it, and a recipient who *did* receive the mail is never
+re-sent it because an unrelated recipient's mailbox rejected delivery. `$reported` is only
+flushed once, after the whole recipients loop — not per recipient — and the flush chunks its
+`whereIn` update at 1000 ids, comfortably under PostgreSQL's ~65535 bind-parameter limit, so
+a large backlog cannot make the marking update itself throw.
 
 The same "stays pending, not consumed" property covers subscription gaps: an event whose
 type no *enabled* recipient currently subscribes to is never marked `notified_at` either
@@ -859,6 +865,18 @@ of mail people learn to filter away rather than read.
 `'off'` organizations are excluded by the job's query before that comparison ever runs — set
 per organization, it silences the mail regardless of how many enabled recipients exist,
 because the query that finds due organizations never selects it in the first place.
+
+`last_digest_sent_at` is stamped with the run's *start* time (`handle()` captures `now()`
+once, before iterating organizations, and every `digestFor()` call in that run reuses it),
+not the time the run finishes. Stamping the finish time would make the gap the next run's
+`isDue()` sees equal to the cadence *minus* however long synchronous mail sending took —
+sending is rarely free, so a "due" org would almost never actually be due, and the effective
+cadence would drift outward run after run. Stamping the start time keeps the gap equal to
+the cadence regardless of how long sending took.
+
+Concurrent execution is prevented by `SendNotificationDigest` implementing
+`ShouldBeUnique`, not by `Schedule::job(...)->withoutOverlapping()` in `routes/console.php`
+— see the comment there for why that call alone would not be enough for a queued job.
 
 ### A Pest gotcha: `toThrow(SomeInterface::class)` does not check `instanceof`
 
