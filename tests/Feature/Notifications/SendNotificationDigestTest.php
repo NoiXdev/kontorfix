@@ -3,11 +3,13 @@
 use App\Enums\NotificationEvent;
 use App\Jobs\SendNotificationDigest;
 use App\Mail\FailureDigest;
+use App\Models\NotificationEventDelivery;
 use App\Models\NotificationEventRecord;
 use App\Models\NotificationRecipient;
 use App\Models\Organization;
 use App\Support\DigestSummary;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Database\QueryException;
 use Illuminate\Mail\PendingMail;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -368,4 +370,162 @@ it('never touches notification_events when the organization has no enabled recip
 
 it('implements ShouldBeUnique so a slow-running instance cannot overlap a newly dispatched one', function () {
     expect(new SendNotificationDigest)->toBeInstanceOf(ShouldBeUnique::class);
+});
+
+// Per-recipient-delivery brief, test 1. Two recipients subscribe to the same event; the
+// second's mailbox rejects delivery. The org-wide `whereNull('notified_at')` set that both
+// recipients used to share is exactly what let recipient A's success cost recipient B their
+// copy: reverting the per-recipient pending set back to that shared clause turns this test
+// red by making the second run re-mail ops@ (already delivered) instead of retrying only
+// oncall@ (still pending).
+it('delivers per recipient: a failing recipient does not block a succeeding one, and neither is ever sent to twice', function () {
+    // Already two hours into an hourly cadence, so the *second* handle() call below is
+    // actually let through by isDue() to reach the per-recipient query, rather than being
+    // turned away by the cadence gate before it gets there.
+    $org = operatorOrgWithCadence('hourly', now()->subHours(2)->toDateTimeString());
+    $event = recordFailure($org, 'sync.failed', 'acme/demo');
+    $first = subscriber($org, 'ops@example.test', ['sync.failed']);
+    $second = subscriber($org, 'oncall@example.test', ['sync.failed']);
+
+    $sendAttempts = [];
+
+    Mail::shouldReceive('to')->andReturnUsing(function (string $email) use (&$sendAttempts) {
+        $sendAttempts[$email] = ($sendAttempts[$email] ?? 0) + 1;
+
+        return tap(Mockery::mock(PendingMail::class), function ($pending) use ($email, &$sendAttempts) {
+            // oncall@'s mailbox rejects delivery on its first attempt only; a retry (the
+            // second handle() call below) succeeds.
+            if ($email === 'oncall@example.test' && $sendAttempts[$email] === 1) {
+                $pending->shouldReceive('send')->andThrow(new RuntimeException('mailbox rejected'));
+            } else {
+                $pending->shouldReceive('send')->andReturn(null);
+            }
+        });
+    });
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->toBeNull()
+        ->and(NotificationEventDelivery::where('notification_recipient_id', $first->id)->exists())->toBeTrue()
+        ->and(NotificationEventDelivery::where('notification_recipient_id', $second->id)->exists())->toBeFalse();
+
+    // $org->update() here would be a no-op dirty-check trap: $org is still the
+    // in-memory instance from before handle() ran, and handle() updated a *different*
+    // Organization instance's row in the DB. If the two happen to round to the same
+    // second, Eloquent sees nothing dirty and silently skips the UPDATE, leaving the
+    // DB's freshly-stamped last_digest_sent_at in place — which then refuses the next
+    // run via isDue() before it ever reaches the per-recipient query. Going through the
+    // query builder bypasses that dirty-check entirely.
+    Organization::whereKey($org->id)->update(['last_digest_sent_at' => now()->subHours(2)]);
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->not->toBeNull()
+        // ops@ was mailed exactly once across both runs (not re-sent now that it already
+        // has a delivery row); oncall@ was attempted twice (the first rejected attempt,
+        // then the retry that succeeded).
+        ->and($sendAttempts['ops@example.test'])->toBe(1)
+        ->and($sendAttempts['oncall@example.test'])->toBe(2)
+        ->and(NotificationEventDelivery::where('notification_recipient_id', $second->id)->exists())->toBeTrue();
+});
+
+// Per-recipient-delivery brief, test 2.
+it('lets a recipient disabled after a failed send stop blocking an event from ever becoming complete', function () {
+    $org = operatorOrgWithCadence('hourly', now()->subHours(2)->toDateTimeString());
+    $event = recordFailure($org);
+    subscriber($org, 'ops@example.test', ['sync.failed']);
+    $flaky = subscriber($org, 'oncall@example.test', ['sync.failed']);
+
+    Mail::shouldReceive('to')->andReturnUsing(function (string $email) {
+        return tap(Mockery::mock(PendingMail::class), function ($pending) use ($email) {
+            if ($email === 'oncall@example.test') {
+                $pending->shouldReceive('send')->andThrow(new RuntimeException('mailbox rejected'));
+            } else {
+                $pending->shouldReceive('send')->andReturn(null);
+            }
+        });
+    });
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->toBeNull();
+
+    $flaky->update(['enabled' => false]);
+    // $org->update() here would be a no-op dirty-check trap: $org is still the
+    // in-memory instance from before handle() ran, and handle() updated a *different*
+    // Organization instance's row in the DB. If the two happen to round to the same
+    // second, Eloquent sees nothing dirty and silently skips the UPDATE, leaving the
+    // DB's freshly-stamped last_digest_sent_at in place — which then refuses the next
+    // run via isDue() before it ever reaches the per-recipient query. Going through the
+    // query builder bypasses that dirty-check entirely.
+    Organization::whereKey($org->id)->update(['last_digest_sent_at' => now()->subHours(2)]);
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->not->toBeNull();
+});
+
+// Per-recipient-delivery brief, test 3.
+it('refuses a duplicate delivery row for the same event/recipient pair', function () {
+    $org = operatorOrgWithCadence('hourly');
+    $event = recordFailure($org);
+    $recipient = subscriber($org, 'ops@example.test', ['sync.failed']);
+
+    NotificationEventDelivery::create([
+        'notification_event_id' => $event->id,
+        'notification_recipient_id' => $recipient->id,
+        'delivered_at' => now(),
+    ]);
+
+    expect(fn () => NotificationEventDelivery::create([
+        'notification_event_id' => $event->id,
+        'notification_recipient_id' => $recipient->id,
+        'delivered_at' => now(),
+    ]))->toThrow(QueryException::class);
+});
+
+// Per-recipient-delivery brief, test 4. Isolates the marking rule itself from redelivery
+// behaviour (test 1's concern): oncall@'s second delivery row is written directly rather
+// than via a mocked mail retry, so this test fails only if the marking predicate itself is
+// wrong — e.g. a mutation that sets notified_at as soon as any single recipient succeeds,
+// which would turn the first assertion below red.
+it('sets notified_at only once every enabled subscribed recipient has a delivery row, not before', function () {
+    $org = operatorOrgWithCadence('hourly', now()->subHours(2)->toDateTimeString());
+    $event = recordFailure($org);
+    $ops = subscriber($org, 'ops@example.test', ['sync.failed']);
+    $oncall = subscriber($org, 'oncall@example.test', ['sync.failed']);
+
+    Mail::shouldReceive('to')->andReturnUsing(function (string $email) {
+        return tap(Mockery::mock(PendingMail::class), function ($pending) use ($email) {
+            if ($email === 'oncall@example.test') {
+                $pending->shouldReceive('send')->andThrow(new RuntimeException('mailbox rejected'));
+            } else {
+                $pending->shouldReceive('send')->andReturn(null);
+            }
+        });
+    });
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->toBeNull()
+        ->and(NotificationEventDelivery::where('notification_recipient_id', $ops->id)->exists())->toBeTrue()
+        ->and(NotificationEventDelivery::where('notification_recipient_id', $oncall->id)->exists())->toBeFalse();
+
+    NotificationEventDelivery::create([
+        'notification_event_id' => $event->id,
+        'notification_recipient_id' => $oncall->id,
+        'delivered_at' => now(),
+    ]);
+    // $org->update() here would be a no-op dirty-check trap: $org is still the
+    // in-memory instance from before handle() ran, and handle() updated a *different*
+    // Organization instance's row in the DB. If the two happen to round to the same
+    // second, Eloquent sees nothing dirty and silently skips the UPDATE, leaving the
+    // DB's freshly-stamped last_digest_sent_at in place — which then refuses the next
+    // run via isDue() before it ever reaches the per-recipient query. Going through the
+    // query builder bypasses that dirty-check entirely.
+    Organization::whereKey($org->id)->update(['last_digest_sent_at' => now()->subHours(2)]);
+
+    (new SendNotificationDigest)->handle();
+
+    expect($event->fresh()->notified_at)->not->toBeNull();
 });
