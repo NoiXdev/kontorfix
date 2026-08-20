@@ -812,6 +812,92 @@ robot is refused an interactive session both at login and, by `RejectRobotWebSes
 every subsequent request — so there is no session for the fail-open to fail open on. It is a
 property worth re-checking if a second writer of a null password is ever introduced.
 
+## Failure-digest notifications
+
+Background failures (a `packages:resync` that cannot reach a repository, an outgoing
+webhook delivery that exhausts its retries, …) are recorded as they happen
+(`App\Listeners\RecordNotificationEvent`, into `notification_events`) and mailed later in a
+periodic digest (`App\Jobs\SendNotificationDigest`) rather than one-at-a-time — see
+`App\Support\DigestSummary` below for why a batch, not a stream.
+
+**Exactly once, never silently dropped, one bad recipient does not block the rest.** A
+`notification_events` row is marked `notified_at` only *after* the mail carrying it has
+actually been sent (`SendNotificationDigest::digestFor()` marks rows from the recipients
+loop, once `Mail::send()` has returned). The send is wrapped in its own `try`/`catch`: a
+mailer that throws for one recipient (an SMTP `550` at `RCPT TO`, a timeout, …) is logged
+and skipped, and the loop moves on to the next recipient rather than aborting the whole run.
+Rows a failed send was trying to report stay `notified_at = null`, so the next scheduled run
+retries exactly them — the backlog survives a mail outage instead of being consumed by the
+attempt that failed to deliver it, and a recipient who *did* receive the mail is never
+re-sent it because an unrelated recipient's mailbox rejected delivery. `$reported` is only
+flushed once, after the whole recipients loop — not per recipient — and the flush chunks its
+`whereIn` update at 1000 ids, comfortably under PostgreSQL's ~65535 bind-parameter limit, so
+a large backlog cannot make the marking update itself throw.
+
+The same "stays pending, not consumed" property covers subscription gaps: an event whose
+type no *enabled* recipient currently subscribes to is never marked `notified_at` either
+(`digestFor()` only marks the events that were actually mailed to someone), so it stays in
+the table indefinitely. Adding a recipient for that event type later produces a non-empty
+first digest — the backlog that accumulated while nobody was subscribed — rather than
+silence, which is what would happen if unreported rows were treated as consumed the moment
+they were considered.
+
+Only *reported* rows are ever deleted, and only once they are old:
+`NotificationEventRecord::prunable()` (the model is `MassPrunable`) covers rows with
+`notified_at` set more than 30 days ago. An unreported row is explicitly excluded from that
+scope, for the same reason it is never marked in the first place — deleting it would
+silently discard the exact backlog the "later recipient still sees it" rule exists to
+preserve.
+
+**Why the digest folds instead of listing.** `packages:resync` is scheduled hourly
+(`routes/console.php`), so a single repository that has been unreachable for a day produces
+24 near-identical failure rows by the time the next digest runs. `DigestSummary::fold()`
+collapses same-(`type`, `subject`) events into one `DigestLine` — a count and the newest
+message — before the digest is rendered, so a broken repository shows up as one line with
+"24×", not 24 copies of the same sentence. A digest that lists instead of folds is the kind
+of mail people learn to filter away rather than read.
+
+**Per-organization cadence.** `organizations.notification_cadence` (`'hourly'` / `'daily'` /
+`'off'`, set from the organization's admin page) controls how often
+`SendNotificationDigest` considers an organization due: `'daily'` compares
+`last_digest_sent_at` against `now()->subDay()`, anything else (including the default,
+`'hourly'`) against `now()->subHour()`, and a null `last_digest_sent_at` is always due.
+`'off'` organizations are excluded by the job's query before that comparison ever runs — set
+per organization, it silences the mail regardless of how many enabled recipients exist,
+because the query that finds due organizations never selects it in the first place.
+
+`last_digest_sent_at` is stamped with the run's *start* time (`handle()` captures `now()`
+once, before iterating organizations, and every `digestFor()` call in that run reuses it),
+not the time the run finishes. Stamping the finish time would make the gap the next run's
+`isDue()` sees equal to the cadence *minus* however long synchronous mail sending took —
+sending is rarely free, so a "due" org would almost never actually be due, and the effective
+cadence would drift outward run after run. Stamping the start time keeps the gap equal to
+the cadence regardless of how long sending took.
+
+Concurrent execution is prevented by `SendNotificationDigest` implementing
+`ShouldBeUnique`, not by `Schedule::job(...)->withoutOverlapping()` in `routes/console.php`
+— see the comment there for why that call alone would not be enough for a queued job.
+
+### A Pest gotcha: `toThrow(SomeInterface::class)` does not check `instanceof`
+
+Found while writing this branch's tests, worth its own note because the failure mode is
+silent. Pest's `toThrow()` only performs an `instanceof` check when the class you pass it is
+**concrete and instantiable**. For an interface (or an abstract class), `class_exists()`
+returns false internally, and Pest falls back to treating the argument as a plain string —
+it asserts that the thrown exception's **message** contains that string as a substring.
+
+Concretely, `expect(fn () => ...)->toThrow(Throwable::class)` does not assert "throws
+something"; it asserts that `get_message()` on whatever was thrown contains the literal text
+`"Throwable"`. That assertion passes or fails for reasons that have nothing to do with the
+exception's type — a `RuntimeException('caught a Throwable during sync')` satisfies it, and
+a `TypeError` with an unrelated message does not, regardless of whether either is in fact a
+`Throwable`.
+
+Always pass a concrete, instantiable class (`RuntimeException::class`,
+`App\Exceptions\SyncFailedException::class`, …) when the intent is a type check. Reserve the
+string form of `toThrow()` for when a message substring genuinely is what you mean to
+assert.
+
 ## Known residual risks / follow-ups
 
 Deliberately classified as low and documented in the security audit (non-blocking):

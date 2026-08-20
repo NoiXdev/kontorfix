@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\NotificationEvent;
 use App\Enums\PackageType;
 use App\Models\SystemSetting;
 use App\Models\User;
@@ -50,6 +51,9 @@ class HandleInertiaRequests extends Middleware
             'appVersion' => config('app.version'),
             // Single source of truth for registry-type metadata (labels, publish-based).
             'registryTypeMeta' => PackageType::metadata(),
+            // Single source of truth for the failure-digest event checkboxes, exactly as
+            // registryTypeMeta above.
+            'notificationEventMeta' => NotificationEvent::metadata(),
             'quote' => ['message' => trim($message), 'author' => trim($author)],
             // Lets the login page hide the "sign up" link when self-registration is off.
             'registrationEnabled' => fn (): bool => SystemSetting::current()->registration_enabled,

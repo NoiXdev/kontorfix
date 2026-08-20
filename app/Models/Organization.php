@@ -25,7 +25,7 @@ class Organization extends Model
             ->dontLogEmptyChanges();
     }
 
-    protected $fillable = ['name', 'slug', 'is_operator', 'enabled_registry_types'];
+    protected $fillable = ['name', 'slug', 'is_operator', 'enabled_registry_types', 'notification_cadence', 'last_digest_sent_at'];
 
     protected function casts(): array
     {
@@ -33,6 +33,7 @@ class Organization extends Model
             'is_operator' => 'bool',
             // Null = inherit the instance-wide set; otherwise a restriction within it.
             'enabled_registry_types' => 'array',
+            'last_digest_sent_at' => 'datetime',
         ];
     }
 
@@ -70,5 +71,13 @@ class Organization extends Model
     public function registryTokens(): HasMany
     {
         return $this->hasMany(RegistryToken::class);
+    }
+
+    /**
+     * @return HasMany<NotificationRecipient, $this>
+     */
+    public function recipients(): HasMany
+    {
+        return $this->hasMany(NotificationRecipient::class);
     }
 }

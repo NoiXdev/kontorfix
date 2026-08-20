@@ -19,6 +19,11 @@ export interface RegistryTypeMeta {
     publish_based: boolean;
 }
 
+export interface NotificationEventMeta {
+    value: string;
+    label: string;
+}
+
 export interface OrgScope {
     active: string | null;
     organizations: OrgScopeOption[];
@@ -53,6 +58,7 @@ export interface SharedData {
     appVersion?: string;
     scope?: OrgScope | null;
     registryTypeMeta?: RegistryTypeMeta[];
+    notificationEventMeta?: NotificationEventMeta[];
     ziggy: {
         location: string;
         url: string;

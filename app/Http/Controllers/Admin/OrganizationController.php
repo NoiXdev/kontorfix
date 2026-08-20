@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreOrganizationRequest;
+use App\Http\Requests\Admin\UpdateOrganizationRequest;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
@@ -45,6 +46,7 @@ class OrganizationController extends Controller
                 'name' => $organization->name,
                 'slug' => $organization->slug,
                 'is_operator' => $organization->is_operator,
+                'notification_cadence' => $organization->notification_cadence,
             ],
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).
@@ -126,6 +128,13 @@ class OrganizationController extends Controller
         ]);
 
         return back()->with('success', "Kunde {$org->name} angelegt.");
+    }
+
+    public function update(UpdateOrganizationRequest $request, Organization $organization): RedirectResponse
+    {
+        $organization->update($request->validated());
+
+        return back()->with('success', "Kunde {$organization->name} aktualisiert.");
     }
 
     public function attachMember(Request $request, Organization $organization): RedirectResponse
