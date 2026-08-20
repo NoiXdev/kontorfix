@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Compiles every .vue SFC under resources/js/components/ui with
+ * Compiles every .vue SFC under resources/js/components with
  * @vue/compiler-sfc's parse + compileScript, and reports the runtime prop
  * names each component actually emits.
  *
@@ -36,7 +36,10 @@ const require = createRequire(import.meta.url);
 registerTS(() => require('typescript'));
 
 const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const defaultTarget = join(repoRoot, 'resources/js/components/ui');
+// All components, not just components/ui: the project's own components under
+// components/kontorfix declare props the same way and are just as exposed to the
+// defect this checks for. Scoping to ui/ meant the gate silently skipped them.
+const defaultTarget = join(repoRoot, 'resources/js/components');
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');

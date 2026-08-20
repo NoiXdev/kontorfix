@@ -130,6 +130,17 @@ have this: `admin/webhooks/Index.vue` (`prefix: 'in'` / `'out'` for inbound vs. 
 webhooks) and `portal/Registry.vue` (`prefix: 'pkg'` / `'tok'` for packages vs. tokens). Any
 future page with more than one `DataTable` needs the same treatment.
 
+**Never rebuild the query from the control that changed** — merge into it. `mergeQuery()`
+(`resources/js/lib/listingQuery.ts`) starts from `window.location.search`, overwrites only the
+keys it is handed, drops the ones set to `undefined` or `''`, and always removes `page`.
+`useTableState` and `admin/activity` both go through it. The alternative has already been a
+bug here: the activity filter bar rebuilt the whole query from its own refs and had to read
+`sort` back out of the URL by hand so that changing the log name would not silently reset the
+order — a workaround that would have needed repeating for every parameter added afterwards,
+and that would have dropped the page size the moment one existed. Dropping `page` is part of
+the same contract: after a sort, filter or page-size change, page 4 does not hold the rows it
+held before.
+
 ### Server-mode sort keys are whitelisted, never interpolated
 
 `PackageController` and `ActivityController` each keep a private `SORTABLE` map from an
@@ -143,6 +154,36 @@ query-string value compared against a Postgres `uuid` column) once raised
 a stack trace *with its bound parameters* to an unrotated log. The sort key sits on the same
 untrusted, unthrottled request, so it gets the same whitelist-and-never-interpolate
 treatment rather than a character-class validation that has already been shown to have gaps.
+
+### The page size is whitelisted the same way, and the direction reported is the one applied
+
+`ActivityController` also keeps `PAGE_SIZES = [25, 50, 100]`. `->paginate()` is only ever
+called with a value out of that list — an unlisted `per_page` falls back to 50 rather than
+raising, so a stale link still renders. Same reasoning as `SORTABLE`: the parameter arrives
+on an unthrottled route, and `->paginate($raw)` would let a caller ask Postgres for 100000
+rows and the presenter to build 100000 arrays. The check is `ctype_digit()` *before* the int
+cast, because `(int) "25abc"` is a perfectly valid 25 and `?per_page[]=…` casts to 1. The
+list is also sent to the page as `pageSizes`, so the selector cannot offer an option the
+server would reject.
+
+The payload reports `per_page` and `direction` **as applied, not as requested**. The
+direction one is easy to get wrong: with no `sort` key the controller falls back to
+`latest('id')` — newest first — while `$direction` still holds its raw `asc` default, so the
+old payload had the timeline's direction toggle labelled "Älteste zuerst" over a
+newest-first list. Any control that renders server state has this hazard; report what the
+query actually did.
+
+### A timeline cannot carry sortable column headers
+
+`admin/activity` renders `ActivityTimeline`, not `DataTable`, so the per-column sort headers
+went with the table. Only the direction came back, as an explicit toggle: entries are grouped
+under day headings, and grouping by day only reads in chronological order — sorting the same
+list by `log_name` would produce day headings in a random order, which is worse than no
+sorting. `log_name` and `description` therefore have no UI any more (the log-name filter
+above the list covers the first, and `subject_type · subject_label` on each entry covers the
+second), even though both remain in `SORTABLE` and reachable by query string. This is a
+deliberate narrowing, not an oversight — a listing that grows a timeline gives up
+per-column sorting.
 
 ### The relative-date trap
 
@@ -321,37 +362,40 @@ Neither of these is visible from `Index.vue` alone. Grep what a controller's `in
 then check every consumer — the page's `<script setup>` *and* the test suite — before
 deciding a prop is dead.
 
-### A named props interface can silently emit no runtime props at all
+### A leading `@vue-ignore` comment silently emits no runtime props at all
 
 `@vue/compiler-sfc` skips resolving a type node whose **leading comments contain the
-substring `@vue-ignore`**. On a named declaration that comment attaches to the interface
-itself, so the compiler discards the whole thing — the inherited members *and* the locally
-declared ones — and the component ends up with no runtime props whatsoever:
+substring `@vue-ignore`**. When that comment sits at the front of the whole type node
+`defineProps` resolves, the compiler discards everything — the inherited members *and* the
+locally declared ones — and the component ends up with no runtime props whatsoever.
+
+Position is the trigger. Whether the type is a named `interface`, a named `type` alias or
+inlined into `defineProps<…>()` makes no difference. These three emit **zero** props:
 
 ```ts
-// BROKEN: emits zero runtime props, including `variant` and `size`
-interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes {
-    variant?: ButtonVariants['variant'];
-}
-const props = withDefaults(defineProps<Props>(), { as: 'button' });
+/* @vue-ignore */                             // leads the declaration
+interface Props extends ButtonHTMLAttributes { variant?: string }
+defineProps<Props>();
+
+type Props = /* @vue-ignore */ ButtonHTMLAttributes & { variant?: string };
+defineProps<Props>();                         // leads the intersection
+
+defineProps</* @vue-ignore */ ButtonHTMLAttributes & { variant?: string }>();
 ```
 
-Inline the type into `defineProps<…>()` instead of declaring a named interface:
+Anywhere but the front is fine — an `extends` member, or any intersection member after the
+first:
 
 ```ts
-// The shape the twelve restored components use
-const props = defineProps<
-    { variant?: ButtonVariants['variant'] } & /* @vue-ignore */ ButtonHTMLAttributes
->();
+interface Props extends /* @vue-ignore */ ButtonHTMLAttributes { variant?: string }
+interface Props extends PrimitiveProps, /* @vue-ignore */ ButtonHTMLAttributes { … }
+defineProps<{ variant?: string } & /* @vue-ignore */ ButtonHTMLAttributes>();
 ```
 
-**The exact trigger is not fully pinned down, and this section deliberately does not claim
-it is.** Two explanations were proposed while fixing this — that member order inside the
-intersection decides it, and that whether the interface is `export`ed decides it — and
-neither reproduced in a minimal test case. What IS established: the twelve components
-emitted zero runtime props in the named-interface form and emit their full set in the
-inlined form, verified by compiling each one. Treat the inlined shape as the known-good
-form and the harness below as the arbiter, not any mental model of the compiler.
+Each of the seven forms above was compiled through the harness below and behaves as stated.
+An earlier revision of this section blamed the named interface and prescribed inlining;
+that is wrong in both directions — inlining does not help when the comment leads, and a
+named interface is safe when it does not.
 
 This is not a style rule. It shipped twice in this codebase and both times the symptom was
 severe and silent:
@@ -364,18 +408,61 @@ severe and silent:
   and the value landed on the DOM as a meaningless `modelvalue="…"` attribute instead of
   `value` — which meant every edit page showed empty fields.
 
-**No gate detects this.** `vue-tsc` resolves `extends` on a different code path from the
-runtime compiler and reports the props as present and correctly typed, so a strict type
+**No type check detects this.** `vue-tsc` resolves the type on a different code path from
+the runtime compiler and reports the props as present and correctly typed, so a strict type
 check passes clean. ESLint, Vite, Vitest and Pest never mount a component. The first
 attempt at a fix patched only the `as` symptom in the template and concluded the class of
 bug was handled; it was not.
 
-Run `node scripts/check-runtime-props.mjs` after touching any component's props. It
-compiles every component under `resources/js/components/ui` and reports the runtime props
-each one emits, exiting non-zero when a component declares props through a type argument
-and emits none. A component that chooses its element or binds a model is also worth one
-look in a real browser — check the rendered `tagName` and that a bound value appears as
-`value`, not as a stray attribute.
+Run `npm run check:props` after touching any component's props. It compiles every component
+under `resources/js/components` — `ui/` and `kontorfix/` alike — and reports the runtime
+props each one emits, exiting non-zero when a component declares props through a type
+argument and emits none. A component that chooses its element or binds a model is also
+worth one look in a real browser — check the rendered `tagName` and that a bound value
+appears as `value`, not as a stray attribute.
+
+
+### An SSR harness that renders nothing passes every negative assertion
+
+The in-app browser cannot load this application, so escaping is verified by compiling a
+component with `@vue/compiler-sfc` and rendering it through `@vue/server-renderer`. That
+works, but it has one silent failure mode worth knowing before you write the next one.
+
+radix-vue's `DialogPortal` renders **nothing** under SSR unless it is force-mounted. A
+harness around any dialog therefore produces an empty string, and every check of the form
+"the payload does not appear as a live tag" passes — against no output at all. This
+happened while building `ActivityDetailDialog`: zero occurrences of the payload, zero live
+`<img>`, all green, nothing rendered. Alias `radix-vue` to a stub that re-exports the real
+package with a force-mounted `DialogPortal`; everything else stays the real code.
+
+Two rules follow, and both have caught real mistakes here:
+
+- **Assert presence before absence.** Check that the expected content *is* in the output
+  first. A negative assertion alone cannot distinguish "safe" from "empty".
+- **Scope every assertion to the element it is about.** `html.includes('emerald')` matched
+  the timeline's marker dot as well as its badge, so stripping the badge colouring entirely
+  left the check green. The same mistake in the detail dialog matched text that `JsonViewer`
+  had rendered elsewhere on the page rather than the table under test.
+
+Also note that a naive `/\sonerror=/` matches the *escaped* text `&lt;img src=x
+onerror=alert(1)&gt;` and reports a handler that does not exist. Match the tag:
+`/<[a-z][^>]*\sonerror\s*=/`.
+
+**SSR renders what a control shows, never what it does.** Event handlers are stripped from
+the server render entirely, so a button wired to nothing produces byte-identical output to a
+correctly wired one — the exact "renders perfectly, does nothing" failure this file already
+records twice. The compiled *client* module is where the binding is visible: with a Vite dev
+server in middleware mode, `server.transformRequest('/resources/js/pages/…/Index.vue')`
+returns code containing `onClick: … $setup.toggleDirection` and `"onUpdate:modelValue":
+$setup.setPerPage`. Checking the parameters those functions then build belongs in Vitest, on
+a composable — which is the reason `admin/activity`'s query-string state lives in
+`useActivityQuery` rather than inside the page.
+
+Two more mechanics for the next harness: user `enforce: 'pre'` plugins run *after* Vite's
+alias plugin, so a stub for `@/layouts/AppLayout.vue` must match the already-resolved
+absolute path; and `ssrLoadModule` externalises anything under `node_modules`, so stubbing
+`@inertiajs/vue3` needs `ssr: { noExternal: ['@inertiajs/vue3'] }` or the real module loads
+and `Head` fails on a missing head manager.
 
 
 ## Tenancy & role model

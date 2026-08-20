@@ -95,3 +95,56 @@ it('falls back to the default order for an unknown activity sort key', function 
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('filters.sort', null));
 });
+
+/**
+ * Two rows in one log, inserted oldest first so that id order and created_at order agree —
+ * the shape an append-only audit log actually has. `log=seed` scopes every request below to
+ * them, so the activity the admin fixture writes for itself cannot take the first row.
+ */
+function seedTwoActivities(): void
+{
+    Activity::create(['log_name' => 'seed', 'description' => 'older', 'created_at' => now()->subDays(2)]);
+    Activity::create(['log_name' => 'seed', 'description' => 'newer', 'created_at' => now()->subDay()]);
+}
+
+it('reports the direction the unsorted default actually orders by', function () {
+    seedTwoActivities();
+
+    // The default order is `latest('id')` — newest first — while `direction` defaults to
+    // `asc` because that is the raw parameter default. The timeline's direction toggle
+    // renders this value, so the old payload had it offering "Älteste zuerst" over a
+    // newest-first list. `direction=asc` is passed here without a `sort`, which is exactly
+    // the case where the requested direction is not the one applied.
+    $this->actingAs(sortAdmin())
+        ->get(route('admin.activity.index', ['log' => 'seed', 'direction' => 'asc']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('activities.data.0.description', 'newer')
+            ->where('filters.direction', 'desc'));
+});
+
+it('orders the activity timeline oldest first when the direction toggle asks for it', function () {
+    seedTwoActivities();
+
+    // These are the exact two parameters the toggle writes into the query string; the
+    // Vitest cover for `useActivityQuery` asserts it emits this pair and nothing else.
+    $this->actingAs(sortAdmin())
+        ->get(route('admin.activity.index', ['log' => 'seed', 'sort' => 'created_at', 'direction' => 'asc']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('activities.data.0.description', 'older')
+            ->where('filters.sort', 'created_at')
+            ->where('filters.direction', 'asc'));
+});
+
+it('orders the activity timeline newest first when the toggle flips back', function () {
+    seedTwoActivities();
+
+    $this->actingAs(sortAdmin())
+        ->get(route('admin.activity.index', ['log' => 'seed', 'sort' => 'created_at', 'direction' => 'desc']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('activities.data.0.description', 'newer')
+            ->where('filters.sort', 'created_at')
+            ->where('filters.direction', 'desc'));
+});

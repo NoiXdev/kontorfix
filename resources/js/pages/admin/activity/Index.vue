@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import DataTable from '@/components/kontorfix/DataTable.vue';
+import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { useActivityQuery, type ActivityFilters } from '@/composables/useActivityQuery';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide } from 'lucide-vue-next';
+import { computed } from 'vue';
 
 interface Activity {
     id: number;
@@ -26,89 +27,29 @@ interface Paginated<T> {
     links: { url: string | null; label: string; active: boolean }[];
 }
 
-interface Filters {
-    log: string | null;
-    subject_type: string | null;
-    subject_id: string | null;
-    causer: string | null;
-    sort: string | null;
-    direction: 'asc' | 'desc';
-}
-
 const props = defineProps<{
     activities: Paginated<Activity>;
-    filters: Filters;
+    filters: ActivityFilters;
     logNames: string[];
+    pageSizes: number[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Aktivität', href: '/admin/activity' }];
 
-const logFilter = ref(props.filters.log ?? '');
-
-// Sort/direction are not among the refs this filter bar owns — they live in `table`
-// below — so they are read back from the current URL rather than reset, or changing the
-// log-name filter while a sort is active would silently drop it back to the default order.
-function currentSort(): { sort: string | undefined; direction: string | undefined } {
-    const current = new URLSearchParams(window.location.search);
-    return { sort: current.get('sort') || undefined, direction: current.get('direction') || undefined };
-}
-
-// Preserve any subject/causer scoping while changing the log-name filter.
-watch(logFilter, (value) => {
-    router.get(
-        route('admin.activity.index'),
-        {
-            log: value || undefined,
-            subject_type: props.filters.subject_type || undefined,
-            subject_id: props.filters.subject_id || undefined,
-            causer: props.filters.causer || undefined,
-            ...currentSort(),
-        },
-        { preserveState: true, replace: true },
-    );
-});
+// Every control on this page writes into the query string and nothing else — no local
+// filtering. `useActivityQuery` builds those parameters (and is where they are tested);
+// the page only renders the current values and hands changes back.
+const { logFilter, direction, perPage, setLog, toggleDirection, setPerPage, clearScope } = useActivityQuery(() => props.filters);
 
 const scoped = computed(() => props.filters.subject_id || props.filters.causer);
 
-function clearScope() {
-    router.get(route('admin.activity.index'), { log: logFilter.value || undefined, ...currentSort() }, { preserveState: true });
-}
-
 const logOptions = [{ value: '', label: 'Alle Bereiche' }, ...props.logNames.map((n) => ({ value: n, label: n }))];
 
-// This listing paginates (30/page), so sorting the current page client-side would only
-// reorder the 30 rows already on it — page 2 would keep entries that belong on page 1. The
-// column whitelist and the actual ordering live in ActivityController::index (server-side);
-// mode: 'server' tells useTableState to hand back `activities.data` untouched instead of
-// re-sorting it. `causer` and `subject` are relations, not plain columns, so they are not
-// sortable here — the same reason the controller leaves them out of its whitelist.
-const columns: ColumnDef<Activity>[] = [
-    { key: 'created_at', label: 'Zeit' },
-    { key: 'log_name', label: 'Bereich' },
-    { key: 'description', label: 'Ereignis' },
-    { key: 'subject', label: 'Objekt', sortable: false },
-    { key: 'causer', label: 'Von', sortable: false },
-    { key: 'changes', label: 'Änderungen', sortable: false },
-];
+// The options come from the server's whitelist, so the selector cannot offer a size the
+// controller would reject and silently replace with the default.
+const sizeOptions = computed(() => props.pageSizes.map((size) => ({ value: size, label: `${size} pro Seite` })));
 
-const table = useTableState<Activity>({
-    rows: () => props.activities.data,
-    columns,
-    mode: 'server',
-    defaultSort: props.filters.sort ? { key: props.filters.sort, direction: props.filters.direction } : undefined,
-});
-
-function pretty(value: unknown): string {
-    try {
-        return JSON.stringify(value, null, 2);
-    } catch {
-        return String(value);
-    }
-}
-
-function hasChanges(a: Activity): boolean {
-    return a.changes && Object.keys(a.changes).length > 0;
-}
+const directionLabel = computed(() => (direction.value === 'desc' ? 'Neueste zuerst' : 'Älteste zuerst'));
 </script>
 
 <template>
@@ -121,8 +62,38 @@ function hasChanges(a: Activity): boolean {
                     <h1 class="text-xl font-semibold">Aktivitätsprotokoll</h1>
                     <p class="text-sm text-muted-foreground">Wer hat was geändert — über Organisationen, Registries, Pakete und Nutzer.</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <SearchableSelect v-model="logFilter" class="w-48" :options="logOptions" />
+                <div class="flex flex-wrap items-center gap-2">
+                    <SearchableSelect
+                        :model-value="logFilter"
+                        class="w-48"
+                        :options="logOptions"
+                        @update:model-value="setLog"
+                    />
+
+                    <!--
+                        What is left of the sortable column headers the timeline replaced: the
+                        day grouping only reads in chronological order, so the direction is the
+                        part of that sorting still worth reaching. It writes `sort`/`direction`,
+                        the same query parameters the headers wrote.
+                    -->
+                    <button
+                        type="button"
+                        class="inline-flex items-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-sm hover:bg-muted/50"
+                        :title="direction === 'desc' ? 'Nach Datum sortiert, neueste zuerst' : 'Nach Datum sortiert, älteste zuerst'"
+                        :aria-label="`Sortierrichtung umschalten — aktuell: ${directionLabel}`"
+                        @click="toggleDirection"
+                    >
+                        <component :is="direction === 'desc' ? ArrowDownWideNarrow : ArrowUpNarrowWide" class="size-4 text-muted-foreground" />
+                        {{ directionLabel }}
+                    </button>
+
+                    <SearchableSelect
+                        :model-value="perPage"
+                        class="w-36"
+                        :options="sizeOptions"
+                        @update:model-value="setPerPage"
+                    />
+
                     <button v-if="scoped" type="button" class="text-sm text-muted-foreground underline-offset-4 hover:underline" @click="clearScope">
                         Filter zurücksetzen
                     </button>
@@ -133,35 +104,9 @@ function hasChanges(a: Activity): boolean {
                 Gefiltert auf ein bestimmtes Objekt / einen Nutzer.
             </div>
 
-            <DataTable :columns="columns" :state="table" :show-filter-bar="false" empty-message="Noch keine Aktivität protokolliert.">
-                <template #default="{ rows }">
-                    <tr
-                        v-for="a in rows"
-                        :key="a.id"
-                        class="border-b border-sidebar-border/70 align-top last:border-0 dark:border-sidebar-border"
-                    >
-                        <td class="px-4 py-3 text-muted-foreground" :title="a.created_at_exact ?? ''">{{ a.created_at }}</td>
-                        <td class="px-4 py-3">{{ a.log_name }}</td>
-                        <td class="px-4 py-3">{{ a.event ?? a.description }}</td>
-                        <td class="px-4 py-3">
-                            <span v-if="a.subject_type"
-                                >{{ a.subject_type }}<span v-if="a.subject_label"> · {{ a.subject_label }}</span></span
-                            >
-                            <span v-else class="text-muted-foreground">—</span>
-                        </td>
-                        <td class="px-4 py-3">{{ a.causer ?? 'System' }}</td>
-                        <td class="px-4 py-3">
-                            <details v-if="hasChanges(a)">
-                                <summary class="cursor-pointer text-muted-foreground">anzeigen</summary>
-                                <pre
-                                    class="mt-1 max-h-64 overflow-auto rounded-md border border-sidebar-border/70 bg-muted/40 p-2 text-xs dark:border-sidebar-border"
-                                    >{{ pretty(a.changes) }}</pre>
-                            </details>
-                            <span v-else class="text-muted-foreground">—</span>
-                        </td>
-                    </tr>
-                </template>
-            </DataTable>
+            <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                <ActivityTimeline :activities="props.activities.data" show-subject />
+            </div>
 
             <!-- Pagination -->
             <div v-if="props.activities.links.length > 3" class="flex flex-wrap gap-1">

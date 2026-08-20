@@ -27,6 +27,15 @@ class ActivityController extends Controller
         'description' => 'description',
     ];
 
+    // The page size is a whitelist for the same reason the sort column is one: the value
+    // arrives in the query string of an unthrottled route, and `->paginate($raw)` would
+    // let a caller ask Postgres for 100000 rows — and, through `->through()`, ask the
+    // presenter to build 100000 arrays — per request. An unlisted value falls back to the
+    // default rather than raising, so a stale or hand-edited link still renders a page.
+    private const PAGE_SIZES = [25, 50, 100];
+
+    private const DEFAULT_PAGE_SIZE = 50;
+
     /**
      * Global audit log with optional scoping to a subject (org/registry/package) or a
      * causer (user). The same endpoint backs the "view activity" links on the detail
@@ -40,6 +49,15 @@ class ActivityController extends Controller
         $causer = $request->query('causer');
         $sort = (string) $request->query('sort', '');
         $direction = $request->query('direction') === 'desc' ? 'desc' : 'asc';
+        $sorted = isset(self::SORTABLE[$sort]);
+
+        // `ctype_digit` before the cast, not `(int)` alone: casting turns "25abc" into a
+        // valid 25 and `?per_page[]=…` (an array) into a 1, so the guard would be deciding
+        // on a number the request never contained. is_string also keeps the array shape out.
+        $requestedSize = $request->query('per_page');
+        $perPage = is_string($requestedSize) && ctype_digit($requestedSize) && in_array((int) $requestedSize, self::PAGE_SIZES, true)
+            ? (int) $requestedSize
+            : self::DEFAULT_PAGE_SIZE;
 
         $activities = Activity::query()
             ->with(['causer', 'subject'])
@@ -58,11 +76,11 @@ class ActivityController extends Controller
                 ? $q->where('causer_id', $causer)
                 : $q->whereRaw('1 = 0'))
             ->when(
-                isset(self::SORTABLE[$sort]),
+                $sorted,
                 fn ($query) => $query->orderBy(self::SORTABLE[$sort], $direction),
                 fn ($query) => $query->latest('id'),
             )
-            ->paginate(30)
+            ->paginate($perPage)
             ->withQueryString()
             ->through(fn (Activity $a) => ActivityPresenter::present($a));
 
@@ -73,10 +91,18 @@ class ActivityController extends Controller
                 'subject_type' => $subjectType,
                 'subject_id' => $subjectId,
                 'causer' => $causer,
-                'sort' => isset(self::SORTABLE[$sort]) ? $sort : null,
-                'direction' => $direction,
+                'sort' => $sorted ? $sort : null,
+                // The direction that was applied, not the one that was asked for. The
+                // fallback branch above orders `latest('id')` — newest first — so reporting
+                // the raw `asc` default had the timeline's direction toggle offering
+                // "Älteste zuerst" while showing the newest entries first.
+                'direction' => $sorted ? $direction : 'desc',
+                'per_page' => $perPage,
             ],
             'logNames' => ['organization', 'registry', 'package', 'user'],
+            // The offered sizes come from the same constant the guard above validates
+            // against, so the selector cannot offer an option the server would reject.
+            'pageSizes' => self::PAGE_SIZES,
         ]);
     }
 
