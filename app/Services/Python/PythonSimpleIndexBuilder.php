@@ -38,7 +38,7 @@ class PythonSimpleIndexBuilder
         return <<<HTML
 <!DOCTYPE html>
 <html>
-  <head><meta name="pypi:repository-version" content="1.0"><title>Links for {$name}</title></head>
+  <head><meta name="pypi:repository-version" content="1.1"><title>Links for {$name}</title></head>
   <body>
     <h1>Links for {$name}</h1>
 {$links}
@@ -57,15 +57,22 @@ HTML;
     public function projectJson(Package $package, Collection $dists, string $baseUrl): array
     {
         return [
-            'meta' => ['api-version' => '1.0'],
+            // 1.1 adds the `versions` key and makes `size` mandatory per file; 1.2 (tracks) and
+            // 1.3 (provenance) are optional and stay absent, which the specification permits.
+            // The number is a claim about what this response contains — raise it only together
+            // with the fields the version requires.
+            'meta' => ['api-version' => '1.1'],
             'name' => PythonName::normalize($package->name),
-            'files' => $dists->map(fn (PythonDist $d): array => [
+            'versions' => $dists->pluck('version')->unique()->values()->all(),
+            'files' => $dists->map(fn (PythonDist $d): array => array_filter([
                 'filename' => $d->filename,
                 'url' => $this->fileUrl($package, $d, $baseUrl),
                 'hashes' => ['sha256' => $d->sha256],
                 'requires-python' => $d->requires_python,
+                'size' => $d->size,
+                'upload-time' => $d->uploaded_at?->toIso8601String(),
                 'yanked' => $d->yanked ? ($d->yanked_reason ?? true) : false,
-            ])->values()->all(),
+            ], fn (mixed $v): bool => $v !== null))->values()->all(),
         ];
     }
 
@@ -83,7 +90,7 @@ HTML;
         return <<<HTML
 <!DOCTYPE html>
 <html>
-  <head><meta name="pypi:repository-version" content="1.0"><title>Simple index</title></head>
+  <head><meta name="pypi:repository-version" content="1.1"><title>Simple index</title></head>
   <body>
 {$links}
   </body>

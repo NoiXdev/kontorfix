@@ -92,6 +92,104 @@ it('serves PEP 691 JSON when the client asks for it', function () {
         ->assertJsonPath('files.0.hashes.sha256', str_repeat('b', 64));
 });
 
+it('declares Simple API version 1.1 in the JSON representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['meta']['api-version'])->toBe('1.1');
+});
+
+it('lists every project version once, in the versions key', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.1.0', 'filename' => 'my_package-1.1.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.1.0.tar.gz", 'sha256' => str_repeat('c', 64), 'size' => 30, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['versions'])->toEqualCanonicalizing(['1.0.0', '1.1.0']);
+});
+
+it('reports the mandatory size on every file', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0-py3-none-any.whl', 'filetype' => 'bdist_wheel',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0-py3-none-any.whl", 'sha256' => str_repeat('b', 64), 'size' => 20, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    foreach ($json['files'] as $file) {
+        expect($file['size'])->toBeInt()->toBeGreaterThan(0);
+    }
+});
+
+it('reports upload-time as an ISO 8601 instant', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->json();
+
+    expect($json['files'][0]['upload-time'])->toMatch('/^\d{4}-\d{2}-\d{2}T/');
+});
+
+it('declares the same version in the HTML representation', function () {
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple/my-package/')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('<meta name="pypi:repository-version" content="1.1">');
+});
+
 it('downloads a stored distribution and counts the download', function () {
     Storage::fake('artifacts');
     [$group, $pkg] = pythonRegistry();
