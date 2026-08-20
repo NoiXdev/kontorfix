@@ -46,6 +46,14 @@ class ComposerMetadataBuilder
                     ];
                 }
 
+                // The registry owns this field. A malicious tag's composer.json could declare
+                // itself abandoned (with an attacker-chosen replacement) or, for a package the
+                // operator once marked and then un-marked, could still carry a stale `abandoned`
+                // key from when the manifest was mirrored — either way, the mirrored manifest
+                // must not be able to plant or resurrect this notice, which the array_merge
+                // above would otherwise pass through. Mirrors NpmMetadataBuilder::build().
+                unset($entry['abandoned']);
+
                 // Composer reads this off each version entry. The minifier collapses it onto the
                 // first one; expansion restores it to all of them, which is how Packagist serves
                 // an abandoned package.

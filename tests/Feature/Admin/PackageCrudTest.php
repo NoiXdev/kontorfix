@@ -15,6 +15,20 @@ it('lists packages for admins', function () {
         ->assertInertia(fn ($page) => $page->component('admin/packages/Index')->has('packages.data', 2));
 });
 
+it('exposes is_abandoned on the index prop so the admin listing can badge it', function () {
+    $live = Package::factory()->create(['name' => 'acme/live']);
+    $abandoned = Package::factory()->create(['name' => 'acme/abandoned', 'abandoned_at' => now()]);
+
+    $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
+        ->get('/admin/packages?sort=name')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/packages/Index')
+            ->where('packages.data.0.name', 'acme/abandoned')
+            ->where('packages.data.0.is_abandoned', true)
+            ->where('packages.data.1.name', 'acme/live')
+            ->where('packages.data.1.is_abandoned', false));
+});
+
 it('creates a package, assigns groups inline and dispatches sync', function () {
     Queue::fake();
     $groups = Group::factory()->count(2)->create();

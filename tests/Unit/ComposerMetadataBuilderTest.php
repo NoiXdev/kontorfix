@@ -85,9 +85,31 @@ it('overrides malicious dist, source and version keys from the stored composer.j
         ->and($v['source']['url'])->toBe('https://git.test/acme/demo.git');
 });
 
-it('omits abandoned entirely for a live package', function () {
+it('omits abandoned entirely for a live package whose manifest never declared it', function () {
     $package = Package::factory()->create(['name' => 'acme/demo']);
     PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
+
+    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+
+    $entries = $doc['packages'][$package->name];
+
+    foreach ($entries as $entry) {
+        expect($entry)->not->toHaveKey('abandoned');
+    }
+});
+
+it('strips an abandoned key forged by the tag composer.json for a live package', function () {
+    // The tag's raw composer.json is merged into the version entry (Packagist parity),
+    // so a repository under someone else's control could declare itself abandoned — and
+    // steer installers at an attacker-chosen replacement — with the operator never having
+    // touched the abandonment switch, or after having un-marked it. The registry, not the
+    // mirrored manifest, must own this field.
+    $package = Package::factory()->create(['name' => 'acme/demo']);
+    PackageVersion::factory()->for($package)->create([
+        'version' => '1.0.0.0',
+        'version_pretty' => 'v1.0.0',
+        'metadata' => ['abandoned' => 'evil/pkg'],
+    ]);
 
     $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
 

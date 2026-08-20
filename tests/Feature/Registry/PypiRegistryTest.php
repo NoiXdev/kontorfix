@@ -202,6 +202,34 @@ it('declares the same version on the root index route', function () {
     expect($html)->toContain('<meta name="pypi:repository-version" content="1.4">');
 });
 
+it('lists a readable project by its normalised name on the root index', function () {
+    [$group] = pythonRegistry(name: 'My.Package');
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    // PEP 503 normalisation collapses '.', '_', '-' runs to a single '-' and lowercases.
+    expect($html)->toContain('<a href="http://localhost/r/kadenz/simple/my-package/">my-package</a>');
+});
+
+it('does not list a project the caller cannot access on the root index', function () {
+    [$group, $pkg] = pythonRegistry(name: 'visible-package');
+    $hidden = Package::factory()->create(['type' => PackageType::Python, 'name' => 'hidden-package', 'repository_url' => null]);
+    // Attached to the same group but expired: RegistryAccessService::canAccessPackage()
+    // excludes it, independent of group membership — the filter this test protects.
+    $group->packages()->attach($hidden, ['available_until' => now()->subDay()]);
+
+    $html = $this->withHeaders(tokenHeaderFor($group))
+        ->get('/r/kadenz/simple')
+        ->assertOk()
+        ->getContent();
+
+    expect($html)->toContain('visible-package')
+        ->and($html)->not->toContain('hidden-package');
+});
+
 it('reports an active status for a live package', function () {
     Storage::fake('artifacts');
     [$group, $pkg] = pythonRegistry();
