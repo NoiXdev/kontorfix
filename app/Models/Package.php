@@ -6,6 +6,7 @@ use App\Enums\GitProvider;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Support\AbandonmentNotice;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
 use Database\Factories\PackageFactory;
@@ -53,7 +54,7 @@ class Package extends Model
     {
         return LogOptions::defaults()
             ->useLogName('package')
-            ->logOnly(['name', 'type', 'repository_url', 'sync_status'])
+            ->logOnly(['name', 'type', 'repository_url', 'sync_status', 'abandoned_at', 'replacement_package', 'abandonment_reason'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
     }
@@ -99,6 +100,9 @@ class Package extends Model
         'sync_error',
         'synced_at',
         'dist_tags',
+        'abandoned_at',
+        'replacement_package',
+        'abandonment_reason',
     ];
 
     /**
@@ -118,6 +122,7 @@ class Package extends Model
             'sync_status' => SyncStatus::class,
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
+            'abandoned_at' => 'datetime',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',
         ];
@@ -139,6 +144,28 @@ class Package extends Model
     public function isPublishSourced(): bool
     {
         return ! $this->isGitSourced();
+    }
+
+    /** Whether an operator has retired this package. */
+    public function isAbandoned(): bool
+    {
+        return $this->abandoned_at !== null;
+    }
+
+    /**
+     * The wording for this package's abandonment, or null while it is live.
+     *
+     * Returning null rather than an empty notice is what keeps the metadata builders from
+     * emitting the key at all on a live package — a builder that always writes `abandoned`
+     * or `deprecated` would mark the entire registry as retired.
+     */
+    public function abandonmentNotice(): ?AbandonmentNotice
+    {
+        if (! $this->isAbandoned()) {
+            return null;
+        }
+
+        return new AbandonmentNotice($this->replacement_package, $this->abandonment_reason);
     }
 
     /**
