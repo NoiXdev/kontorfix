@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\TrustHosts;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
@@ -10,7 +11,6 @@ use App\Services\Http\TrustedHosts;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Http\Kernel;
-use Illuminate\Http\Middleware\TrustHosts;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
@@ -109,6 +109,9 @@ it('trusts a hostname the operator attaches after the allowlist was already cach
 it('wires the allowlist into the framework middleware', function () {
     // The check above proves the patterns are right; this one proves they are installed.
     // Without it, deleting the trustHosts() call in bootstrap/app.php breaks nothing.
+    // App\Http\Middleware\TrustHosts is the framework class's replacement (bootstrap/app.php
+    // swaps it in so the health endpoint can be exempted from the allowlist) and shares the
+    // same static `hosts()` configuration, since TrustHosts::at() writes onto the parent.
     expect(app(Kernel::class)->getGlobalMiddleware())->toContain(TrustHosts::class)
         ->and((new TrustHosts(app()))->hosts())->toBe(TrustedHosts::patterns());
 });
@@ -179,11 +182,17 @@ it('refuses to root a generated link at a Host that is not an attached registry 
 it('refuses a request whose Host is not on the allowlist', function () {
     // TrustHosts stands down under `runningUnitTests()`, so install the very patterns it
     // would install and drive a real request through the framework's host validation.
+    // Uses /login rather than /up: the health endpoint is deliberately exempted from this
+    // check now (see tests/Feature/Http/HealthEndpointHostTest.php), so it can no longer
+    // stand in for "an unlisted host is refused" here.
     Request::setTrustedHosts(TrustedHosts::patterns());
 
     try {
-        $this->get(ATTACKER.'/up')->assertStatus(400);
-        $this->get('http://localhost/up')->assertOk();
+        $this->get(ATTACKER.'/login')->assertStatus(400);
+        // No user exists on a fresh test database, so RequireSetup bounces /login to the
+        // wizard — the point here is that the trusted host reaches routing at all,
+        // not what it renders once there.
+        $this->get('http://localhost/login')->assertRedirect(route('setup.show'));
     } finally {
         Request::setTrustedHosts([]);
     }
