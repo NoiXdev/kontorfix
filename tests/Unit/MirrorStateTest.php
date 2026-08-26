@@ -75,3 +75,14 @@ it('names both uids in the foreign-owner message and says what to do', function 
     expect($message)->toContain('/app/storage/app/vcs/abc.git')
         ->and($message)->toContain((string) posix_geteuid());
 });
+
+it('leads with the fleet-wide chown and keeps single-directory removal only as the fallback', function () {
+    // A foreign owner means the whole volume was likely created under the pre-v0.7.0 root
+    // user, not just this one mirror — see docs/development.md's "Upgrading an existing
+    // deployment" note. The chown fixes every affected package (mirrors and dists alike)
+    // in one command; re-cloning one directory at a time does not.
+    $message = MirrorState::foreignOwnerMessage('/app/storage/app/vcs/abc.git');
+
+    expect($message)->toContain('docker run --rm -v <project>_artifacts:/data alpine chown -R')
+        ->and(strpos($message, 'chown'))->toBeLessThan(strpos($message, 'entfernen'));
+});

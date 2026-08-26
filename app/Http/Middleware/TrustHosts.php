@@ -18,8 +18,14 @@ use Illuminate\Http\Request;
  * and process-global: a list installed by an earlier request in the same worker would
  * otherwise still be in force when the health check arrives.
  *
- * Safe for this route and no other: `/up` returns a constant and never reads the host, and
- * `$request->path()` does not read it either.
+ * `/up` itself is safe to exempt: it returns a constant and never reads the host. The
+ * condition below is what has to be safe too, and on its own has nothing to do with the
+ * route — it must match exactly what the router considers `/up`, or the exemption clears
+ * the trusted-host list for a request the router then answers with a plain 404 (whatever
+ * host the attacker sent reaches only that 404 page's `connect-src`, not this application).
+ * The router (`UriValidator`) normalises with `rtrim($path, '/')`; `Request::path()` uses
+ * `trim($path, '/')` — both ends — so `//up` clears the list via `path()` but 404s in the
+ * router. Matching the router's own rtrim-only normalisation keeps the two congruent.
  *
  * `$next` is intentionally untyped: the parent declares it without a type, and a
  * `Closure`/`Response` signature here is a narrower, incompatible override — PHP raises a
@@ -29,7 +35,7 @@ class TrustHosts extends Base
 {
     public function handle(Request $request, $next)
     {
-        if ($request->path() === 'up') {
+        if (rtrim($request->getPathInfo(), '/') === '/up') {
             Request::setTrustedHosts([]);
 
             return $next($request);

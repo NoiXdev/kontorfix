@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Vcs\GitRepository;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use Tests\Support\FixtureRepo;
@@ -204,6 +205,37 @@ it('is idempotent: sync twice fetches instead of recloning', function () {
     $repo->sync();
 
     expect($repo->tags())->toContain('v1.2.0');
+});
+
+// Two versions of the same package, both cold, requested in parallel produce exactly this
+// shape: two GitRepository instances built from the same storage key, both calling sync()
+// at once. Nothing above GitRepository serialises that (SyncPackage's WithoutOverlapping is
+// per package id, and ComposerController's dist lock is per dist file) — see the comment on
+// GitRepository::sync() for why the mirror lock exists.
+
+it('still syncs when another sync holds the mirror lock and never lets go', function () {
+    // A stuck holder must not hang this call forever; the wait is bounded and the
+    // fallback is the unlocked sync that predates the lock.
+    config(['kontorfix.mirror_lock_wait' => 0]);
+
+    $key = 'test-pkg-'.uniqid();
+
+    // Held for the whole call and deliberately never released.
+    expect(Cache::lock('mirror:'.$key, 330)->get())->toBeTrue();
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    expect($repo->tags())->toContain('v1.0.0');
+});
+
+it('releases the mirror lock after a sync so a concurrent sync of the same mirror is not blocked', function () {
+    $key = 'test-pkg-'.uniqid();
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    // If sync() had not released the lock, acquiring it fresh here would fail.
+    expect(Cache::lock('mirror:'.$key, 330)->get())->toBeTrue();
 });
 
 it('throws a useful error for unreachable urls', function () {

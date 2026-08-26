@@ -19,7 +19,7 @@ use Illuminate\Http\Request;
  * `url()` first, which stamps HTTP_HOST back to the app host and silently discards a `Host`
  * header override. An absolute-URL request target is the only way this test client actually
  * changes the host the framework validates against — see the identical pattern already used
- * by HostHeaderTrustTest.php's `ATTACKER.'/up'`.
+ * by HostHeaderTrustTest.php's `ATTACKER.'/login'`.
  */
 beforeEach(function () {
     Request::setTrustedHosts(TrustedHosts::patterns());
@@ -45,4 +45,14 @@ it('still answers the health check under the application host', function () {
 
 it('still refuses an unlisted host on a route that is not the health check', function () {
     $this->get('http://172.18.0.6:8080/login')->assertStatus(400);
+});
+
+it('does not exempt a doubled-slash path the router would not route to /up anyway', function () {
+    // Request::path() trims both ends (trim($path, '/')), but the router (UriValidator)
+    // only rtrims. //up therefore used to normalise to "up" via path() — clearing the
+    // trusted-host list — while the router still 404s it (rtrim leaves "//up" alone, which
+    // never matches the compiled "/up" route). TrustHosts now keys off the same
+    // rtrim-only normalisation the router uses, so an unlisted host on //up is refused
+    // by the host check instead of sailing through to a router 404.
+    $this->get('http://172.18.0.6:8080//up')->assertStatus(400);
 });

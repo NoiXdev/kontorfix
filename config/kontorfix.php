@@ -116,6 +116,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Git mirror lock
+    |--------------------------------------------------------------------------
+    |
+    | Seconds GitRepository::sync() waits for another sync() call already working on the
+    | same mirror. Two versions of the same package, both cold, requested in parallel
+    | (a normal parallel `composer install`) both reach sync() for one mirror; if it needs
+    | repair, the second call's delete can remove the first call's directory mid-clone.
+    |
+    | Unlike the dist build lock above, a timed-out wait here still falls through and runs
+    | unlocked (never hang a queued job or a download request on a stuck holder forever),
+    | but the default equals the lock TTL (330s, comfortably above the 300s clone timeout)
+    | rather than a short poll: falling through early would reintroduce the very race this
+    | lock exists to prevent, so the timeout is meant to fire only for a genuinely stuck
+    | holder, not as a routine degrade path. Lower it in tests that need to observe the
+    | unlocked fallback without waiting out the real timeout.
+    |
+    */
+
+    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 330),
+
+    /*
+    |--------------------------------------------------------------------------
     | Git transport and address policy
     |--------------------------------------------------------------------------
     |

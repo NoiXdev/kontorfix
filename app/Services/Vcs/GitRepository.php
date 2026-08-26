@@ -3,7 +3,9 @@
 namespace App\Services\Vcs;
 
 use App\Enums\GitProvider;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Process\ProcessResult;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
@@ -20,7 +22,7 @@ class GitRepository
 
     public function __construct(
         private readonly string $url,
-        string $storageKey,
+        private readonly string $storageKey,
         ?string $token = null,
         ?GitProvider $provider = null,
         ?string $username = null,
@@ -43,6 +45,50 @@ class GitRepository
             throw new RuntimeException($rejection);
         }
 
+        // SyncPackage serialises against itself per package id (WithoutOverlapping), and
+        // ComposerController::dist() takes a lock per *dist file*. Neither stops two
+        // separate calls from reaching this method for the same mirror at the same time —
+        // e.g. two versions of the same package, both cold, requested in parallel by a
+        // parallel `composer install`. If the mirror is Repairable for both, the second
+        // call's delete below can remove the first call's directory mid-clone or
+        // mid-archive. That is not data corruption (the dist zip is staged to a temp path
+        // and renamed only once complete, elsewhere), just a wasted re-clone and an error
+        // response — but the delete is still the first destructive operation on a path
+        // several requests can share, so it is worth serialising properly rather than
+        // leaving it to chance.
+        //
+        // TTL 330s: comfortably above the slowest thing that can happen under the lock —
+        // the 300s `git clone --mirror` timeout below — with margin for the up-front
+        // MirrorState::of() check (15s timeout) and the directory delete. The wait
+        // (config('kontorfix.mirror_lock_wait'), default 330s too — see config/kontorfix.php)
+        // deliberately matches the TTL instead of a short poll: unlike the per-dist lock,
+        // which falls through unlocked on timeout because building twice is merely
+        // wasteful, falling through here would reintroduce exactly the delete-during-clone
+        // race this lock exists to prevent. So the timeout fallback below only fires for a
+        // genuinely stuck lock (e.g. a crashed holder that never released), not as a
+        // routine degrade path.
+        $lock = Cache::lock('mirror:'.$this->storageKey, 330);
+        $held = false;
+
+        try {
+            $lock->block((int) config('kontorfix.mirror_lock_wait', 330));
+            $held = true;
+        } catch (LockTimeoutException) {
+            // Fall through and run unlocked rather than hang a queued job or a download
+            // request forever.
+        }
+
+        try {
+            $this->performSync();
+        } finally {
+            if ($held) {
+                $lock->release();
+            }
+        }
+    }
+
+    private function performSync(): void
+    {
         $state = MirrorState::of($this->mirrorPath);
 
         if ($state === MirrorState::ForeignOwner) {

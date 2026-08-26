@@ -608,7 +608,12 @@ image, and a freshly created `artifacts` volume inherits the ownership from it.
 
 > **Upgrading an existing deployment:** a volume created while the container still ran as
 > root keeps its root-owned directories, and uploads/proxy caching will fail with
-> "Permission denied". Chown it once, then start normally:
+> "Permission denied". Git-sourced packages hit the same root cause on the same volume: their
+> mirrors under `storage/app/vcs` are also root-owned, git refuses to work in a repository it
+> does not own ("detected dubious ownership"), and the sync surfaces this as a foreign-owner
+> error naming every affected mirror. Chown the whole volume once, then start normally — this
+> fixes uploads, dist caching, and every git mirror in one pass, rather than re-cloning them
+> one package at a time:
 >
 > ```bash
 > docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data

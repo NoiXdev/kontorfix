@@ -77,15 +77,30 @@ enum MirrorState
         ));
     }
 
-    /** German: this reaches the operator through `packages.sync_error`. */
+    /**
+     * German: this reaches the operator through `packages.sync_error`.
+     *
+     * A foreign owner here is the same root-owned-volume issue documented in
+     * docs/development.md's "Upgrading an existing deployment" note (dists on the same
+     * `artifacts` volume hit it too): every mirror is foreign-owned at once, not just this
+     * one. Leading with the chown lets the operator fix the whole fleet in one command
+     * instead of deleting mirrors one package at a time; the single-directory removal is
+     * kept as the narrow fallback for the case where only this one mirror is actually
+     * affected (e.g. it was copied in by hand with the wrong owner).
+     */
     public static function foreignOwnerMessage(string $path): string
     {
         $owner = @fileowner($path);
 
         return sprintf(
             'Der Git-Mirror gehört uid %s, dieser Dienst läuft als uid %d. '
-            .'Das Verzeichnis %s entfernen — der nächste Sync klont neu.',
+            .'Das betrifft in der Regel alle Mirrors auf diesem Volume — '
+            .'einmalig `docker run --rm -v <project>_artifacts:/data alpine chown -R %d:%d /data` '
+            .'ausführen (siehe docs/development.md). '
+            .'Ist nur dieser eine Mirror betroffen, reicht es, das Verzeichnis %s zu entfernen — der nächste Sync klont neu.',
             $owner === false ? 'unbekannt' : (string) $owner,
+            posix_geteuid(),
+            posix_geteuid(),
             posix_geteuid(),
             $path,
         );

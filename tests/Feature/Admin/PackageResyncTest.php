@@ -28,7 +28,10 @@ it('queues a sync for a git-sourced package', function () {
     $this->actingAs(resyncOperator())
         ->post(route('admin.packages.resync', $package))
         ->assertRedirect()
-        ->assertSessionHasNoErrors();
+        ->assertSessionHasNoErrors()
+        // Show.vue reads flash.success to render the toast the operator relies on
+        // instead of clicking the button again — see Show.vue's flashSuccess computed.
+        ->assertSessionHas('success', 'Synchronisierung wurde eingereiht.');
 
     Queue::assertPushed(SyncPackage::class, fn (SyncPackage $job): bool => $job->package->is($package));
 });
