@@ -63,6 +63,8 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Mark/unmark a package as abandoned. Split from the repository-source update above:
     // that one carries credential-retarget logic abandonment has nothing to do with.
     Route::put('packages/{package}/abandonment', [Admin\PackageController::class, 'abandonment'])->name('packages.abandonment');
+    // Re-queue a sync for a git-sourced package; refused (409) for a publish-based one.
+    Route::post('packages/{package}/resync', [Admin\PackageController::class, 'resync'])->name('packages.resync');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');

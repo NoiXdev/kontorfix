@@ -162,6 +162,15 @@ function saveSource() {
         });
 }
 
+// Retries a sync without touching the stored source — the only other way was re-submitting
+// the form above with the same values. Only offered for git-sourced packages: the server
+// route stays reachable regardless, refusing a publish-based package with 409.
+const resyncForm = useForm({});
+
+function resyncPackage() {
+    resyncForm.post(route('admin.packages.resync', props.package.id), { preserveScroll: true });
+}
+
 // --- Abandonment ---
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
 
@@ -391,9 +400,12 @@ useOperatorChannel({
                             </div>
                         </template>
 
-                        <div>
+                        <div class="flex items-center gap-3">
                             <Button type="submit" :disabled="sourceForm.processing">
                                 {{ isGitSourced ? 'Speichern & neu synchronisieren' : 'Speichern' }}
+                            </Button>
+                            <Button v-if="isGitSourced" type="button" variant="outline" :disabled="resyncForm.processing" @click="resyncPackage">
+                                Jetzt synchronisieren
                             </Button>
                         </div>
                     </form>
