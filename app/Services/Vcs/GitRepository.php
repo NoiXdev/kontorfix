@@ -4,6 +4,7 @@ namespace App\Services\Vcs;
 
 use App\Enums\GitProvider;
 use Illuminate\Contracts\Process\ProcessResult;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
 use RuntimeException;
@@ -42,7 +43,20 @@ class GitRepository
             throw new RuntimeException($rejection);
         }
 
-        if (is_dir($this->mirrorPath)) {
+        $state = MirrorState::of($this->mirrorPath);
+
+        if ($state === MirrorState::ForeignOwner) {
+            throw new RuntimeException(MirrorState::foreignOwnerMessage($this->mirrorPath));
+        }
+
+        // A mirror we own but cannot fetch into is worth less than the seconds a fresh clone
+        // costs. Dropping it here means one bad clone does not wedge a package forever.
+        if ($state === MirrorState::Repairable) {
+            File::deleteDirectory($this->mirrorPath);
+            $state = MirrorState::Absent;
+        }
+
+        if ($state === MirrorState::Usable) {
             // fetch needs the auth header too (the mirror's stored URL is token-free).
             $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(120)
                 ->run(['git', 'fetch', '--prune', '--tags', 'origin']);

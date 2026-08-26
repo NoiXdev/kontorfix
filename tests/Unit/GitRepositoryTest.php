@@ -118,6 +118,33 @@ it('creates a zip archive for a ref', function () {
     unlink($zip);
 });
 
+it('re-clones a mirror that exists but is not a usable repository', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    mkdir($mirror, 0775, true);
+    file_put_contents($mirror.'/stray', 'not a repo');
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    expect(is_file($mirror.'/HEAD'))->toBeTrue()
+        ->and(is_file($mirror.'/stray'))->toBeFalse();
+});
+
+it('fetches an existing healthy mirror instead of re-cloning it', function () {
+    $key = 'test-pkg-'.uniqid();
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    $marker = storage_path('app/vcs/'.$key.'.git/.kept');
+    touch($marker);
+
+    $repo->sync();
+
+    // A re-clone would wipe the directory; the marker surviving proves the fetch path ran.
+    expect(is_file($marker))->toBeTrue();
+});
+
 it('is idempotent: sync twice fetches instead of recloning', function () {
     $fixture = FixtureRepo::make();
     $key = 'test-pkg-'.uniqid();
