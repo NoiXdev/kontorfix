@@ -3,6 +3,7 @@
 namespace App\Services\Vcs;
 
 use Illuminate\Support\Facades\Process;
+use RuntimeException;
 
 /**
  * What can be done with an existing git mirror directory.
@@ -16,6 +17,17 @@ use Illuminate\Support\Facades\Process;
  * So the two cases are kept apart on purpose. A mirror this service owns but cannot use is
  * thrown away and re-cloned. A mirror owned by someone else is reported in terms an
  * operator can act on, instead of passing git's wording through.
+ *
+ * A third case is kept apart just as deliberately: uncertainty must never be treated as
+ * "broken". `of()` only ever returns Repairable when git has positively told us the path is
+ * not a usable repository — never merely because the check itself failed to run (git
+ * missing, a timeout, a transient filesystem error). Collapsing "definitely broken" and
+ * "couldn't tell" into the same outcome would mean an infra hiccup deletes and re-clones a
+ * perfectly good mirror; under load, a burst of such hiccups would each trigger a full
+ * re-clone, adding load and causing more hiccups elsewhere — exactly the thundering herd
+ * this design exists to avoid. An indeterminate result is therefore surfaced as a
+ * RuntimeException instead of a classification, the same way every other sync failure in
+ * this codebase is reported — the caller sees a failed sync, not a silently repaired one.
  */
 enum MirrorState
 {
@@ -36,14 +48,33 @@ enum MirrorState
             return self::ForeignOwner;
         }
 
-        // Cheap and decisive: a mirror git itself refuses to recognise is one we cannot
-        // fetch into, whatever the reason — interrupted clone, truncated HEAD, stray
-        // directory left by a crash.
-        $result = Process::path($path)->timeout(15)->run(['git', 'rev-parse', '--is-bare-repository']);
+        // --git-dir pins this check to exactly $path. Without it, git's ordinary repository
+        // discovery walks up through parent directories looking for a `.git`, and a mirror
+        // lives inside this application's own working tree — an unpinned check run against a
+        // stray directory can walk all the way up to *this project's* repository and answer a
+        // question about that one instead of about $path (worse: if some ancestor happened to
+        // be a bare repo, it would report "true" and misclassify a broken mirror as Usable).
+        $result = Process::path($path)->timeout(15)->run(['git', '--git-dir='.$path, 'rev-parse', '--is-bare-repository']);
 
-        return $result->successful() && trim($result->output()) === 'true'
-            ? self::Usable
-            : self::Repairable;
+        if ($result->successful()) {
+            return trim($result->output()) === 'true' ? self::Usable : self::Repairable;
+        }
+
+        // Exit 128 with this exact message is git positively telling us $path is not a
+        // git repository at all — a stray directory, a half-written clone missing HEAD, or
+        // similar. That is decisive evidence, not a guess.
+        if (str_contains($result->errorOutput(), 'not a git repository')) {
+            return self::Repairable;
+        }
+
+        // Any other failure (git missing, a permissions surprise, a flaky filesystem) looks
+        // identical to a broken mirror from here, but is not evidence that the mirror itself
+        // is broken. See the class docblock: uncertainty must not cause deletion.
+        throw new RuntimeException(sprintf(
+            'Could not determine whether %s is a usable git mirror: %s',
+            $path,
+            trim($result->errorOutput()) !== '' ? trim($result->errorOutput()) : 'git exited '.$result->exitCode(),
+        ));
     }
 
     /** German: this reaches the operator through `packages.sync_error`. */

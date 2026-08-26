@@ -145,6 +145,53 @@ it('fetches an existing healthy mirror instead of re-cloning it', function () {
     expect(is_file($marker))->toBeTrue();
 });
 
+it('does not delete an existing mirror when the usability check itself is inconclusive', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    mkdir($mirror, 0775, true);
+    file_put_contents($mirror.'/marker', 'still here');
+
+    // Not git positively saying "this is not a repository" — a stand-in for a timeout, a
+    // missing binary, or any other infra hiccup that looks like a broken mirror but isn't
+    // evidence of one. Uncertainty must not cause deletion.
+    Process::fake([
+        '*rev-parse*' => Process::result(
+            errorOutput: 'fatal: unable to read current working directory: No such file or directory',
+            exitCode: 128,
+        ),
+    ]);
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    expect(fn () => $repo->sync())->toThrow(RuntimeException::class);
+    // The mirror must still be there — an inconclusive check must not have deleted it.
+    expect(is_file($mirror.'/marker'))->toBeTrue();
+});
+
+it('never empties the target of a symlink sitting at the mirror path when repairing', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    if (! is_dir(dirname($mirror))) {
+        mkdir(dirname($mirror), 0775, true);
+    }
+
+    $target = sys_get_temp_dir().'/kfx-symlink-target-'.uniqid();
+    mkdir($target, 0775, true);
+    file_put_contents($target.'/precious.txt', 'do not delete me');
+    symlink($target, $mirror);
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    // File::deleteDirectory() follows a symlink and empties whatever it points to; a
+    // correct repair removes only the link and leaves the target's contents untouched.
+    expect(is_file($target.'/precious.txt'))->toBeTrue()
+        ->and(is_link($mirror))->toBeFalse()
+        ->and(is_file($mirror.'/HEAD'))->toBeTrue();
+
+    File::deleteDirectory($target);
+});
+
 it('is idempotent: sync twice fetches instead of recloning', function () {
     $fixture = FixtureRepo::make();
     $key = 'test-pkg-'.uniqid();

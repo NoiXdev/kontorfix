@@ -52,7 +52,16 @@ class GitRepository
         // A mirror we own but cannot fetch into is worth less than the seconds a fresh clone
         // costs. Dropping it here means one bad clone does not wedge a package forever.
         if ($state === MirrorState::Repairable) {
-            File::deleteDirectory($this->mirrorPath);
+            // File::deleteDirectory() follows a symlink at the given path and empties the
+            // *target's* contents instead of removing the link itself — never call it here.
+            // Nothing in this codebase creates a symlink at a mirror path today, but nothing
+            // guarantees this location can never become one either; unlinking the entry is
+            // safe regardless of what it points to, whereas deleting through it is not.
+            if (is_link($this->mirrorPath)) {
+                unlink($this->mirrorPath);
+            } else {
+                File::deleteDirectory($this->mirrorPath);
+            }
             $state = MirrorState::Absent;
         }
 
