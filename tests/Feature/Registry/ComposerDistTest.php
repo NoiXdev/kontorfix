@@ -5,6 +5,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FixtureRepo;
@@ -135,6 +136,12 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
     // alone would still be 503.
     config(['kontorfix.mirror_lock_wait' => 8, 'kontorfix.mirror_lock_wait_web' => 1]);
 
+    // ServiceUnavailableHttpException is an HttpException, so it sits in Laravel's
+    // $internalDontReport and is silent by default — unlike the 500 it replaced, which
+    // was reported. A spy rather than a strict mock: it must not choke on unrelated log
+    // calls elsewhere in the request, only confirm this one happened.
+    Log::spy();
+
     Storage::fake('artifacts');
     $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
     (new SyncPackage($pkg))->handle();
@@ -153,6 +160,10 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
     // client is told when to come back instead of being told the request can never succeed.
     $res->assertStatus(503)->assertHeader('Retry-After');
     expect($elapsed)->toBeLessThan(4.0);
+
+    // The signal that would show pool saturation on a live instance — otherwise this
+    // 503 leaves no trace anywhere, silent by construction (see the config above).
+    Log::shouldHaveReceived('info')->once();
 
     // Nothing half-built was left behind, and no download was counted.
     $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;

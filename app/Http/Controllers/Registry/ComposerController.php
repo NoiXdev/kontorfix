@@ -16,6 +16,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
@@ -183,13 +184,48 @@ class ComposerController extends Controller
                         // back" with a hint of when. A 500 says the request can never
                         // succeed, which is what this path used to claim.
                         //
-                        // Retry-After is deliberately four times the wait we just spent:
-                        // a client that retries immediately would block another thread for
-                        // another $mirrorWait against the same clone, so the number is
-                        // chosen to keep a polling client's duty cycle on the thread pool
-                        // low rather than to predict when the holder finishes (which is not
-                        // knowable from here). Whether a given client honours the header is
-                        // its own business; the status code is the part that carries.
+                        // What the status code buys, regardless of what any particular
+                        // client does with it: correct semantics, a signal a proxy or a
+                        // monitoring system can act on without parsing a German sentence,
+                        // and — the part that actually matters for this codebase — a
+                        // FrankenPHP thread released now instead of held for the queue's
+                        // much longer wait. Retry-After is set to four times the wait we
+                        // just spent on the same logic: it is not a prediction of when the
+                        // holder finishes (not knowable from here), it is what keeps a
+                        // client that DOES honour the header from immediately re-blocking
+                        // another thread against the same busy clone.
+                        //
+                        // What it does NOT buy, checked against Composer 2.10's own
+                        // source rather than assumed: Composer never reads Retry-After —
+                        // there is no reference to it anywhere in its codebase — and its
+                        // cURL downloader retries 423, 425, 500, 502, 503, 504, 507 and 510
+                        // identically (CurlDownloader::isAuthenticatedRetryStatusCode() and
+                        // friends), with a fixed backoff of 0ms/100ms/500ms over 3 retries.
+                        // A 503 here gets exactly the treatment the 500 it replaces used to
+                        // get. For sustained contention that means a `composer install`
+                        // still exhausts its retries and fails outright — for *clone*
+                        // contention (parallel cold versions of one package, this branch's
+                        // original motivating case) that is the pre-branch v0.7.0 outcome
+                        // again, not a fix for it. The common case, contention against a
+                        // *fetch*, is unaffected: it is absorbed by $mirrorWait before this
+                        // is ever thrown. Composer's indifference is not a reason to send
+                        // 500 instead — the status code is correct on its own terms, and
+                        // other clients (browsers, proxies, CDNs) do honour the header —
+                        // but it is a reason not to claim this closes the parallel-install
+                        // gap for the client that actually matters here.
+                        //
+                        // Logged explicitly because ServiceUnavailableHttpException is an
+                        // HttpException, and Laravel's exception handler treats every
+                        // HttpException as reportable-by-default-false ($internalDontReport)
+                        // — the 500 this replaces WAS reported. Without this line, mirror
+                        // contention on the web path is invisible: exactly the signal that
+                        // would show a saturating thread pool before it saturates.
+                        Log::info('Mirror lock busy on the web path; answering 503.', [
+                            'package_id' => $package->id,
+                            'version' => $version,
+                            'wait_seconds' => $mirrorWait,
+                        ]);
+
                         throw new ServiceUnavailableHttpException(max($mirrorWait, 1) * 4, $e->getMessage(), $e);
                     }
                     $tmp = $repo->archiveZip($pkgVersion->source_reference);

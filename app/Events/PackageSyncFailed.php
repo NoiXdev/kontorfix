@@ -12,6 +12,15 @@ class PackageSyncFailed implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets;
 
+    /**
+     * Seconds this event's queued broadcast delivery may run before the worker kills it.
+     *
+     * See `PackageSynced::$timeout` for why this has to be declared explicitly: without it,
+     * `Illuminate\Broadcasting\BroadcastEvent` inherits the raised `supervisor-1.timeout`
+     * (900s) meant for `SyncPackage`, for a job that only relays a Pusher broadcast.
+     */
+    public int $timeout = 30;
+
     public function __construct(public Package $package, public string $error) {}
 
     public function broadcastOn(): PrivateChannel

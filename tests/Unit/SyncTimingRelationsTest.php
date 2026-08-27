@@ -3,6 +3,8 @@
 use App\Jobs\SyncPackage;
 use App\Models\Package;
 use App\Services\Vcs\GitRepository;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\Queue;
@@ -116,8 +118,16 @@ it('keeps the web caller off the queue caller\'s wait', function () {
     // crossing its failure threshold.
     $health = appHealthcheck();
     $webWait = (int) config('kontorfix.mirror_lock_wait_web');
+    $distBuildWait = (int) config('kontorfix.dist_build_lock_wait');
 
-    expect($webWait + $health['timeout'])
+    // A rejected dist request parks a thread twice in sequence, not once:
+    // ComposerController::dist() blocks on the dist-build lock first
+    // (kontorfix.dist_build_lock_wait) and only then, if it still has to build, on the
+    // mirror lock (kontorfix.mirror_lock_wait_web). Omitting the first understates the
+    // real worst-case park by exactly its value — with today's defaults (15 + 15 + 5 = 35
+    // against a 75s budget) that slack hides the fact that raising
+    // KONTORFIX_DIST_BUILD_LOCK_WAIT to 60 alone lands exactly on the healthcheck budget.
+    expect($distBuildWait + $webWait + $health['timeout'])
         ->toBeLessThanOrEqual($health['interval'] * $health['retries']);
 
     // And the two waits must not be quietly re-unified: the queue caller's value is sized
@@ -234,13 +244,38 @@ it('makes every queued job declare its own timeout', function () {
     // without a $timeout silently inherits a fifteen-minute worker alarm instead of the
     // minute it would have got before. That is invisible until something hangs, which is
     // exactly the kind of drift this file exists to refuse.
+    //
+    // A non-recursive glob of app/Jobs only ever sees the classes declared directly there.
+    // It cannot see this drift happen in a *vendor*-dispatched job — and one already does:
+    // dispatching a ShouldBroadcast (not ...Now) event queues
+    // Illuminate\Broadcasting\BroadcastEvent, whose $timeout is copied from the event via
+    // ReadsQueueAttributes::getAttributeValue(), same fallback-to-supervisor rule as any
+    // App\Jobs class. So the sweep below is widened to cover that one concrete case
+    // explicitly rather than silently claiming a coverage this glob cannot deliver — every
+    // other vendor-dispatched job (a queued listener, a queued notification/mailable) is
+    // still outside what this test can see, and inherits the supervisor value if it
+    // declares no $timeout of its own.
     $jobs = collect(glob(app_path('Jobs/*.php')))
         ->map(fn (string $file) => 'App\\Jobs\\'.basename($file, '.php'))
         ->filter(fn (string $class) => is_subclass_of($class, ShouldQueue::class));
 
-    expect($jobs)->not->toBeEmpty();
+    $broadcastEvents = collect(glob(app_path('Events/*.php')))
+        ->map(fn (string $file) => 'App\\Events\\'.basename($file, '.php'))
+        // ShouldBroadcastNow extends ShouldBroadcast but is dispatched synchronously by
+        // the broadcast manager, never through BroadcastEvent — it never touches a
+        // supervisor timeout at all, so it does not belong in this sweep.
+        ->filter(fn (string $class) => is_subclass_of($class, ShouldBroadcast::class)
+            && ! is_subclass_of($class, ShouldBroadcastNow::class));
 
-    foreach ($jobs as $class) {
+    $classes = $jobs->merge($broadcastEvents);
+
+    expect($classes)->not->toBeEmpty();
+    // Both sources have to actually contribute, or a change to either glob/filter that
+    // quietly empties one side would pass this assertion by only ever checking the other.
+    expect($jobs)->not->toBeEmpty();
+    expect($broadcastEvents)->not->toBeEmpty();
+
+    foreach ($classes as $class) {
         expect(property_exists($class, 'timeout'))->toBeTrue("{$class} declares no \$timeout");
     }
 });

@@ -262,9 +262,18 @@ class SyncPackage implements ShouldQueue
         // attempted too many times or run too long") tells an operator nothing about the
         // repository. handle() has already written the real reason to `sync_error` on every
         // attempt that got far enough to have one, so prefer that. Read straight out of the
-        // column rather than trusting this deserialized copy — and as a value, not a model,
-        // so a package deleted in the meantime is simply a null rather than an exception
-        // thrown from inside the failure handler.
+        // column rather than trusting this deserialized copy — as a value, not a model,
+        // because it is one query cheaper than reloading a model just to read one column.
+        //
+        // That is the only reason. A package deleted in the meantime does NOT reach this
+        // method as a null $this->package: Illuminate\Queue\CallQueuedHandler::failed()
+        // re-deserializes the job's stored payload to obtain the command it calls failed()
+        // on, and that deserialization restores $this->package via
+        // SerializesAndRestoresModelIdentifiers::restoreModel() — Eloquent's firstOrFail().
+        // A missing row makes that throw ModelNotFoundException uncaught, before this
+        // method's body ever runs, not after it with a null property (verified directly:
+        // constructing the payload, deleting the row, then calling
+        // CallQueuedHandler::failed() throws ModelNotFoundException rather than returning).
         $stored = $e instanceof MaxAttemptsExceededException
             ? Package::query()->whereKey($this->package->getKey())->value('sync_error')
             : null;
