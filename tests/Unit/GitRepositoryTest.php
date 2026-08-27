@@ -3,6 +3,7 @@
 use App\Services\Vcs\GitRepository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Tests\Support\FixtureRepo;
 
@@ -294,6 +295,84 @@ it('releases the mirror lock after a sync so a concurrent sync of the same mirro
 
     // If sync() had not released the lock, acquiring it fresh here would fail.
     expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
+});
+
+// A mirror owned by another uid cannot be deleted by this service — that needs write
+// permission *inside* it — but it can be renamed aside, which needs write permission only on
+// storage/app/vcs. A symlink to a root-owned directory is how that state is produced here
+// without privileges: MirrorState::of() stats through the link, so it sees the foreign owner,
+// while rename() moves the link itself and never touches what it points at.
+
+it('moves a foreign-owned mirror aside and clones a fresh one in its place', function () {
+    Log::spy();
+
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    if (! is_dir(dirname($mirror))) {
+        mkdir(dirname($mirror), 0775, true);
+    }
+    symlink('/usr', $mirror); // root-owned, and unwritable by this uid either way
+
+    expect(fileowner($mirror))->not->toBe(posix_geteuid());
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    $displaced = glob(dirname($mirror).'/'.$key.'.git.foreign-*') ?: [];
+
+    try {
+        expect($displaced)->toHaveCount(1)
+            // The link moved; its target was never followed, let alone emptied.
+            ->and(is_link($displaced[0]))->toBeTrue()
+            ->and(readlink($displaced[0]))->toBe('/usr')
+            // A displaced name can never be mistaken for a mirror: mirrors end in `.git`.
+            ->and(basename($displaced[0]))->toMatch('/\.git\.foreign-\d{8}-\d{6}-[0-9a-f]{8}$/')
+            // ...and the package is working again without an operator.
+            ->and(is_link($mirror))->toBeFalse()
+            ->and(is_file($mirror.'/HEAD'))->toBeTrue()
+            ->and($repo->tags())->toContain('v1.0.0');
+    } finally {
+        foreach ($displaced as $link) {
+            unlink($link);
+        }
+    }
+
+    // The sync succeeded, so sync_error is cleared and the log is the only place the
+    // permanent residue is visible at all. It has to name the directory and still carry the
+    // fleet-wide chown that makes the whole case go away.
+    Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context) use ($mirror) {
+        return str_contains($message, 'foreign-owned git mirror')
+            && $context['mirror'] === $mirror
+            && str_contains($context['displaced'], '.git.foreign-')
+            && str_contains($context['remedy'], 'chown -R');
+    })->once();
+});
+
+it('falls back to the actionable message when a foreign-owned mirror cannot be moved aside either', function () {
+    $key = 'test-pkg-'.uniqid();
+    $parent = storage_path('app/vcs');
+    if (! is_dir($parent)) {
+        mkdir($parent, 0775, true);
+    }
+    $mirror = $parent.'/'.$key.'.git';
+    symlink('/usr', $mirror);
+
+    // Renaming needs write permission on the parent — the same permission the fresh clone
+    // needs. Take it away and displacement becomes impossible, which is the read-only
+    // volume / wrong-owner-on-vcs case. There is nothing left to do but tell the operator.
+    chmod($parent, 0555);
+
+    try {
+        $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+        expect(fn () => $repo->sync())->toThrow(RuntimeException::class, 'chown -R');
+        // Nothing was moved and nothing was invented in its place.
+        expect(glob($parent.'/'.$key.'.git.foreign-*'))->toBe([])
+            ->and(is_link($mirror))->toBeTrue();
+    } finally {
+        chmod($parent, 0775);
+        unlink($mirror);
+    }
 });
 
 it('throws a useful error for unreachable urls', function () {

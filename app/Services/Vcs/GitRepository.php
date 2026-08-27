@@ -7,6 +7,7 @@ use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use InvalidArgumentException;
 use RuntimeException;
@@ -130,7 +131,7 @@ class GitRepository
         $state = MirrorState::of($this->mirrorPath);
 
         if ($state === MirrorState::ForeignOwner) {
-            throw new RuntimeException(MirrorState::foreignOwnerMessage($this->mirrorPath));
+            $state = $this->displaceForeignMirror();
         }
 
         // A mirror we own but cannot fetch into is worth less than the seconds a fresh clone
@@ -172,6 +173,60 @@ class GitRepository
         if (! $result->successful()) {
             throw new RuntimeException('git clone failed: '.GitAuth::scrub($result->errorOutput()));
         }
+    }
+
+    /**
+     * Moves a mirror owned by another uid out of the way so the clone below can take its
+     * place, and reports Absent. Throws — with the old actionable message — only if even
+     * that is impossible.
+     *
+     * The v0.7.0 incident proved this service cannot *delete* a root-owned mirror: emptying
+     * `<key>.git` needs write permission inside `<key>.git`, which uid 33 does not have.
+     * It says nothing about renaming one. `rename()` touches only the directory entry, so
+     * it needs write permission on the parent, `storage/app/vcs` — the very permission the
+     * fresh `git clone` two lines later already depends on. If we can re-clone at all, we
+     * can displace; if we cannot displace, the re-clone would have failed too, which is why
+     * the fallback is the unchanged "here is what to run" message rather than a retry.
+     *
+     * What this does not do is delete the displaced directory afterwards. It cannot — that
+     * is the same permission problem, just at a different path — so the copy stays on the
+     * volume for good. That is the honest price of self-healing and the reason for the
+     * log line: the sync it accompanies *succeeds*, clearing `sync_error`, so without the
+     * log the residue would appear nowhere at all. It is bounded, not a leak: displacing a
+     * mirror replaces it with one this service owns, so a given package pays it once per
+     * time something external puts a foreign-owned directory there — in practice once, on
+     * the upgrade this whole case exists for. Warning rather than error because nothing is
+     * broken; there is an action item, and it is one command for the whole fleet.
+     *
+     * The suffix carries a timestamp (so an operator can tell displacements apart and see
+     * how old they are) and four random bytes (so repeated runs cannot collide — the
+     * timestamp alone has one-second resolution). A collision would not be silent anyway:
+     * rename() onto a non-empty directory fails and lands in the fallback below. The name
+     * can also never be mistaken for a mirror, because every mirror path ends in `.git`
+     * and every displaced path ends in hex.
+     */
+    private function displaceForeignMirror(): MirrorState
+    {
+        $displaced = sprintf('%s.foreign-%s-%s', $this->mirrorPath, date('Ymd-His'), bin2hex(random_bytes(4)));
+
+        // Built before the rename: it names the owning uid, which is read off the
+        // directory that is about to move.
+        $notice = MirrorState::displacedMessage($this->mirrorPath, $displaced);
+
+        if (! @rename($this->mirrorPath, $displaced)) {
+            throw new RuntimeException(
+                'Der Git-Mirror gehört einem anderen Benutzer und konnte auch nicht zur Seite '
+                .'verschoben werden. '.MirrorState::foreignOwnerMessage($this->mirrorPath)
+            );
+        }
+
+        Log::warning('Displaced a foreign-owned git mirror; the displaced copy is never removed by this service.', [
+            'mirror' => $this->mirrorPath,
+            'displaced' => $displaced,
+            'remedy' => $notice,
+        ]);
+
+        return MirrorState::Absent;
     }
 
     /** @return list<string> */

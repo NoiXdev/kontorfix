@@ -86,3 +86,19 @@ it('leads with the fleet-wide chown and keeps single-directory removal only as t
     expect($message)->toContain('docker run --rm -v <project>_artifacts:/data alpine chown -R')
         ->and(strpos($message, 'chown'))->toBeLessThan(strpos($message, 'entfernen'));
 });
+
+it('says what was displaced, that it is permanent, and still leads to the chown', function () {
+    // The sync this accompanies succeeded, so `sync_error` is empty and the log line built
+    // from this message is the only trace the residue leaves. Three things have to survive
+    // in it: which directory was left behind, that nothing will ever remove it, and the one
+    // command that stops it happening for the rest of the fleet.
+    $message = MirrorState::displacedMessage(
+        '/app/storage/app/vcs/abc.git',
+        '/app/storage/app/vcs/abc.git.foreign-20260827-120000-deadbeef',
+    );
+
+    expect($message)->toContain('/app/storage/app/vcs/abc.git.foreign-20260827-120000-deadbeef')
+        ->and($message)->toContain('kann der Dienst nicht löschen')
+        ->and($message)->toContain('docker run --rm -v <project>_artifacts:/data alpine chown -R')
+        ->and($message)->toContain((string) posix_geteuid());
+});

@@ -10,13 +10,23 @@ use RuntimeException;
  *
  * v0.7.0 dropped the container from root to www-data. Every mirror the previous release
  * created is owned by root, and git refuses to work in a repository owned by another user
- * ("detected dubious ownership"). The service cannot repair that: removing a directory
- * needs write permission on its *immediate* parent, and the foreign-owned `.git` directory
- * is that parent — deleting as www-data failed on every entry.
+ * ("detected dubious ownership").
  *
- * So the two cases are kept apart on purpose. A mirror this service owns but cannot use is
- * thrown away and re-cloned. A mirror owned by someone else is reported in terms an
- * operator can act on, instead of passing git's wording through.
+ * Such a mirror cannot be *deleted* by this service: emptying `<key>.git` needs write
+ * permission inside `<key>.git`, and that directory belongs to the other user. But it can
+ * be *displaced*. Renaming an entry needs write permission only on the directory holding
+ * it — `storage/app/vcs` — which this service owns; that is the same permission the fresh
+ * clone afterwards relies on, so if displacement is impossible the re-clone was never
+ * going to work either. GitRepository::sync() therefore moves a foreign-owned mirror aside
+ * and clones next to it rather than failing the package forever. The cost is real and is
+ * not hidden: the displaced copy can never be removed by this service, so it stays on the
+ * volume until an operator removes it, which is why the message below leads with the
+ * fleet-wide chown that makes the whole situation go away.
+ *
+ * So the three cases are kept apart on purpose. A mirror this service owns but cannot use
+ * is thrown away and re-cloned. A mirror owned by someone else is moved aside and re-cloned
+ * — and if even that fails, reported in terms an operator can act on, instead of passing
+ * git's wording through.
  *
  * A third case is kept apart just as deliberately: uncertainty must never be treated as
  * "broken". `of()` only ever returns Repairable when git has positively told us the path is
@@ -80,6 +90,10 @@ enum MirrorState
     /**
      * German: this reaches the operator through `packages.sync_error`.
      *
+     * Only reached when displacing the mirror failed too (a read-only volume, an exhausted
+     * inode table, a `storage/app/vcs` this service does not own either) — the last case in
+     * which the package genuinely cannot be synced without an operator.
+     *
      * A foreign owner here is the same root-owned-volume issue documented in
      * docs/development.md's "Upgrading an existing deployment" note (dists on the same
      * `artifacts` volume hit it too): every mirror is foreign-owned at once, not just this
@@ -90,19 +104,68 @@ enum MirrorState
      */
     public static function foreignOwnerMessage(string $path): string
     {
-        $owner = @fileowner($path);
-
         return sprintf(
             'Der Git-Mirror gehört uid %s, dieser Dienst läuft als uid %d. '
-            .'Das betrifft in der Regel alle Mirrors auf diesem Volume — '
-            .'einmalig `docker run --rm -v <project>_artifacts:/data alpine chown -R %d:%d /data` '
-            .'ausführen (siehe docs/development.md). '
+            .'%s '
             .'Ist nur dieser eine Mirror betroffen, reicht es, das Verzeichnis %s zu entfernen — der nächste Sync klont neu.',
-            $owner === false ? 'unbekannt' : (string) $owner,
+            self::ownerLabel($path),
             posix_geteuid(),
-            posix_geteuid(),
-            posix_geteuid(),
+            self::chownRemedy(),
             $path,
+        );
+    }
+
+    /**
+     * German, and deliberately not an exception: this describes a sync that *succeeded*.
+     * GitRepository::sync() logs it after moving a foreign-owned mirror aside, so it is the
+     * only channel through which the residue it leaves behind becomes visible at all —
+     * `sync_error` is cleared by the very sync that produces it.
+     *
+     * Must be built before the rename, while $path still exists: the owner uid it names is
+     * read off the directory itself.
+     *
+     * Says three things, in this order, because that is the order an operator needs them:
+     * what was done (so an unexpectedly re-cloned mirror is not a mystery), what it costs
+     * (a directory this service can never remove, hence a manual cleanup), and how to stop
+     * it happening for the rest of the fleet (the same chown as foreignOwnerMessage() —
+     * self-healing one package at a time is a stopgap, not the fix).
+     */
+    public static function displacedMessage(string $path, string $displaced): string
+    {
+        return sprintf(
+            'Der Git-Mirror %s gehörte uid %s, dieser Dienst läuft als uid %d — '
+            .'er wurde nach %s verschoben und neu geklont. '
+            .'Dieses verschobene Verzeichnis kann der Dienst nicht löschen (dazu fehlt ihm das Schreibrecht darin); '
+            .'es bleibt dauerhaft auf dem Volume liegen und muss von Hand entfernt werden. '
+            .'%s',
+            $path,
+            self::ownerLabel($path),
+            posix_geteuid(),
+            $displaced,
+            self::chownRemedy(),
+        );
+    }
+
+    private static function ownerLabel(string $path): string
+    {
+        $owner = @fileowner($path);
+
+        return $owner === false ? 'unbekannt' : (string) $owner;
+    }
+
+    /**
+     * The one sentence both messages above have to carry: a foreign owner is practically
+     * never a single-mirror problem, so the fleet-wide command comes before any per-package
+     * remedy. Shared so it cannot drift apart between the two paths.
+     */
+    private static function chownRemedy(): string
+    {
+        return sprintf(
+            'Das betrifft in der Regel alle Mirrors auf diesem Volume — '
+            .'einmalig `docker run --rm -v <project>_artifacts:/data alpine chown -R %d:%d /data` '
+            .'ausführen (siehe docs/development.md).',
+            posix_geteuid(),
+            posix_geteuid(),
         );
     }
 }
