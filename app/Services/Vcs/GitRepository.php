@@ -15,6 +15,28 @@ use Throwable;
 
 class GitRepository
 {
+    /**
+     * Seconds a mirror lock stays valid without being released.
+     *
+     * This is not a budget for the work, it is the ceiling on how long a *crashed* holder
+     * can wedge a mirror — so it has to sit comfortably above the slowest legitimate run,
+     * not be shaved against it. Bounded work under the lock: MirrorState::of() (15s
+     * timeout) plus `git clone --mirror` (300s timeout) = 315s. The unbounded part is the
+     * directory delete on the Repairable path: a half-finished clone of a large repository,
+     * unlinked recursively on an overlay filesystem, is not something a timeout covers.
+     * 900s leaves 585s for it.
+     *
+     * The previous value, 330s, left exactly 15s — so the TTL could expire while the holder
+     * was still cloning, at which point a waiter acquires the lock and deletes the
+     * directory being cloned into. A lock whose TTL can expire mid-operation is worse than
+     * no lock, because the code around it assumes exclusivity.
+     *
+     * The cost of the larger value is paid only when a holder dies without releasing (an
+     * OOM-killed or timed-out worker): the mirror is then unsyncable for up to 15 minutes.
+     * That is a visible, retried failure for a genuinely broken worker — not a silent one.
+     */
+    private const LOCK_TTL = 900;
+
     private string $mirrorPath;
 
     /** @var array<string, string> */
@@ -57,33 +79,49 @@ class GitRepository
         // several requests can share, so it is worth serialising properly rather than
         // leaving it to chance.
         //
-        // TTL 330s: comfortably above the slowest thing that can happen under the lock —
-        // the 300s `git clone --mirror` timeout below — with margin for the up-front
-        // MirrorState::of() check (15s timeout) and the directory delete. The wait
-        // (config('kontorfix.mirror_lock_wait'), default 330s too — see config/kontorfix.php)
-        // deliberately matches the TTL instead of a short poll: unlike the per-dist lock,
-        // which falls through unlocked on timeout because building twice is merely
-        // wasteful, falling through here would reintroduce exactly the delete-during-clone
-        // race this lock exists to prevent. So the timeout fallback below only fires for a
-        // genuinely stuck lock (e.g. a crashed holder that never released), not as a
-        // routine degrade path.
-        $lock = Cache::lock('mirror:'.$this->storageKey, 330);
-        $held = false;
+        // Two decisions here, and they depend on each other.
+        //
+        // **The wait is short** (config('kontorfix.mirror_lock_wait'), default 15s — see
+        // config/kontorfix.php). It has to fit inside the queue worker's own job timeout,
+        // which config/horizon.php sets to 60s: a SyncPackage that spends longer than that
+        // waiting is killed mid-wait, and with $tries = 3 all three attempts die the same
+        // way and fire a failure digest for a package with nothing wrong with it. A wait
+        // that matched the lock TTL guaranteed exactly that whenever an operator pressed
+        // "Resync" while a cold dist request was cloning the same package — the false-alarm
+        // chain this branch exists to remove, rebuilt inside the fix for it.
+        //
+        // **The timeout aborts** rather than falling through unlocked. A short wait can no
+        // longer claim to fire only for a genuinely stuck holder, so what happens on
+        // timeout is now a routine path, and running the delete below against a live
+        // cloning holder is precisely the race the lock was added to prevent. The
+        // asymmetry with the per-dist lock (which does fall through) is deliberate:
+        // building a dist twice is wasteful, deleting a mirror twice is destructive.
+        //
+        // Aborting is affordable because the wait no longer has to cover a clone: the
+        // caller's own retry does. SyncPackage backs off [60, 300, 900], so its third
+        // attempt lands well past the 315s worst case under the lock; a dist request gets
+        // an error it can repeat. An aborted sync is idempotent, visible and retried; a
+        // delete race destroys a running 300s clone and reports it as "git clone failed",
+        // which marks the package failed and fires the digest for real.
+        $lock = Cache::lock('mirror:'.$this->storageKey, self::LOCK_TTL);
 
         try {
-            $lock->block((int) config('kontorfix.mirror_lock_wait', 330));
-            $held = true;
+            $lock->block((int) config('kontorfix.mirror_lock_wait', 15));
         } catch (LockTimeoutException) {
-            // Fall through and run unlocked rather than hang a queued job or a download
-            // request forever.
+            // German: reaches the operator through `packages.sync_error`. Deliberately
+            // neutral about who retries — SyncPackage does it automatically, a dist
+            // request does not.
+            throw new RuntimeException(
+                'Ein anderer Vorgang synchronisiert gerade den Git-Mirror dieses Pakets. '
+                .'Dieser Sync wurde abgebrochen, statt parallel dazu zu laufen — '
+                .'nach dem Ende des laufenden Vorgangs erneut versuchen.'
+            );
         }
 
         try {
             $this->performSync();
         } finally {
-            if ($held) {
-                $lock->release();
-            }
+            $lock->release();
         }
     }
 

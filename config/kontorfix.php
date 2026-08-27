@@ -124,17 +124,23 @@ return [
     | (a normal parallel `composer install`) both reach sync() for one mirror; if it needs
     | repair, the second call's delete can remove the first call's directory mid-clone.
     |
-    | Unlike the dist build lock above, a timed-out wait here still falls through and runs
-    | unlocked (never hang a queued job or a download request on a stuck holder forever),
-    | but the default equals the lock TTL (330s, comfortably above the 300s clone timeout)
-    | rather than a short poll: falling through early would reintroduce the very race this
-    | lock exists to prevent, so the timeout is meant to fire only for a genuinely stuck
-    | holder, not as a routine degrade path. Lower it in tests that need to observe the
-    | unlocked fallback without waiting out the real timeout.
+    | Unlike the dist build lock above, a timed-out wait here does NOT fall through and
+    | build anyway: it aborts the sync. Building a dist twice is wasteful, deleting a
+    | mirror twice is destructive, so the two locks answer the same question differently on
+    | purpose. Aborting is affordable because the sync is idempotent and the caller retries
+    | — SyncPackage backs off [60, 300, 900], which outlasts the slowest possible clone.
+    |
+    | Because of that, this value does not need to cover a clone, and must not try to: it
+    | is spent inside a queued job whose worker timeout (config/horizon.php, 60s) kills it
+    | mid-wait, turning routine contention into a failure digest for a healthy package.
+    | Keep it comfortably below that timeout. Raise it on an instance with large
+    | repositories — a longer wait means a second caller is more likely to be served from
+    | the finished mirror instead of aborting — but raise the worker timeout with it. 0
+    | disables waiting entirely: the second caller aborts at once.
     |
     */
 
-    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 330),
+    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 15),
 
     /*
     |--------------------------------------------------------------------------

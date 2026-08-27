@@ -213,20 +213,78 @@ it('is idempotent: sync twice fetches instead of recloning', function () {
 // per package id, and ComposerController's dist lock is per dist file) — see the comment on
 // GitRepository::sync() for why the mirror lock exists.
 
-it('still syncs when another sync holds the mirror lock and never lets go', function () {
-    // A stuck holder must not hang this call forever; the wait is bounded and the
-    // fallback is the unlocked sync that predates the lock.
+it('aborts instead of syncing unlocked when another sync holds the mirror lock', function () {
+    // Falling through and working anyway is what the previous version did, and it is the
+    // one thing this lock must never do: with three or more callers on one mirror the
+    // timeout is reached while a holder is genuinely mid-clone, so the fallback ran the
+    // delete below against a live clone — exactly the race the lock was added to prevent.
     config(['kontorfix.mirror_lock_wait' => 0]);
 
     $key = 'test-pkg-'.uniqid();
 
-    // Held for the whole call and deliberately never released.
-    expect(Cache::lock('mirror:'.$key, 330)->get())->toBeTrue();
+    // Held by someone else for the whole call and deliberately never released.
+    expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
 
     $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
-    $repo->sync();
 
-    expect($repo->tags())->toContain('v1.0.0');
+    expect(fn () => $repo->sync())->toThrow(RuntimeException::class);
+    expect(is_dir(storage_path('app/vcs/'.$key.'.git')))->toBeFalse();
+});
+
+it('leaves an existing mirror untouched when it cannot get the mirror lock', function () {
+    // The abort has to happen *before* performSync(), not somewhere inside it: a caller
+    // that gives up must not have deleted anything on its way out.
+    config(['kontorfix.mirror_lock_wait' => 0]);
+
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    mkdir($mirror, 0775, true);
+    file_put_contents($mirror.'/stray', 'not a repo'); // Repairable: the delete path
+
+    expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    $threw = false;
+
+    try {
+        $repo->sync();
+    } catch (RuntimeException) {
+        $threw = true;
+    }
+
+    // Checked in this order deliberately: the failure that matters is the directory being
+    // gone, not the missing exception. A version that falls through and works unlocked
+    // should be reported as "it deleted the mirror", which is the actual defect.
+    expect(is_file($mirror.'/stray'))->toBeTrue()
+        ->and($threw)->toBeTrue();
+});
+
+it('waits for a busy mirror lock and repairs only once it actually holds it', function () {
+    // The behaviour the lock exists for, rather than its edges: a second sync() on the same
+    // mirror does not run alongside the first, it waits for it. Modelled with a holder that
+    // goes away on its own (a TTL that expires) because the alternative — a second sync
+    // running concurrently — is what this test would have to permit to observe it in one
+    // process, and that is the very thing being ruled out.
+    config(['kontorfix.mirror_lock_wait' => 30]);
+
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    mkdir($mirror, 0775, true);
+    file_put_contents($mirror.'/stray', 'not a repo'); // Repairable: the delete path
+
+    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
+
+    $started = microtime(true);
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+    $elapsed = microtime(true) - $started;
+
+    // It blocked for the holder rather than proceeding immediately...
+    expect($elapsed)->toBeGreaterThanOrEqual(1.0);
+    // ...and the destructive repair happened afterwards, not alongside.
+    expect(is_file($mirror.'/stray'))->toBeFalse()
+        ->and(is_file($mirror.'/HEAD'))->toBeTrue();
 });
 
 it('releases the mirror lock after a sync so a concurrent sync of the same mirror is not blocked', function () {
@@ -235,7 +293,7 @@ it('releases the mirror lock after a sync so a concurrent sync of the same mirro
     $repo->sync();
 
     // If sync() had not released the lock, acquiring it fresh here would fail.
-    expect(Cache::lock('mirror:'.$key, 330)->get())->toBeTrue();
+    expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
 });
 
 it('throws a useful error for unreachable urls', function () {
