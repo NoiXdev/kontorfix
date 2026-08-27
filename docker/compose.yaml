@@ -47,11 +47,24 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    # /up is answered by the same FrankenPHP thread pool that serves everything else, so
+    # this check also detects a saturated pool — which is why the mirror lock the registry
+    # takes on a cold dist download has a separate, short wait for HTTP callers
+    # (kontorfix.mirror_lock_wait_web). tests/Unit/SyncTimingRelationsTest.php asserts that
+    # that wait still fits inside interval × retries.
     healthcheck:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8080/up']
       interval: 15s
       timeout: 5s
       retries: 5
+    # Deliberately NO stop_grace_period here, unlike the worker below, and the consequence
+    # is worth writing down rather than leaving implicit: the lazy dist build performs a
+    # `git clone --mirror` inline on the request thread while holding the same mirror lock
+    # SyncPackage takes. Docker's 10s default therefore SIGKILLs that request on an app
+    # redeploy, and the lock stays held for its full 900s TTL. Raising it would make every
+    # user-facing redeploy wait for the slowest in-flight clone (minutes), which is the more
+    # expensive of the two — a fast restart is worth one mirror being unsyncable for a
+    # quarter of an hour. Moving the build off the request thread is the real fix.
     volumes:
       - artifacts:/app/storage/app
     restart: unless-stopped
@@ -68,6 +81,22 @@ services:
     # artifacts, so the worker needs the same volume the app serves them from.
     volumes:
       - artifacts:/app/storage/app
+    # Docker's default is 10 seconds: SIGTERM, then SIGKILL. `php artisan horizon` is PID 1
+    # here, so on every redeploy that SIGKILLed whatever a worker was doing ten seconds in.
+    # For SyncPackage that means killing a `git clone --mirror` while it holds the mirror
+    # lock — and the kill leaves the lock held for its full 900s TTL, wedging that package
+    # for fifteen minutes after a routine deploy.
+    #
+    # 930s = SyncPackage::TIMEOUT (900, also the largest supervisor timeout, which is what
+    # MasterSupervisor::terminate() waits for) plus a little. Horizon exits as soon as its
+    # supervisors are done, so an idle worker still stops in seconds; only a worker with a
+    # sync genuinely in flight makes a deploy wait, and only for as long as that sync had
+    # left. Lower it if a bounded deploy time matters more than an unwedged mirror — that is
+    # the whole trade.
+    #
+    # It does not make the kill impossible. `docker kill`, an OOM kill and host failure all
+    # still take a holder out; GitRepository::LOCK_TTL is what bounds the damage then.
+    stop_grace_period: 930s
     restart: unless-stopped
 
   scheduler:

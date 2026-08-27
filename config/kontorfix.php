@@ -116,6 +116,57 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Git mirror lock
+    |--------------------------------------------------------------------------
+    |
+    | Seconds GitRepository::sync() waits for another sync() call already working on the
+    | same mirror. Two versions of the same package, both cold, requested in parallel
+    | (a normal parallel `composer install`) both reach sync() for one mirror; if it needs
+    | repair, the second call's delete can remove the first call's directory mid-clone.
+    |
+    | Unlike the dist build lock above, a timed-out wait here does NOT fall through and
+    | build anyway: it aborts the sync. Building a dist twice is wasteful, deleting a
+    | mirror twice is destructive, so the two locks answer the same question differently on
+    | purpose.
+    |
+    | There are TWO values because there are two callers, and one number cannot serve both.
+    |
+    | `mirror_lock_wait` is the **queue** caller's (App\Jobs\SyncPackage). Because the
+    | timeout aborts, it has to cover the work it is waiting for, not merely a polite
+    | moment: 330s = MirrorState::CHECK_TIMEOUT (15) + the clone timeout (300) + slack, i.e.
+    | GitRepository::DEFAULT_LOCK_WAIT. Sized that way, running out of wait means the holder
+    | outlived every bounded step it could be in — it is wedged, and giving up is right.
+    | What it costs is one parked worker process out of a pool provisioned for exactly this,
+    | and SyncPackage's own job timeout is sized to outlast this wait plus the work after
+    | it. Raising this value therefore means raising that job timeout too, and the
+    | connection's retry_after with it; the relations are asserted in
+    | tests/Unit/SyncTimingRelationsTest.php rather than left to a comment. 0 disables
+    | waiting entirely: the caller aborts at once.
+    |
+    | `mirror_lock_wait_web` is the **HTTP** caller's (ComposerController::dist()), and it
+    | is short for a reason that has nothing to do with what the client would tolerate. The
+    | app container runs `frankenphp php-server` in classic mode, so a blocked request holds
+    | a thread of a pool sized from the CPU count — the same pool that answers metadata,
+    | downloads, the admin UI and the container healthcheck `/up`. N parallel requests for N
+    | different cold versions take N different `dist-build:` locks, so nothing serialises
+    | them before sync(); with the queue's 330s here, N threads park for up to five and a
+    | half minutes, `/up` misses its 5s×5 healthcheck budget, and the proxy drops the
+    | container. The bounded 503 + `Retry-After` that the short wait produces instead is the
+    | cheaper failure by a wide margin. It is still long enough to absorb the *common* case
+    | of contention, which is a fetch rather than a clone.
+    |
+    | Neither value bounds the request that WINS the lock: the lazy dist build performs the
+    | clone inline, on the request thread, for up to GitRepository::WORST_CASE_WORK. The
+    | reverse proxy in front of the app has to be willing to wait that long regardless.
+    |
+    */
+
+    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 330),
+
+    'mirror_lock_wait_web' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT_WEB', 15),
+
+    /*
+    |--------------------------------------------------------------------------
     | Git transport and address policy
     |--------------------------------------------------------------------------
     |

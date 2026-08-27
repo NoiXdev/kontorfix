@@ -608,7 +608,21 @@ image, and a freshly created `artifacts` volume inherits the ownership from it.
 
 > **Upgrading an existing deployment:** a volume created while the container still ran as
 > root keeps its root-owned directories, and uploads/proxy caching will fail with
-> "Permission denied". Chown it once, then start normally:
+> "Permission denied". Git-sourced packages hit the same root cause on the same volume: their
+> mirrors under `storage/app/vcs` are also root-owned and git refuses to work in a repository
+> it does not own ("detected dubious ownership").
+>
+> A sync does recover from this on its own: it cannot delete a root-owned mirror, but it can
+> rename it aside — that needs permission on `storage/app/vcs`, not inside the mirror — and
+> clone a fresh one next to it. The package works again without an operator. What it leaves
+> behind is a `<id>.git.foreign-<timestamp>-<random>` directory that the app can never remove,
+> logged at warning level as "Displaced a foreign-owned git mirror". Those directories are
+> yours to delete, and they keep a second copy of every affected mirror on the volume until
+> you do.
+>
+> So the chown is still the fix, not the fallback. Run it once, then start normally — it
+> fixes uploads, dist caching, and every git mirror in one pass, and stops any further
+> displacement copies from being created:
 >
 > ```bash
 > docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data

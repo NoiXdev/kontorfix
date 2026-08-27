@@ -430,6 +430,22 @@ class PackageController extends Controller
     }
 
     /**
+     * Mirrors Api\V1\PackageController::resync(): dispatching IS the point of this action,
+     * so a package that cannot be synced is refused outright rather than redirected with a
+     * success message that describes something which did not happen.
+     */
+    public function resync(Package $package): RedirectResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
+
+        SyncPackage::dispatch($package);
+
+        return back()->with('success', 'Synchronisierung wurde eingereiht.');
+    }
+
+    /**
      * A stored git token is bound to exactly one host — pairing it with a repository
      * elsewhere would transmit the secret to that host as an Authorization header.
      */

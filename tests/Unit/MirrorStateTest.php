@@ -1,0 +1,133 @@
+<?php
+
+use App\Services\Vcs\MirrorState;
+use Illuminate\Support\Facades\Process;
+
+function makeBareRepo(string $path): void
+{
+    mkdir($path, 0775, true);
+    exec('git init --bare --quiet '.escapeshellarg($path));
+}
+
+it('reports an absent mirror', function () {
+    expect(MirrorState::of(sys_get_temp_dir().'/does-not-exist-'.uniqid()))->toBe(MirrorState::Absent);
+});
+
+it('reports a healthy bare repository as usable', function () {
+    $path = sys_get_temp_dir().'/mirror-ok-'.uniqid().'.git';
+    makeBareRepo($path);
+
+    expect(MirrorState::of($path))->toBe(MirrorState::Usable);
+});
+
+it('reports a directory that is not a repository as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-broken-'.uniqid().'.git';
+    mkdir($path, 0775, true);
+    file_put_contents($path.'/stray', 'not a repo');
+
+    expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+});
+
+it('reports a half-written repository as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-half-'.uniqid().'.git';
+    makeBareRepo($path);
+    unlink($path.'/HEAD');
+
+    expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+});
+
+it('classifies the path itself, not an ancestor directory that happens to be a bare repository', function () {
+    $bare = sys_get_temp_dir().'/mirror-ancestor-'.uniqid().'.git';
+    makeBareRepo($bare);
+
+    // A stray subdirectory living inside a real bare repository's own tree. It is not a
+    // mirror itself, but git's ordinary repository discovery (no --git-dir pin) starts at
+    // this path and walks upward, so an unpinned check run from here finds the ancestor
+    // bare repo and answers a question about *that* repository instead of about $stray —
+    // reporting "true" (bare) and misclassifying a broken path as Usable.
+    $stray = $bare.'/extra-stray';
+    mkdir($stray, 0775, true);
+    file_put_contents($stray.'/whatever', 'not a repo');
+
+    expect(MirrorState::of($stray))->toBe(MirrorState::Repairable);
+});
+
+// Not every occupant of a mirror path is a directory, and `git clone` refuses the path
+// regardless of what it is. Reporting these as Absent (a bare is_dir() check) sends them
+// into a clone that fails identically forever; Repairable is what makes the entry
+// removable, which needs write permission on the parent only.
+
+it('reports a dangling symlink at the mirror path as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-dangling-'.uniqid().'.git';
+    // file_exists() follows the link and reports false here, so this is the one shape a
+    // file_exists()-based existence check misses entirely.
+    symlink(sys_get_temp_dir().'/gone-'.uniqid(), $path);
+
+    try {
+        expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+    } finally {
+        unlink($path);
+    }
+});
+
+it('reports a regular file at the mirror path as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-file-'.uniqid().'.git';
+    file_put_contents($path, 'not a directory');
+
+    try {
+        expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+    } finally {
+        unlink($path);
+    }
+});
+
+it('reports a failure instead of guessing Repairable when the usability check itself cannot be trusted', function () {
+    $path = sys_get_temp_dir().'/mirror-ambiguous-'.uniqid().'.git';
+    mkdir($path, 0775, true);
+
+    // Simulates any failure of the check that is not git positively saying "this is not a
+    // repository" — a missing binary, a permissions surprise, a flaky filesystem, a timeout
+    // under load. None of these are evidence the mirror is broken.
+    Process::fake([
+        '*rev-parse*' => Process::result(
+            errorOutput: 'fatal: unable to read current working directory: No such file or directory',
+            exitCode: 128,
+        ),
+    ]);
+
+    expect(fn () => MirrorState::of($path))->toThrow(RuntimeException::class);
+});
+
+it('names both uids in the foreign-owner message and says what to do', function () {
+    $message = MirrorState::foreignOwnerMessage('/app/storage/app/vcs/abc.git');
+
+    expect($message)->toContain('/app/storage/app/vcs/abc.git')
+        ->and($message)->toContain((string) posix_geteuid());
+});
+
+it('leads with the fleet-wide chown and keeps single-directory removal only as the fallback', function () {
+    // A foreign owner means the whole volume was likely created under the pre-v0.7.0 root
+    // user, not just this one mirror — see docs/development.md's "Upgrading an existing
+    // deployment" note. The chown fixes every affected package (mirrors and dists alike)
+    // in one command; re-cloning one directory at a time does not.
+    $message = MirrorState::foreignOwnerMessage('/app/storage/app/vcs/abc.git');
+
+    expect($message)->toContain('docker run --rm -v <project>_artifacts:/data alpine chown -R')
+        ->and(strpos($message, 'chown'))->toBeLessThan(strpos($message, 'entfernen'));
+});
+
+it('says what was displaced, that it is permanent, and still leads to the chown', function () {
+    // The sync this accompanies succeeded, so `sync_error` is empty and the log line built
+    // from this message is the only trace the residue leaves. Three things have to survive
+    // in it: which directory was left behind, that nothing will ever remove it, and the one
+    // command that stops it happening for the rest of the fleet.
+    $message = MirrorState::displacedMessage(
+        '/app/storage/app/vcs/abc.git',
+        '/app/storage/app/vcs/abc.git.foreign-20260827-120000-deadbeef',
+    );
+
+    expect($message)->toContain('/app/storage/app/vcs/abc.git.foreign-20260827-120000-deadbeef')
+        ->and($message)->toContain('kann der Dienst nicht löschen')
+        ->and($message)->toContain('docker run --rm -v <project>_artifacts:/data alpine chown -R')
+        ->and($message)->toContain((string) posix_geteuid());
+});

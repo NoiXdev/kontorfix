@@ -18,6 +18,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
+use Illuminate\Http\Middleware\TrustHosts;
 use Illuminate\Http\Request;
 use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
@@ -62,6 +63,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // `subdomains: false` because TrustedHosts::patterns() already emits the
         // subdomain pattern for the APP_URL host itself and would otherwise duplicate it.
         $middleware->trustHosts(at: fn (): array => TrustedHosts::patterns(), subdomains: false);
+
+        // The framework class installs the allowlist; this subclass adds the one exemption the
+        // health endpoint needs. `trustHosts()` above still configures it — TrustHosts::at()
+        // writes a static declared on the parent, which the subclass shares.
+        $middleware->replace(TrustHosts::class, App\Http\Middleware\TrustHosts::class);
 
         // Deployment runs behind a reverse proxy (Traefik/Portainer). Without this,
         // getSchemeAndHttpHost() would return the internal host and the generated

@@ -23,9 +23,20 @@ class SendNotificationDigest implements ShouldBeUnique, ShouldQueue
     use Queueable;
 
     /**
+     * Explicit, and equal to what the supervisor default used to hand this job.
+     *
+     * config/horizon.php raises `supervisor-1.timeout` to SyncPackage::TIMEOUT (900s)
+     * because SyncPackage's own kill paths need it there, and `Worker::timeoutForJob()`
+     * gives the supervisor value to every job that declares none. Declaring it here keeps
+     * this job's budget where it has always been — and keeps $uniqueFor below meaningful,
+     * since that value is sized against this one.
+     */
+    public int $timeout = 60;
+
+    /**
      * A safety net for the case the lock's normal release (end of handle()) never runs —
-     * the worker is killed rather than finishing. Comfortably above the 60s job timeout
-     * (config/horizon.php) so a live run is never pre-empted by its own stale lock.
+     * the worker is killed rather than finishing. Comfortably above this job's own 60s
+     * timeout (declared above) so a live run is never pre-empted by its own stale lock.
      */
     public int $uniqueFor = 300;
 

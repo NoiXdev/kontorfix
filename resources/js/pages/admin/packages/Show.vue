@@ -11,8 +11,8 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem } from '@/types';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { type BreadcrumbItem, type SharedData } from '@/types';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -162,6 +162,15 @@ function saveSource() {
         });
 }
 
+// Retries a sync without touching the stored source — the only other way was re-submitting
+// the form above with the same values. Only offered for git-sourced packages: the server
+// route stays reachable regardless, refusing a publish-based package with 409.
+const resyncForm = useForm({});
+
+function resyncPackage() {
+    resyncForm.post(route('admin.packages.resync', props.package.id), { preserveScroll: true });
+}
+
 // --- Abandonment ---
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
 
@@ -192,6 +201,10 @@ function saveAbandonment() {
         .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
 }
 
+// Toast for one-off actions like resync — same pattern as Index.vue's flashSuccess.
+const page = usePage<SharedData>();
+const flashSuccess = computed(() => page.props.flash?.success ?? null);
+
 // Live update of the sync status for the currently displayed package.
 // Local state, so the live update doesn't mutate the prop.
 const syncStatus = ref(props.package.sync_status);
@@ -217,6 +230,13 @@ useOperatorChannel({
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
+            <div
+                v-if="flashSuccess"
+                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
+            >
+                {{ flashSuccess }}
+            </div>
+
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>
@@ -391,9 +411,12 @@ useOperatorChannel({
                             </div>
                         </template>
 
-                        <div>
+                        <div class="flex items-center gap-3">
                             <Button type="submit" :disabled="sourceForm.processing">
                                 {{ isGitSourced ? 'Speichern & neu synchronisieren' : 'Speichern' }}
+                            </Button>
+                            <Button v-if="isGitSourced" type="button" variant="outline" :disabled="resyncForm.processing" @click="resyncPackage">
+                                Jetzt synchronisieren
                             </Button>
                         </div>
                     </form>

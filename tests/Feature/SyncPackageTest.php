@@ -1,8 +1,11 @@
 <?php
 
 use App\Enums\SyncStatus;
+use App\Events\PackageSyncFailed;
 use App\Jobs\SyncPackage;
 use App\Models\Package;
+use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Process;
 use Tests\Support\FixtureRepo;
 
@@ -48,8 +51,41 @@ it('declares retry with backoff for transient failures', function () {
     $pkg = Package::factory()->create();
     $job = new SyncPackage($pkg);
 
-    expect($job->tries)->toBe(3)
-        ->and($job->backoff())->toBe([60, 300, 900]);
+    // $maxExceptions, not $tries: retryUntil() is set, and the worker ignores attempts()
+    // entirely while its window is open — so contention (a release by WithoutOverlapping,
+    // which throws nothing) costs no budget while a git failure still does. See the
+    // property's docblock, and tests/Unit/SyncTimingRelationsTest.php for the relations.
+    expect($job->maxExceptions)->toBe(3)
+        ->and($job->backoff())->toBe([60, 300, 900])
+        ->and(property_exists($job, 'tries'))->toBeFalse();
+});
+
+it('reports the real git failure in the digest when the queue is the one that gives up', function () {
+    // The queue can end this job without ever calling handle() again: the retryUntil window
+    // closes, and Worker::markJobAsFailedIfAlreadyExceedsMaxAttempts() fails the job with a
+    // MaxAttemptsExceededException whose message ("attempted too many times or run too
+    // long") says nothing about the repository. Passing that straight into the digest would
+    // replace the one sentence an operator can act on with one they cannot.
+    Event::fake([PackageSyncFailed::class]);
+
+    $pkg = Package::factory()->create(['repository_url' => 'file:///does/not/exist-'.uniqid()]);
+    expect(fn () => (new SyncPackage($pkg))->handle())->toThrow(RuntimeException::class);
+
+    (new SyncPackage($pkg))->failed(new MaxAttemptsExceededException('attempted too many times'));
+
+    Event::assertDispatched(PackageSyncFailed::class, fn (PackageSyncFailed $e) => str_contains($e->error, 'git clone failed'));
+});
+
+it('reports the exception itself when the failure is not the queue giving up', function () {
+    // The mirror image: an ordinary final failure carries its own message, and must not be
+    // silently replaced by whatever happens to be in sync_error from an earlier attempt.
+    Event::fake([PackageSyncFailed::class]);
+
+    $pkg = Package::factory()->create(['sync_error' => 'stale error from an earlier attempt']);
+
+    (new SyncPackage($pkg))->failed(new RuntimeException('boom'));
+
+    Event::assertDispatched(PackageSyncFailed::class, fn (PackageSyncFailed $e) => $e->error === 'boom');
 });
 
 it('keeps release dates and latest-version stable across re-syncs', function () {
