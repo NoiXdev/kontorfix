@@ -21,22 +21,48 @@ class GitRepository
      *
      * This is not a budget for the work, it is the ceiling on how long a *crashed* holder
      * can wedge a mirror — so it has to sit comfortably above the slowest legitimate run,
-     * not be shaved against it. Bounded work under the lock: MirrorState::of() (15s
-     * timeout) plus `git clone --mirror` (300s timeout) = 315s. The unbounded part is the
-     * directory delete on the Repairable path: a half-finished clone of a large repository,
-     * unlinked recursively on an overlay filesystem, is not something a timeout covers.
-     * 900s leaves 585s for it.
+     * not be shaved against it. Bounded work under the lock is WORST_CASE_WORK. The
+     * unbounded part is the directory delete on the Repairable path: a half-finished clone
+     * of a large repository, unlinked recursively on an overlay filesystem, is not
+     * something a timeout covers. 900s leaves 585s for it.
      *
-     * The previous value, 330s, left exactly 15s — so the TTL could expire while the holder
-     * was still cloning, at which point a waiter acquires the lock and deletes the
+     * The pre-v0.7.1 value, 330s, left exactly 15s — so the TTL could expire while the
+     * holder was still cloning, at which point a waiter acquires the lock and deletes the
      * directory being cloned into. A lock whose TTL can expire mid-operation is worse than
      * no lock, because the code around it assumes exclusivity.
      *
-     * The cost of the larger value is paid only when a holder dies without releasing (an
-     * OOM-killed or timed-out worker): the mirror is then unsyncable for up to 15 minutes.
-     * That is a visible, retried failure for a genuinely broken worker — not a silent one.
+     * The cost of the larger value is paid only when a holder dies without releasing. That
+     * used to be routine — a queue worker capped at 60s cannot finish a 300s clone — and is
+     * now the exception it always claimed to be: SyncPackage declares a job timeout that
+     * outlasts DEFAULT_LOCK_WAIT + WORST_CASE_WORK, so a worker is not killed while holding
+     * this lock. See SyncPackage for the full chain of derived timings.
      */
-    private const LOCK_TTL = 900;
+    public const LOCK_TTL = 900;
+
+    /** `git clone --mirror` timeout, in seconds. The slowest single step under the lock. */
+    public const CLONE_TIMEOUT = 300;
+
+    /** `git fetch` timeout, in seconds — the Usable path, always cheaper than a clone. */
+    public const FETCH_TIMEOUT = 120;
+
+    /** Timeout for every git command that runs *inside* the mirror (ls-tree, show, archive). */
+    public const COMMAND_TIMEOUT = 120;
+
+    /**
+     * The longest a healthy sync can hold the mirror lock, ignoring the unbounded delete:
+     * classify the mirror, then clone it. Everything else in this file's timing budget is
+     * expressed against this number rather than against a literal, so that raising a git
+     * timeout moves the lock TTL, the wait and the job timeout with it.
+     */
+    public const WORST_CASE_WORK = MirrorState::CHECK_TIMEOUT + self::CLONE_TIMEOUT;
+
+    /**
+     * Fallback for `kontorfix.mirror_lock_wait` when the key is absent entirely.
+     *
+     * Chosen so a waiter outlasts any *live* holder (WORST_CASE_WORK, plus slack) rather
+     * than being shorter than the work it waits for. See sync() for why that matters.
+     */
+    public const DEFAULT_LOCK_WAIT = self::WORST_CASE_WORK + 15;
 
     private string $mirrorPath;
 
@@ -82,32 +108,42 @@ class GitRepository
         //
         // Two decisions here, and they depend on each other.
         //
-        // **The wait is short** (config('kontorfix.mirror_lock_wait'), default 15s — see
-        // config/kontorfix.php). It has to fit inside the queue worker's own job timeout,
-        // which config/horizon.php sets to 60s: a SyncPackage that spends longer than that
-        // waiting is killed mid-wait, and with $tries = 3 all three attempts die the same
-        // way and fire a failure digest for a package with nothing wrong with it. A wait
-        // that matched the lock TTL guaranteed exactly that whenever an operator pressed
-        // "Resync" while a cold dist request was cloning the same package — the false-alarm
-        // chain this branch exists to remove, rebuilt inside the fix for it.
+        // **The wait outlasts the work** (config('kontorfix.mirror_lock_wait'), default
+        // DEFAULT_LOCK_WAIT = WORST_CASE_WORK + 15 — see config/kontorfix.php). Anything
+        // shorter turns the abort below from "the holder is wedged" into "the holder is
+        // busy", and the two have opposite correct answers: a wedged holder means give up,
+        // a busy one means wait for the mirror it is about to finish.
         //
-        // **The timeout aborts** rather than falling through unlocked. A short wait can no
-        // longer claim to fire only for a genuinely stuck holder, so what happens on
-        // timeout is now a routine path, and running the delete below against a live
-        // cloning holder is precisely the race the lock was added to prevent. The
-        // asymmetry with the per-dist lock (which does fall through) is deliberate:
-        // building a dist twice is wasteful, deleting a mirror twice is destructive.
+        // The wait used to be 15s, shorter than a single clone, because it had to fit
+        // inside a queue worker capped at 60s. That constraint is gone: SyncPackage now
+        // declares its own job timeout covering this wait plus the work after it, so the
+        // waiting job is no longer killed mid-wait. What the short wait cost, meanwhile,
+        // was not theoretical — sync() has a second caller with no retry at all. Two cold
+        // versions of one package requested in parallel (the case this whole comment opens
+        // with) take two *different* dist locks, so both reach this line; the second waited
+        // 15s against a clone that takes longer than that essentially always, aborted, and
+        // ComposerController::dist() turned the RuntimeException into an HTTP 500 — a
+        // failed `composer install` in the lock's own motivating scenario. A wait that
+        // covers WORST_CASE_WORK serves that second caller from the finished mirror
+        // instead.
         //
-        // Aborting is affordable because the wait no longer has to cover a clone: the
-        // caller's own retry does. SyncPackage backs off [60, 300, 900], so its third
-        // attempt lands well past the 315s worst case under the lock; a dist request gets
-        // an error it can repeat. An aborted sync is idempotent, visible and retried; a
-        // delete race destroys a running 300s clone and reports it as "git clone failed",
-        // which marks the package failed and fires the digest for real.
+        // **The timeout aborts** rather than falling through unlocked. Running the delete
+        // below against a live cloning holder is precisely the race the lock was added to
+        // prevent, and the asymmetry with the per-dist lock (which does fall through) is
+        // deliberate: building a dist twice is wasteful, deleting a mirror twice is
+        // destructive. With the wait sized as above, reaching the timeout means the holder
+        // outlived every bounded step it could legitimately be in — a crashed or wedged
+        // holder — so aborting is the right answer rather than a routine one.
+        //
+        // Aborting stays affordable because it is idempotent, visible and retried:
+        // SyncPackage backs off [60, 300, 900] and its later attempts land past LOCK_TTL,
+        // and a dist request gets an error it can repeat. A delete race, by contrast,
+        // destroys a running clone and reports it as "git clone failed", which marks the
+        // package failed and fires the digest for real.
         $lock = Cache::lock('mirror:'.$this->storageKey, self::LOCK_TTL);
 
         try {
-            $lock->block((int) config('kontorfix.mirror_lock_wait', 15));
+            $lock->block((int) config('kontorfix.mirror_lock_wait', self::DEFAULT_LOCK_WAIT));
         } catch (LockTimeoutException) {
             // German: reaches the operator through `packages.sync_error`. Deliberately
             // neutral about who retries — SyncPackage does it automatically, a dist
@@ -137,22 +173,31 @@ class GitRepository
         // A mirror we own but cannot fetch into is worth less than the seconds a fresh clone
         // costs. Dropping it here means one bad clone does not wedge a package forever.
         if ($state === MirrorState::Repairable) {
+            // Three shapes reach this branch and only one of them is a directory to empty.
+            //
             // File::deleteDirectory() follows a symlink at the given path and empties the
-            // *target's* contents instead of removing the link itself — never call it here.
-            // Nothing in this codebase creates a symlink at a mirror path today, but nothing
-            // guarantees this location can never become one either; unlinking the entry is
-            // safe regardless of what it points to, whereas deleting through it is not.
-            if (is_link($this->mirrorPath)) {
-                unlink($this->mirrorPath);
-            } else {
+            // *target's* contents instead of removing the link itself — never call it on a
+            // link. Nothing in this codebase creates a symlink at a mirror path today, but
+            // nothing guarantees this location can never become one either; unlinking the
+            // entry is safe regardless of what it points to, whereas deleting through it is
+            // not. It is also a silent no-op on a plain file, which would leave the entry
+            // in place for `git clone` to refuse.
+            //
+            // Ordered so that a path which no longer exists at all falls through untouched:
+            // displaceForeignMirror() reports Absent after renaming, and a future change
+            // that reported Repairable there instead must not turn into unlink() on
+            // nothing.
+            if (is_dir($this->mirrorPath) && ! is_link($this->mirrorPath)) {
                 File::deleteDirectory($this->mirrorPath);
+            } elseif (is_link($this->mirrorPath) || file_exists($this->mirrorPath)) {
+                unlink($this->mirrorPath);
             }
             $state = MirrorState::Absent;
         }
 
         if ($state === MirrorState::Usable) {
             // fetch needs the auth header too (the mirror's stored URL is token-free).
-            $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(120)
+            $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(self::FETCH_TIMEOUT)
                 ->run(['git', 'fetch', '--prune', '--tags', 'origin']);
 
             if (! $result->successful()) {
@@ -166,7 +211,7 @@ class GitRepository
             mkdir(dirname($this->mirrorPath), 0775, true);
         }
 
-        $result = Process::env($this->authEnv)->timeout(300)->run([
+        $result = Process::env($this->authEnv)->timeout(self::CLONE_TIMEOUT)->run([
             'git', 'clone', '--mirror', '-c', 'protocol.file.allow=always', $this->url, $this->mirrorPath,
         ]);
 
@@ -214,9 +259,12 @@ class GitRepository
         $notice = MirrorState::displacedMessage($this->mirrorPath, $displaced);
 
         if (! @rename($this->mirrorPath, $displaced)) {
+            // Leads with the *action* that failed rather than with the subject, because the
+            // sentence that follows opens with "Der Git-Mirror …" — two sentences in a row
+            // starting the same way read as a copy-paste slip to the operator seeing them.
             throw new RuntimeException(
-                'Der Git-Mirror gehört einem anderen Benutzer und konnte auch nicht zur Seite '
-                .'verschoben werden. '.MirrorState::foreignOwnerMessage($this->mirrorPath)
+                'Automatisches Verschieben zur Seite ist fehlgeschlagen — hier hilft nur ein '
+                .'manueller Eingriff. '.MirrorState::foreignOwnerMessage($this->mirrorPath)
             );
         }
 
@@ -293,7 +341,7 @@ class GitRepository
         $buffer = '';
         $capped = false;
 
-        $process = Process::path($this->mirrorPath)->timeout(120)->start(
+        $process = Process::path($this->mirrorPath)->timeout(self::COMMAND_TIMEOUT)->start(
             $this->showCommand($ref, $path),
             function (string $type, string $chunk) use (&$buffer, &$capped, $maxBytes) {
                 if ($capped || $type !== SystemProcess::OUT) {
@@ -466,7 +514,7 @@ class GitRepository
      */
     private function run(array $command): ProcessResult
     {
-        $result = Process::path($this->mirrorPath)->timeout(120)->run($command);
+        $result = Process::path($this->mirrorPath)->timeout(self::COMMAND_TIMEOUT)->run($command);
 
         if (! $result->successful()) {
             throw new RuntimeException(implode(' ', $command).' failed: '.$result->errorOutput());

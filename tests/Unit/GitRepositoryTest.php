@@ -276,8 +276,15 @@ it('waits for a busy mirror lock and repairs only once it actually holds it', fu
 
     expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
 
-    $started = microtime(true);
+    // The fixture is built BEFORE the clock starts. It spawns seven git processes and takes
+    // a noticeable fraction of a second; measured inside the window it would count towards
+    // $elapsed, and on a loaded machine it could clear the 1.0s threshold on its own — a
+    // version of sync() that never blocked at all would then still pass. That is a silent
+    // false green rather than a flake, and this test exists precisely because the property
+    // was previously untested.
     $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    $started = microtime(true);
     $repo->sync();
     $elapsed = microtime(true) - $started;
 
@@ -297,6 +304,85 @@ it('releases the mirror lock after a sync so a concurrent sync of the same mirro
     expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
 });
 
+it('releases the mirror lock when the sync fails, not only when it succeeds', function () {
+    // The release lives in a finally, which is easy to move out of by accident and
+    // impossible to notice: the failing sync reports the failure either way. What differs
+    // is everything afterwards — a lock left held wedges the mirror for its full TTL, so
+    // the retry that would have fixed a transient failure aborts instead, and the third one
+    // fires a failure digest for a package that was only briefly unreachable.
+    $key = 'test-pkg-'.uniqid();
+    $repo = new GitRepository('file:///does/not/exist-'.uniqid(), $key);
+
+    expect(fn () => $repo->sync())->toThrow(RuntimeException::class);
+    expect(Cache::lock('mirror:'.$key, 900, 'someone-else')->get())->toBeTrue();
+});
+
+it('still waits for the mirror lock when the config key is missing entirely', function () {
+    // Covers the `??` fallback in sync(), which every other test in this file steps over by
+    // setting the value explicitly. A fallback of 0 — or a caller that dropped the default
+    // argument, so config() returns null — would turn a missing key into "never wait", i.e.
+    // abort on the first contended sync, silently.
+    $kontorfix = config('kontorfix');
+    unset($kontorfix['mirror_lock_wait']);
+    config(['kontorfix' => $kontorfix]);
+
+    expect(config('kontorfix.mirror_lock_wait'))->toBeNull();
+
+    $key = 'test-pkg-'.uniqid();
+    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    $started = microtime(true);
+    $repo->sync();
+
+    expect(microtime(true) - $started)->toBeGreaterThanOrEqual(1.0)
+        ->and(is_file(storage_path('app/vcs/'.$key.'.git/HEAD')))->toBeTrue();
+});
+
+// `git clone` refuses any path that already has a directory entry, so a mirror path that is
+// occupied by something which is not a directory fails identically on every retry, forever.
+// Classifying those as Absent (which a bare is_dir() check does) is what made that
+// permanent: the repairs that would work — unlinking the entry, or renaming it aside when
+// it belongs to another uid — are only reachable from Repairable and ForeignOwner.
+
+it('re-clones over a dangling symlink sitting at the mirror path', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    if (! is_dir(dirname($mirror))) {
+        mkdir(dirname($mirror), 0775, true);
+    }
+    // Dangling on purpose: file_exists() follows the link and reports false, so this is the
+    // one shape an is_dir()/file_exists() pair misses entirely.
+    symlink('/does/not/exist-'.uniqid(), $mirror);
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    expect(is_link($mirror))->toBeFalse()
+        ->and(is_file($mirror.'/HEAD'))->toBeTrue()
+        ->and($repo->tags())->toContain('v1.0.0');
+});
+
+it('re-clones over a stray file sitting at the mirror path', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    if (! is_dir(dirname($mirror))) {
+        mkdir(dirname($mirror), 0775, true);
+    }
+    file_put_contents($mirror, 'not a directory');
+
+    $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+    $repo->sync();
+
+    // Removing the entry needs write permission on the parent only — the same permission
+    // the clone that follows already depends on — so File::deleteDirectory(), which is a
+    // silent no-op on a file, must not be the tool used here.
+    expect(is_dir($mirror))->toBeTrue()
+        ->and(is_file($mirror.'/HEAD'))->toBeTrue()
+        ->and($repo->tags())->toContain('v1.0.0');
+});
+
 // A mirror owned by another uid cannot be deleted by this service — that needs write
 // permission *inside* it — but it can be renamed aside, which needs write permission only on
 // storage/app/vcs. A symlink to a root-owned directory is how that state is produced here
@@ -313,7 +399,8 @@ it('moves a foreign-owned mirror aside and clones a fresh one in its place', fun
     }
     symlink('/usr', $mirror); // root-owned, and unwritable by this uid either way
 
-    expect(fileowner($mirror))->not->toBe(posix_geteuid());
+    $owner = fileowner($mirror);
+    expect($owner)->not->toBe(posix_geteuid());
 
     $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
     $repo->sync();
@@ -340,11 +427,18 @@ it('moves a foreign-owned mirror aside and clones a fresh one in its place', fun
     // The sync succeeded, so sync_error is cleared and the log is the only place the
     // permanent residue is visible at all. It has to name the directory and still carry the
     // fleet-wide chown that makes the whole case go away.
-    Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context) use ($mirror) {
+    //
+    // The uid is asserted because it is the one part of this message that can only be read
+    // *before* the rename: afterwards there is nothing at $mirror to stat, fileowner()
+    // returns false and the message degrades to "gehörte uid unbekannt" — a plausible
+    // string, produced by a plausible reordering, that a check on "chown -R" alone would
+    // wave through while telling the operator nothing about who to chown from.
+    Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context) use ($mirror, $owner) {
         return str_contains($message, 'foreign-owned git mirror')
             && $context['mirror'] === $mirror
             && str_contains($context['displaced'], '.git.foreign-')
-            && str_contains($context['remedy'], 'chown -R');
+            && str_contains($context['remedy'], 'chown -R')
+            && str_contains($context['remedy'], 'gehörte uid '.$owner);
     })->once();
 });
 

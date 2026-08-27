@@ -25,6 +25,44 @@ class SyncPackage implements ShouldQueue
     /** Transient errors (network, git timeout) are retried. */
     public int $tries = 3;
 
+    /**
+     * Seconds this job may run before the worker kills it.
+     *
+     * Declared here rather than left to the supervisor because the supervisor's value
+     * (config/horizon.php, 60s) is far below the work this job actually performs, and the
+     * kill is a `pcntl_alarm` handler that calls `exit()`: `finally` blocks do not unwind,
+     * so every lock the job holds stays held until its TTL runs out. GitRepository's mirror
+     * lock has a TTL of 900s, and `git clone --mirror` is allowed 300s — so with a 60s
+     * worker timeout, *any* repository slower than a minute to clone ended every attempt
+     * with a killed holder and a mirror wedged for 15 minutes, during which the job's own
+     * retries (backoff [60, 300, 900], i.e. ~t+135 and ~t+450) both landed inside the still
+     * held lock and drove the third failure into a PackageSyncFailed digest for a package
+     * with nothing wrong with it.
+     *
+     * The value is derived, not picked. Worst case before the lock is released:
+     *
+     *     mirror_lock_wait (330) + GitRepository::WORST_CASE_WORK (15 + 300) = 645s
+     *
+     * so 900s keeps the kill strictly outside the locked region — the property the whole
+     * design rests on — and leaves 255s for the version import and README render, which run
+     * after sync() has released the lock and can therefore be cut short without wedging
+     * anything.
+     *
+     * Three other numbers are pinned to this one and move with it (see
+     * tests/Unit/SyncTimingRelationsTest.php, which asserts each relation rather than the
+     * literals):
+     *
+     * - `queue.connections.*.retry_after` must exceed it, or the queue hands the same job
+     *   to a second worker while the first is still cloning.
+     * - WithoutOverlapping::expireAfter must be at least it, or the per-package lock lapses
+     *   mid-job and two syncs of one package run side by side.
+     * - releaseAfter × (tries − 1) must be at least it, so a second sync of the same
+     *   package parked behind the overlap lock still has an attempt left when the holder
+     *   finishes, instead of exhausting $tries on contention and failing — which would fire
+     *   exactly the false digest this branch exists to remove.
+     */
+    public int $timeout = 900;
+
     public function __construct(public Package $package) {}
 
     /** @return list<int> */
@@ -33,10 +71,21 @@ class SyncPackage implements ShouldQueue
         return [60, 300, 900];
     }
 
-    /** @return list<WithoutOverlapping> */
+    /**
+     * `releaseAfter` is not a politeness delay, it is `$timeout / ($tries - 1)`: a job
+     * parked behind the overlap lock gets `$tries` reservations in total, and every one of
+     * them that finds the lock still held burns an attempt. Spacing them so the last one
+     * lands after the holder's own timeout is what keeps contention from being reported as
+     * a package failure. `expireAfter` is the mirror image — the ceiling on how long a
+     * killed worker can wedge a package — and must cover a job that runs to `$timeout`.
+     *
+     * @return list<WithoutOverlapping>
+     */
     public function middleware(): array
     {
-        return [(new WithoutOverlapping($this->package->id))->releaseAfter(30)->expireAfter(300)];
+        return [(new WithoutOverlapping($this->package->id))
+            ->releaseAfter((int) ceil($this->timeout / ($this->tries - 1)))
+            ->expireAfter($this->timeout)];
     }
 
     public function handle(): void

@@ -26,6 +26,20 @@ return [
     |
     | Drivers: "sync", "database", "beanstalkd", "sqs", "redis", "null"
     |
+    | `retry_after` on the connections this application actually runs on (database in a
+    | plain install, redis in the shipped Docker/Horizon setup) is deliberately not
+    | Laravel's stock 90s. It is the point at which the queue assumes a reserved job is
+    | lost and hands it to a second worker, so it MUST be greater than the longest job
+    | this application can legitimately run — otherwise a still-running sync is executed
+    | a second time in parallel. App\Jobs\SyncPackage may take 900s (it can spend that on
+    | waiting for a mirror lock plus a `git clone --mirror`), so 960 buys a minute of
+    | headroom over it. tests/Unit/SyncTimingRelationsTest.php asserts the relation rather
+    | than the number.
+    |
+    | The price is paid only for genuinely lost jobs (a SIGKILLed worker): recovery is
+    | delayed from ~90s to ~960s. That is the cheaper of the two failure modes — a delayed
+    | retry versus two workers running the same sync at once.
+    |
     */
 
     'connections' => [
@@ -39,7 +53,7 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 960),
             'after_commit' => false,
         ],
 
@@ -67,7 +81,7 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 960),
             'block_for' => null,
             'after_commit' => false,
         ],

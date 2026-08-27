@@ -207,6 +207,12 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
+            // Default for jobs that do not say otherwise. It is NOT the ceiling for every
+            // job: Illuminate\Queue\Worker::timeoutForJob() prefers a job's own $timeout,
+            // and App\Jobs\SyncPackage declares one (900s) because a `git clone --mirror`
+            // does not fit in a minute and a worker killed mid-clone leaves the mirror lock
+            // held until its TTL runs out. Raising this value is not a substitute for that
+            // property, and lowering it does not affect that job.
             'timeout' => 60,
             'nice' => 0,
         ],

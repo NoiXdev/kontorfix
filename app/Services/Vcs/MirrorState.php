@@ -28,6 +28,15 @@ use RuntimeException;
  * — and if even that fails, reported in terms an operator can act on, instead of passing
  * git's wording through.
  *
+ * "Directory" is not assumed. A mirror path can also be occupied by something that is not
+ * a directory at all — a dangling symlink left by a half-finished move, a stray regular
+ * file — and `git clone` refuses such a path with "destination path already exists" on
+ * every single attempt, forever. Treating those as Absent (which is what a bare `is_dir()`
+ * check does) routes them straight into that permanent failure and, worse, keeps the two
+ * repairs that *would* work — unlinking the entry, or renaming it aside when it belongs to
+ * another uid — unreachable. So the question `of()` asks first is whether the directory
+ * entry exists at all, not whether it is a directory.
+ *
  * A third case is kept apart just as deliberately: uncertainty must never be treated as
  * "broken". `of()` only ever returns Repairable when git has positively told us the path is
  * not a usable repository — never merely because the check itself failed to run (git
@@ -46,16 +55,38 @@ enum MirrorState
     case Repairable;
     case ForeignOwner;
 
+    /**
+     * Seconds the usability probe below may take. Named because it is one half of the
+     * bounded work GitRepository does while holding the mirror lock, and every timing
+     * constant around that lock (its TTL, the wait before it, the job timeout that has to
+     * outlast both) is derived from that sum rather than guessed — see GitRepository.
+     */
+    public const CHECK_TIMEOUT = 15;
+
     public static function of(string $path): self
     {
-        if (! is_dir($path)) {
+        // is_link() first and separately: file_exists() resolves the link, so a *dangling*
+        // symlink is invisible to it while still occupying the entry `git clone` needs.
+        if (! is_link($path) && ! file_exists($path)) {
             return self::Absent;
         }
 
+        // fileowner() resolves the link too, so this is the owner of whatever the entry
+        // leads to — which is the thing we would have to write into. It returns false for a
+        // dangling link, and "no owner to compare" is not evidence of a foreign one, so
+        // that case falls through to the non-directory branch below and is unlinked.
         $owner = @fileowner($path);
 
         if ($owner !== false && $owner !== posix_geteuid()) {
             return self::ForeignOwner;
+        }
+
+        // Something that is not a directory sits here: a dangling symlink, a stray regular
+        // file, a socket. Nothing to probe with git, and nothing to keep — the repair is to
+        // remove the entry, which needs write permission on the parent only, exactly like
+        // the clone that follows it.
+        if (! is_dir($path)) {
+            return self::Repairable;
         }
 
         // --git-dir pins this check to exactly $path. Without it, git's ordinary repository
@@ -64,7 +95,7 @@ enum MirrorState
         // stray directory can walk all the way up to *this project's* repository and answer a
         // question about that one instead of about $path (worse: if some ancestor happened to
         // be a bare repo, it would report "true" and misclassify a broken mirror as Usable).
-        $result = Process::path($path)->timeout(15)->run(['git', '--git-dir='.$path, 'rev-parse', '--is-bare-repository']);
+        $result = Process::path($path)->timeout(self::CHECK_TIMEOUT)->run(['git', '--git-dir='.$path, 'rev-parse', '--is-bare-repository']);
 
         if ($result->successful()) {
             return trim($result->output()) === 'true' ? self::Usable : self::Repairable;

@@ -127,20 +127,35 @@ return [
     | Unlike the dist build lock above, a timed-out wait here does NOT fall through and
     | build anyway: it aborts the sync. Building a dist twice is wasteful, deleting a
     | mirror twice is destructive, so the two locks answer the same question differently on
-    | purpose. Aborting is affordable because the sync is idempotent and the caller retries
-    | — SyncPackage backs off [60, 300, 900], which outlasts the slowest possible clone.
+    | purpose.
     |
-    | Because of that, this value does not need to cover a clone, and must not try to: it
-    | is spent inside a queued job whose worker timeout (config/horizon.php, 60s) kills it
-    | mid-wait, turning routine contention into a failure digest for a healthy package.
-    | Keep it comfortably below that timeout. Raise it on an instance with large
-    | repositories — a longer wait means a second caller is more likely to be served from
-    | the finished mirror instead of aborting — but raise the worker timeout with it. 0
-    | disables waiting entirely: the second caller aborts at once.
+    | Because the timeout aborts, this value has to cover the work it is waiting for, not
+    | merely a polite moment: 330s = MirrorState::CHECK_TIMEOUT (15) + the clone timeout
+    | (300) + slack, i.e. GitRepository::DEFAULT_LOCK_WAIT. Sized that way, running out of
+    | wait means the holder outlived every bounded step it could be in — it is wedged, and
+    | giving up is right. Sized shorter (it was 15s), running out of wait mostly meant the
+    | holder was merely mid-clone, and the abort hit the one caller that cannot retry:
+    | ComposerController::dist() has no queue behind it, so the RuntimeException became an
+    | HTTP 500 and a failed `composer install` in exactly the parallel-cold-versions
+    | scenario this lock exists for.
+    |
+    | The old ceiling on this value — the 60s queue worker timeout in config/horizon.php —
+    | no longer applies: SyncPackage declares its own job timeout, sized to outlast this
+    | wait plus the work after it. Raising this value therefore means raising that job
+    | timeout too, and the connection's retry_after with it; the relations are asserted in
+    | tests/Unit/SyncTimingRelationsTest.php rather than left to a comment. 0 disables
+    | waiting entirely: the second caller aborts at once.
+    |
+    | One consequence is worth stating plainly, because it lands on the web tier: a cold
+    | dist request can now spend this long blocked before it starts working. It replaces a
+    | fast 500 with a slow success, which is what a `composer install` wants — but only if
+    | the reverse proxy in front of the app is willing to wait that long. It already has to
+    | be, since the *first* request performs the clone itself inline; raise this value and
+    | that proxy timeout together.
     |
     */
 
-    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 15),
+    'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 330),
 
     /*
     |--------------------------------------------------------------------------

@@ -52,6 +52,35 @@ it('classifies the path itself, not an ancestor directory that happens to be a b
     expect(MirrorState::of($stray))->toBe(MirrorState::Repairable);
 });
 
+// Not every occupant of a mirror path is a directory, and `git clone` refuses the path
+// regardless of what it is. Reporting these as Absent (a bare is_dir() check) sends them
+// into a clone that fails identically forever; Repairable is what makes the entry
+// removable, which needs write permission on the parent only.
+
+it('reports a dangling symlink at the mirror path as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-dangling-'.uniqid().'.git';
+    // file_exists() follows the link and reports false here, so this is the one shape a
+    // file_exists()-based existence check misses entirely.
+    symlink(sys_get_temp_dir().'/gone-'.uniqid(), $path);
+
+    try {
+        expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+    } finally {
+        unlink($path);
+    }
+});
+
+it('reports a regular file at the mirror path as repairable', function () {
+    $path = sys_get_temp_dir().'/mirror-file-'.uniqid().'.git';
+    file_put_contents($path, 'not a directory');
+
+    try {
+        expect(MirrorState::of($path))->toBe(MirrorState::Repairable);
+    } finally {
+        unlink($path);
+    }
+});
+
 it('reports a failure instead of guessing Repairable when the usability check itself cannot be trusted', function () {
     $path = sys_get_temp_dir().'/mirror-ambiguous-'.uniqid().'.git';
     mkdir($path, 0775, true);

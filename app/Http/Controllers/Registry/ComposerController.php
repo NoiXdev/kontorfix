@@ -136,7 +136,22 @@ class ComposerController extends Controller
             // Waiting is strictly cheaper than the duplicate build it replaces, and it is
             // bounded: if the lock cannot be had in time we build anyway, i.e. we fall back
             // to exactly the previous behaviour rather than refusing the download.
-            $lock = Cache::lock('dist-build:'.$path, 300);
+            //
+            // The TTL has to cover everything the holder does while holding it, and the
+            // longest part of that is not the zip but sync(): waiting for the mirror lock
+            // (kontorfix.mirror_lock_wait), then in the worst case a full clone
+            // (GitRepository::WORST_CASE_WORK), and only then `git archive`
+            // (GitRepository::COMMAND_TIMEOUT). A TTL shorter than that lapses under a live
+            // builder and lets a waiter start a second build of the same dist — harmless
+            // (the archive is staged and renamed) but exactly the duplicate work this lock
+            // exists to prevent. It costs nothing when a builder dies: waiters fall through
+            // after kontorfix.dist_build_lock_wait regardless of the TTL.
+            $lock = Cache::lock(
+                'dist-build:'.$path,
+                (int) config('kontorfix.mirror_lock_wait', GitRepository::DEFAULT_LOCK_WAIT)
+                    + GitRepository::WORST_CASE_WORK
+                    + GitRepository::COMMAND_TIMEOUT,
+            );
             $held = false;
 
             try {
