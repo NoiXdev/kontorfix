@@ -1,4 +1,24 @@
-## [0.7.0](https://github.com/NoiXdev/kontorfix/compare/v0.6.0...v) (2026-08-20)
+## [0.7.1](https://github.com/NoiXdev/kontorfix/compare/v0.7.0...v) (2026-08-27)
+
+
+### Features
+
+* **admin:** resync a package from its detail page ([84624cf](https://github.com/NoiXdev/kontorfix/commit/84624cf2b772fc0d379ddf44140667af9c9a6247))
+* **vcs:** self-heal a foreign-owned git mirror by displacing it instead of failing forever ([4dfda2a](https://github.com/NoiXdev/kontorfix/commit/4dfda2ac3187de929e936fd2ab37d65e9a45e373))
+
+
+### Bug Fixes
+
+* **0.7.1:** address whole-branch review findings across resync, mirrors, and host trust ([483c3d4](https://github.com/NoiXdev/kontorfix/commit/483c3d42958a5d5de7440a7272d48f7690faab6a))
+* **http:** let the health endpoint answer under any host ([59a9bf0](https://github.com/NoiXdev/kontorfix/commit/59a9bf0296357e82b9840c79260230e99db34727))
+* **vcs:** abort a contended mirror sync instead of racing it, and stop shaving the lock TTL ([711489b](https://github.com/NoiXdev/kontorfix/commit/711489b19fb56137e6ce1f891d4bced60bbba060))
+* **vcs:** close round-six's two Important findings and three cheap Minors ([a5a6fa1](https://github.com/NoiXdev/kontorfix/commit/a5a6fa1e8138a008c3e58be83a595827687b61a7))
+* **vcs:** pin mirror check to its path and never delete on uncertainty ([e847067](https://github.com/NoiXdev/kontorfix/commit/e8470678c1790a5024bc982b12e6e12cb8a9d576))
+* **vcs:** re-clone an unusable mirror and name a foreign owner ([0f0d49c](https://github.com/NoiXdev/kontorfix/commit/0f0d49c8ff3e036670e1a139a57c40dade8ed736))
+* **vcs:** size the mirror lock timings against the work they guard ([8fc8b69](https://github.com/NoiXdev/kontorfix/commit/8fc8b69750b51976dca8a565d5955301974d10a4))
+* **vcs:** split the mirror lock budget by caller and close the kill paths ([bd73166](https://github.com/NoiXdev/kontorfix/commit/bd73166b9512bbc021bc6cf7ccc5e3a56bcf30c3))
+
+## [0.7.0](https://github.com/NoiXdev/kontorfix/compare/v0.6.0...v0.7.0) (2026-08-20)
 
 
 ### Features
