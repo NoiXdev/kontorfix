@@ -18,6 +18,18 @@ class DeliverWebhook implements ShouldQueue
 
     public int $tries = 3;
 
+    /**
+     * Explicit, and equal to what the supervisor default used to hand this job.
+     *
+     * config/horizon.php raises `supervisor-1.timeout` to SyncPackage::TIMEOUT (900s)
+     * because SyncPackage's own kill paths need it there. `Worker::timeoutForJob()` gives
+     * the supervisor value to every job that declares none, so without this line raising it
+     * for one job would have quietly given a hung webhook delivery a fifteen-minute worker
+     * alarm as well. The HTTP call below is capped at 15s; 60s covers it plus the delivery
+     * row write with room to spare.
+     */
+    public int $timeout = 60;
+
     /** @param array<string, mixed> $payload */
     public function __construct(public Webhook $webhook, public string $event, public array $payload) {}
 

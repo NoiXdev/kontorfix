@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\Vcs\GitRepository;
+use App\Services\Vcs\MirrorState;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
@@ -274,8 +275,6 @@ it('waits for a busy mirror lock and repairs only once it actually holds it', fu
     mkdir($mirror, 0775, true);
     file_put_contents($mirror.'/stray', 'not a repo'); // Repairable: the delete path
 
-    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
-
     // The fixture is built BEFORE the clock starts. It spawns seven git processes and takes
     // a noticeable fraction of a second; measured inside the window it would count towards
     // $elapsed, and on a loaded machine it could clear the 1.0s threshold on its own — a
@@ -283,6 +282,13 @@ it('waits for a busy mirror lock and repairs only once it actually holds it', fu
     // false green rather than a flake, and this test exists precisely because the property
     // was previously untested.
     $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    // Taken AFTER the fixture, immediately before the clock. Held first, the fixture's
+    // ~175ms would run down the 1s TTL: Lock::block() polls every 250ms, so the lock would
+    // free at +0.825s and be picked up at the 1.000s poll — green with 75ms to spare. A
+    // fixture slower than 250ms (DDEV on macOS, CI under load) moves the pickup to the
+    // 0.750s poll and the assertion below fails for no reason connected to what it tests.
+    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
 
     $started = microtime(true);
     $repo->sync();
@@ -293,6 +299,47 @@ it('waits for a busy mirror lock and repairs only once it actually holds it', fu
     // ...and the destructive repair happened afterwards, not alongside.
     expect(is_file($mirror.'/stray'))->toBeFalse()
         ->and(is_file($mirror.'/HEAD'))->toBeTrue();
+});
+
+// The timing constants are only worth asserting relations between (see
+// tests/Unit/SyncTimingRelationsTest.php) if they are the values the git commands are
+// actually given. Writing `->timeout(600)` in performSync() leaves every relation there
+// green while the real budget drifts, so the two tests below read the timeout back off the
+// invocation the process runner received.
+
+it('gives git clone the clone timeout it is budgeted for', function () {
+    Process::fake();
+
+    $key = 'test-pkg-'.uniqid();
+    // No mirror path exists, so MirrorState reports Absent and sync() goes straight to the
+    // clone without running a probe first.
+    (new GitRepository('file:///does/not/matter-'.uniqid(), $key))->sync();
+
+    Process::assertRan(fn ($process) => in_array('clone', (array) $process->command, true)
+        && $process->timeout === GitRepository::CLONE_TIMEOUT);
+});
+
+it('gives the usability probe and git fetch the timeouts they are budgeted for', function () {
+    $key = 'test-pkg-'.uniqid();
+    $mirror = storage_path('app/vcs/'.$key.'.git');
+    mkdir($mirror, 0775, true);
+
+    // A real directory plus a probe that answers "true" is what puts sync() on the Usable
+    // path; everything else about the git invocations is faked. The catch-all is not
+    // decoration: an unmatched command is executed for real, and `git fetch origin` run
+    // for real inside storage/app/vcs walks git's repository discovery up into *this*
+    // project's checkout and fetches its origin.
+    Process::fake([
+        '*rev-parse*' => Process::result('true'),
+        '*' => Process::result(''),
+    ]);
+
+    (new GitRepository('file:///does/not/matter-'.uniqid(), $key))->sync();
+
+    Process::assertRan(fn ($process) => in_array('rev-parse', (array) $process->command, true)
+        && $process->timeout === MirrorState::CHECK_TIMEOUT);
+    Process::assertRan(fn ($process) => in_array('fetch', (array) $process->command, true)
+        && $process->timeout === GitRepository::FETCH_TIMEOUT);
 });
 
 it('releases the mirror lock after a sync so a concurrent sync of the same mirror is not blocked', function () {
@@ -329,9 +376,11 @@ it('still waits for the mirror lock when the config key is missing entirely', fu
     expect(config('kontorfix.mirror_lock_wait'))->toBeNull();
 
     $key = 'test-pkg-'.uniqid();
-    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
-
     $repo = new GitRepository('file://'.FixtureRepo::make(), $key);
+
+    // After the fixture, immediately before the clock — see the previous test for why the
+    // other order leaves this assertion ~75ms of margin against a 1s TTL.
+    expect(Cache::lock('mirror:'.$key, 1, 'someone-else')->get())->toBeTrue();
 
     $started = microtime(true);
     $repo->sync();

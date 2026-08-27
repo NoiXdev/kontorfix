@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\SyncPackage;
 use Illuminate\Support\Str;
 
 return [
@@ -207,13 +208,33 @@ return [
             'maxJobs' => 0,
             'memory' => 128,
             'tries' => 1,
-            // Default for jobs that do not say otherwise. It is NOT the ceiling for every
-            // job: Illuminate\Queue\Worker::timeoutForJob() prefers a job's own $timeout,
-            // and App\Jobs\SyncPackage declares one (900s) because a `git clone --mirror`
-            // does not fit in a minute and a worker killed mid-clone leaves the mirror lock
-            // held until its TTL runs out. Raising this value is not a substitute for that
-            // property, and lowering it does not affect that job.
-            'timeout' => 60,
+            // This value drives THREE kill paths, and only the first of them defers to a
+            // job's own $timeout:
+            //
+            // 1. The worker's `pcntl_alarm`. Illuminate\Queue\Worker::timeoutForJob()
+            //    prefers the job's property here, so App\Jobs\SyncPackage gets its own
+            //    900s regardless of what this says.
+            // 2. Laravel\Horizon\ProcessPool::stopTerminatingProcessesThatAreHanging(),
+            //    which hard-stops a worker this many seconds after SIGTERM. It reads
+            //    `$this->options->timeout` — this value — and never looks at the job. With
+            //    60s here, every autoscaler scale-down (routine: `packages:resync` runs
+            //    hourly, the pool grows, then shrinks by slicing the OLDEST processes) and
+            //    every `horizon:terminate` SIGKILLed a running `git clone --mirror` about
+            //    70 seconds in.
+            // 3. Laravel\Horizon\MasterSupervisor::terminate(), which waits at most
+            //    `longestActiveTimeout()` — the largest supervisor timeout — before
+            //    exit()ing.
+            //
+            // So this is raised to match the longest job in the application rather than
+            // left at the framework default. An earlier version of this comment claimed
+            // raising it "is not a substitute" for SyncPackage's property; that was wrong
+            // for paths 2 and 3, which is exactly where the mid-clone kills came from.
+            //
+            // Read from the class so the two files cannot drift apart. The cost of the
+            // larger value is that a job which declares no $timeout would get 900s of
+            // worker alarm; App\Jobs\DeliverWebhook and App\Jobs\SendNotificationDigest
+            // therefore declare 60s explicitly, and any new job should too.
+            'timeout' => SyncPackage::TIMEOUT,
             'nice' => 0,
         ],
     ],

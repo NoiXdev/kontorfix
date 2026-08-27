@@ -129,33 +129,41 @@ return [
     | mirror twice is destructive, so the two locks answer the same question differently on
     | purpose.
     |
-    | Because the timeout aborts, this value has to cover the work it is waiting for, not
-    | merely a polite moment: 330s = MirrorState::CHECK_TIMEOUT (15) + the clone timeout
-    | (300) + slack, i.e. GitRepository::DEFAULT_LOCK_WAIT. Sized that way, running out of
-    | wait means the holder outlived every bounded step it could be in — it is wedged, and
-    | giving up is right. Sized shorter (it was 15s), running out of wait mostly meant the
-    | holder was merely mid-clone, and the abort hit the one caller that cannot retry:
-    | ComposerController::dist() has no queue behind it, so the RuntimeException became an
-    | HTTP 500 and a failed `composer install` in exactly the parallel-cold-versions
-    | scenario this lock exists for.
+    | There are TWO values because there are two callers, and one number cannot serve both.
     |
-    | The old ceiling on this value — the 60s queue worker timeout in config/horizon.php —
-    | no longer applies: SyncPackage declares its own job timeout, sized to outlast this
-    | wait plus the work after it. Raising this value therefore means raising that job
-    | timeout too, and the connection's retry_after with it; the relations are asserted in
+    | `mirror_lock_wait` is the **queue** caller's (App\Jobs\SyncPackage). Because the
+    | timeout aborts, it has to cover the work it is waiting for, not merely a polite
+    | moment: 330s = MirrorState::CHECK_TIMEOUT (15) + the clone timeout (300) + slack, i.e.
+    | GitRepository::DEFAULT_LOCK_WAIT. Sized that way, running out of wait means the holder
+    | outlived every bounded step it could be in — it is wedged, and giving up is right.
+    | What it costs is one parked worker process out of a pool provisioned for exactly this,
+    | and SyncPackage's own job timeout is sized to outlast this wait plus the work after
+    | it. Raising this value therefore means raising that job timeout too, and the
+    | connection's retry_after with it; the relations are asserted in
     | tests/Unit/SyncTimingRelationsTest.php rather than left to a comment. 0 disables
-    | waiting entirely: the second caller aborts at once.
+    | waiting entirely: the caller aborts at once.
     |
-    | One consequence is worth stating plainly, because it lands on the web tier: a cold
-    | dist request can now spend this long blocked before it starts working. It replaces a
-    | fast 500 with a slow success, which is what a `composer install` wants — but only if
-    | the reverse proxy in front of the app is willing to wait that long. It already has to
-    | be, since the *first* request performs the clone itself inline; raise this value and
-    | that proxy timeout together.
+    | `mirror_lock_wait_web` is the **HTTP** caller's (ComposerController::dist()), and it
+    | is short for a reason that has nothing to do with what the client would tolerate. The
+    | app container runs `frankenphp php-server` in classic mode, so a blocked request holds
+    | a thread of a pool sized from the CPU count — the same pool that answers metadata,
+    | downloads, the admin UI and the container healthcheck `/up`. N parallel requests for N
+    | different cold versions take N different `dist-build:` locks, so nothing serialises
+    | them before sync(); with the queue's 330s here, N threads park for up to five and a
+    | half minutes, `/up` misses its 5s×5 healthcheck budget, and the proxy drops the
+    | container. The bounded 503 + `Retry-After` that the short wait produces instead is the
+    | cheaper failure by a wide margin. It is still long enough to absorb the *common* case
+    | of contention, which is a fetch rather than a clone.
+    |
+    | Neither value bounds the request that WINS the lock: the lazy dist build performs the
+    | clone inline, on the request thread, for up to GitRepository::WORST_CASE_WORK. The
+    | reverse proxy in front of the app has to be willing to wait that long regardless.
     |
     */
 
     'mirror_lock_wait' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT', 330),
+
+    'mirror_lock_wait_web' => (int) env('KONTORFIX_MIRROR_LOCK_WAIT_WEB', 15),
 
     /*
     |--------------------------------------------------------------------------
