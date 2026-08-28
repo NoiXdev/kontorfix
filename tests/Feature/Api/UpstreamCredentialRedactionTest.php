@@ -21,7 +21,12 @@ uses(RefreshDatabase::class);
  *
  * The column cannot simply refuse userinfo: every Basic mirror that works today would
  * break on the next unrelated edit with nowhere to move the credential to. So the value
- * stays, and is withheld from readers below the tier that wrote it.
+ * stays, is withheld from readers below the tier that wrote it, and
+ * UpdateUpstreamRequest resolves a redacted echo of the *unchanged* value back to
+ * the stored URL before validation — so an unrelated edit does not force
+ * re-entering the credential. Originally leaked to member-tier API keys; later
+ * found to leak to any Maintainer viewing the upstreams admin console too, not
+ * just the Admin who wrote it — both are covered below.
  */
 const UCR_MIRROR_URL = 'https://svc:s3cr3t-mirror-pw@nexus.corp/repository/npm-proxy';
 
@@ -58,18 +63,31 @@ it('does not repeat the mirror credential on the registry detail page', function
         ->assertInertia(fn ($p) => $p->where('upstreams.0.url', 'https://***@nexus.corp/repository/npm-proxy'));
 });
 
-it('still shows the operator the stored value so it can be read back and re-entered', function () {
-    // The upstreams console is the tier that wrote the credential, and its edit dialog
-    // pre-fills `form.url` from exactly this prop — redacting here would make the
-    // operator write the marker back over their own secret on the next unrelated save.
+it('withholds the mirror credential from the upstreams console too, and round-trips it intact on an unrelated save', function () {
+    // The upstreams console sits in the `['auth', 'operator']` route group — reachable by
+    // any Maintainer of the organization, not just the Admin who entered the credential —
+    // so it is redacted like every other reader below the tier that wrote it.
     $this->actingAs($this->admin)->get('/admin/upstreams')
-        ->assertInertia(fn ($p) => $p->where('upstreams.0.url', UCR_MIRROR_URL));
+        ->assertInertia(fn ($p) => $p->where('upstreams.0.url', 'https://***@nexus.corp/repository/npm-proxy'));
+
+    // The edit page's form is pre-filled with exactly that redacted value and echoes it
+    // back unchanged on an unrelated save (priority here). UpdateUpstreamRequest resolves
+    // that echo to the stored URL before validation (see its prepareForValidation()), so
+    // this does not force the operator to re-enter the credential.
+    $this->actingAs($this->admin)->put("/admin/upstreams/{$this->upstream->id}", [
+        'type' => 'composer', 'url' => 'https://***@nexus.corp/repository/npm-proxy', 'policy' => 'proxy', 'priority' => 5,
+    ])->assertSessionHasNoErrors();
+
+    expect($this->upstream->fresh()->url)->toBe(UCR_MIRROR_URL);
 });
 
-it('refuses a redacted value written back over the stored credential', function () {
+it('refuses a redacted value that does not match the stored credential', function () {
+    // Not the "unchanged" echo — an operator edited the host (or path) around the marker
+    // rather than clearing it. The write must be refused, not silently overwrite the
+    // credential with a literal `***`.
     $this->actingAs($this->admin)
         ->put("/admin/upstreams/{$this->upstream->id}", [
-            'type' => 'composer', 'url' => 'https://***@nexus.corp/repository/npm-proxy',
+            'type' => 'composer', 'url' => 'https://***@evil.corp/repository/npm-proxy',
             'policy' => 'proxy',
         ])
         ->assertSessionHasErrors(['url' => UCR_WRITEBACK_ERROR]);

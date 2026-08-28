@@ -131,6 +131,17 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        // Both fields can carry an inline Basic-auth credential (see CredentialUrl).
+        // UpdateUpstreamRequest::prepareForValidation() and PackageController::update()
+        // resolve a redacted echo back to the raw stored URL before validation runs, so
+        // that a *failed* save's ...->withInput() redirect does not see the redaction
+        // marker in $request->input() — but that same raw value is what Handler::invalid()
+        // would otherwise flash into `_old_input` in the sessions table. Nothing renders
+        // old() for these fields today, so this is not a live disclosure, but a raw
+        // credential has no business sitting in secondary storage until the session
+        // expires.
+        $exceptions->dontFlash(['url', 'repository_url']);
+
         // A broken/slow upstream is a gateway error, not a 500 on our part.
         // UpstreamException is thrown exclusively in the registry proxy — hence always
         // 502, regardless of whether access came via /r/{slug} or a custom domain.

@@ -6,12 +6,42 @@ use App\Enums\PackageType;
 use App\Enums\UpstreamPolicy;
 use App\Models\Upstream;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Support\CredentialUrl;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class UpdateUpstreamRequest extends FormRequest
 {
+    /**
+     * The edit page is now shown the redacted url like every other reader (see
+     * UpstreamController::edit()), and its form posts back whatever it was given. A
+     * redacted value byte-identical to the redaction of what is stored is that echo — it
+     * means "unchanged", not "overwrite the credential with a literal marker" — so it is
+     * resolved back to the stored value before rules() and withValidator() ever see it.
+     * Anything else redacted is still refused by NotRedactedCredentialUrl below: an
+     * operator who edited the path around a `***` has to supply the credential for the
+     * new URL, and a client inventing a marker cannot overwrite a secret with it.
+     *
+     * Runs before authorize() in the FormRequest lifecycle, so it is safe to read the
+     * route-bound upstream here even though authorization has not been decided yet — the
+     * value merged in is only ever the upstream's own already-stored URL.
+     */
+    protected function prepareForValidation(): void
+    {
+        $upstream = $this->route('upstream');
+        if (! $upstream instanceof Upstream) {
+            return;
+        }
+
+        $submitted = $this->input('url');
+        if (is_string($submitted)
+            && CredentialUrl::isRedacted($submitted)
+            && $submitted === CredentialUrl::redact($upstream->url)) {
+            $this->merge(['url' => $upstream->url]);
+        }
+    }
+
     /**
      * Authorization cannot be left to the controller here, the way it is for every other
      * request in this namespace: `withValidator()` below reads the route-bound upstream's

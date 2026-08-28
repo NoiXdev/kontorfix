@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\StoreUpstreamRequest;
 use App\Http\Requests\Admin\UpdateUpstreamRequest;
 use App\Models\Group;
 use App\Models\Upstream;
+use App\Support\CredentialUrl;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -30,7 +31,10 @@ class UpstreamController extends Controller
                     'group' => $u->group?->name,
                     'group_id' => $u->group_id,
                     'type' => $u->type,
-                    'url' => $u->url,
+                    // Redacted: `url` is the supported place to put a mirror's Basic-auth
+                    // credential (see CredentialUrl), and the listing is reachable by any
+                    // Maintainer of the organization, not just the Admin who entered it.
+                    'url' => CredentialUrl::redact($u->url),
                     'policy' => $u->policy,
                     'priority' => $u->priority,
                     'enabled' => $u->enabled,
@@ -78,7 +82,11 @@ class UpstreamController extends Controller
         // Loaded fresh from the record, not from the index listing's mapped row: this page
         // is reached directly (URL, bookmark, back button), so it cannot rely on anything
         // the listing already had in memory. `auth_token` itself never leaves the server —
-        // only `has_auth`, exactly like the index listing.
+        // only `has_auth`, exactly like the index listing. `url` is redacted the same way
+        // too: it legitimately carries `user:pass@host` for a Basic-auth mirror, and the
+        // form only ever needs it verbatim back when the operator actually changes it —
+        // see UpdateUpstreamRequest, which resolves an unchanged, still-redacted echo back
+        // to the stored value before validation.
         $upstream->loadMissing(['group:id,name', 'allowedPackages']);
 
         return Inertia::render('admin/upstreams/Edit', [
@@ -86,7 +94,7 @@ class UpstreamController extends Controller
                 'id' => $upstream->id,
                 'group_id' => $upstream->group_id,
                 'type' => $upstream->type,
-                'url' => $upstream->url,
+                'url' => CredentialUrl::redact($upstream->url),
                 'policy' => $upstream->policy,
                 'priority' => $upstream->priority,
                 'has_auth' => (bool) $upstream->auth_token,

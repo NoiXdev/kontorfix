@@ -64,8 +64,11 @@ const policyOptions: { value: 'proxy' | 'strict'; label: string }[] = [
         <Input id="url" v-model="form.url" placeholder="https://repo.packagist.org" autocomplete="off" />
         <p class="text-xs text-muted-foreground">
             Zugangsdaten gehören in das Token-Feld, nicht in die URL. Eine URL der Form
-            <code class="font-mono">https://user:passwort@host/…</code> funktioniert zwar, wird aber gegenüber Mitgliedern der Organisation
-            ausgeblendet.
+            <code class="font-mono">https://user:passwort@host/…</code> funktioniert zwar, wird aber niemandem mehr angezeigt — auch nicht
+            hier im Formular, nicht einmal für den Admin, der sie eingetragen hat. Unverändert lassen behält die gespeicherten
+            Zugangsdaten; wer die URL bearbeitet, muss sie vollständig neu eingeben, inklusive Zugangsdaten. Da niemand sie im
+            Nachhinein auslesen kann: Ist das Passwort nicht anderweitig bekannt, lässt sich nur Pfad oder Host ändern, indem der
+            Upstream gelöscht und neu angelegt wird.
         </p>
         <InputError :message="form.errors.url" />
     </div>
