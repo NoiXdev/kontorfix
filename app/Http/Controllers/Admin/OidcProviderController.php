@@ -61,6 +61,26 @@ class OidcProviderController extends Controller
         return back()->with('success', 'OIDC-Provider gelöscht.');
     }
 
+    /**
+     * Single-purpose toggle for `trusts_email_claim` (see OidcUserResolver): the only way,
+     * short of hand-written SQL, to turn the flag off on a provider that predates it — the
+     * migration backfilled every existing row to `true`. Deliberately narrow: a full
+     * provider-edit endpoint would also need to cover client-secret rotation and endpoint
+     * re-discovery, which is out of scope here.
+     */
+    public function trust(Request $request, OidcProvider $provider): RedirectResponse
+    {
+        $validated = $request->validate([
+            'trusts_email_claim' => ['required', 'boolean'],
+        ]);
+
+        $provider->update(['trusts_email_claim' => $validated['trusts_email_claim']]);
+
+        return back()->with('success', $provider->trusts_email_claim
+            ? 'Provider als vertrauenswürdig für E-Mail-Zusicherungen markiert.'
+            : 'Provider als nicht vertrauenswürdig für E-Mail-Zusicherungen markiert.');
+    }
+
     public function discover(Request $request): JsonResponse
     {
         $validated = $request->validate([

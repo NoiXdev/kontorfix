@@ -122,6 +122,7 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
 
     Route::resource('oidc', Admin\OidcProviderController::class)->only(['index', 'create', 'store', 'destroy'])->parameters(['oidc' => 'provider']);
     Route::post('oidc/discover', [Admin\OidcProviderController::class, 'discover'])->name('oidc.discover');
+    Route::patch('oidc/{provider}/trust', [Admin\OidcProviderController::class, 'trust'])->name('oidc.trust');
 
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
     Route::put('system', [Admin\SystemController::class, 'update'])->name('system.update');
