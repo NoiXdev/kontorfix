@@ -19,6 +19,7 @@ interface ProviderRow {
     issuer: string;
     enabled: boolean;
     allow_registration: boolean;
+    trusts_email_claim: boolean;
     has_secret: boolean;
     default_role: Role | null;
     default_organization_id: string | null;
@@ -46,6 +47,11 @@ const columns: ColumnDef<ProviderRow>[] = [
     { key: 'issuer', label: 'Issuer' },
     { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
     { key: 'allow_registration', label: 'Registrierung', sortValue: (row) => (row.allow_registration ? 'Erlaubt' : 'Gesperrt') },
+    {
+        key: 'trusts_email_claim',
+        label: 'E-Mail-Vertrauen',
+        sortValue: (row) => (row.trusts_email_claim ? 'Vertrauenswürdig' : 'Nicht vertrauenswürdig'),
+    },
     { key: 'has_secret', label: 'Secret', sortable: false },
     { key: 'actions', label: 'Aktionen', sortable: false },
 ];
@@ -125,6 +131,11 @@ const badgeClasses = (on: boolean) =>
                         <td class="px-4 py-3">
                             <span :class="badgeClasses(provider.allow_registration)">
                                 {{ provider.allow_registration ? 'Erlaubt' : 'Gesperrt' }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <span :class="badgeClasses(provider.trusts_email_claim)">
+                                {{ provider.trusts_email_claim ? 'Vertrauenswürdig' : 'Nicht vertrauenswürdig' }}
                             </span>
                         </td>
                         <td class="px-4 py-3">

@@ -180,4 +180,18 @@ async function loadFromDiscovery() {
         <Switch id="allow_registration" v-model="form.allow_registration" />
         <Label for="allow_registration">Selbstregistrierung erlauben</Label>
     </div>
+
+    <label class="flex items-start gap-2 text-sm">
+        <Switch id="trusts_email_claim" v-model="form.trusts_email_claim" class="mt-1" />
+        <span>
+            E-Mail-Zusicherung vertrauen
+            <span class="block text-xs text-muted-foreground">
+                Erlaubt diesem Provider, ein bestehendes Konto allein anhand einer als verifiziert
+                zugesicherten E-Mail-Adresse zu beanspruchen und automatisch damit zu verknüpfen. Nur für
+                Provider aktivieren, denen bei der E-Mail-Verifizierung vertraut wird — ein weniger
+                vertrauenswürdiger Provider könnte sonst eine fremde Adresse behaupten und sich so als
+                dieses Konto anmelden.
+            </span>
+        </span>
+    </label>
 </template>

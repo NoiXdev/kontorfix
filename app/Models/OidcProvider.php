@@ -36,6 +36,7 @@ class OidcProvider extends Model
         'scopes',
         'enabled',
         'allow_registration',
+        'trusts_email_claim',
         'default_organization_id',
         'default_role',
     ];
@@ -60,6 +61,7 @@ class OidcProvider extends Model
             'client_secret' => 'encrypted',
             'enabled' => 'bool',
             'allow_registration' => 'bool',
+            'trusts_email_claim' => 'bool',
             'default_role' => UserRole::class,
         ];
     }

@@ -32,6 +32,12 @@ class OidcProviderFactory extends Factory
             'scopes' => 'openid email profile',
             'enabled' => false,
             'allow_registration' => false,
+            // Mirrors the migration's backfill: a factory-made provider models an already
+            // established, working configuration (like every row that existed before the
+            // `trusts_email_claim` column shipped), not the untrusted state a brand-new row
+            // gets from the column default. Tests that specifically exercise the untrusted
+            // path override this explicitly.
+            'trusts_email_claim' => true,
             'default_organization_id' => null,
             'default_role' => UserRole::Member,
         ];

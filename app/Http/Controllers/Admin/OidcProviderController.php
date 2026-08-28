@@ -27,6 +27,7 @@ class OidcProviderController extends Controller
                     'issuer' => $p->issuer,
                     'enabled' => $p->enabled,
                     'allow_registration' => $p->allow_registration,
+                    'trusts_email_claim' => $p->trusts_email_claim,
                     'has_secret' => $p->hasSecret(),
                     'default_role' => $p->default_role,
                     'default_organization_id' => $p->default_organization_id,
@@ -46,6 +47,7 @@ class OidcProviderController extends Controller
         $data = $request->validated();
         $data['enabled'] = $request->boolean('enabled');
         $data['allow_registration'] = $request->boolean('allow_registration');
+        $data['trusts_email_claim'] = $request->boolean('trusts_email_claim');
 
         OidcProvider::create($data);
 

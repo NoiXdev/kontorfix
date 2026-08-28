@@ -31,6 +31,7 @@ class StoreOidcProviderRequest extends FormRequest
             'scopes' => ['nullable', 'string', 'max:500'],
             'enabled' => ['boolean'],
             'allow_registration' => ['boolean'],
+            'trusts_email_claim' => ['boolean'],
             'default_organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'default_role' => ['nullable', Rule::enum(UserRole::class)],
         ];
