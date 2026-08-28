@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
-import { Plus, Trash2 } from 'lucide-vue-next';
+import { Plus, ShieldCheck, ShieldOff, Trash2 } from 'lucide-vue-next';
 import { computed } from 'vue';
 
 type Role = 'member' | 'maintainer' | 'admin';
@@ -19,6 +19,7 @@ interface ProviderRow {
     issuer: string;
     enabled: boolean;
     allow_registration: boolean;
+    trusts_email_claim: boolean;
     has_secret: boolean;
     default_role: Role | null;
     default_organization_id: string | null;
@@ -46,6 +47,11 @@ const columns: ColumnDef<ProviderRow>[] = [
     { key: 'issuer', label: 'Issuer' },
     { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
     { key: 'allow_registration', label: 'Registrierung', sortValue: (row) => (row.allow_registration ? 'Erlaubt' : 'Gesperrt') },
+    {
+        key: 'trusts_email_claim',
+        label: 'E-Mail-Vertrauen',
+        sortValue: (row) => (row.trusts_email_claim ? 'Vertrauenswürdig' : 'Nicht vertrauenswürdig'),
+    },
     { key: 'has_secret', label: 'Secret', sortable: false },
     { key: 'actions', label: 'Aktionen', sortable: false },
 ];
@@ -68,6 +74,22 @@ function destroyProvider(id: string) {
     router.delete(route('admin.oidc.destroy', id), {
         onBefore: () => confirm('OIDC-Provider wirklich löschen?'),
     });
+}
+
+function toggleTrust(provider: ProviderRow) {
+    const next = !provider.trusts_email_claim;
+    router.patch(
+        route('admin.oidc.trust', provider.id),
+        { trusts_email_claim: next },
+        {
+            preserveScroll: true,
+            onBefore: () =>
+                next ||
+                confirm(
+                    'Provider als nicht vertrauenswürdig für E-Mail-Zusicherungen markieren? Bestehende Konten werden dann nicht mehr automatisch über die E-Mail-Adresse verknüpft.',
+                ),
+        },
+    );
 }
 
 const badgeClasses = (on: boolean) =>
@@ -126,6 +148,27 @@ const badgeClasses = (on: boolean) =>
                             <span :class="badgeClasses(provider.allow_registration)">
                                 {{ provider.allow_registration ? 'Erlaubt' : 'Gesperrt' }}
                             </span>
+                        </td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-1.5">
+                                <span :class="badgeClasses(provider.trusts_email_claim)">
+                                    {{ provider.trusts_email_claim ? 'Vertrauenswürdig' : 'Nicht vertrauenswürdig' }}
+                                </span>
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    class="size-7"
+                                    @click="toggleTrust(provider)"
+                                    :aria-label="
+                                        provider.trusts_email_claim
+                                            ? 'Als nicht vertrauenswürdig für E-Mail-Zusicherungen markieren'
+                                            : 'Als vertrauenswürdig für E-Mail-Zusicherungen markieren'
+                                    "
+                                >
+                                    <ShieldOff v-if="provider.trusts_email_claim" class="size-4" />
+                                    <ShieldCheck v-else class="size-4 text-emerald-600 dark:text-emerald-400" />
+                                </Button>
+                            </div>
                         </td>
                         <td class="px-4 py-3">
                             <span

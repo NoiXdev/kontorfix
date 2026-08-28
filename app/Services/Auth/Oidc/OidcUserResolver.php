@@ -43,6 +43,18 @@ class OidcUserResolver
             // wins, deterministically — the account that held the address first.
             $user = User::whereRaw('lower(email) = ?', [$email])->orderBy('created_at')->orderBy('id')->first();
             if ($user !== null) {
+                // A provider only gets to *claim* an existing account by email if it has been
+                // marked trustworthy for that specifically (`trusts_email_claim`). This is
+                // independent of `allow_registration`, which governs whether the provider may
+                // bring in new people — a second, less trustworthy IdP could otherwise assert
+                // `email_verified: true` for someone else's address and be linked to their
+                // account. Every provider that already existed before this column was
+                // introduced was backfilled to `true` (see the migration); any provider created
+                // since defaults to `false` until an operator opts in.
+                if (! $provider->trusts_email_claim) {
+                    throw new RuntimeException('Für diese E-Mail-Adresse existiert bereits ein Konto. Dieser Provider ist nicht als vertrauenswürdig für E-Mail-Zusicherungen markiert und darf ihn deshalb nicht automatisch verknüpfen. Verknüpfen Sie das Konto gezielt im angemeldeten Zustand, oder markieren Sie den Provider als vertrauenswürdig für E-Mail-Zusicherungen.');
+                }
+
                 // Do NOT automatically link a privileged account to a federated identity by
                 // email: an IdP that sets email_verified freely could otherwise take over that
                 // account. Privilege is read from every source (super-admin flag, home-org role,

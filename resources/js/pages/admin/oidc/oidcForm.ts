@@ -16,6 +16,7 @@ export interface OidcFormData {
     scopes: string;
     enabled: boolean;
     allow_registration: boolean;
+    trusts_email_claim: boolean;
     default_organization_id: string;
     default_role: OidcRole;
 }

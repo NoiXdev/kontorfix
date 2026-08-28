@@ -34,6 +34,7 @@ const form = useForm<OidcFormData>({
     scopes: 'openid email profile',
     enabled: false,
     allow_registration: false,
+    trusts_email_claim: false,
     default_organization_id: '',
     default_role: 'member',
 });
