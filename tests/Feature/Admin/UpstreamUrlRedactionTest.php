@@ -14,10 +14,10 @@ use App\Models\Organization;
 use App\Models\Upstream;
 use App\Models\User;
 
-const LEAKED_PASSWORD = 'sw0rdfish-leak';
+const UUR_LEAKED_PASSWORD = 'sw0rdfish-leak';
 
 /** A Maintainer — the tier that may reach the upstream console but did not enter the credential. */
-function maintainerFor(Upstream $upstream): User
+function redactionMaintainerFor(Upstream $upstream): User
 {
     return User::factory()
         ->for($upstream->group->organization)
@@ -27,11 +27,11 @@ function maintainerFor(Upstream $upstream): User
 it('withholds an inline mirror credential from the index listing', function () {
     $upstream = Upstream::factory()
         ->for(Group::factory()->for(Organization::factory()))
-        ->create(['url' => 'https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test']);
+        ->create(['url' => 'https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test']);
 
-    $response = $this->actingAs(maintainerFor($upstream))->get('/admin/upstreams')->assertOk();
+    $response = $this->actingAs(redactionMaintainerFor($upstream))->get('/admin/upstreams')->assertOk();
 
-    expect($response->getContent())->not->toContain(LEAKED_PASSWORD);
+    expect($response->getContent())->not->toContain(UUR_LEAKED_PASSWORD);
     $response->assertInertia(fn ($page) => $page
         ->where('upstreams.0.url', 'https://***@repo.packagist.test'));
 });
@@ -39,12 +39,12 @@ it('withholds an inline mirror credential from the index listing', function () {
 it('withholds an inline mirror credential from the edit page', function () {
     $upstream = Upstream::factory()
         ->for(Group::factory()->for(Organization::factory()))
-        ->create(['url' => 'https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test']);
+        ->create(['url' => 'https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test']);
 
-    $response = $this->actingAs(maintainerFor($upstream))
+    $response = $this->actingAs(redactionMaintainerFor($upstream))
         ->get("/admin/upstreams/{$upstream->id}/edit")->assertOk();
 
-    expect($response->getContent())->not->toContain(LEAKED_PASSWORD);
+    expect($response->getContent())->not->toContain(UUR_LEAKED_PASSWORD);
     $response->assertInertia(fn ($page) => $page
         ->where('upstream.url', 'https://***@repo.packagist.test'));
 });
@@ -55,7 +55,7 @@ it('still shows a credential-free upstream url in full — the anchor for the ca
     $upstream = Upstream::factory()
         ->for(Group::factory()->for(Organization::factory()))
         ->create(['url' => 'https://repo.packagist.test']);
-    $maintainer = maintainerFor($upstream);
+    $maintainer = redactionMaintainerFor($upstream);
 
     $this->actingAs($maintainer)->get('/admin/upstreams')->assertOk()
         ->assertInertia(fn ($page) => $page->where('upstreams.0.url', 'https://repo.packagist.test'));
@@ -71,7 +71,7 @@ it('keeps the stored credential when the edit form is saved back with the redact
             'type' => 'composer',
             'policy' => 'proxy',
             'priority' => 3,
-            'url' => 'https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test',
+            'url' => 'https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test',
         ]);
     $admin = User::factory()->for($upstream->group->organization)->create(['role' => UserRole::Admin]);
 
@@ -84,7 +84,7 @@ it('keeps the stored credential when the edit form is saved back with the redact
         'priority' => 3,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
-    expect($upstream->fresh()->url)->toBe('https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test');
+    expect($upstream->fresh()->url)->toBe('https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test');
 });
 
 it('refuses a redacted url that does not match the stored credential', function () {
@@ -96,7 +96,7 @@ it('refuses a redacted url that does not match the stored credential', function 
         ->create([
             'type' => 'composer',
             'policy' => 'proxy',
-            'url' => 'https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test',
+            'url' => 'https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test',
         ]);
     $admin = User::factory()->for($upstream->group->organization)->create(['role' => UserRole::Admin]);
 
@@ -106,5 +106,31 @@ it('refuses a redacted url that does not match the stored credential', function 
         'policy' => 'proxy',
     ])->assertSessionHasErrors('url');
 
-    expect($upstream->fresh()->url)->toBe('https://mirror:'.LEAKED_PASSWORD.'@repo.packagist.test');
+    expect($upstream->fresh()->url)->toBe('https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test');
+});
+
+it('does not flash the raw credential into old-input storage when an unrelated field fails validation', function () {
+    // `policy` is what fails here, not `url` — a submission whose url is a real
+    // (uncredentialed-marker) value, so it sails through NotRedactedCredentialUrl and gets
+    // included in the redirect's old-input flash like any other field. The only thing
+    // standing between that flash and a raw credential sitting in the `sessions` table is
+    // `bootstrap/app.php`'s `dontFlash(['url', 'repository_url'])`.
+    $upstream = Upstream::factory()
+        ->for(Group::factory()->for(Organization::factory()))
+        ->create([
+            'type' => 'composer',
+            'policy' => 'proxy',
+            'url' => 'https://repo.packagist.test',
+        ]);
+    $admin = User::factory()->for($upstream->group->organization)->create(['role' => UserRole::Admin]);
+
+    $this->actingAs($admin)->put("/admin/upstreams/{$upstream->id}", [
+        'type' => 'composer',
+        'url' => 'https://mirror:'.UUR_LEAKED_PASSWORD.'@repo.packagist.test',
+        'policy' => 'not-a-real-policy',
+    ])->assertSessionHasErrors('policy');
+
+    $oldInput = session('_old_input');
+    expect($oldInput)->not->toBeNull();
+    expect($oldInput['url'] ?? '')->not->toContain(UUR_LEAKED_PASSWORD);
 });
