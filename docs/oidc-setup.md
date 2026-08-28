@@ -29,6 +29,7 @@ Der Button ist ein normaler Browser-GET auf die Route `oidc.redirect`
 | `scopes` | optional | Angeforderte Scopes (Default enthält `openid`; üblich `openid email profile`). |
 | `enabled` | ja | Nur `true` blendet den Provider auf der Login-Seite ein. |
 | `allow_registration` | ja | Opt-in für Auto-Provisioning (siehe Sicherheitsmodell). |
+| `trusts_email_claim` | ja | Opt-in dafür, dass dieser Provider ein **bestehendes** Konto allein über die zugesicherte E-Mail-Adresse beanspruchen darf (siehe Sicherheitsmodell). Default `false`. |
 | `default_organization_id` | bei `allow_registration` | Organisation, in der neu provisionierte Nutzer angelegt werden. |
 | `default_role` | bei `allow_registration` | Rolle (`UserRole`), die neu provisionierte Nutzer erhalten. |
 
@@ -76,9 +77,23 @@ Die Route ist `oidc.callback` (`GET /auth/oidc/{slug}/callback`).
   (Ablauf) und `nonce` geprüft.
 - **SSRF-Schutz:** Ausgehende Requests auf Discovery-, Token- und JWKS-Endpunkte sind gegen
   SSRF abgesichert (keine internen/privaten Ziele).
-- **Verknüpfung nur über verifizierte E-Mail:** Eine OIDC-Identität wird nur dann mit einem
-  bestehenden Konto verknüpft, wenn der IdP die E-Mail als verifiziert liefert. Damit ist
-  kein Account-Takeover über nicht verifizierte E-Mail-Adressen möglich.
+- **Verknüpfung mit bestehenden Konten ist doppelt abgesichert:** Eine OIDC-Identität wird
+  nur dann automatisch mit einem bestehenden Konto verknüpft, wenn (1) der IdP die E-Mail
+  als verifiziert liefert **und** (2) der Provider `trusts_email_claim = true` gesetzt hat.
+  Bedingung (1) allein genügt nicht: `email_verified` ist eine Zusicherung des IdP, und ein
+  zweiter, weniger vertrauenswürdiger Provider könnte sie für eine fremde Adresse setzen und
+  so das Konto übernehmen. Bedingung (2) entscheidet also, **welchen** IdPs man diese
+  Zusicherung abnimmt. Ist der Provider nicht als vertrauenswürdig markiert und existiert
+  bereits ein Konto zu der Adresse, wird der Login mit einem Hinweis abgewiesen — das Konto
+  lässt sich stattdessen gezielt im angemeldeten Zustand verknüpfen.
+- **Privilegierte Konten werden nie automatisch verknüpft:** Unabhängig von
+  `trusts_email_claim` lehnt der Resolver die automatische Verknüpfung ab, sobald das
+  Zielkonto privilegiert ist (Super-Admin-Flag, Rolle in der Heimat-Organisation o. Ä.).
+- **Beim Upgrade wurden bestehende Provider auf `trusts_email_claim = true` gesetzt:** Sonst
+  hätte die Migration auf reinen SSO-Instanzen alle Anmeldungen blockiert. Die Migration
+  protokolliert die betroffenen Provider als Warnung. Prüfen Sie nach dem Upgrade, welche
+  davon die Zusicherung wirklich verdienen, und schalten Sie den Rest in der Provider-Liste
+  über die Schaltfläche neben dem Badge ab.
 - **Auto-Provisioning ist opt-in pro Provider:** Nur wenn `allow_registration = true`, legt
   ein erfolgreicher Login ohne bestehendes Konto automatisch einen neuen Nutzer an — in der
   konfigurierten `default_organization_id` mit `default_role`. Ist das Flag `false`, wird
