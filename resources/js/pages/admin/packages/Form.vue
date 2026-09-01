@@ -11,10 +11,12 @@ import { computed, inject, ref, watch } from 'vue';
 import {
     canChooseSourceMode,
     isGitMode as computeIsGitMode,
+    describeProbeFailure,
     modesFor,
     packageFormKey,
     type GitCredentialOption,
     type GroupOption,
+    type PackageFormData,
     type ProbeResult,
     type SourceModeMap,
 } from './packageForm';
@@ -107,6 +109,23 @@ function xsrfToken(): string {
     return match ? decodeURIComponent(match[1]) : '';
 }
 
+// Renders a failed probe: the real reason in the probe banner, plus — for a 422 — the
+// message under the field it belongs to, where the operator is already looking. Pass null
+// when fetch threw and there is no response.
+async function showProbeFailure(response: Response | null) {
+    const failure = await describeProbeFailure(response);
+    probeResult.value = { ok: false, error: failure.message, versions: [] };
+    // Only fields this form actually has: the errors bag is whatever the server sent, and
+    // `setError` on a key that is not part of the form data would put a message nowhere any
+    // InputError renders. The banner above carries the message either way.
+    const fields = Object.keys(form.data());
+    for (const [field, message] of Object.entries(failure.errors)) {
+        if (fields.includes(field)) {
+            form.setError(field as keyof PackageFormData, message);
+        }
+    }
+}
+
 async function probeRepository() {
     if (probing.value || form.repository_url.trim() === '') {
         return;
@@ -134,7 +153,11 @@ async function probeRepository() {
         });
 
         if (!response.ok) {
-            probeResult.value = { ok: false, error: 'Prüfung fehlgeschlagen — bitte erneut versuchen.', versions: [] };
+            // The reason lives in the response body — reporting every failure as "bitte
+            // erneut versuchen" hid it, and for a git-sourced type „Anlegen" stays disabled
+            // until the probe succeeds, so an unreadable rejection is an unusable mask.
+            // Same helper as PackagePicker.vue, which calls this same endpoint.
+            await showProbeFailure(response);
             return;
         }
 
@@ -144,7 +167,8 @@ async function probeRepository() {
             form.name = result.name;
         }
     } catch {
-        probeResult.value = { ok: false, error: 'Prüfung fehlgeschlagen — bitte erneut versuchen.', versions: [] };
+        // No response at all (offline, DNS, aborted): the one case a retry can fix.
+        await showProbeFailure(null);
     } finally {
         probing.value = false;
     }
