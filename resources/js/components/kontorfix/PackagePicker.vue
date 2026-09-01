@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { describeProbeFailure } from '@/pages/admin/packages/packageForm';
 import { X } from 'lucide-vue-next';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { computed, onUnmounted, ref, watch } from 'vue';
@@ -166,18 +167,8 @@ async function probeRepository() {
             }),
         });
 
-        if (response.status === 422) {
-            const body = await response.json();
-            const errors: Record<string, string> = {};
-            for (const [key, messages] of Object.entries((body.errors ?? {}) as Record<string, string[]>)) {
-                errors[key] = Array.isArray(messages) ? messages[0] : String(messages);
-            }
-            createErrors.value = errors;
-            return;
-        }
-
         if (!response.ok) {
-            createErrors.value = { general: 'Prüfung fehlgeschlagen — bitte erneut versuchen.' };
+            await showProbeFailure(response);
             return;
         }
 
@@ -191,10 +182,19 @@ async function probeRepository() {
             createForm.value.name = query.value.trim();
         }
     } catch {
-        createErrors.value = { general: 'Prüfung fehlgeschlagen — bitte erneut versuchen.' };
+        // No response at all (offline, DNS, aborted): the one case a retry can fix.
+        await showProbeFailure(null);
     } finally {
         probing.value = false;
     }
+}
+
+// Shared with the admin create mask (Form.vue), which posts to the same endpoint: a 422
+// lands on its field, everything else in the general banner, and only a genuinely transient
+// failure suggests trying again.
+async function showProbeFailure(response: Response | null) {
+    const failure = await describeProbeFailure(response);
+    createErrors.value = Object.keys(failure.errors).length > 0 ? failure.errors : { general: failure.message };
 }
 
 // Laravel expects the decrypted CSRF token as an X-XSRF-TOKEN header

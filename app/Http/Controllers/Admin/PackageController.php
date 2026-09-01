@@ -22,6 +22,7 @@ use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
+use App\Support\RepositoryUrlRules;
 use App\Support\VersionOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -236,12 +237,16 @@ class PackageController extends Controller
 
     public function probe(Request $request, RepositoryProbe $probe): JsonResponse
     {
+        // Same URL shape — and the same German messages — as StorePackageRequest, from the
+        // one shared definition. The create mask makes a successful probe a precondition
+        // for saving a git-sourced package, so a URL this endpoint rejects for a reason the
+        // operator cannot read is a package that can never be created.
         $data = $request->validate([
             'type' => ['required', Rule::enum(PackageType::class)],
-            'repository_url' => ['required', 'string', 'max:500', 'url:https,ssh', 'starts_with:https://,ssh://'],
+            'repository_url' => array_merge(['required'], RepositoryUrlRules::shape()),
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
-        ]);
+        ], RepositoryUrlRules::messages());
 
         // A managed credential (if referenced and administered) takes precedence over an
         // inline token; otherwise the inline token is treated as a GitHub token.
@@ -341,15 +346,15 @@ class PackageController extends Controller
         }
 
         $data = $request->validate([
-            'repository_url' => [
-                Rule::requiredIf($package->isGitSourced()),
-                'nullable', 'string', 'max:500', new NotRedactedCredentialUrl,
-                'url:https,ssh', 'starts_with:https://,ssh://',
-            ],
+            'repository_url' => array_merge(
+                [Rule::requiredIf($package->isGitSourced()), 'nullable'],
+                RepositoryUrlRules::shape(),
+                [new NotRedactedCredentialUrl],
+            ),
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
-        ]);
+        ], RepositoryUrlRules::messages());
 
         // `??` could not express "clear it". An emptied field arrives as null (the global
         // ConvertEmptyStringsToNull), which the null-coalesce read as "not submitted" and

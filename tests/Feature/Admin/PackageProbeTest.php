@@ -17,6 +17,46 @@ it('validates the repository url scheme', function () {
     ])->assertStatus(422)->assertJsonValidationErrors('repository_url');
 });
 
+// The clone URL GitHub and GitLab show by default. It is the likeliest thing an operator
+// pastes, and it fails the shape rules — so the message it produces is the one that decides
+// whether the create mask is diagnosable. `Anlegen` stays disabled until the probe succeeds,
+// so an English (or swallowed) message here is a dead end for a German-speaking operator.
+it('rejects the default ssh clone url with the german message, not laravel\'s english default', function () {
+    $response = $this->actingAs(probeAdmin())->postJson('/admin/packages/probe', [
+        'type' => 'composer',
+        'repository_url' => 'git@github.com:acme/tools.git',
+    ])->assertStatus(422)->assertJsonValidationErrors('repository_url');
+
+    expect($response->json('errors.repository_url'))
+        ->toContain('Die Repository-URL muss mit https:// oder ssh:// beginnen.')
+        ->toContain('Bitte eine gültige https- oder ssh-Repository-URL angeben.')
+        ->each->not->toContain('must start with');
+});
+
+// The bug this guards against is drift: the probe and the store endpoint validated the same
+// field from two copies of the same rules, and only one of them translated the messages. The
+// probe is a precondition for the store call, so any disagreement between them is a URL the
+// operator is told two different things about — or, as happened, one thing in German and the
+// same thing in English.
+it('rejects a url with the same messages from the probe and the store endpoint', function () {
+    $admin = probeAdmin();
+    $url = 'git@github.com:acme/tools.git';
+
+    $probe = $this->actingAs($admin)->postJson('/admin/packages/probe', [
+        'type' => 'composer',
+        'repository_url' => $url,
+    ])->assertStatus(422);
+
+    $store = $this->actingAs($admin)->postJson('/admin/packages', [
+        'type' => 'composer',
+        'name' => 'acme/tools',
+        'repository_url' => $url,
+        'group_ids' => [homeRegistryId($admin)],
+    ])->assertStatus(422);
+
+    expect($store->json('errors.repository_url'))->toEqual($probe->json('errors.repository_url'));
+});
+
 it('previews a reachable repository with discovered name and versions', function () {
     Process::fake([
         '*ls-remote*' => Process::result(

@@ -6,6 +6,7 @@ use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Registry\RegistryTypeService;
+use App\Support\RepositoryUrlRules;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,12 +30,14 @@ class StorePackageRequest extends FormRequest
 
         // A repository is required whenever the package is git-sourced: always for
         // Composer, and for npm/Python when the chosen source mode is "git" (mirror).
-        // Only real Git remotes over https/ssh — no file:// or gopher:// etc., which
-        // would otherwise be passed to the git subprocess as an SSRF surface.
+        // The URL shape itself comes from RepositoryUrlRules, shared with the probe
+        // endpoint the create mask gates saving on, so the two cannot disagree about
+        // which URLs are acceptable — or about how they say so.
         $repositoryRequired = $this->effectiveSourceMode($type) === PackageSourceMode::Git;
         $repositoryRule = array_merge(
             [$repositoryRequired ? 'required' : 'nullable'],
-            ['string', 'max:500', new NotRedactedCredentialUrl, 'url:https,ssh', 'starts_with:https://,ssh://'],
+            RepositoryUrlRules::shape(),
+            [new NotRedactedCredentialUrl],
         );
 
         return [
@@ -108,15 +111,15 @@ class StorePackageRequest extends FormRequest
      */
     public function messages(): array
     {
-        return [
+        return array_merge([
             // Rule::in's default reads "The selected source mode is invalid." — English, in
             // a German UI. Reachable over the API only (the create dialog hides the field
             // for a type with a single mode), but it is still a user-visible string.
             'source_mode.in' => 'Dieser Quellmodus ist für den gewählten Pakettyp nicht zulässig.',
-            'repository_url.starts_with' => 'Die Repository-URL muss mit https:// oder ssh:// beginnen.',
-            'repository_url.url' => 'Bitte eine gültige https- oder ssh-Repository-URL angeben.',
             'group_ids.required' => 'Bitte mindestens eine Registry auswählen.',
             'group_ids.min' => 'Bitte mindestens eine Registry auswählen.',
-        ];
+            // The repository-URL messages live with the rules they translate, so the probe
+            // endpoint rejects the same URL with the same wording.
+        ], RepositoryUrlRules::messages());
     }
 }
