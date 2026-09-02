@@ -655,8 +655,9 @@ silently:
 Each case aborts with a `RuntimeException` listing every affected row (id and name/slug), so
 the fix is applied on the concrete rows the message names, not guessed at from the schema.
 
-**Deleting an organization** (`OrganizationController::destroy()`) now refuses — with a normal
-validation error, not a database exception — while the organization is the operator
+**Deleting an organization** refuses — with a normal validation error, not a database
+exception — in *both* entry points, the console (`Admin\OrganizationController::destroy()`)
+and the API (`Api\V1\OrganizationController::destroy()`), while the organization is the operator
 organization, or still has users, registries, or **packages** of its own
 (`Organization::packages()`). Deleting every registry first used to leave the organization's
 packages ownerless but alive: an orphan that any tenant who learned its id could still reach
