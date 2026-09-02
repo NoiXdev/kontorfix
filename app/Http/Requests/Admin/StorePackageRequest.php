@@ -82,14 +82,13 @@ class StorePackageRequest extends FormRequest
             'repository_token' => ['nullable', 'string', 'max:500'],
             // Optionally reference a managed git credential instead of an inline token.
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
-            // At least one registry is mandatory. `packages.name` is unique per type across
-            // the whole instance, but a package belongs to an organization only through the
-            // registries it is attached to — so a package created with none burns the name
-            // instance-wide while being invisible to its own creator (every package listing
-            // joins through `groups`) and, since orphans are attachable only by a
-            // super-admin, unrecoverable for the creating organization. The attach gate in
-            // GuardsPackageAttachment remains the primary control against *taking* a
-            // package; this stops one being created into limbo in the first place.
+            // At least one registry is mandatory, and it is what resolves the owner:
+            // ownerOrganizationId() reads the organization off the selected registries, and
+            // that organization is both what `packages.organization_id` gets set to and what
+            // the uniqueness rule above scopes against. With no registry there is no owner to
+            // derive, which is precisely the ownerless row the enforcement migration refuses
+            // to migrate. (Historically this rule also stopped a name being burned
+            // instance-wide; `(organization_id, type, name)` makes that impossible now.)
             'group_ids' => ['required', 'array', 'min:1'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
         ];

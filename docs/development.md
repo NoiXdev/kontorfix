@@ -635,7 +635,7 @@ carries a `restrictOnDelete` foreign key to `organizations`, and `(organization_
 name)` is unique — two organizations may now use the same `(type, name)` pair, which a single
 global unique index used to forbid. A registry (`groups.organization_id`) belongs to exactly
 one organization too, and a package may only be attached to registries of the organization
-that owns it (`App\Services\Registry\GuardsPackageAttachment` and the dependency-confusion
+that owns it (`App\Http\Controllers\Concerns\GuardsPackageAttachment` and the dependency-confusion
 guard both compare against it directly).
 
 **The enforcement migration** (`2026_09_02_110000_enforce_package_organization.php`) refuses
