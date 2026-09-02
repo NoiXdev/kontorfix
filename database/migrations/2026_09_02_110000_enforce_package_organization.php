@@ -23,6 +23,24 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // Registry ownership first, because it is the precondition for package ownership.
+        // The backfill in the companion migration deliberately skips registries with a null
+        // organization, so a package attached *only* to such a registry comes out ownerless.
+        // Checked in the other order, that package was reported as belonging to no registry
+        // at all — false, and unactionable: attaching it to another registry happens to work,
+        // deleting it destroys data for no reason, and the real cause only surfaced on the
+        // next run, after the operator had already acted on the wrong diagnosis.
+        $orglessGroups = DB::table('groups')->whereNull('organization_id')->get(['id', 'slug']);
+
+        if ($orglessGroups->isNotEmpty()) {
+            $list = $orglessGroups->map(fn ($g): string => "  - {$g->slug} ({$g->id})")->implode("\n");
+
+            throw new RuntimeException(
+                "Cannot enforce package ownership: these registries belong to no organization.\n"
+                ."Assign each to an organization, then run the migration again.\n\n".$list
+            );
+        }
+
         $ownerless = DB::table('packages')->whereNull('organization_id')
             ->get(['id', 'type', 'name']);
 
@@ -32,17 +50,6 @@ return new class extends Migration
             throw new RuntimeException(
                 "Cannot enforce package ownership: these packages belong to no registry, so no owner can be derived.\n"
                 ."Attach each to a registry, or delete it, then run the migration again.\n\n".$list
-            );
-        }
-
-        $orglessGroups = DB::table('groups')->whereNull('organization_id')->get(['id', 'slug']);
-
-        if ($orglessGroups->isNotEmpty()) {
-            $list = $orglessGroups->map(fn ($g): string => "  - {$g->slug} ({$g->id})")->implode("\n");
-
-            throw new RuntimeException(
-                "Cannot enforce package ownership: these registries belong to no organization.\n"
-                ."Assign each to an organization, then run the migration again.\n\n".$list
             );
         }
 

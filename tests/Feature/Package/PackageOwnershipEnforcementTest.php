@@ -87,3 +87,60 @@ it('still refuses the same name twice inside one organization', function () {
     expect(fn () => Package::factory()->for($org)->create(['type' => 'composer', 'name' => 'acme/tools']))
         ->toThrow(UniqueConstraintViolationException::class);
 });
+
+it('reports the org-less registry, not the package, when both hold', function () {
+    // The backfill deliberately skips registries with a null organization, so a package
+    // attached ONLY to such a registry comes out ownerless too. Both refusals therefore
+    // fire on the same data, and the order decides what the operator is told. Registry
+    // ownership is the precondition, so it has to be reported first: the ownerless message
+    // ("belongs to no registry ... attach each to a registry, or delete it") is false here,
+    // and following it either works by accident or destroys data for no reason.
+    Schema::table('groups', fn (Blueprint $table) => $table->uuid('organization_id')->nullable()->change());
+    Schema::table('packages', fn (Blueprint $table) => $table->uuid('organization_id')->nullable()->change());
+
+    $group = Group::factory()->create(['slug' => 'legacy-registry']);
+    $package = Package::factory()->create(['type' => 'composer', 'name' => 'acme/stranded']);
+    $group->packages()->attach($package);
+
+    DB::table('groups')->where('id', $group->id)->update(['organization_id' => null]);
+    DB::table('packages')->where('id', $package->id)->update(['organization_id' => null]);
+
+    $message = null;
+    try {
+        runEnforcePackageOrganizationMigration()->up();
+    } catch (Throwable $e) {
+        $message = $e->getMessage();
+    }
+
+    expect($message)->toContain('these registries belong to no organization')
+        ->and($message)->toContain('legacy-registry')
+        ->and($message)->not->toContain('belong to no registry');
+});
+
+it('refuses to roll back while two organizations hold the same package name', function () {
+    // down() restores the old global unique(type, name), which cannot hold once two
+    // organizations legitimately share a name — the whole point of up(). Refused with the
+    // pairs named, rather than a bare unique violation part-way through the rollback.
+    $a = Group::factory()->create();
+    $b = Group::factory()->create();
+
+    Package::factory()->inOrgOf($a)->create(['type' => 'composer', 'name' => 'acme/shared-name']);
+    Package::factory()->inOrgOf($b)->create(['type' => 'composer', 'name' => 'acme/shared-name']);
+
+    // Asserted on the message, not on RuntimeException: Illuminate's QueryException extends
+    // PDOException extends RuntimeException, so a bare unique violation mid-rollback — the
+    // exact failure this refusal exists to prevent — would satisfy a class-only assertion.
+    $message = null;
+    try {
+        runEnforcePackageOrganizationMigration()->down();
+    } catch (Throwable $e) {
+        $message = $e->getMessage();
+    }
+
+    expect($message)->toContain('Cannot roll back package ownership enforcement')
+        ->and($message)->toContain('acme/shared-name');
+
+    // The refusal happens before any schema change, so the org-scoped index is still there.
+    expect(fn () => Package::factory()->inOrgOf($a)->create(['type' => 'composer', 'name' => 'acme/shared-name']))
+        ->toThrow(UniqueConstraintViolationException::class);
+});
