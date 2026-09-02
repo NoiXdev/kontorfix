@@ -628,6 +628,45 @@ image, and a freshly created `artifacts` volume inherits the ownership from it.
 > docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data
 > ```
 
+### Package ownership invariant
+
+Every package belongs to exactly one organization: `packages.organization_id` is `NOT NULL`,
+carries a `restrictOnDelete` foreign key to `organizations`, and `(organization_id, type,
+name)` is unique — two organizations may now use the same `(type, name)` pair, which a single
+global unique index used to forbid. A registry (`groups.organization_id`) belongs to exactly
+one organization too, and a package may only be attached to registries of the organization
+that owns it (`App\Services\Registry\GuardsPackageAttachment` and the dependency-confusion
+guard both compare against it directly).
+
+**The enforcement migration** (`2026_09_02_110000_enforce_package_organization.php`) refuses
+to run — rather than repair the data — on three distinct conditions, each naming the offending
+rows so the operator decides what happens to them instead of finding data moved or dropped
+silently:
+
+- **Ownerless packages** — a package with no `organization_id` because it was attached to no
+  registry when the backfill ran. Attach it to a registry, or delete it, then run the
+  migration again.
+- **Organization-less registries** — a registry (`groups` row) with no `organization_id`.
+  Assign it to an organization, then run the migration again.
+- **Cross-organization package/registry pairs** — a `group_package` row whose registry belongs
+  to a different organization than the package does. Detach the package from that registry,
+  or move the package to the registry's organization, then run the migration again.
+
+Each case aborts with a `RuntimeException` listing every affected row (id and name/slug), so
+the fix is applied on the concrete rows the message names, not guessed at from the schema.
+
+**Deleting an organization** (`OrganizationController::destroy()`) now refuses — with a normal
+validation error, not a database exception — while the organization is the operator
+organization, or still has users, registries, or **packages** of its own
+(`Organization::packages()`). Deleting every registry first used to leave the organization's
+packages ownerless but alive: an orphan that any tenant who learned its id could still reach
+through the package's registry-independent read paths. The `restrictOnDelete` foreign key
+above states the same rule at the database level as a last resort; the controller check is the
+readable half, so an operator sees "Organisation ist Betreiber oder nicht leer (erst
+Pakete/Registries/Nutzer entfernen)" instead of a raw `SQLSTATE[23503]` foreign-key-violation
+page. To delete an organization: remove or reassign its packages, delete its registries, remove
+its users, then delete the organization.
+
 ### Storage
 
 The artifact storage (`local` or S3/MinIO) is configured by the operator admin and is treated
