@@ -52,9 +52,16 @@ return [
 
     'channels' => [
 
+        // The fallback is `daily`, not Laravel's stock `single`. What an installation
+        // without any LOG_* variables gets is decided *here* — .env.example is a template
+        // nobody is obliged to copy, and every environment that skipped it (CI, a fresh
+        // clone, a container started from the image with a half-filled .env) inherited the
+        // `single` driver, which by design never rotates. That is how this repository's own
+        // storage/logs/laravel.log reached 142 MB. `single` is still one variable away:
+        // LOG_STACK=single, or LOG_CHANNEL=single.
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', env('LOG_STACK', 'single')),
+            'channels' => explode(',', env('LOG_STACK', 'daily')),
             'ignore_exceptions' => false,
         ],
 
@@ -70,6 +77,27 @@ return [
             'path' => storage_path('logs/laravel.log'),
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
+            'replace_placeholders' => true,
+        ],
+
+        // The channel phpunit.xml points the suite at. It exists because the suite used to
+        // fall through to the default one and append to the *development* log: a full run is
+        // ~1500 tests, many of which deliberately drive failure paths, and the ~117k
+        // `testing.*` records it left there outnumbered the ~100 real `local.*` records by
+        // more than a thousand to one — the dev log was, in practice, a test log.
+        //
+        // Routed to its own file rather than sent to `null`, deliberately. Silencing is the
+        // smaller change and would also fix the growth, but the log is how you find out why
+        // a test failed for a reason its assertion cannot show you (a swallowed exception, a
+        // guard that declined, a retry that gave up), and a suite that logs nowhere makes
+        // that class of failure strictly harder to diagnose. `daily` keeps it bounded
+        // without anyone having to remember to delete it; three days is enough to still hold
+        // the run you are currently arguing with.
+        'testing' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/testing.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => env('LOG_TESTING_DAYS', 3),
             'replace_placeholders' => true,
         ],
 
