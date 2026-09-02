@@ -105,7 +105,16 @@ trait ResolvesRegistryPackage
     {
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
-        $package = Package::where('type', $type)->where('name', $fullName)->first();
+
+        // Scoped to the organization that owns the addressed registry. The name is unique
+        // only within an organization, so an unscoped lookup could return another
+        // tenant's package and then lean on the access check to hide it — a check that is
+        // about assignment, not ownership.
+        $package = Package::where('type', $type)
+            ->where('name', $fullName)
+            ->where('organization_id', $group->organization_id)
+            ->first();
+
         if (! $package || ! $this->access()->canAccessPackage($token, $group, $package)) {
             return null;
         }

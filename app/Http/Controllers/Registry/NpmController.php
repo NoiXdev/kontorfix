@@ -141,7 +141,10 @@ class NpmController extends Controller
 
         // Resolve the package strictly: it must exist AND be assigned to the target group.
         // No public shortcut via canAccessPackage() on the write path.
-        $pkg = Package::where('type', PackageType::Npm)->where('name', $name)->first();
+        $pkg = Package::where('type', PackageType::Npm)
+            ->where('name', $name)
+            ->where('organization_id', $group->organization_id)
+            ->first();
         abort_if($pkg === null || ! $this->access->packageBelongsToGroup($group, $pkg), 404);
 
         // A git-mirror package derives its versions from tags — publishing into it would
