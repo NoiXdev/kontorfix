@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -89,4 +90,32 @@ it('excludes expired assignments from package access', function () {
     $token = RegistryToken::findByPlainText($plain);
 
     expect($this->svc->canAccessPackage($token, $this->groupA, $this->pkgA))->toBeFalse();
+});
+
+/**
+ * Both organization_id columns are database-enforced NOT NULL, so a persisted row can no
+ * longer reproduce the old "ownerless group" fixture — that scenario used to be exercised
+ * by a now-deleted test. canAccessGroup() and canPublishToGroup() still guard both sides
+ * of the comparison against null, because they take plain models rather than a guaranteed
+ * database round trip, and `null === null` must never read as "same organization". These
+ * two cases build the org-wide token and the group in memory (never saved), which is the
+ * only way left to construct an unset organization_id on either side, and prove the guard
+ * still refuses rather than granting.
+ */
+it('never grants group access when both sides organization_id are unset', function () {
+    $ownerlessGroup = Group::factory()->make(['organization_id' => null]);
+    $orgWideToken = new RegistryToken(['organization_id' => null, 'group_id' => null]);
+
+    expect($this->svc->canAccessGroup($orgWideToken, $ownerlessGroup))->toBeFalse();
+});
+
+it('never grants publish access when both sides organization_id are unset', function () {
+    $ownerlessGroup = Group::factory()->make(['organization_id' => null]);
+    $orgWideToken = new RegistryToken([
+        'organization_id' => null,
+        'group_id' => null,
+        'ability' => TokenAbility::Publish,
+    ]);
+
+    expect($this->svc->canPublishToGroup($orgWideToken, $ownerlessGroup))->toBeFalse();
 });
