@@ -9,11 +9,12 @@ use App\Models\Package;
 use App\Models\User;
 
 /*
- * Packages carry no organization column — they belong to an organization through the
- * registries they are attached to. Every endpoint that accepts `package_ids` must
- * therefore refuse ids that are already owned elsewhere, or a customer-org admin could
+ * A package belongs to exactly one organization outright (`packages.organization_id`), and
+ * may only be attached to registries of that organization. Every endpoint that accepts
+ * `package_ids` must therefore refuse ids owned elsewhere, or a customer-org admin could
  * pull a foreign package into their own registry and inherit write access to it
- * (repository_url takeover, deletion).
+ * (repository_url takeover, deletion) — and create the cross-organization `group_package`
+ * row the enforcement migration refuses.
  */
 
 beforeEach(function () {
@@ -136,6 +137,41 @@ it('refuses even a super admin from syncing a foreign orgs package into a regist
     [, $superKey] = ApiKey::issue($super, 'w', ApiKeyPermission::Write);
 
     $this->withToken($superKey)
+        ->putJson("/api/v1/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0);
+});
+
+it('refuses an admin of two organizations from moving a package between them', function () {
+    // The one case that distinguishes "the target organization" from "the caller's reach".
+    // This admin legitimately administers both organizations, so every scope check passes
+    // and spansAllOrganizations() is irrelevant (they are not a super-admin) — the refusal
+    // comes solely from assertCanAttachPackages() comparing the package's owner against the
+    // TARGET registry's organization rather than against everything the caller can reach.
+    // A future "simplification" to scopedOrgIds() would silently make this attach succeed
+    // and create exactly the cross-organization group_package row the enforcement migration
+    // refuses, which is why it is pinned here.
+    $bothOrgs = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin]);
+    $bothOrgs->organizations()->attach($this->orgB->id, ['role' => UserRole::Admin->value]);
+
+    expect($bothOrgs->fresh()->administeredOrganizationIds())
+        ->toEqualCanonicalizing([$this->orgA->id, $this->orgB->id]);
+
+    $this->actingAs($bothOrgs)
+        ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0)
+        ->and($this->foreignPackage->fresh()->organization_id)->toBe($this->orgB->id);
+});
+
+it('refuses the same move through the api', function () {
+    $bothOrgs = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin]);
+    $bothOrgs->organizations()->attach($this->orgB->id, ['role' => UserRole::Admin->value]);
+    [, $key] = ApiKey::issue($bothOrgs, 'w', ApiKeyPermission::Write);
+
+    $this->withToken($key)
         ->putJson("/api/v1/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
         ->assertForbidden();
 
