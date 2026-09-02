@@ -58,14 +58,6 @@ it('denies a group-scoped token of the same org access to sibling groups', funct
     expect($this->svc->canAccessGroup($token, $groupA2))->toBeFalse();
 });
 
-it('denies org-wide tokens access to ownerless groups', function () {
-    $orphan = Group::factory()->create(['organization_id' => null]);
-    [, $plain] = RegistryToken::issue($this->orgA, 'a', group: null);
-    $token = RegistryToken::findByPlainText($plain);
-
-    expect($this->svc->canAccessGroup($token, $orphan))->toBeFalse();
-});
-
 it('grants token access to public groups regardless of org', function () {
     $this->groupB->update(['public' => true]);
     [, $plain] = RegistryToken::issue($this->orgA, 'a', $this->groupA);

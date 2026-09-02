@@ -29,10 +29,14 @@ it('casts the pivot available_until to a datetime', function () {
         ->toBeInstanceOf(Carbon::class);
 });
 
-it('enforces the unique constraint on package type and name', function () {
-    Package::factory()->create(['name' => 'acme/demo']);
+it('enforces the unique constraint on package type and name within one organization', function () {
+    // The name is scoped to the owning organization, not global — a bare
+    // Package::factory()->create() mints its own organization each time, so the
+    // constraint is only exercised by pinning both rows to the same one.
+    $org = Organization::factory()->create();
+    Package::factory()->for($org)->create(['name' => 'acme/demo']);
 
-    expect(fn () => Package::factory()->create(['name' => 'acme/demo']))
+    expect(fn () => Package::factory()->for($org)->create(['name' => 'acme/demo']))
         ->toThrow(QueryException::class);
 });
 
