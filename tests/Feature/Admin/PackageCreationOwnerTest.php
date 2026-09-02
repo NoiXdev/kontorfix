@@ -17,12 +17,6 @@ function adminOf(Organization $org): User
     return User::factory()->for($org)->create(['role' => UserRole::Admin]);
 }
 
-/** A super admin: an operator-organization admin, privileged across every organization. */
-function superAdmin(): User
-{
-    return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
-}
-
 it('owns a created package where its registries are owned', function () {
     // A real repository_url dispatches SyncPackage, which would otherwise try an actual
     // git clone against an unreachable host — the house style used by every sibling create
