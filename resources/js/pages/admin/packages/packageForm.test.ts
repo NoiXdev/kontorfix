@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeProbeFailure, PROBE_RETRY_MESSAGE, type ProbeResponseLike } from './packageForm';
+import { describeManifestOutcome, describeProbeFailure, PROBE_RETRY_MESSAGE, type ProbeResponseLike, type ProbeResult } from './packageForm';
 
 /** A stand-in for the part of `fetch`'s Response the helper reads. */
 function response(status: number, body?: unknown): ProbeResponseLike {
@@ -87,5 +87,54 @@ describe('describeProbeFailure', () => {
 
         expect(failure.errors).toEqual({});
         expect(failure.message).toContain('abgelehnt');
+    });
+});
+
+describe('describeManifestOutcome', () => {
+    /** A successful probe, with the manifest fields the server now sends. */
+    function probe(extra: Partial<ProbeResult> = {}): ProbeResult {
+        return { ok: true, versions: [], manifest: 'ok', manifest_file: 'composer.json', ...extra };
+    }
+
+    // The reported bug: „Prüfen" answered a private Composer repository with „Repository
+    // erreichbar" and left the name field empty, because the manifest read had failed
+    // unauthenticated behind the scenes. A repository that simply has no manifest looked
+    // exactly the same, and the two need opposite responses from the operator.
+    it('says the manifest could not be read, and points at access', () => {
+        const note = describeManifestOutcome(probe({ manifest: 'unreadable', name: null }));
+
+        expect(note?.tone).toBe('warning');
+        expect(note?.text).toContain('composer.json');
+        expect(note?.text).toContain('Zugriff');
+    });
+
+    it('distinguishes a repository that simply has no manifest', () => {
+        const note = describeManifestOutcome(probe({ manifest: 'missing', name: null }));
+
+        expect(note?.tone).toBe('info');
+        expect(note?.text).toContain('Keine composer.json');
+        // Not the access advice: nothing is broken here, the operator just types the name.
+        expect(note?.text).not.toContain('Zugriff');
+    });
+
+    it('stays silent when the name was discovered', () => {
+        expect(describeManifestOutcome(probe({ name: 'acme/demo' }))).toBeNull();
+    });
+
+    it('reports a manifest that was read but carries no name', () => {
+        const note = describeManifestOutcome(probe({ name: null }));
+
+        expect(note?.tone).toBe('info');
+        expect(note?.text).toContain('keinen Namen');
+    });
+
+    it('adds nothing to a failed probe — the error banner owns that', () => {
+        expect(describeManifestOutcome({ ok: false, error: 'Repository nicht erreichbar.', versions: [] })).toBeNull();
+    });
+
+    it('names the manifest by whatever the server said it looked for', () => {
+        const note = describeManifestOutcome(probe({ manifest: 'missing', manifest_file: 'pyproject.toml', name: null }));
+
+        expect(note?.text).toContain('pyproject.toml');
     });
 });

@@ -53,6 +53,7 @@ it('reaches git at all on this route — the anchor for the timeout case', funct
     Process::fake([
         '*ls-remote*' => Process::result(output: "ref: refs/heads/main\tHEAD\n"),
         '*clone*' => Process::result(''),
+        '*ls-tree*' => Process::result("composer.json\n"),
         '*show*' => Process::result('{"name":"acme/tools"}'),
     ]);
 

@@ -33,11 +33,22 @@ export interface GitCredentialOption {
 
 export type SourceModeMap = Record<string, { value: string; label: string }[]>;
 
+/**
+ * How the probe's second job went — reading the manifest to discover the package name.
+ * Mirrors App\Enums\ManifestReadStatus.
+ */
+export type ManifestStatus = 'ok' | 'missing' | 'unreadable';
+
 export interface ProbeResult {
     ok: boolean;
     error?: string;
     name?: string | null;
     description?: string | null;
+    /** Absent on results this page builds itself for a failed request (`ok: false`). */
+    manifest?: ManifestStatus;
+    /** The file the probe looked for, e.g. `composer.json`. Named by the server so the
+     *  type → filename mapping stays in the PackageType enum only. */
+    manifest_file?: string;
     versions: string[];
 }
 
@@ -63,6 +74,41 @@ export function canChooseSourceMode(sourceModes: SourceModeMap, type: string): b
  * submission on it). */
 export function isGitMode(sourceModes: SourceModeMap, type: string, sourceModeValue: string): boolean {
     return modesFor(sourceModes, type)[0]?.value === 'git' || sourceModeValue === 'git';
+}
+
+/**
+ * What the success banner has to add about the manifest, or null when the probe filled the
+ * name in and there is nothing to say.
+ *
+ * A reachable repository whose manifest could not be read used to look exactly like a
+ * reachable repository that has no manifest: „Repository erreichbar" and an empty name
+ * field. Those call for opposite responses — type the name yourself, versus fix access and
+ * probe again — so the banner has to name which one happened. It never repeats git's own
+ * words: the probe reports a status, and the reason for it stays in the server log.
+ */
+export function describeManifestOutcome(result: ProbeResult): { text: string; tone: 'info' | 'warning' } | null {
+    if (!result.ok || result.manifest === undefined) {
+        return null;
+    }
+
+    const file = result.manifest_file ?? 'Manifest-Datei';
+
+    if (result.manifest === 'unreadable') {
+        return {
+            text: `${file} konnte nicht gelesen werden — ggf. fehlt der Zugriff (privates Repository ohne passendes Token). Zugriff prüfen oder den Namen selbst eintragen.`,
+            tone: 'warning',
+        };
+    }
+
+    if (result.manifest === 'missing') {
+        return { text: `Keine ${file} im Repository gefunden — Namen bitte selbst eintragen.`, tone: 'info' };
+    }
+
+    if (!result.name) {
+        return { text: `${file} enthält keinen Namen — Namen bitte selbst eintragen.`, tone: 'info' };
+    }
+
+    return null;
 }
 
 /** The only message that invites another attempt. Reserved for failures another attempt can

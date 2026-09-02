@@ -11,6 +11,7 @@ import { computed, inject, ref, watch } from 'vue';
 import {
     canChooseSourceMode,
     isGitMode as computeIsGitMode,
+    describeManifestOutcome,
     describeProbeFailure,
     modesFor,
     packageFormKey,
@@ -42,6 +43,10 @@ const form = injectedForm;
 // rather than living only in this component's local state (same technique as users'
 // `accessMode`).
 const probeResult = defineModel<ProbeResult | null>('probeResult', { default: null });
+
+// What the success banner says about the manifest beyond „Repository erreichbar". Null when
+// the probe discovered the name and there is nothing left to tell the operator.
+const manifestNote = computed(() => (probeResult.value ? describeManifestOutcome(probeResult.value) : null));
 
 // Type metadata (labels) comes from the shared single source.
 const { options: typeOptionsFor } = useRegistryTypes();
@@ -272,10 +277,17 @@ function toggleGroup(groupId: string, checked: boolean) {
         <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
         </div>
-        <div v-else-if="probeResult && probeResult.ok" class="rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
-            <span class="font-medium text-verdigris">Repository erreichbar.</span>
-            <span v-if="probeResult.versions.length" class="text-muted-foreground"> {{ probeResult.versions.length }} Version(en) gefunden. </span>
-            <span v-else class="text-muted-foreground">Keine Tags gefunden — Sync läuft nach dem Anlegen trotzdem.</span>
+        <div v-else-if="probeResult && probeResult.ok" class="space-y-1 rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
+            <div>
+                <span class="font-medium text-verdigris">Repository erreichbar.</span>
+                <span v-if="probeResult.versions.length" class="text-muted-foreground"> {{ probeResult.versions.length }} Version(en) gefunden. </span>
+                <span v-else class="text-muted-foreground">Keine Tags gefunden — Sync läuft nach dem Anlegen trotzdem.</span>
+            </div>
+            <!-- Reachable is only half the answer: the probe also reads the manifest to fill
+                 the name in, and that half used to fail silently. -->
+            <div v-if="manifestNote" :class="manifestNote.tone === 'warning' ? 'font-medium text-destructive' : 'text-muted-foreground'">
+                {{ manifestNote.text }}
+            </div>
         </div>
         <p v-else class="text-xs text-muted-foreground">Repository zuerst „Prüfen", dann anlegen.</p>
     </template>

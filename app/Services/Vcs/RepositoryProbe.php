@@ -3,6 +3,7 @@
 namespace App\Services\Vcs;
 
 use App\Enums\GitProvider;
+use App\Enums\ManifestReadStatus;
 use App\Enums\PackageType;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -20,7 +21,7 @@ class RepositoryProbe
     private const UNREACHABLE = 'Repository nicht erreichbar.';
 
     /**
-     * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>}
+     * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>, manifest?: string, manifest_file?: string}
      */
     public function probe(PackageType $type, string $url, ?string $token = null, ?GitProvider $provider = null, ?string $username = null): array
     {
@@ -67,14 +68,23 @@ class RepositoryProbe
 
         // Read the manifest from the default branch via a blobless shallow clone — small
         // and quick, and enough to extract name/description.
-        [$name, $description] = $this->readManifest($type, $url, $defaultBranch, $env);
+        $manifest = $this->readManifest($type, $url, $defaultBranch, $env);
 
         return [
             'ok' => true,
-            'name' => $name,
-            'description' => $description,
+            'name' => $manifest['name'],
+            'description' => $manifest['description'],
             'default_branch' => $defaultBranch,
             'versions' => $versions,
+            // Reachability and manifest-read are two separate jobs, and this probe used to
+            // report only the first. A repository with no manifest and a repository whose
+            // manifest could not be fetched both arrived as `ok: true` with a null name, so
+            // the create form showed „Repository erreichbar" and an empty name field either
+            // way — and the operator had no way to tell "type it yourself" from "fix
+            // access". The status says which, and never carries git's own words: the reason
+            // goes to the log, for the same reason readableGitError() keeps it there.
+            'manifest' => $manifest['status']->value,
+            'manifest_file' => $type->manifestFile(),
         ];
     }
 
@@ -107,7 +117,7 @@ class RepositoryProbe
 
     /**
      * @param  array<string, string>  $env
-     * @return array{0: string|null, 1: string|null} [name, description]
+     * @return array{name: string|null, description: string|null, status: ManifestReadStatus}
      */
     private function readManifest(PackageType $type, string $url, ?string $branch, array $env = []): array
     {
@@ -116,6 +126,15 @@ class RepositoryProbe
         $dir = rtrim(sys_get_temp_dir(), '/').'/kfx-probe-'.Str::random(12);
 
         try {
+            // `--filter=blob:none` earns its place and stays. The probe runs synchronously
+            // inside a throttled web request, against a repository the caller names, on a
+            // 60 s budget — and `--no-checkout` alone saves nothing on the wire (git still
+            // packs every blob of the tip commit, it just does not write them out), so
+            // without the filter the transfer is the whole tip tree of whatever repository
+            // the operator points at. With it, the clone is commits and trees, and exactly
+            // one blob — the manifest — is fetched below. The price is that the fetch is a
+            // real second round trip to the origin, which is precisely why every command
+            // here has to carry $env.
             $clone = Process::env($env)->timeout(60)->run(array_filter([
                 'git', 'clone', '--depth', '1', '--filter=blob:none', '--no-checkout', '--quiet',
                 $branch ? '--branch' : null, $branch ?: null,
@@ -123,34 +142,99 @@ class RepositoryProbe
             ]));
 
             if (! $clone->successful()) {
-                return [null, null];
+                return $this->manifestFailure('clone', $type, $url, $clone->errorOutput());
             }
 
-            $show = Process::path($dir)->timeout(30)->run(['git', 'show', '--end-of-options', 'HEAD:'.$manifest]);
+            // Trees arrive with the clone (only blobs are filtered), so this settles
+            // "the repository has no such file" locally, with no network at all — and it is
+            // what makes the two outcomes separable: after it, a failing `show` below is
+            // always a read failure and never an absent manifest.
+            $entry = Process::path($dir)->env($env)->timeout(15)->run([
+                'git', 'ls-tree', '--name-only', '--end-of-options', 'HEAD', '--', $manifest,
+            ]);
+
+            if (! $entry->successful()) {
+                return $this->manifestFailure('ls-tree', $type, $url, $entry->errorOutput());
+            }
+
+            if (trim($entry->output()) === '') {
+                return ['name' => null, 'description' => null, 'status' => ManifestReadStatus::Missing];
+            }
+
+            // $env, not a bare Process — this was the bug. The blob is deliberately not in
+            // the clone, so `git show` lazily fetches it from the promisor remote: a second
+            // request to the origin. GitAuth's credential lives in GIT_CONFIG_* environment
+            // variables and is never written into the clone's own config, so a Process
+            // without $env sent that fetch out unauthenticated. A private repository
+            // answered 401, `readManifest` gave up, and probe() still reported ok — the
+            // create form said „Repository erreichbar" and left the name empty. Public
+            // repositories were unaffected, because the anonymous fetch succeeds there,
+            // which is what made this look type- or repository-specific.
+            // GIT_TERMINAL_PROMPT=0 and http.followRedirects=false ride along for exactly
+            // the reasons GitAuth documents; they applied to the clone and not to this.
+            $show = Process::path($dir)->env($env)->timeout(30)->run([
+                'git', 'show', '--end-of-options', 'HEAD:'.$manifest,
+            ]);
+
             if (! $show->successful()) {
-                return [null, null];
+                return $this->manifestFailure('show', $type, $url, $show->errorOutput());
             }
 
             // Composer/npm manifests are JSON; Python's pyproject.toml is TOML.
-            return $type === PackageType::Python
+            $parsed = $type === PackageType::Python
                 ? $this->parsePyproject($show->output())
                 : $this->parseJsonManifest($show->output());
-        } catch (Throwable) {
-            return [null, null];
+
+            // Only the JSON reader can report "this is not a manifest at all"; the
+            // pyproject reader is a key scraper, so a file it finds no name in is a read
+            // that succeeded and simply had nothing to offer.
+            if ($parsed === null) {
+                return $this->manifestFailure('parse', $type, $url, 'manifest is not valid JSON');
+            }
+
+            return ['name' => $parsed[0], 'description' => $parsed[1], 'status' => ManifestReadStatus::Ok];
+        } catch (Throwable $e) {
+            return $this->manifestFailure('exception', $type, $url, class_basename($e));
         } finally {
             $this->deleteDir($dir);
         }
     }
 
     /**
-     * @return array{0: string|null, 1: string|null} [name, description]
+     * Records why the manifest read failed and reports it as unreadable.
+     *
+     * Nothing used to be recorded at all: a failed clone, a failed read, an unparseable
+     * manifest and a thrown exception all became a silent `[null, null]`, which is what let
+     * a probe report success while having failed at half its job. The detail goes to the
+     * log and only to the log — read readableGitError()'s note for why git's raw stderr
+     * must not travel back to a console operator who named the target. Scrubbed, because an
+     * `Authorization: Basic …` header can appear in it verbatim.
+     *
+     * @return array{name: null, description: null, status: ManifestReadStatus}
      */
-    private function parseJsonManifest(string $raw): array
+    private function manifestFailure(string $step, PackageType $type, string $url, string $detail): array
+    {
+        Log::warning('Repository probe could not read the package manifest.', [
+            'step' => $step,
+            'type' => $type->value,
+            'manifest' => $type->manifestFile(),
+            'host' => (string) parse_url($url, PHP_URL_HOST),
+            'detail' => Str::limit(GitAuth::scrub(trim($detail)), 500),
+        ]);
+
+        return ['name' => null, 'description' => null, 'status' => ManifestReadStatus::Unreadable];
+    }
+
+    /**
+     * @return array{0: string|null, 1: string|null}|null [name, description], or null when
+     *                                                    the payload is not JSON at all
+     */
+    private function parseJsonManifest(string $raw): ?array
     {
         /** @var array<string,mixed>|null $json */
         $json = json_decode($raw, true);
         if (! is_array($json)) {
-            return [null, null];
+            return null;
         }
 
         $name = isset($json['name']) && is_string($json['name']) ? $json['name'] : null;
