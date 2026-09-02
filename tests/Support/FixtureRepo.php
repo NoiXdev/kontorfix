@@ -83,6 +83,41 @@ class FixtureRepo
         return $dir;
     }
 
+    /**
+     * A repo with no package manifest at all — the "nothing is wrong, just type the name
+     * yourself" case the probe has to report differently from a failed read.
+     */
+    public static function makeWithoutManifest(): string
+    {
+        $dir = sys_get_temp_dir().'/kfx-fixture-nomanifest-'.uniqid();
+        mkdir($dir, 0775, true);
+        self::git($dir, 'git init -b main .');
+
+        file_put_contents($dir.'/README.md', "# no manifest here\n");
+        self::git($dir, 'git add .');
+        self::git($dir, 'git -c user.email=test@kontorfix.test -c user.name=kontorfix commit -m "init"');
+
+        return $dir;
+    }
+
+    /**
+     * A repo whose composer.json is present but unreadable as a manifest. Stands in for
+     * every way the manifest read can fail after the repository itself was reachable —
+     * including the one that motivated this: the blob's lazy fetch coming back 401.
+     */
+    public static function makeWithBrokenManifest(): string
+    {
+        $dir = sys_get_temp_dir().'/kfx-fixture-broken-'.uniqid();
+        mkdir($dir, 0775, true);
+        self::git($dir, 'git init -b main .');
+
+        file_put_contents($dir.'/composer.json', "<!doctype html>\nnot json at all\n");
+        self::git($dir, 'git add .');
+        self::git($dir, 'git -c user.email=test@kontorfix.test -c user.name=kontorfix commit -m "init"');
+
+        return $dir;
+    }
+
     private static function git(string $dir, string $command): void
     {
         Process::path($dir)->run($command)->throw();

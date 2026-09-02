@@ -324,7 +324,14 @@ class PackageController extends Controller
             ], 201);
         }
 
-        return back()->with('success', "Paket {$package->name} angelegt — Sync gestartet.");
+        // Explicitly to the detail page, not back(): the form now lives on its own
+        // `admin/packages/create` page, and back() would return there — to a freshly emptied
+        // form that renders no `flash.success`, so the operator saw a blank mask and no
+        // confirmation. The detail page (not the index) is the right destination because
+        // creation dispatches SyncPackage: sync status, sync errors and the resync action
+        // all live there, and it renders the flash.
+        return redirect()->route('admin.packages.show', $package)
+            ->with('success', "Paket {$package->name} angelegt — Sync gestartet.");
     }
 
     public function update(Request $request, Package $package): RedirectResponse

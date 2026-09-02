@@ -65,6 +65,9 @@ it('previews a reachable repository with discovered name and versions', function
             ."cafe1234\trefs/tags/v1.1.0\n",
         ),
         '*clone*' => Process::result(''),
+        // The clone is blobless, so the probe first asks the (already downloaded) tree
+        // whether the manifest exists at all before fetching it.
+        '*ls-tree*' => Process::result("composer.json\n"),
         '*show*' => Process::result('{"name":"acme/tools","description":"Handy tools"}'),
     ]);
 
@@ -83,6 +86,7 @@ it('discovers the project name from a python pyproject.toml', function () {
     Process::fake([
         '*ls-remote*' => Process::result("ref: refs/heads/main\tHEAD\ndeadbeef\trefs/tags/v1.0.0\n"),
         '*clone*' => Process::result(''),
+        '*ls-tree*' => Process::result("pyproject.toml\n"),
         '*show*' => Process::result("[project]\nname = \"acme-lib\"\ndescription = \"A handy lib\"\nversion = \"1.0.0\"\n"),
     ]);
 
