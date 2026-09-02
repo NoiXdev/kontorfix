@@ -196,6 +196,10 @@ class PypiController extends Controller
         // way a name can, so this is not closing a guessing attack — it closes the same
         // cross-organization pivot row the index and project page now refuse, which would
         // otherwise still stream its distributions through the foreign registry.
+        //
+        // Redundant since RegistryAccessService::availablePackages() states the same rule, so
+        // canAccessPackage() below already refuses this row. Kept: it costs one predicate, and
+        // it lets this handler be read on its own without tracing into the access service.
         $pkg = Package::where('type', PackageType::Python)
             ->where('organization_id', $group->organization_id)
             ->whereKey($package)
@@ -229,6 +233,11 @@ class PypiController extends Controller
      * it is stated anyway, because this is the only ecosystem where ownership was left
      * implied by the access check rather than written into the query, and an invariant
      * that only one of three read paths spells out is one edit from being lost.
+     *
+     * Not made redundant by the same constraint now living in
+     * RegistryAccessService::availablePackages(): the publish path (upload()) resolves the
+     * target project through this method *without* canAccessPackage(), so here this is still
+     * the only statement of the rule.
      *
      * @return Collection<int, Package>
      */

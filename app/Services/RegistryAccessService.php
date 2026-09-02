@@ -104,15 +104,32 @@ class RegistryAccessService
     }
 
     /**
-     * The single place for the expiry predicate of the group assignment.
+     * The single place for the expiry predicate of the group assignment — and for the
+     * ownership predicate that goes with it.
+     *
+     * Constrained to the addressed registry's organization for the same reason findLocal()
+     * and the PyPI read paths are: the pivot row records *assignment*, and canAccessPackage()
+     * checks assignment and group access — neither compares the package's organization to the
+     * registry's. A cross-organization pivot row would therefore be served here, and this
+     * method feeds packagesFor() (Composer's `available-packages` index), packageBelongsToGroup()
+     * (the npm publish membership check) and canAccessPackage() (every ecosystem's access
+     * check). Without the constraint a registry with no Composer upstream listed another
+     * tenant's package *name* in available-packages — name disclosure, not content, since
+     * findLocal() still refused to serve it.
+     *
+     * The enforcement migration now refuses to complete while such a row exists, so this
+     * should never match anything; it is stated anyway, because an invariant that only the
+     * read paths spell out one by one is one edit from being lost.
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */
     private function availablePackages(Group $group): BelongsToMany
     {
-        return $group->packages()->where(function (Builder $q) {
-            $q->whereNull('group_package.available_until')
-                ->orWhere('group_package.available_until', '>', now());
-        });
+        return $group->packages()
+            ->where('packages.organization_id', $group->organization_id)
+            ->where(function (Builder $q) {
+                $q->whereNull('group_package.available_until')
+                    ->orWhere('group_package.available_until', '>', now());
+            });
     }
 }
