@@ -304,6 +304,9 @@ class PackageController extends Controller
         // submitted mode) so the stored column is truthful regardless of what was sent.
         $attributes = $request->safe()->except('group_ids');
         $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        // The owner is the organization the selected registries belong to; the request has
+        // already refused a selection spanning more than one.
+        $attributes['organization_id'] = $request->ownerOrganizationId();
 
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);

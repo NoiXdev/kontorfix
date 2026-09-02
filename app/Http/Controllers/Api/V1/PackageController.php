@@ -74,6 +74,9 @@ class PackageController extends Controller
         // to the column's DB default ('publish') instead of the type's real default.
         $attributes = $request->safe()->except('group_ids');
         $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        // The owner is the organization the selected registries belong to; the request has
+        // already refused a selection spanning more than one. Mirrors Admin\PackageController::store.
+        $attributes['organization_id'] = $request->ownerOrganizationId();
 
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
