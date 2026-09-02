@@ -84,14 +84,16 @@ it('forbids viewing or deleting a package that lives only in a foreign registry'
     expect(Package::find($foreignPkg->id))->not->toBeNull();
 });
 
-it('allows viewing a package shared into the own registry', function () {
-    // Owned by Org B; deliberately also attached to Org A's registry below to prove
-    // that a package shared in remains visible — the org-pairing sweep guard in
-    // tests/Pest.php is expected to trip on the groupA attach line, and stays doing so.
+it('still forbids viewing a foreign orgs package even when a super-admin shared it into the own registry', function () {
+    // Owned by Org B; a super-admin can still attach it into Org A's registry too
+    // (CrossTenantPackageAttachTest covers that path), but assertCanTouchPackage now
+    // compares organization_id directly rather than reconstructing ownership from
+    // attachment, so being shared in no longer grants Org A's admin write-capable
+    // access to it — repository_url, resync, delete stay Org B's alone.
     $shared = Package::factory()->inOrgOf($this->groupB)->create();
     // The same package is attached to both a foreign and the own registry.
     $this->groupB->packages()->attach($shared->id);
     $this->groupA->packages()->attach($shared->id);
 
-    $this->actingAs($this->adminA)->get("/admin/packages/{$shared->id}")->assertOk();
+    $this->actingAs($this->adminA)->get("/admin/packages/{$shared->id}")->assertForbidden();
 });

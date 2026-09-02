@@ -58,11 +58,10 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
-     * Constrains a Package query to packages reachable in the active scope. Packages have
-     * no organization of their own — they belong to one via the registries they are
-     * attached to. A super-admin viewing "all orgs" sees every package (including
-     * orphans); everyone else only sees packages attached to a registry in one of their
-     * administered organizations.
+     * Constrains a Package query to packages owned within the active scope. Packages
+     * carry their organization outright (`organization_id`). A super-admin viewing
+     * "all orgs" sees every package; everyone else only sees packages owned by one of
+     * their administered organizations.
      *
      * @param  Builder<Package>  $query
      * @return Builder<Package>
@@ -73,29 +72,24 @@ trait ScopesToAdministeredOrgs
             return $query;
         }
 
-        $orgIds = $this->scopedOrgIds();
-
-        return $query->whereHas('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds));
+        return $query->whereIn('organization_id', $this->scopedOrgIds());
     }
 
-    /** Aborts 403 unless the given package is reachable in the active scope. */
+    /** Aborts 403 unless the given package is owned within the active scope. */
     protected function assertCanTouchPackage(Package $package): void
     {
         if (app(OrgScope::class)->spansAllOrganizations()) {
             return;
         }
 
-        $orgIds = $this->scopedOrgIds();
-        $reachable = $package->groups()->whereIn('organization_id', $orgIds)->exists();
-
-        abort_unless($reachable, 403);
+        abort_unless(in_array($package->organization_id, $this->scopedOrgIds(), true), 403);
     }
 
     /**
      * Aborts 403 unless every submitted package may be attached by the current user:
-     * "attachable" means already reachable in the active scope. A package that lives only
-     * in another organization's registries — or in none at all — is refused, otherwise
-     * attaching it would hand the caller write access to it via assertCanTouchPackage().
+     * "attachable" means owned by an organization in the active scope. A package owned
+     * elsewhere is refused, otherwise attaching it would hand the caller write access to
+     * it via assertCanTouchPackage().
      *
      * The decision itself lives in {@see GuardsPackageAttachment}, shared with `/api/v1`;
      * only the set of organizations that count as the caller's differs.
