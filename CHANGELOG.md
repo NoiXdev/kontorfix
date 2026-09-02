@@ -1,4 +1,12 @@
-## [0.7.2](https://github.com/NoiXdev/kontorfix/compare/v0.7.1...v) (2026-09-02)
+## [0.7.3](https://github.com/NoiXdev/kontorfix/compare/v0.7.2...v) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin:** send a submitted create form somewhere that shows the result ([c5a7047](https://github.com/NoiXdev/kontorfix/commit/c5a70472a8d29ac170ae923317ad185c7fd6c883))
+* **probe:** authenticate the manifest read and stop hiding when it fails ([e779888](https://github.com/NoiXdev/kontorfix/commit/e77988826335c8070c20ee0b06d0863fb223d02e))
+
+## [0.7.2](https://github.com/NoiXdev/kontorfix/compare/v0.7.1...v0.7.2) (2026-09-02)
 
 
 ### Bug Fixes
