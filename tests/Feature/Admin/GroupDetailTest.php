@@ -15,7 +15,7 @@ beforeEach(function () {
 
 it('shows a registry with packages, domains, upstreams, tokens and a setup snippet', function () {
     $group = Group::factory()->for(Organization::factory())->create(['name' => 'Kadenz', 'slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['name' => 'acme/widget']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/widget']);
     $group->packages()->attach($pkg);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
     Upstream::factory()->for($group)->create();

@@ -361,6 +361,7 @@ it('lets an operator clear the stale repository url of a publish-mode package', 
 it('refuses to empty the repository url of a git-sourced package', function () {
     [$admin, $groupId] = sourceModeFixture();
     $package = Package::factory()->create([
+        'organization_id' => $admin->organization_id,
         'type' => 'composer',
         'source_mode' => 'git',
         'repository_url' => 'https://github.test/acme/lib.git',

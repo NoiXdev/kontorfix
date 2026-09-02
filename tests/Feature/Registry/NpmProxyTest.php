@@ -47,7 +47,7 @@ it('strict-mode: 404 until allowlisted', function () {
 it('prefers a local npm package and does not call the upstream', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Npm]);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'local-pkg']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'local-pkg']);
     PackageVersion::factory()->for($pkg)->create(['dist_tarball_name' => 'local-pkg-1.0.0.tgz']);
     $group->packages()->attach($pkg);
 

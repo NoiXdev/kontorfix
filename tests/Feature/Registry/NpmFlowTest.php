@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 it('completes the full npm flow: publish -> packument -> tarball', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
     $bytes = 'hello-tarball';
 
@@ -34,7 +34,7 @@ it('completes the full npm flow: publish -> packument -> tarball', function () {
 it('completes the same flow for a scoped package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -49,7 +49,7 @@ it('completes the same flow for a scoped package', function () {
 it('serves the npm endpoints a 401 across the board without a token', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->getJson('/r/kadenz/leftpad')->assertUnauthorized();

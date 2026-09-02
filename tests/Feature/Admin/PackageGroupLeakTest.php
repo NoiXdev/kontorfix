@@ -19,7 +19,10 @@ it('shows the caller only the registries in their own scope, and a count for the
     $myGroup = Group::factory()->for($mine)->create(['name' => 'Meine Registry']);
     $foreignGroup = Group::factory()->for($theirs)->create(['name' => 'Fremde Registry', 'slug' => 'geheim-fremd']);
 
-    $package = Package::factory()->create();
+    // Home is "mine"; also attached below to $foreignGroup to reproduce the super-admin-only
+    // shared state under test — the org-pairing sweep guard in tests/Pest.php is expected to
+    // trip on that foreignGroup attach, and stays doing so.
+    $package = Package::factory()->inOrgOf($myGroup)->create();
     $package->groups()->attach([$myGroup->id, $foreignGroup->id]);
 
     $admin = User::factory()->for($mine)->create(['role' => UserRole::Admin]);
@@ -38,9 +41,13 @@ it('shows the caller only the registries in their own scope, and a count for the
 it('still shows every registry to a super-admin spanning all organizations', function () {
     $a = Organization::factory()->create();
     $b = Organization::factory()->create();
-    $package = Package::factory()->create();
+    $groupA = Group::factory()->for($a)->create();
+    // Home is org A; also attached below to a group in org B to reproduce the super-admin-only
+    // shared state under test — the org-pairing sweep guard in tests/Pest.php is expected to
+    // trip on that org-B attach, and stays doing so.
+    $package = Package::factory()->inOrgOf($groupA)->create();
     $package->groups()->attach([
-        Group::factory()->for($a)->create()->id,
+        $groupA->id,
         Group::factory()->for($b)->create()->id,
     ]);
 

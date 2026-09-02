@@ -103,7 +103,7 @@ it('forbids marking a package outside the administered org', function () {
     $orgB = Organization::factory()->create();
     $adminA = User::factory()->for($orgA)->create(['role' => UserRole::Admin]);
     $groupB = Group::factory()->for($orgB)->create();
-    $package = Package::factory()->create();
+    $package = Package::factory()->inOrgOf($groupB)->create();
     $package->groups()->attach($groupB);
 
     $this->actingAs($adminA)

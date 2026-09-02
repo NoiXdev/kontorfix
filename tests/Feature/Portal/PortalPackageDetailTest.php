@@ -12,7 +12,7 @@ beforeEach(function () {
     $this->org = Organization::factory()->create();
     $this->member = User::factory()->for($this->org)->create(['role' => UserRole::Member]);
     $this->group = Group::factory()->for($this->org)->create(['slug' => 'acme']);
-    $this->pkg = Package::factory()->create(['type' => 'composer', 'name' => 'acme/widget']);
+    $this->pkg = Package::factory()->inOrgOf($this->group)->create(['type' => 'composer', 'name' => 'acme/widget']);
     PackageVersion::factory()->create(['package_id' => $this->pkg->id, 'version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => ['require' => ['php' => '^8.2']]]);
     $this->group->packages()->attach($this->pkg);
 });
@@ -58,7 +58,7 @@ it('sends null abandonment markers for a live package', function () {
 
 it('forbids a package not in the members registry', function () {
     $otherGroup = Group::factory()->for(Organization::factory()->create())->create();
-    $otherPkg = Package::factory()->create();
+    $otherPkg = Package::factory()->inOrgOf($otherGroup)->create();
     $otherGroup->packages()->attach($otherPkg);
 
     // foreign registry → 403 (GroupPolicy)

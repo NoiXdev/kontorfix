@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Storage;
 it('publishes an npm version, stores the tarball and computes integrity', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
     $bytes = 'fake-tarball-bytes';
 
@@ -32,7 +32,7 @@ it('publishes an npm version, stores the tarball and computes integrity', functi
 it('publishes a scoped package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -44,7 +44,7 @@ it('publishes a scoped package', function () {
 it('rejects publish without a publish-ability token', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
     [, $plain] = RegistryToken::issue($group->organization, 'read', $group, TokenAbility::Read);
 
@@ -60,7 +60,7 @@ it('rejects publish without a publish-ability token', function () {
 it('rejects republishing an existing version with 409', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
     $body = publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x');
 
@@ -71,7 +71,7 @@ it('rejects republishing an existing version with 409', function () {
 it('derives a safe tarball name and ignores a malicious attachment key', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     // npm sends an attachment key like "@scope/name-version.tgz", or here a
@@ -92,7 +92,7 @@ it('derives a safe tarball name and ignores a malicious attachment key', functio
 it('derives an unscoped tarball name for a scoped package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
     $group->packages()->attach($pkg);
 
     // npm sends the real attachment key "@noixdev/ui-kit-1.0.0.tgz" (with @ and /).
@@ -107,7 +107,7 @@ it('derives an unscoped tarball name for a scoped package', function () {
 it('rejects a non-semver version string', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -118,7 +118,7 @@ it('rejects a non-semver version string', function () {
 it('rejects an empty attachment', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -130,7 +130,7 @@ it('rejects a tarball larger than the configured limit', function () {
     config(['kontorfix.npm_max_tarball_bytes' => 8]);
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -142,7 +142,7 @@ it('rejects a tarball larger than the configured limit', function () {
 it('rejects a body whose name does not match the package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
@@ -155,7 +155,7 @@ it('rejects a package name that would derive an unsafe tarball filename', functi
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     // Injectable via the factory (bypasses creation validation) — the publish service
     // must still check the derived filename against the regex.
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@x/..']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@x/..']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))

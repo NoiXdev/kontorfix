@@ -154,7 +154,7 @@ it('keeps the dependency-confusion guard ahead of the credential check', functio
     ]);
     $other = publicRegistryGroup('elsewhere');
     $other->packages()->attach(
-        Package::factory()->create(['type' => PackageType::Python, 'name' => 'internal-lib'])
+        Package::factory()->inOrgOf($other)->create(['type' => PackageType::Python, 'name' => 'internal-lib'])
     );
 
     $this->get('/r/confusion/simple/internal-lib/')->assertNotFound();

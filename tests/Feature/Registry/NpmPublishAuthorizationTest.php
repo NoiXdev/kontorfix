@@ -18,7 +18,7 @@ it('blocks a foreign-org publish token from publishing to a public registry', fu
     // Org A: public registry with one package.
     $orgA = Organization::factory()->create();
     $group = Group::factory()->for($orgA)->create(['slug' => 'orga-public', 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     // Org B: its own org-wide publish token (group_id = null).
@@ -40,7 +40,7 @@ it('still allows a legitimate same-org publish token to publish to the public re
 
     $orgA = Organization::factory()->create();
     $group = Group::factory()->for($orgA)->create(['slug' => 'orga-public', 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     // Token belongs to the target group (or rather its org): publishHeaderFor() issues
@@ -58,7 +58,7 @@ it('still allows anonymous read of the public registry (read short-circuit uncha
 
     $orgA = Organization::factory()->create();
     $group = Group::factory()->for($orgA)->create(['slug' => 'orga-public', 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     // Anonymous GET on the packument of the public registry remains allowed.

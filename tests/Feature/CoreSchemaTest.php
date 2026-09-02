@@ -9,9 +9,9 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 
 it('assigns pool packages to groups with constraints', function () {
-    $pkg = Package::factory()->create(['name' => 'kadenz/shop-bridge']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '1.2.0.0']);
     $group = Group::factory()->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'kadenz/shop-bridge']);
+    PackageVersion::factory()->for($pkg)->create(['version' => '1.2.0.0']);
 
     $group->packages()->attach($pkg, ['available_until' => now()->addYear()]);
 
@@ -21,8 +21,8 @@ it('assigns pool packages to groups with constraints', function () {
 });
 
 it('casts the pivot available_until to a datetime', function () {
-    $pkg = Package::factory()->create();
     $group = Group::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($pkg, ['available_until' => now()->addYear()]);
 
     expect($group->packages()->first()->pivot->available_until)
@@ -37,8 +37,8 @@ it('enforces the unique constraint on package type and name', function () {
 });
 
 it('prevents duplicate package assignments to the same group', function () {
-    $pkg = Package::factory()->create();
     $group = Group::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($pkg);
 
     expect(fn () => $group->packages()->attach($pkg))

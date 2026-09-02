@@ -40,9 +40,9 @@ it('creates a registry in the admins own organization by default', function () {
 });
 
 it('scopes package search to packages in the admins registries', function () {
-    $mine = Package::factory()->create(['name' => 'a/mine']);
+    $mine = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/mine']);
     $this->groupA->packages()->attach($mine->id);
-    $theirs = Package::factory()->create(['name' => 'b/theirs']);
+    $theirs = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/theirs']);
     $this->groupB->packages()->attach($theirs->id);
 
     $names = collect($this->actingAs($this->adminA)->getJson('/admin/package-search?q=')->json())->pluck('name');

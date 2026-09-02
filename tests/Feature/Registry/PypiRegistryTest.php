@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Storage;
 function pythonRegistry(string $slug = 'kadenz', string $name = 'My.Package'): array
 {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => $slug, 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Python, 'name' => $name, 'repository_url' => null]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Python, 'name' => $name, 'repository_url' => null]);
     $group->packages()->attach($pkg);
 
     return [$group, $pkg];
@@ -216,7 +216,7 @@ it('lists a readable project by its normalised name on the root index', function
 
 it('does not list a project the caller cannot access on the root index', function () {
     [$group, $pkg] = pythonRegistry(name: 'visible-package');
-    $hidden = Package::factory()->create(['type' => PackageType::Python, 'name' => 'hidden-package', 'repository_url' => null]);
+    $hidden = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Python, 'name' => 'hidden-package', 'repository_url' => null]);
     // Attached to the same group but expired: RegistryAccessService::canAccessPackage()
     // excludes it, independent of group membership — the filter this test protects.
     $group->packages()->attach($hidden, ['available_until' => now()->subDay()]);
@@ -364,7 +364,7 @@ it('never forwards a locally-known project to an upstream (dependency confusion)
 
     // The project exists in another org's registry — must not leak or be proxied.
     $groupB = Group::factory()->for(Organization::factory())->create(['slug' => 'b', 'public' => true]);
-    $secret = Package::factory()->create(['type' => PackageType::Python, 'name' => 'internal-lib']);
+    $secret = Package::factory()->inOrgOf($groupB)->create(['type' => PackageType::Python, 'name' => 'internal-lib']);
     $groupB->packages()->attach($secret);
 
     $this->withHeaders(tokenHeaderFor($groupA))->get('/r/a/simple/internal-lib/')->assertNotFound();

@@ -132,7 +132,7 @@ it('forbids a write key belonging to another organization from marking the packa
     [, $plain] = ApiKey::issue($adminA, 'w', ApiKeyPermission::Write);
 
     $groupB = Group::factory()->for($orgB)->create();
-    $package = Package::factory()->create();
+    $package = Package::factory()->inOrgOf($groupB)->create();
     $package->groups()->attach($groupB);
 
     // adminA administers orgA but not orgB, and the package is attached only to a

@@ -86,7 +86,7 @@ it('refuses to retarget an existing package at a foreign git credential', functi
     $foreign = GitCredential::factory()->for($theirs)->create();
     $admin = User::factory()->for($mine)->create(['role' => UserRole::Admin]);
     $group = Group::factory()->for($mine)->create();
-    $package = Package::factory()->create(['repository_url' => 'https://github.com/acme/widget.git']);
+    $package = Package::factory()->inOrgOf($group)->create(['repository_url' => 'https://github.com/acme/widget.git']);
     $package->groups()->sync([$group->id]);
 
     $this->actingAs($admin)->put("/admin/packages/{$package->id}", [

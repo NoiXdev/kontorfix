@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Http;
 it('serves composer packages.json at the domain root with a root-relative metadata-url', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     $group->packages()->attach($pkg);
 
     $res = $this->withHeaders(array_merge(['Host' => 'packages.kadenz.test'], tokenHeaderFor($group)))
@@ -26,7 +26,7 @@ it('serves composer packages.json at the domain root with a root-relative metada
 it('serves p2 metadata at the domain root with a domain-root dist url', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     PackageVersion::factory()->for($pkg)->create();
     $group->packages()->attach($pkg);
 
@@ -41,7 +41,7 @@ it('serves p2 metadata at the domain root with a domain-root dist url', function
 it('serves npm packument at the domain root', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
-    $pkg = Package::factory()->create(['name' => 'acme-demo', 'type' => PackageType::Npm]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme-demo', 'type' => PackageType::Npm]);
     PackageVersion::factory()->for($pkg)->create();
     $group->packages()->attach($pkg);
 
@@ -57,7 +57,7 @@ it('returns 404 for an unknown host', function () {
 
 it('still serves the slug route unchanged after the domain-resolution refactor', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     $group->packages()->attach($pkg);
 
     $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json');

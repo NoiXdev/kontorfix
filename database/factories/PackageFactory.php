@@ -5,6 +5,8 @@ namespace Database\Factories;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
@@ -22,6 +24,11 @@ class PackageFactory extends Factory
     public function definition(): array
     {
         return [
+            // A package is owned by exactly one organization. The factory mints its own by
+            // default so a bare Package::factory() row is valid; pair it with a registry
+            // through inOrgOf(), because GroupFactory mints an organization of its own too
+            // and the two would otherwise disagree.
+            'organization_id' => Organization::factory(),
             'type' => PackageType::Composer,
             // Derived from the type exactly as both create paths do, so a factory row is
             // as truthful as a real one. Override for a Python git mirror.
@@ -35,5 +42,11 @@ class PackageFactory extends Factory
             'repository_url' => null,
             'sync_status' => SyncStatus::Pending,
         ];
+    }
+
+    /** Own the package where the given registry is owned — the pairing every attach needs. */
+    public function inOrgOf(Group $group): static
+    {
+        return $this->state(fn (): array => ['organization_id' => $group->organization_id]);
     }
 }

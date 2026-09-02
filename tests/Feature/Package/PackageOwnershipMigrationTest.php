@@ -15,7 +15,7 @@ function runAddOrganizationIdToPackagesMigration(): object
 it('backfills a package owner from the registry it is attached to', function () {
     $org = Organization::factory()->create();
     $group = Group::factory()->for($org)->create();
-    $package = Package::factory()->create();
+    $package = Package::factory()->for($org)->create();
     $group->packages()->attach($package);
 
     // Simulate the pre-migration schema: this row predates the `organization_id` column.

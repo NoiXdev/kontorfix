@@ -25,7 +25,7 @@ beforeEach(function () {
     $this->groupB = Group::factory()->for($this->orgB)->create();
 
     // A package that already belongs to Org B through Org B's registry.
-    $this->foreignPackage = Package::factory()->create(['name' => 'b/theirs']);
+    $this->foreignPackage = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/theirs']);
     $this->groupB->packages()->attach($this->foreignPackage->id);
 
     [, $this->apiKey] = ApiKey::issue($this->adminA, 'w', ApiKeyPermission::Write);
@@ -73,8 +73,8 @@ it('allows re-attaching a package already reachable in the own organization', fu
     // The picker's quick-add creates a package WITH its registry (group_ids in the same
     // request) and then posts the attach, so by the time this route sees the id the
     // package is already in scope. Re-attaching is idempotent and must stay allowed.
-    $fresh = Package::factory()->create(['name' => 'a/fresh']);
-    $own = Package::factory()->create(['name' => 'a/mine']);
+    $fresh = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/fresh']);
+    $own = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/mine']);
     $this->groupA->packages()->attach([$fresh->id, $own->id]);
 
     $this->actingAs($this->adminA)

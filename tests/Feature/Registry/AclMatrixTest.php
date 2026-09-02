@@ -12,8 +12,8 @@ beforeEach(function () {
     $this->orgB = Organization::factory()->create();
     $this->groupA = Group::factory()->for($this->orgA)->create();
     $this->groupB = Group::factory()->for($this->orgB)->create();
-    $this->pkgA = Package::factory()->create();
-    $this->pkgB = Package::factory()->create();
+    $this->pkgA = Package::factory()->for($this->orgA)->create();
+    $this->pkgB = Package::factory()->for($this->orgB)->create();
     $this->groupA->packages()->attach($this->pkgA);
     $this->groupB->packages()->attach($this->pkgB);
 });
@@ -41,7 +41,7 @@ it('denies anonymous access to private groups but allows public ones', function 
 });
 
 it('lists only packages assigned to the group and not expired', function () {
-    $stillThere = Package::factory()->create();
+    $stillThere = Package::factory()->inOrgOf($this->groupA)->create();
     $this->groupA->packages()->attach($stillThere);
     $this->groupA->packages()->updateExistingPivot($this->pkgA->id, ['available_until' => now()->subDay()]);
 
@@ -75,7 +75,7 @@ it('grants token access to public groups regardless of org', function () {
 });
 
 it('includes packages with future or null availability', function () {
-    $pkgFuture = Package::factory()->create();
+    $pkgFuture = Package::factory()->inOrgOf($this->groupA)->create();
     $this->groupA->packages()->attach($pkgFuture, ['available_until' => now()->addDay()]);
 
     expect($this->svc->packagesFor($this->groupA)->pluck('id'))

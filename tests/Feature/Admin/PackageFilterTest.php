@@ -13,7 +13,7 @@ beforeEach(function () {
 
 it('filters packages by name, type, status and group', function () {
     $g = Group::factory()->for(Organization::factory())->create();
-    $a = Package::factory()->create(['name' => 'acme/alpha', 'type' => 'composer', 'sync_status' => SyncStatus::Synced]);
+    $a = Package::factory()->inOrgOf($g)->create(['name' => 'acme/alpha', 'type' => 'composer', 'sync_status' => SyncStatus::Synced]);
     $b = Package::factory()->create(['name' => 'beta/widget', 'type' => 'npm', 'sync_status' => SyncStatus::Failed]);
     $g->packages()->attach($a);
 
@@ -40,7 +40,7 @@ it('answers a malformed group filter with an empty list instead of a driver erro
     // appended to an unrotated laravel.log for every request, on a route with no
     // throttle.
     $g = Group::factory()->for(Organization::factory())->create();
-    $a = Package::factory()->create(['name' => 'acme/alpha']);
+    $a = Package::factory()->inOrgOf($g)->create(['name' => 'acme/alpha']);
     $g->packages()->attach($a);
 
     // Reachability anchor: the same route with a well-formed id reaches the controller,

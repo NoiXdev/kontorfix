@@ -7,7 +7,7 @@ use App\Models\PackageVersion;
 
 it('serves packages.json with metadata-url and available packages', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     $group->packages()->attach($pkg);
 
     $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json');
@@ -19,7 +19,7 @@ it('serves packages.json with metadata-url and available packages', function () 
 
 it('serves p2 metadata for an assigned package', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     PackageVersion::factory()->for($pkg)->create();
     $group->packages()->attach($pkg);
 
@@ -40,7 +40,7 @@ it('returns 401 without token and 404 for unassigned packages', function () {
 
 it('allows anonymous access to public groups', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'pub', 'public' => true]);
-    $pkg = Package::factory()->create(['name' => 'acme/open']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/open']);
     $group->packages()->attach($pkg);
 
     $this->getJson('/r/pub/packages.json')
@@ -49,7 +49,7 @@ it('allows anonymous access to public groups', function () {
 
 it('returns 404 (not 401) when a valid token has no access to the group', function () {
     $victim = Group::factory()->for(Organization::factory())->create(['slug' => 'victim']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($victim)->create(['name' => 'acme/demo']);
     $victim->packages()->attach($pkg);
 
     // Token from a different group/org: authenticated, but without access → 404, not 401.

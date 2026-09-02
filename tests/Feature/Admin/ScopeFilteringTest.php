@@ -18,9 +18,9 @@ beforeEach(function () {
     $this->groupA = Group::factory()->for($this->orgA)->create(['name' => 'Reg A']);
     $this->groupB = Group::factory()->for($this->orgB)->create(['name' => 'Reg B']);
 
-    $this->pkgA = Package::factory()->create(['name' => 'a/one']);
+    $this->pkgA = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/one']);
     $this->groupA->packages()->attach($this->pkgA->id);
-    $this->pkgB = Package::factory()->create(['name' => 'b/one']);
+    $this->pkgB = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/one']);
     $this->groupB->packages()->attach($this->pkgB->id);
 
     Domain::factory()->for($this->groupA)->create(['hostname' => 'a.example.test']);

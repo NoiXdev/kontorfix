@@ -9,7 +9,7 @@ use App\Models\PackageVersion;
 
 it('serves an npm packument for an assigned scoped package', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit', 'dist_tags' => ['latest' => '1.0.0']]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit', 'dist_tags' => ['latest' => '1.0.0']]);
     PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => ['name' => '@noixdev/ui-kit', 'version' => '1.0.0'], 'dist_tarball_name' => 'ui-kit-1.0.0.tgz']);
     $group->packages()->attach($pkg);
 
@@ -27,7 +27,7 @@ it('serves an npm packument for an assigned scoped package', function () {
 
 it('serves an unscoped packument', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => ['name' => 'leftpad'], 'dist_tarball_name' => 'leftpad-1.0.0.tgz']);
     $group->packages()->attach($pkg);
 
@@ -52,7 +52,7 @@ it('does not shadow the composer root or p2 routes', function () {
 it('does not expose a composer package via the npm packument endpoint (cross-type isolation)', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     // Same name, but type=composer — must not be discoverable via the npm endpoint.
-    $composerPkg = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'shared-name']);
+    $composerPkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'shared-name']);
     PackageVersion::factory()->for($composerPkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => []]);
     $group->packages()->attach($composerPkg);
 

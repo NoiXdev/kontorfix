@@ -14,8 +14,8 @@ it('lists groups for admins', function () {
 });
 
 it('creates a group with slug and assigns existing pool packages', function () {
-    $pkgs = Package::factory()->count(2)->create();
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    $pkgs = Package::factory()->count(2)->create(['organization_id' => $admin->organization_id]);
 
     $this->actingAs($admin)->post('/admin/groups', [
         'name' => 'Kadenz GmbH',

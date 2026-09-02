@@ -45,7 +45,7 @@ it('keeps the legacy SECURITY_CSP_REPORT_ONLY switch working', function () {
 // outside the `web` group and used to receive no security headers at all.
 it('sets the universal headers on a stateless registry response', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'hdr', 'public' => true]);
-    $group->packages()->attach(Package::factory()->create(['name' => 'acme/demo']));
+    $group->packages()->attach(Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']));
 
     $res = $this->getJson('/r/hdr/packages.json');
 
@@ -67,7 +67,7 @@ it('sets the universal headers on a stateless api response', function () {
 it('keeps the document-only headers off a non-html response', function () {
     config(['security.csp' => 'enforce']);
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'hdr', 'public' => true]);
-    $group->packages()->attach(Package::factory()->create(['name' => 'acme/demo']));
+    $group->packages()->attach(Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']));
 
     $res = $this->getJson('/r/hdr/packages.json');
 

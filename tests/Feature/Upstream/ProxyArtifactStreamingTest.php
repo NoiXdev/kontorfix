@@ -111,9 +111,9 @@ it('still builds the dist when another request holds the lock and never lets go'
     // fallback is the unlocked build that predates the lock.
     config(['kontorfix.dist_build_lock_wait' => 0]);
 
-    $package = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($package))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $package = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($package))->handle();
     $group->packages()->attach($package);
 
     $sha = $package->versions()->where('version', '1.0.0.0')->sole()->source_reference;
@@ -132,9 +132,9 @@ it('still builds the dist when another request holds the lock and never lets go'
 it('releases the dist lock after a build so the next cold version is not blocked', function () {
     Storage::fake('artifacts');
 
-    $package = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($package))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $package = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($package))->handle();
     $group->packages()->attach($package);
 
     $sha = $package->versions()->where('version', '1.0.0.0')->sole()->source_reference;

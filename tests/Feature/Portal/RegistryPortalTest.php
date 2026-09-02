@@ -25,7 +25,7 @@ it('lists only the members own registries', function () {
 
 it('shows a registry with setup snippets and its packages', function () {
     $group = Group::factory()->for($this->orgA)->create(['slug' => 'acme']);
-    $pkg = Package::factory()->create(['name' => 'acme/widget']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/widget']);
     $group->packages()->attach($pkg);
 
     $this->actingAs($this->member)->get("/portal/registries/{$group->id}")

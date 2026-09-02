@@ -76,7 +76,7 @@ it('forbids issuing a token for a foreign organization', function () {
 });
 
 it('forbids viewing or deleting a package that lives only in a foreign registry', function () {
-    $foreignPkg = Package::factory()->create();
+    $foreignPkg = Package::factory()->inOrgOf($this->groupB)->create();
     $this->groupB->packages()->attach($foreignPkg->id);
 
     $this->actingAs($this->adminA)->get("/admin/packages/{$foreignPkg->id}")->assertForbidden();
@@ -85,7 +85,10 @@ it('forbids viewing or deleting a package that lives only in a foreign registry'
 });
 
 it('allows viewing a package shared into the own registry', function () {
-    $shared = Package::factory()->create();
+    // Owned by Org B; deliberately also attached to Org A's registry below to prove
+    // that a package shared in remains visible — the org-pairing sweep guard in
+    // tests/Pest.php is expected to trip on the groupA attach line, and stays doing so.
+    $shared = Package::factory()->inOrgOf($this->groupB)->create();
     // The same package is attached to both a foreign and the own registry.
     $this->groupB->packages()->attach($shared->id);
     $this->groupA->packages()->attach($shared->id);

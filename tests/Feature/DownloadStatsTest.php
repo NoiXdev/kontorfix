@@ -11,9 +11,9 @@ use Tests\Support\FixtureRepo;
 
 it('counts downloads and records the dist size when a dist is served', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
@@ -46,7 +46,7 @@ it('rolls usage stats up to the registry level', function () {
     $admin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
     $group = Group::factory()->for(Organization::factory())->create();
 
-    $pkg = Package::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $pkg->versions()->create([
         'version' => '1.0.0.0', 'version_pretty' => 'v1', 'source_reference' => 'r1',
         'metadata' => [], 'download_count' => 42, 'dist_size' => 5000,
