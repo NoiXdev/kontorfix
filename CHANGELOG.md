@@ -1,4 +1,16 @@
-## [0.7.1](https://github.com/NoiXdev/kontorfix/compare/v0.7.0...v) (2026-08-27)
+## [0.7.2](https://github.com/NoiXdev/kontorfix/compare/v0.7.1...v) (2026-09-02)
+
+
+### Bug Fixes
+
+* **admin:** allow toggling trusts_email_claim on existing OIDC providers ([a6d5e03](https://github.com/NoiXdev/kontorfix/commit/a6d5e039715c22ca46315aec5a4b1df3336e4374))
+* **admin:** keep upstream credentials out of the session and say so in the form ([522941a](https://github.com/NoiXdev/kontorfix/commit/522941addfd6653416b6d12c618fc176f92db64f))
+* **admin:** redact upstream mirror credentials from the console ([d850492](https://github.com/NoiXdev/kontorfix/commit/d850492552ce79f0014be9081cd691c16649a621))
+* **admin:** surface the real reason a package probe failed ([5cc230f](https://github.com/NoiXdev/kontorfix/commit/5cc230f6ac3968704ef80ac7710f795cee439913))
+* **auth:** gate OIDC email-claim auto-linking behind per-provider trust ([11e99dd](https://github.com/NoiXdev/kontorfix/commit/11e99dd9be6616f7cdfdd9bcfcfcbdd26515bb37))
+* **logging:** rotate by default, keep the suite out of the dev log, cap Docker logs ([94d8634](https://github.com/NoiXdev/kontorfix/commit/94d8634d524c0ab1e4ba38724a54f7f8dc130d5c))
+
+## [0.7.1](https://github.com/NoiXdev/kontorfix/compare/v0.7.0...v0.7.1) (2026-08-27)
 
 
 ### Features
