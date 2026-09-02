@@ -14,6 +14,40 @@
 # shipped file keeps `:latest` because a digest cannot be committed ahead of the release it
 # names, not because pinning is optional for a production deployment.
 
+# Docker's default logging driver is `json-file` with NO limits: every line any container
+# writes is appended to a file under /var/lib/docker/containers forever, and the only thing
+# that ever truncates it is deleting the container. On a long-lived deployment that is a
+# host-disk filler with no warning attached, and it takes the Docker daemon — not just this
+# stack — down with it when the partition fills. 10 MB × 5 is 50 MB per container, ~300 MB
+# for the whole stack; raise max-file if you need a longer window, max-size if single log
+# lines are large (stack traces are).
+#
+# This has to be repeated per service: `logging` is not something Compose can default.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '5'
+
+# The application services below all log to `stderr` (config/logging.php) rather than to a
+# file, so their output lands in `docker logs` / Portainer and is subject to the caps above.
+# The file channels are wrong here for two independent reasons:
+#
+#  - storage/logs is not a volume (only storage/app is), so a log file lives in the
+#    container's writable layer. It grows unbounded until the container is replaced, and
+#    then it is *destroyed* — every Watchtower redeploy silently deletes the log covering
+#    the incident that prompted the redeploy.
+#  - Adding a volume for it would fix the destruction but not the growth, and would put the
+#    logs somewhere an operator has to shell in to read, instead of in the place Portainer
+#    already shows.
+#
+# Set LOG_LEVEL in docker/.env to change verbosity (`info` is a sane production floor;
+# config/logging.php defaults to `debug`). See docs/development.md, "Logs".
+#
+# LOG_CHANNEL is set under each service's `environment:` rather than in docker/.env on
+# purpose: `environment:` wins over `env_file:`, so this holds even for an operator whose
+# .env still carries the LOG_CHANNEL=stack that .env.example ships.
+
 services:
   app:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
@@ -44,6 +78,8 @@ services:
     env_file: .env
     environment:
       CONTAINER_ROLE: app
+      LOG_CHANNEL: stderr
+    logging: *logging
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -73,6 +109,8 @@ services:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
     environment:
       CONTAINER_ROLE: worker
+      LOG_CHANNEL: stderr
+    logging: *logging
     env_file: .env
     depends_on:
       postgres: { condition: service_healthy }
@@ -103,6 +141,8 @@ services:
     image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
     environment:
       CONTAINER_ROLE: scheduler
+      LOG_CHANNEL: stderr
+    logging: *logging
     env_file: .env
     depends_on:
       postgres: { condition: service_healthy }
@@ -128,6 +168,8 @@ services:
     profiles: ['reverb']
     environment:
       CONTAINER_ROLE: reverb
+      LOG_CHANNEL: stderr
+    logging: *logging
     env_file: .env
     # No volume on purpose: `reverb:start` only relays websocket frames via Redis and
     # never reads or writes storage/app. Channel authorization happens in the app service.
@@ -147,6 +189,7 @@ services:
       POSTGRES_DB: kontorfix
       POSTGRES_USER: kontorfix
       POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+    logging: *logging
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -158,6 +201,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *logging
     volumes:
       - redisdata:/data
     healthcheck:

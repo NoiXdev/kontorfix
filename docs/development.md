@@ -640,6 +640,61 @@ as trusted infrastructure. Two deliberate properties:
 - A broken S3 configuration can interrupt downloads (the `artifacts` disk throws on errors).
   Use the built-in connection test before saving.
 
+### Logs
+
+**In the Docker deployment the application does not write a log file at all.** `app`,
+`worker`, `scheduler` and `reverb` each set `LOG_CHANNEL=stderr` in `docker/compose.yaml`,
+so everything Laravel logs goes to the container's stderr and is read with `docker compose
+logs -f app` or from the container's log view in Portainer.
+
+| Where | Retention | Set in |
+| ----- | --------- | ------ |
+| Container stderr → Docker `json-file` | 10 MB × 5 files per container (~50 MB) | `logging:` in `docker/compose.yaml` |
+| Local install (`storage/logs/laravel-YYYY-MM-DD.log`) | `LOG_DAILY_DAYS`, 14 days | `config/logging.php`, `.env` |
+| Test suite (`storage/logs/testing-YYYY-MM-DD.log`) | `LOG_TESTING_DAYS`, 3 days | `phpunit.xml`, `config/logging.php` |
+
+Two things this replaces, both of which were real:
+
+- **A log file in a container is deleted by the deploy that makes you want to read it.**
+  Only `storage/app` is a named volume (`artifacts`); `storage/logs` is not mounted, so a
+  file channel wrote into the container's writable layer. It grew unbounded for the life of
+  the container and Watchtower then destroyed it on the next image pull — precisely when an
+  operator is reconstructing an incident. Mounting a volume for it would have fixed the
+  destruction but not the growth, and would have put the logs somewhere you have to shell in
+  to read.
+- **Docker's own default is unbounded too.** The `json-file` driver with no options appends
+  to `/var/lib/docker/containers/<id>/<id>-json.log` forever. Redirecting the app to stderr
+  without capping the driver just moves the disk filler one layer out, so every service in
+  the stack — Postgres and Redis included — declares `logging:` limits.
+
+**To change it:**
+
+- *Keep more or less output:* `max-size` / `max-file` under `logging:` in the stack file.
+  Raise `max-file` for a longer window, `max-size` if single entries are large (stack traces
+  are). Both are per container.
+- *Change verbosity:* `LOG_LEVEL` in `docker/.env`. It defaults to `debug`; `info` is a
+  sane production floor.
+- *Ship logs elsewhere:* set the Docker `logging.driver` per service (`syslog`, `gelf`,
+  `journald`, …), or point `LOG_CHANNEL` at `papertrail`/`syslog` in `config/logging.php`.
+  Do not point it back at `single` or `daily` in a container, for the reason above.
+
+Locally there is no container, so `config/logging.php` decides. Its default is `daily`, not
+Laravel's stock `single` — `single` writes one file nothing ever rotates, which is how this
+repository's own `storage/logs/laravel.log` reached 142 MB. Nothing prunes a file that was
+already written under the old default; delete it by hand (`rm storage/logs/laravel.log`)
+once, and rotation takes it from there.
+
+The test suite has its own channel and its own file. It used to fall through to the default
+one and append to the log a developer reads, and it dominated it — roughly 117k `testing.*`
+records against 100 real `local.*` ones, because a full run is ~1500 tests and many drive
+failure paths on purpose. It is routed rather than silenced: a test that fails for a reason
+its assertion cannot show you is diagnosed from that log.
+
+`tests/Unit/ContainerLoggingTest.php` holds all of this together — it fails if a service is
+added without log limits, if an application service starts writing to a file inside its
+container, if the local default stops rotating, or if the suite is pointed back at the
+developer's log.
+
 ### Session and cache identity across upgrades
 
 Three values decide whether a framework upgrade is invisible to the people using the

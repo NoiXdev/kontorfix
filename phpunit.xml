@@ -32,6 +32,12 @@
         <!-- The git fixtures are local bare repos cloned over file://. Production ships
              https,ssh; the tests that assert the scheme gate reset it to that default. -->
         <env name="KONTORFIX_VCS_ALLOWED_SCHEMES" value="https,ssh,file"/>
+        <!-- Without this the suite falls through to config/logging.php's default and writes
+             into the developer's own storage/logs/laravel.log, which nothing rotates. The
+             `testing` channel is a rotated file of its own (storage/logs/testing-*.log, 3
+             days) — kept rather than silenced so a failure whose cause is only visible in a
+             log entry stays diagnosable. See config/logging.php. -->
+        <env name="LOG_CHANNEL" value="testing"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
