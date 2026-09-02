@@ -18,21 +18,22 @@ it('does not serve one organization a package owned by another', function () {
     // Attached to my registry by a pre-invariant row: resolution must still refuse it.
     $mine->packages()->attach($foreign);
 
-    // No upstream is configured here, so the refusal is a flat 404. Note the provenance of
-    // that 404 moved: it used to come from the (then unscoped) dependency-confusion guard
-    // spotting the foreign row; now the guard is organization-scoped and ignores it, and
-    // the 404 comes from there being nothing to fall through to. The test below covers the
-    // same refusal with a live fallthrough path, where the status code is no longer 404.
+    // The 404 is now single-sourced. It used to have two independent causes — findLocal()
+    // refusing the foreign row, and the then-unscoped dependency-confusion guard spotting
+    // it — and scoping the guard removed the second. findLocal() is and always was this
+    // test's subject: unscope its organization_id constraint and this request returns 200
+    // (the pivot row above makes the package accessible to a public group), so the test
+    // goes red. The guard is covered separately in OrgScopedUpstreamFallthroughTest.
     $this->get("/r/{$mine->slug}/p2/acme/tools.json")->assertNotFound();
 });
 
 it('does not serve another organization\'s package even when an upstream can answer', function () {
-    // The companion to the test above. With an upstream configured the request now falls
-    // through instead of 404ing, so a status-code assertion would no longer prove anything.
-    // What must hold regardless of status code is that the foreign row is never SERVED:
-    // its version never appears in the response, and the answer demonstrably came from
-    // the upstream. Were findLocal() unscoped again, the local metadata would be returned
-    // and nothing would be sent — both assertions below would fail.
+    // The companion to the test above, covering the case it cannot: with an upstream
+    // configured the request falls through instead of 404ing, so a status-code assertion
+    // would no longer prove anything. What must hold either way is that the foreign row is
+    // never SERVED — its version never appears in the response, and the answer demonstrably
+    // came from the upstream. Were findLocal() unscoped again, the local metadata would be
+    // returned and nothing would be sent, so both assertions below would fail.
     Http::fake(['*' => Http::response(['minified' => 'composer/2.0', 'packages' => []], 200)]);
 
     $mine = Group::factory()->create(['public' => true]);

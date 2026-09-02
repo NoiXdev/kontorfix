@@ -13,6 +13,11 @@ use Illuminate\Support\Facades\Schema;
  * already satisfied a new rule. The upgrade stops with the offending rows named, so the
  * operator decides — attach it to a registry, or delete it — instead of finding their
  * packages moved.
+ *
+ * The same applies to the assignment side. The invariant this release establishes is that a
+ * package may only be attached to registries of its own organization, and every read path
+ * now leans on it: findLocal() and the dependency-confusion guard both filter on
+ * organization_id and would otherwise be enforcing a premise the data does not hold.
  */
 return new class extends Migration
 {
@@ -38,6 +43,38 @@ return new class extends Migration
             throw new RuntimeException(
                 "Cannot enforce package ownership: these registries belong to no organization.\n"
                 ."Assign each to an organization, then run the migration again.\n\n".$list
+            );
+        }
+
+        // A package attached to a registry of another organization. The backfill in the
+        // companion migration picks the OLDEST registry's organization as the owner and
+        // leaves every other assignment in place, so a package shared across organizations
+        // before this release keeps a pivot row pointing into a tenant that no longer owns
+        // it. That row is not inert: the PyPI read paths resolve through
+        // $group->packages(), so the foreign registry would go on listing the project,
+        // serving its page and streaming its distributions while Composer and npm refuse
+        // it — tenant isolation holding in two ecosystems and not the third.
+        //
+        // Named, not deleted. These rows are somebody's deliberate registry assignments,
+        // and quietly dropping them would remove packages from a registry that has been
+        // serving them. Same call as the ownerless case above: the operator decides.
+        $crossOrg = DB::table('group_package as gp')
+            ->join('packages as p', 'p.id', '=', 'gp.package_id')
+            ->join('groups as g', 'g.id', '=', 'gp.group_id')
+            ->whereColumn('g.organization_id', '!=', 'p.organization_id')
+            ->orderBy('p.type')->orderBy('p.name')->orderBy('g.slug')
+            ->get(['p.type', 'p.name', 'p.id as package_id', 'g.slug', 'g.id as group_id']);
+
+        if ($crossOrg->isNotEmpty()) {
+            $list = $crossOrg
+                ->map(fn ($r): string => "  - {$r->type} {$r->name} ({$r->package_id}) is attached to registry {$r->slug} ({$r->group_id})")
+                ->implode("\n");
+
+            throw new RuntimeException(
+                "Cannot enforce package ownership: these packages are attached to a registry of another\n"
+                ."organization. A package may only be attached to registries of the organization that owns it.\n"
+                ."Detach each package from the registry listed, or move the package to that organization, then\n"
+                ."run the migration again.\n\n".$list
             );
         }
 

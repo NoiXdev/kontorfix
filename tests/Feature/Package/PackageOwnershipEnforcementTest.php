@@ -27,6 +27,48 @@ it('refuses to enforce ownership while a package has no registry', function () {
         ->toThrow(RuntimeException::class, $package->name);
 });
 
+it('refuses to enforce ownership while a package is attached to a foreign registry', function () {
+    // The backfill takes the OLDEST registry's organization as the owner and leaves every
+    // other assignment in place, so a package shared across organizations before this
+    // release keeps a pivot row pointing into a tenant that no longer owns it. Refused and
+    // named rather than deleted: these are somebody's deliberate registry assignments.
+    $mine = Group::factory()->create(['slug' => 'mine']);
+    $theirs = Group::factory()->create(['slug' => 'theirs']);
+
+    $foreign = Package::factory()->inOrgOf($theirs)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $mine->packages()->attach($foreign);
+
+    // Both the package and the registry it wrongly hangs off have to be named, or the
+    // operator cannot act on the message.
+    expect(fn () => runEnforcePackageOrganizationMigration()->up())
+        ->toThrow(RuntimeException::class, 'acme/tools')
+        ->and(fn () => runEnforcePackageOrganizationMigration()->up())
+        ->toThrow(RuntimeException::class, 'mine');
+});
+
+it('lets a package be attached to several registries of its own organization', function () {
+    // The counterpart: multi-registry assignment stays legal inside one organization, so
+    // the refusal above cannot be satisfied by banning shared packages outright.
+    $one = Group::factory()->create();
+    $two = Group::factory()->create(['organization_id' => $one->organization_id]);
+
+    $package = Package::factory()->inOrgOf($one)->create(['type' => 'composer', 'name' => 'acme/shared']);
+    $one->packages()->attach($package);
+    $two->packages()->attach($package);
+
+    $error = null;
+    try {
+        runEnforcePackageOrganizationMigration()->up();
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+
+    // up() cannot run to completion a second time: RefreshDatabase has already applied it,
+    // so the schema block trips over the unique index it has already replaced. Getting that
+    // far is the assertion — the cross-organization refusal did not fire on these rows.
+    expect($error)->not->toContain('attached to a registry of another');
+});
+
 it('lets two organizations hold the same package name', function () {
     $a = Group::factory()->create();
     $b = Group::factory()->create();

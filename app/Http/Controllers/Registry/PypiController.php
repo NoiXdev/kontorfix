@@ -192,7 +192,14 @@ class PypiController extends Controller
         // pattern refuses those already; this does not rely on it.
         abort_unless(Str::isUuid($package), 404);
 
-        $pkg = Package::where('type', PackageType::Python)->whereKey($package)->first();
+        // Scoped like every other read path. A UUID cannot collide across organizations the
+        // way a name can, so this is not closing a guessing attack — it closes the same
+        // cross-organization pivot row the index and project page now refuse, which would
+        // otherwise still stream its distributions through the foreign registry.
+        $pkg = Package::where('type', PackageType::Python)
+            ->where('organization_id', $group->organization_id)
+            ->whereKey($package)
+            ->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
 
         $dist = $pkg->pythonDists()->where('filename', $filename)->firstOrFail();
@@ -214,11 +221,23 @@ class PypiController extends Controller
     /**
      * Python packages assigned to the group (unfiltered by access — callers refine).
      *
+     * Constrained to the owning organization for the same reason findLocal() is: the pivot
+     * row records assignment, and canAccessPackage() checks assignment and group access —
+     * neither compares the package's organization to the registry's. A cross-organization
+     * pivot row would therefore be served here. The enforcement migration now refuses to
+     * complete while such a row exists, so this constraint should never match anything;
+     * it is stated anyway, because this is the only ecosystem where ownership was left
+     * implied by the access check rather than written into the query, and an invariant
+     * that only one of three read paths spells out is one edit from being lost.
+     *
      * @return Collection<int, Package>
      */
     private function pythonPackagesOfGroup(Group $group): Collection
     {
-        return $group->packages()->where('type', PackageType::Python)->get();
+        return $group->packages()
+            ->where('type', PackageType::Python)
+            ->where('packages.organization_id', $group->organization_id)
+            ->get();
     }
 
     /**
