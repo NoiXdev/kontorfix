@@ -14,15 +14,21 @@ use App\Models\Package;
  * claimable by any tenant who learned its id. Ownership survives the registries now, so
  * that case is simply a package owned by someone else.
  *
- * The two surfaces still differ in *which* organizations count as the caller's — the
- * console intersects with the sidebar scope, the API uses the key owner's administered
- * organizations — so they keep their own resolution and share only the decision below.
+ * Both `assertCanAttachPackages()` callers (console and API) resolve the target
+ * organization their own way — the console via the sidebar scope/`resolveCreationOrg()`,
+ * the API via `resolveWriteOrg()` — but both pass this trait exactly the one organization
+ * the attach targets, never the caller's broader reach. Attaching creates a `group_package`
+ * row the enforcement migration requires to agree with `packages.organization_id`, so this
+ * holds for every caller including a super-admin: there is no organization-spanning
+ * exemption for the decision below, only for who may reach it.
  */
 trait GuardsPackageAttachment
 {
     /**
      * Aborts 403 unless every submitted package is owned by one of the given organizations.
-     * An empty `$orgIds` refuses every non-empty submission.
+     * An empty `$orgIds` refuses every non-empty submission. `assertCanAttachPackages()` in
+     * both {@see ScopesToAdministeredOrgs} and {@see ScopesApiToUser} always calls this with
+     * exactly one — the organization being attached into.
      *
      * @param  array<int, string>  $packageIds
      * @param  array<int, string>  $orgIds

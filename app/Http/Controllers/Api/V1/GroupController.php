@@ -37,7 +37,7 @@ class GroupController extends Controller
 
         // Never let a registry be seeded with another organization's packages.
         $packageIds = $request->validated('package_ids', []);
-        $this->assertCanAttachPackages($packageIds);
+        $this->assertCanAttachPackages($packageIds, $organizationId);
 
         $group = Group::create([
             'name' => $request->validated('name'),

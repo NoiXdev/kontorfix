@@ -103,10 +103,10 @@ class GroupController extends Controller
         // one) — always validated to be one the user may administer.
         $organizationId = $this->resolveCreationOrg($request->validated('organization_id'));
 
-        // Packages may only be pulled in from the caller's own reach — never out of
-        // another organization's registry.
+        // Packages may only be pulled in from this registry's own organization — never
+        // out of another one.
         $packageIds = $request->validated('package_ids', []);
-        $this->assertCanAttachPackages($packageIds);
+        $this->assertCanAttachPackages($packageIds, $organizationId);
 
         $group = Group::create([
             'name' => $request->validated('name'),
@@ -142,7 +142,7 @@ class GroupController extends Controller
             'package_ids.*' => ['uuid', 'exists:packages,id'],
         ]);
 
-        $this->assertCanAttachPackages($data['package_ids']);
+        $this->assertCanAttachPackages($data['package_ids'], $group->organization_id);
 
         // syncWithoutDetaching keeps the packages already in the group.
         $group->packages()->syncWithoutDetaching($data['package_ids']);

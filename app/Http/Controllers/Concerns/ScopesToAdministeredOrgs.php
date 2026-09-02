@@ -86,23 +86,26 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
-     * Aborts 403 unless every submitted package may be attached by the current user:
-     * "attachable" means owned by an organization in the active scope. A package owned
-     * elsewhere is refused, otherwise attaching it would hand the caller write access to
-     * it via assertCanTouchPackage().
+     * Aborts 403 unless every submitted package is owned by the organization it is being
+     * attached into. A package owned elsewhere is refused, otherwise attaching it would
+     * hand the caller write access to it via assertCanTouchPackage().
+     *
+     * Checked against the target organization specifically, not the caller's broader
+     * scope: an admin who administers several organizations must not be able to move a
+     * package from one of them into another just because both are reachable, and the
+     * migration that hardened `packages.organization_id` refuses exactly such a
+     * cross-organization `group_package` row on the next fresh install — so this holds
+     * even for a super-admin spanning every organization, which is why there is no
+     * spansAllOrganizations() exemption here unlike the rest of this trait.
      *
      * The decision itself lives in {@see GuardsPackageAttachment}, shared with `/api/v1`;
-     * only the set of organizations that count as the caller's differs.
+     * only how the target organization is resolved differs.
      *
      * @param  array<int, string>  $packageIds
      */
-    protected function assertCanAttachPackages(array $packageIds): void
+    protected function assertCanAttachPackages(array $packageIds, string $organizationId): void
     {
-        if (app(OrgScope::class)->spansAllOrganizations()) {
-            return;
-        }
-
-        $this->assertPackagesReachableIn($packageIds, $this->scopedOrgIds());
+        $this->assertPackagesReachableIn($packageIds, [$organizationId]);
     }
 
     /**

@@ -110,12 +110,34 @@ it('creates a quick-added package into its registry in one request, so no orphan
     expect($package->groups()->pluck('groups.id')->all())->toBe([$this->groupA->id]);
 });
 
-it('allows a super admin to share a package across organizations', function () {
+it('refuses even a super admin from attaching a package into a foreign orgs registry', function () {
+    // A package may only be attached to registries of its own organization — the
+    // invariant the enforcement migration hardened onto packages.organization_id and
+    // group_package. It used to have an exemption here: a super-admin's scope "spans
+    // all organizations", so the attach check was skipped outright. But since Task 5/6
+    // a cross-organization attach achieves nothing (the foreign registry cannot serve or
+    // touch what it doesn't own) and the exemption let a super-admin create exactly the
+    // group_package row the migration refuses on the next fresh install — an escape
+    // hatch to an unusable, migration-blocking state is not a feature worth keeping.
     $super = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin, 'is_super_admin' => true]);
 
     $this->actingAs($super)
         ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
-        ->assertRedirect()->assertSessionHasNoErrors();
+        ->assertForbidden();
 
-    expect($this->groupA->packages()->count())->toBe(1);
+    expect($this->groupA->packages()->count())->toBe(0);
+});
+
+it('refuses even a super admin from syncing a foreign orgs package into a registry through the api', function () {
+    // The API copy of the same invariant — ScopesApiToUser::assertCanAttachPackages()
+    // dropped its seesAllOrganizations() exemption for the same reason the console
+    // copy did.
+    $super = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin, 'is_super_admin' => true]);
+    [, $superKey] = ApiKey::issue($super, 'w', ApiKeyPermission::Write);
+
+    $this->withToken($superKey)
+        ->putJson("/api/v1/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0);
 });
