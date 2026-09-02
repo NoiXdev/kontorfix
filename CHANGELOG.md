@@ -1,4 +1,27 @@
-## [0.7.3](https://github.com/NoiXdev/kontorfix/compare/v0.7.2...v) (2026-09-02)
+## [0.8.0](https://github.com/NoiXdev/kontorfix/compare/v0.7.3...v) (2026-09-02)
+
+
+### Features
+
+* **admin:** own a created package where its registries are owned ([da329f4](https://github.com/NoiXdev/kontorfix/commit/da329f4076823524a2f0851f075b7032d9b2d57e))
+* **packages:** give a package an owning organization ([7213730](https://github.com/NoiXdev/kontorfix/commit/72137306c2b74d4918fe99d512794a9524ee5911))
+* **packages:** scope the package name to its organization ([f6ddc25](https://github.com/NoiXdev/kontorfix/commit/f6ddc25c24bfa654181d0f8751dfd663c44cb61d))
+* **registry:** resolve a package within the addressed organization ([aebffb7](https://github.com/NoiXdev/kontorfix/commit/aebffb72a0a2cf1b55d82007e7a06d9dcda3ccd9))
+* **registry:** scope the dependency-confusion guard to the organization ([a56b2da](https://github.com/NoiXdev/kontorfix/commit/a56b2daac005b0dcbba1838728e393baa69685f1))
+
+
+### Bug Fixes
+
+* **admin:** refuse deleting an organization that still owns packages ([2191334](https://github.com/NoiXdev/kontorfix/commit/21913345b12e8e9ccfc1095c067f6c72fd8e99d9))
+* **api:** refuse deleting an organization that still owns packages ([17da89d](https://github.com/NoiXdev/kontorfix/commit/17da89dad63ed8f410805363816bd8c67f9c64a7))
+* **migrations:** report the org-less registry before the ownerless package ([8205adc](https://github.com/NoiXdev/kontorfix/commit/8205adc2205fc75e56592bd128cb61480b581c42))
+* **policies:** stop GroupPolicy::view from crashing on a null organization_id ([6ec70c5](https://github.com/NoiXdev/kontorfix/commit/6ec70c5eb83148fa2814a6b10314770178aec116))
+* **registry:** keep the organization null-guard truthful in RegistryAccessService ([b8e9053](https://github.com/NoiXdev/kontorfix/commit/b8e9053d905e0345ab9c80340c4744de64ca1aa4))
+* **registry:** refuse cross-organization package assignments at migration time ([5ed6f4f](https://github.com/NoiXdev/kontorfix/commit/5ed6f4fea501fb8a49dcddb8c3e0cfae6b8ccc21))
+* **registry:** scope the registry access service to the addressed organization ([db677fc](https://github.com/NoiXdev/kontorfix/commit/db677fc46bb5a6fb6969c3a9c1207ecb12484003))
+* **tests:** pair factory packages with their registry's organization ([35a1965](https://github.com/NoiXdev/kontorfix/commit/35a196569f101363b82555a373ab5361692867ab))
+
+## [0.7.3](https://github.com/NoiXdev/kontorfix/compare/v0.7.2...v0.7.3) (2026-09-02)
 
 
 ### Bug Fixes
