@@ -71,7 +71,7 @@ class ComposerController extends Controller
 
         // If the name exists locally but isn't accessible to this group, we abort,
         // WITHOUT asking the upstream — otherwise a private package name would leak to packagist.
-        if ($this->packageExistsLocally(PackageType::Composer, $fullName)) {
+        if ($this->packageExistsLocally(PackageType::Composer, $fullName, $group)) {
             abort(404);
         }
 

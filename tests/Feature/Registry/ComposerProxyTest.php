@@ -83,8 +83,11 @@ it('prefers a local package over the upstream and does not call it', function ()
 it('does not leak a locally-hosted but inaccessible package name to the upstream', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
-    // Package exists locally but is NOT assigned to this group.
-    $secret = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
+    // Package is hosted by this organization but is NOT assigned to this group. The org
+    // has to match: the guard is organization-scoped, and "not assigned" is what this
+    // test is about — a foreign organization's name deliberately falls through instead
+    // (OrgScopedUpstreamFallthroughTest).
+    $secret = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
     PackageVersion::factory()->for($secret)->create();
 
     Http::fake();

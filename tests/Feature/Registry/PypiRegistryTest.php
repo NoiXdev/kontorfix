@@ -362,8 +362,13 @@ it('never forwards a locally-known project to an upstream (dependency confusion)
     $groupA = Group::factory()->for(Organization::factory())->create(['slug' => 'a', 'public' => true]);
     Upstream::factory()->for($groupA)->create(['type' => PackageType::Python, 'url' => 'https://pypi.org', 'enabled' => true]);
 
-    // The project exists in another org's registry — must not leak or be proxied.
-    $groupB = Group::factory()->for(Organization::factory())->create(['slug' => 'b', 'public' => true]);
+    // The project exists in a SIBLING registry of the same organization — must not leak or
+    // be proxied. The fixture used to put it in a second organization; since the guard is
+    // scoped to the addressed organization, that case now deliberately falls through and
+    // is covered by OrgScopedUpstreamFallthroughTest. What this test still proves is the
+    // guard's whole point: a name this organization hosts is never forwarded upstream,
+    // even when asked for from a registry the package is not assigned to.
+    $groupB = Group::factory()->create(['organization_id' => $groupA->organization_id, 'slug' => 'b', 'public' => true]);
     $secret = Package::factory()->inOrgOf($groupB)->create(['type' => PackageType::Python, 'name' => 'internal-lib']);
     $groupB->packages()->attach($secret);
 

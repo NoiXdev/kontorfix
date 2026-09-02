@@ -134,7 +134,7 @@ class PypiController extends Controller
 
         // A private name that exists locally must never be forwarded upstream (dependency
         // confusion protection) — mirror the Composer/npm behaviour.
-        if ($this->pythonExistsLocally($normalized)) {
+        if ($this->pythonExistsLocally($normalized, $group)) {
             abort(404);
         }
 
@@ -221,9 +221,15 @@ class PypiController extends Controller
         return $group->packages()->where('type', PackageType::Python)->get();
     }
 
-    private function pythonExistsLocally(string $normalized): bool
+    /**
+     * The Python half of the dependency-confusion guard, scoped to the addressed
+     * organization for the reasons given on ResolvesRegistryPackage::packageExistsLocally().
+     */
+    private function pythonExistsLocally(string $normalized, Group $group): bool
     {
-        return Package::where('type', PackageType::Python)->get()
+        return Package::where('type', PackageType::Python)
+            ->where('organization_id', $group->organization_id)
+            ->get()
             ->contains(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
     }
 }

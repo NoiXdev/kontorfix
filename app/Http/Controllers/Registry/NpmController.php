@@ -57,7 +57,7 @@ class NpmController extends Controller
 
         // If the name exists locally but isn't accessible to this group, we abort,
         // WITHOUT asking the upstream — otherwise a private package name would leak to npmjs.
-        if ($this->packageExistsLocally(PackageType::Npm, $name)) {
+        if ($this->packageExistsLocally(PackageType::Npm, $name, $group)) {
             abort(404);
         }
 
