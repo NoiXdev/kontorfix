@@ -68,13 +68,17 @@ class UserController extends Controller
         $user = User::create($validated);
         $user->forceFill(['email_verified_at' => now()])->save();
 
+        // Both outcomes go explicitly to the index, not back(): the form now lives on its
+        // own `admin/users/create` page, and back() would return there — to a freshly
+        // emptied form that renders no `flash.success`. The index shows the new row and the
+        // flash.
         if ($withPassword) {
-            return back()->with('success', "Nutzer {$user->name} angelegt.");
+            return redirect()->route('admin.users.index')->with('success', "Nutzer {$user->name} angelegt.");
         }
 
         $user->notify(new UserInvitation);
 
-        return back()->with('success', "Nutzer {$user->name} eingeladen.");
+        return redirect()->route('admin.users.index')->with('success', "Nutzer {$user->name} eingeladen.");
     }
 
     public function invite(User $user): RedirectResponse

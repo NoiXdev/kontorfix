@@ -106,7 +106,10 @@ class WebhookController extends Controller
             'events' => $data['events'],
         ]);
 
-        return back()->with('success', 'Webhook erstellt.');
+        // Explicitly to the index, not back(): the form now lives on its own
+        // `admin/webhooks/create` page, and back() would return there — to a freshly emptied
+        // form that renders no `flash.success`. Same reason as storeIncoming() below.
+        return redirect()->route('admin.webhooks.index')->with('success', 'Webhook erstellt.');
     }
 
     public function destroy(Webhook $webhook): RedirectResponse

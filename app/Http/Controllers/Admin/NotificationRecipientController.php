@@ -42,7 +42,11 @@ class NotificationRecipientController extends Controller
             'enabled' => $data['enabled'] ?? true,
         ]);
 
-        return back()->with('success', 'Empfänger erstellt.');
+        // Explicitly to the index, not back(): the form now lives on its own
+        // `admin/notification-recipients/create` page, and back() would return there — to a
+        // freshly emptied form that renders no `flash.success`. The index shows the new row
+        // and the flash.
+        return redirect()->route('admin.notification-recipients.index')->with('success', 'Empfänger erstellt.');
     }
 
     public function destroy(NotificationRecipient $notificationRecipient): RedirectResponse

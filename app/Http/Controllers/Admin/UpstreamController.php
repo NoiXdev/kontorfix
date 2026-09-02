@@ -72,6 +72,23 @@ class UpstreamController extends Controller
             $upstream->allowedPackages()->create(['name' => $name]);
         }
 
+        // This endpoint has two callers, and only one of them may be redirected away.
+        //
+        // From its own `admin/upstreams/create` page, back() returns to that page — a
+        // freshly emptied form that renders no `flash.success`, so the operator saw a blank
+        // mask and no confirmation. That is the defect, and the index is the fix.
+        //
+        // The registry detail page (`admin/groups/{group}`) posts here too, from an inline
+        // dialog. There, staying put is correct: the upstream list on that page refreshes
+        // in place and the operator is mid-task on the registry, not on upstreams. Sending
+        // them to the upstreams index would be a worse regression than the bug.
+        //
+        // The discriminator is where the submission came from — the very signal back()
+        // already uses, so the inline path keeps byte-for-byte the behaviour it has today.
+        if (str_starts_with(url()->previous(), route('admin.upstreams.create'))) {
+            return redirect()->route('admin.upstreams.index')->with('success', 'Upstream erstellt.');
+        }
+
         return back()->with('success', 'Upstream erstellt.');
     }
 

@@ -51,7 +51,10 @@ class OidcProviderController extends Controller
 
         OidcProvider::create($data);
 
-        return back()->with('success', 'OIDC-Provider erstellt.');
+        // Explicitly to the index, not back(): the form now lives on its own
+        // `admin/oidc/create` page, and back() would return there — to a freshly emptied
+        // form that renders no `flash.success`. The index shows the new row and the flash.
+        return redirect()->route('admin.oidc.index')->with('success', 'OIDC-Provider erstellt.');
     }
 
     public function destroy(OidcProvider $provider): RedirectResponse

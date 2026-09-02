@@ -80,7 +80,11 @@ class GitCredentialController extends Controller
             'token' => $data['token'],
         ]);
 
-        return back()->with('success', 'Git-Token gespeichert.');
+        // Explicitly to the index, not back(): the form now lives on its own
+        // `admin/git-credentials/create` page, and back() would return there — to a freshly
+        // emptied form that renders no `flash.success`. The index shows the new row and the
+        // flash.
+        return redirect()->route('admin.git-credentials.index')->with('success', 'Git-Token gespeichert.');
     }
 
     public function edit(GitCredential $gitCredential): Response
