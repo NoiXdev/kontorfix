@@ -1,7 +1,9 @@
 <?php
 
 use App\Enums\TokenAbility;
+use App\Enums\UserRole;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,6 +57,21 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * A super admin: an operator-organization admin, privileged across every organization.
+ *
+ * Shared here (rather than local to one test file, like PackageCreationOwnerTest.php's
+ * adminOf() or CreateFormRedirectTest.php's redirectSuperAdmin()) because it needs to run
+ * whether or not the file that happens to invoke it is the one loaded alongside it —
+ * PHPUnit only defines a top-level function once its declaring file has been required, so a
+ * test file that used the version formerly declared in PackageCreationOwnerTest.php would
+ * throw "Call to undefined function" whenever run on its own.
+ */
+function superAdmin(): User
+{
+    return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
 }
 
 /**

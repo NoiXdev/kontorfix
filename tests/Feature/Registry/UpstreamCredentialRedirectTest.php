@@ -152,9 +152,14 @@ it('keeps the dependency-confusion guard ahead of the credential check', functio
     Upstream::factory()->for($group)->create([
         'type' => PackageType::Python, 'url' => 'https://pypi.org', 'enabled' => true,
     ]);
-    $other = publicRegistryGroup('elsewhere');
+    // A sibling registry of the SAME organization: the guard is organization-scoped, so
+    // this is the fixture that still exercises it. A different organization's name now
+    // falls through by design (OrgScopedUpstreamFallthroughTest).
+    $other = Group::factory()->create([
+        'organization_id' => $group->organization_id, 'slug' => 'elsewhere', 'public' => true,
+    ]);
     $other->packages()->attach(
-        Package::factory()->create(['type' => PackageType::Python, 'name' => 'internal-lib'])
+        Package::factory()->inOrgOf($other)->create(['type' => PackageType::Python, 'name' => 'internal-lib'])
     );
 
     $this->get('/r/confusion/simple/internal-lib/')->assertNotFound();

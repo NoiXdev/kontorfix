@@ -171,9 +171,14 @@ class OrganizationController extends Controller
 
     public function destroy(Organization $organization): RedirectResponse
     {
-        if ($organization->is_operator || $organization->users()->exists() || $organization->groups()->exists()) {
+        // Packages too, not only users and registries. Deleting every registry first used
+        // to leave the organization's packages ownerless but alive — the orphan any tenant
+        // who learned an id could claim. restrictOnDelete states the same rule at the
+        // database level; this is the readable half.
+        if ($organization->is_operator || $organization->users()->exists()
+            || $organization->groups()->exists() || $organization->packages()->exists()) {
             throw ValidationException::withMessages([
-                'organization' => 'Organisation ist Betreiber oder nicht leer (erst Registries/Nutzer entfernen).',
+                'organization' => 'Organisation ist Betreiber oder nicht leer (erst Pakete/Registries/Nutzer entfernen).',
             ]);
         }
 

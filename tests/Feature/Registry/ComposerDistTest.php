@@ -12,9 +12,9 @@ use Tests\Support\FixtureRepo;
 
 it('builds the zip lazily, stores it on the artifacts disk and streams it', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
     $res = $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip');
@@ -26,9 +26,9 @@ it('builds the zip lazily, stores it on the artifacts disk and streams it', func
 
 it('serves the cached zip on the second request without rebuilding', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
@@ -44,9 +44,9 @@ it('serves the cached zip on the second request without rebuilding', function ()
 it('rebuilds the dist when a tag was force-pushed to a new commit', function () {
     Storage::fake('artifacts');
     $fixture = FixtureRepo::make();
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.$fixture]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.$fixture]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
@@ -89,7 +89,7 @@ it('waits out a briefly busy mirror lock instead of failing the download', funct
     $headers = tokenHeaderFor($group);
 
     $make = function (string $name) use ($group) {
-        $pkg = Package::factory()->create(['name' => $name, 'repository_url' => 'file://'.FixtureRepo::make()]);
+        $pkg = Package::factory()->inOrgOf($group)->create(['name' => $name, 'repository_url' => 'file://'.FixtureRepo::make()]);
         (new SyncPackage($pkg))->handle();
         $group->packages()->attach($pkg);
 
@@ -143,9 +143,9 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
     Log::spy();
 
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
     // Held for the whole request and deliberately never released: a clone that is nowhere
@@ -182,9 +182,9 @@ it('denies dist download without access', function () {
 
 it('returns 404 for an unknown version of an assigned package', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))

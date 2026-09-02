@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Jobs\SyncPackage;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
@@ -31,7 +32,10 @@ it('exposes is_abandoned on the index prop so the admin listing can badge it', f
 
 it('creates a package, assigns groups inline and dispatches sync', function () {
     Queue::fake();
-    $groups = Group::factory()->count(2)->create();
+    // Both registries must belong to the same organization: a package's owner is derived
+    // from its group_ids, and a selection spanning several organizations is now refused.
+    $org = Organization::factory()->create();
+    $groups = Group::factory()->count(2)->for($org)->create();
 
     $this->actingAs(User::factory()->operator()->create(['role' => UserRole::Admin]))
         ->post('/admin/packages', [
@@ -81,13 +85,17 @@ it('returns json validation errors for inline picker creation', function () {
 });
 
 it('validates package name format and uniqueness', function () {
-    Package::factory()->create(['type' => 'composer', 'name' => 'acme/demo']);
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    // Uniqueness is now scoped to an organization: the duplicate below only tests what
+    // it claims to if the posted group_ids names a registry in the *same* organization
+    // as the pre-existing package.
+    $group = Group::factory()->create(['organization_id' => $admin->organization_id]);
+    Package::factory()->inOrgOf($group)->create(['type' => 'composer', 'name' => 'acme/demo']);
 
     $url = 'https://git.example.com/acme/demo.git';
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'Invalid Name', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'Invalid Name', 'repository_url' => $url, 'group_ids' => [$group->id]])
         ->assertSessionHasErrors('name');
-    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => $url])
+    $this->actingAs($admin)->post('/admin/packages', ['type' => 'composer', 'name' => 'acme/demo', 'repository_url' => $url, 'group_ids' => [$group->id]])
         ->assertSessionHasErrors('name');
 });
 

@@ -3,39 +3,32 @@
 namespace App\Http\Controllers\Concerns;
 
 use App\Models\Package;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The one implementation of the cross-tenant attach check.
  *
- * Packages carry no organization of their own — they belong to one through the registries
- * they are attached to. Every endpoint accepting `package_ids` must refuse ids that are not
- * already reachable by the caller, or attaching one would hand the caller write access to
- * another organization's package (repository_url and its embedded credentials, versions,
- * dists, resync, delete).
+ * A package is owned by an organization outright (`packages.organization_id`), so this is
+ * a comparison rather than a reconstruction. It used to re-derive ownership from the
+ * registries a package happened to be attached to, which could not answer for a package
+ * attached to none: deleting a registry cascaded the pivot rows and left an orphan
+ * claimable by any tenant who learned its id. Ownership survives the registries now, so
+ * that case is simply a package owned by someone else.
  *
- * A package attached to *no* registry is refused as well. It used to be exempt, on the
- * grounds that a freshly created package has no pivot rows yet — but both create paths
- * attach their `group_ids` in the same request, and a package created with none is invisible
- * to its own creator, since every package listing joins through `groups`. What the exemption
- * really covered was the orphan a deleted registry leaves behind when the pivot rows cascade:
- * claimable by any tenant who learned its id, together with everything already synced into
- * it, and unrecoverable for the original organization, whose own re-attach then trips the
- * foreign test. Orphans are attachable only by a caller whose scope spans every organization
- * — a super-admin, the party that has to adjudicate the ownership anyway.
- *
- * This trait exists because the check was previously written out twice, once in
- * {@see ScopesToAdministeredOrgs} for the web console and once in {@see ScopesApiToUser} for
- * `/api/v1`. The orphan exemption was removed from the web copy only, leaving the API half
- * claimable. The two surfaces still differ in *which* organizations count as the caller's —
- * the console intersects with the sidebar scope, the API uses the key owner's administered
- * organizations — so they keep their own resolution and share only the decision below.
+ * Both `assertCanAttachPackages()` callers (console and API) resolve the target
+ * organization their own way — the console via the sidebar scope/`resolveCreationOrg()`,
+ * the API via `resolveWriteOrg()` — but both pass this trait exactly the one organization
+ * the attach targets, never the caller's broader reach. Attaching creates a `group_package`
+ * row the enforcement migration requires to agree with `packages.organization_id`, so this
+ * holds for every caller including a super-admin: there is no organization-spanning
+ * exemption for the decision below, only for who may reach it.
  */
 trait GuardsPackageAttachment
 {
     /**
-     * Aborts 403 unless every submitted package is already attached to a registry in one of
-     * the given organizations. An empty `$orgIds` refuses every non-empty submission.
+     * Aborts 403 unless every submitted package is owned by one of the given organizations.
+     * An empty `$orgIds` refuses every non-empty submission. `assertCanAttachPackages()` in
+     * both {@see ScopesToAdministeredOrgs} and {@see ScopesApiToUser} always calls this with
+     * exactly one — the organization being attached into.
      *
      * @param  array<int, string>  $packageIds
      * @param  array<int, string>  $orgIds
@@ -47,7 +40,7 @@ trait GuardsPackageAttachment
         }
 
         $foreign = Package::whereIn('id', $packageIds)
-            ->whereDoesntHave('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds))
+            ->whereNotIn('organization_id', $orgIds)
             ->exists();
 
         abort_if($foreign, 403);

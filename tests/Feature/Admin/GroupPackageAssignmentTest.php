@@ -14,8 +14,8 @@ function groupAdmin(): User
 it('assigns existing packages to a registry from the group view', function () {
     $admin = groupAdmin();
     $group = Group::factory()->for(Organization::factory())->create();
-    $a = Package::factory()->create();
-    $b = Package::factory()->create();
+    $a = Package::factory()->inOrgOf($group)->create();
+    $b = Package::factory()->inOrgOf($group)->create();
 
     $this->actingAs($admin)->post(route('admin.groups.packages.store', $group->id), [
         'package_ids' => [$a->id, $b->id],
@@ -27,8 +27,8 @@ it('assigns existing packages to a registry from the group view', function () {
 it('keeps already-assigned packages when adding more', function () {
     $admin = groupAdmin();
     $group = Group::factory()->for(Organization::factory())->create();
-    $a = Package::factory()->create();
-    $b = Package::factory()->create();
+    $a = Package::factory()->inOrgOf($group)->create();
+    $b = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($a->id);
 
     $this->actingAs($admin)->post(route('admin.groups.packages.store', $group->id), ['package_ids' => [$b->id]])
@@ -40,7 +40,7 @@ it('keeps already-assigned packages when adding more', function () {
 it('removes a package from a registry', function () {
     $admin = groupAdmin();
     $group = Group::factory()->for(Organization::factory())->create();
-    $pkg = Package::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($pkg->id);
 
     $this->actingAs($admin)->delete(route('admin.groups.packages.destroy', [$group->id, $pkg->id]))

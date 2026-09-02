@@ -36,7 +36,7 @@ beforeEach(function () {
     $this->member = User::factory()->for($this->org)->create(['role' => UserRole::Member]);
 
     $this->group = Group::factory()->for($this->org)->create(['slug' => 'kadenz']);
-    $this->package = Package::factory()->create([
+    $this->package = Package::factory()->inOrgOf($this->group)->create([
         'name' => 'acme/demo', 'type' => PackageType::Composer, 'repository_url' => PCR_PAT_URL,
     ]);
     $this->group->packages()->attach($this->package);

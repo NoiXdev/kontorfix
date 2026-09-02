@@ -72,7 +72,7 @@ it('keeps the email verification link on the application host when the Host head
 
 it('roots the slug-mode registry metadata at the application url, not at the request host', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['name' => 'acme/demo']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     PackageVersion::factory()->for($pkg)->create();
     $group->packages()->attach($pkg);
 

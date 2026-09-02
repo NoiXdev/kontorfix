@@ -11,8 +11,8 @@ beforeEach(function () {
     $this->org = Organization::factory()->create();
     $this->member = User::factory()->for($this->org)->create(['role' => UserRole::Member]);
     $this->group = Group::factory()->for($this->org)->create(['slug' => 'acme']);
-    $a = Package::factory()->create(['name' => 'acme/alpha', 'type' => 'composer']);
-    $b = Package::factory()->create(['name' => 'beta/widget', 'type' => 'npm']);
+    $a = Package::factory()->inOrgOf($this->group)->create(['name' => 'acme/alpha', 'type' => 'composer']);
+    $b = Package::factory()->inOrgOf($this->group)->create(['name' => 'beta/widget', 'type' => 'npm']);
     $this->group->packages()->attach([$a->id, $b->id]);
 });
 

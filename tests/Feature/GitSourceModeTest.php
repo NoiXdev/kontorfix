@@ -36,7 +36,7 @@ it('mirrors python versions from git tags and builds sdists with sha256', functi
 it('serves git-mirror python dists over the simple index and streams the sdist', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create([
+    $pkg = Package::factory()->inOrgOf($group)->create([
         'type' => PackageType::Python, 'source_mode' => PackageSourceMode::Git,
         'name' => 'acme-lib', 'repository_url' => 'file://'.FixtureRepo::makePython(),
     ]);
@@ -54,7 +54,7 @@ it('serves git-mirror python dists over the simple index and streams the sdist',
 it('rejects publishing to a git-mirror npm package', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create([
+    $pkg = Package::factory()->inOrgOf($group)->create([
         'type' => PackageType::Npm, 'source_mode' => PackageSourceMode::Git,
         'name' => 'leftpad', 'repository_url' => 'file:///tmp/x',
     ]);

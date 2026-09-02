@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -12,8 +13,8 @@ beforeEach(function () {
     $this->orgB = Organization::factory()->create();
     $this->groupA = Group::factory()->for($this->orgA)->create();
     $this->groupB = Group::factory()->for($this->orgB)->create();
-    $this->pkgA = Package::factory()->create();
-    $this->pkgB = Package::factory()->create();
+    $this->pkgA = Package::factory()->for($this->orgA)->create();
+    $this->pkgB = Package::factory()->for($this->orgB)->create();
     $this->groupA->packages()->attach($this->pkgA);
     $this->groupB->packages()->attach($this->pkgB);
 });
@@ -41,7 +42,7 @@ it('denies anonymous access to private groups but allows public ones', function 
 });
 
 it('lists only packages assigned to the group and not expired', function () {
-    $stillThere = Package::factory()->create();
+    $stillThere = Package::factory()->inOrgOf($this->groupA)->create();
     $this->groupA->packages()->attach($stillThere);
     $this->groupA->packages()->updateExistingPivot($this->pkgA->id, ['available_until' => now()->subDay()]);
 
@@ -58,14 +59,6 @@ it('denies a group-scoped token of the same org access to sibling groups', funct
     expect($this->svc->canAccessGroup($token, $groupA2))->toBeFalse();
 });
 
-it('denies org-wide tokens access to ownerless groups', function () {
-    $orphan = Group::factory()->create(['organization_id' => null]);
-    [, $plain] = RegistryToken::issue($this->orgA, 'a', group: null);
-    $token = RegistryToken::findByPlainText($plain);
-
-    expect($this->svc->canAccessGroup($token, $orphan))->toBeFalse();
-});
-
 it('grants token access to public groups regardless of org', function () {
     $this->groupB->update(['public' => true]);
     [, $plain] = RegistryToken::issue($this->orgA, 'a', $this->groupA);
@@ -75,7 +68,7 @@ it('grants token access to public groups regardless of org', function () {
 });
 
 it('includes packages with future or null availability', function () {
-    $pkgFuture = Package::factory()->create();
+    $pkgFuture = Package::factory()->inOrgOf($this->groupA)->create();
     $this->groupA->packages()->attach($pkgFuture, ['available_until' => now()->addDay()]);
 
     expect($this->svc->packagesFor($this->groupA)->pluck('id'))
@@ -97,4 +90,32 @@ it('excludes expired assignments from package access', function () {
     $token = RegistryToken::findByPlainText($plain);
 
     expect($this->svc->canAccessPackage($token, $this->groupA, $this->pkgA))->toBeFalse();
+});
+
+/**
+ * Both organization_id columns are database-enforced NOT NULL, so a persisted row can no
+ * longer reproduce the old "ownerless group" fixture — that scenario used to be exercised
+ * by a now-deleted test. canAccessGroup() and canPublishToGroup() still guard both sides
+ * of the comparison against null, because they take plain models rather than a guaranteed
+ * database round trip, and `null === null` must never read as "same organization". These
+ * two cases build the org-wide token and the group in memory (never saved), which is the
+ * only way left to construct an unset organization_id on either side, and prove the guard
+ * still refuses rather than granting.
+ */
+it('never grants group access when both sides organization_id are unset', function () {
+    $ownerlessGroup = Group::factory()->make(['organization_id' => null]);
+    $orgWideToken = new RegistryToken(['organization_id' => null, 'group_id' => null]);
+
+    expect($this->svc->canAccessGroup($orgWideToken, $ownerlessGroup))->toBeFalse();
+});
+
+it('never grants publish access when both sides organization_id are unset', function () {
+    $ownerlessGroup = Group::factory()->make(['organization_id' => null]);
+    $orgWideToken = new RegistryToken([
+        'organization_id' => null,
+        'group_id' => null,
+        'ability' => TokenAbility::Publish,
+    ]);
+
+    expect($this->svc->canPublishToGroup($orgWideToken, $ownerlessGroup))->toBeFalse();
 });

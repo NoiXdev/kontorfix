@@ -27,8 +27,20 @@ class RegistryAccessService
             return $token->group_id === $group->id;
         }
 
-        return $group->organization_id !== null
-            && $token->organization_id === $group->organization_id;
+        // groups.organization_id is database-enforced NOT NULL (see the
+        // 2026_09_02_110000_enforce_package_organization migration) for a *persisted* row —
+        // but this method takes plain models, and Eloquent never guarantees every attribute
+        // of an in-memory model is set. getAttribute() reads the raw value instead of the
+        // magic property, whose declared type PHPStan infers from that same NOT NULL schema
+        // and would otherwise treat as always non-null — masking exactly the case this
+        // guards against. Dropping either null check would let two unset organization_ids
+        // compare equal and grant access neither side actually has.
+        $groupOrganizationId = $group->getAttribute('organization_id');
+        $tokenOrganizationId = $token->getAttribute('organization_id');
+
+        return $groupOrganizationId !== null
+            && $tokenOrganizationId !== null
+            && $tokenOrganizationId === $groupOrganizationId;
     }
 
     /**
@@ -45,7 +57,15 @@ class RegistryAccessService
             return false;
         }
 
-        if ($group->organization_id === null || $token->organization_id !== $group->organization_id) {
+        // Same defensive shape as canAccessGroup() above, and the same reason for reading
+        // via getAttribute() rather than the magic property: groups.organization_id is
+        // database-enforced NOT NULL for a persisted row, but this still refuses rather
+        // than compare two unset organization_ids as equal. See the comment there.
+        $groupOrganizationId = $group->getAttribute('organization_id');
+        $tokenOrganizationId = $token->getAttribute('organization_id');
+
+        if ($groupOrganizationId === null || $tokenOrganizationId === null
+            || $tokenOrganizationId !== $groupOrganizationId) {
             return false;
         }
 
@@ -84,15 +104,32 @@ class RegistryAccessService
     }
 
     /**
-     * The single place for the expiry predicate of the group assignment.
+     * The single place for the expiry predicate of the group assignment — and for the
+     * ownership predicate that goes with it.
+     *
+     * Constrained to the addressed registry's organization for the same reason findLocal()
+     * and the PyPI read paths are: the pivot row records *assignment*, and canAccessPackage()
+     * checks assignment and group access — neither compares the package's organization to the
+     * registry's. A cross-organization pivot row would therefore be served here, and this
+     * method feeds packagesFor() (Composer's `available-packages` index), packageBelongsToGroup()
+     * (the npm publish membership check) and canAccessPackage() (every ecosystem's access
+     * check). Without the constraint a registry with no Composer upstream listed another
+     * tenant's package *name* in available-packages — name disclosure, not content, since
+     * findLocal() still refused to serve it.
+     *
+     * The enforcement migration now refuses to complete while such a row exists, so this
+     * should never match anything; it is stated anyway, because an invariant that only the
+     * read paths spell out one by one is one edit from being lost.
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */
     private function availablePackages(Group $group): BelongsToMany
     {
-        return $group->packages()->where(function (Builder $q) {
-            $q->whereNull('group_package.available_until')
-                ->orWhere('group_package.available_until', '>', now());
-        });
+        return $group->packages()
+            ->where('packages.organization_id', $group->organization_id)
+            ->where(function (Builder $q) {
+                $q->whereNull('group_package.available_until')
+                    ->orWhere('group_package.available_until', '>', now());
+            });
     }
 }

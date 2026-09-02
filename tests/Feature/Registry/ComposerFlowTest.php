@@ -10,9 +10,9 @@ use Tests\Support\FixtureRepo;
 
 it('completes the full composer client flow: root -> p2 -> dist', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
@@ -34,9 +34,9 @@ it('completes the full composer client flow: root -> p2 -> dist', function () {
 
 it('serves a client that lacks a token nothing but a 401 challenge across the flow', function () {
     Storage::fake('artifacts');
-    $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
-    (new SyncPackage($pkg))->handle();
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
     $this->getJson('/r/kadenz/packages.json')->assertUnauthorized();

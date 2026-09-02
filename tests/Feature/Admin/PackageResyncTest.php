@@ -58,7 +58,7 @@ it('forbids resyncing a package outside the administered org', function () {
     // runs, which would prove nothing about assertCanTouchPackage().
     $adminA = User::factory()->for($orgA)->create(['role' => UserRole::Admin]);
     $groupB = Group::factory()->for($orgB)->create();
-    $package = Package::factory()->create(['type' => PackageType::Composer, 'source_mode' => PackageSourceMode::Git]);
+    $package = Package::factory()->for($orgB)->create(['type' => PackageType::Composer, 'source_mode' => PackageSourceMode::Git]);
     $package->groups()->attach($groupB);
 
     $this->actingAs($adminA)

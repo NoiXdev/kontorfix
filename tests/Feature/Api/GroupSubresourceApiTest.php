@@ -40,8 +40,8 @@ it('adds and removes an upstream', function () {
 });
 
 it('sets the package assignment', function () {
-    $a = Package::factory()->create();
-    $b = Package::factory()->create();
+    $a = Package::factory()->inOrgOf($this->group)->create();
+    $b = Package::factory()->inOrgOf($this->group)->create();
 
     $this->withToken($this->plain)->putJson("/api/v1/groups/{$this->group->id}/packages", [
         'package_ids' => [$a->id, $b->id],

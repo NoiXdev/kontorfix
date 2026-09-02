@@ -30,7 +30,7 @@ class GroupPackageController extends Controller
             'package_ids.*' => ['uuid', Rule::exists('packages', 'id')],
         ]);
 
-        $this->assertCanAttachPackages($validated['package_ids'] ?? []);
+        $this->assertCanAttachPackages($validated['package_ids'] ?? [], $group->organization_id);
 
         $group->packages()->sync($validated['package_ids'] ?? []);
 

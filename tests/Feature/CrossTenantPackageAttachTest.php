@@ -9,11 +9,12 @@ use App\Models\Package;
 use App\Models\User;
 
 /*
- * Packages carry no organization column — they belong to an organization through the
- * registries they are attached to. Every endpoint that accepts `package_ids` must
- * therefore refuse ids that are already owned elsewhere, or a customer-org admin could
+ * A package belongs to exactly one organization outright (`packages.organization_id`), and
+ * may only be attached to registries of that organization. Every endpoint that accepts
+ * `package_ids` must therefore refuse ids owned elsewhere, or a customer-org admin could
  * pull a foreign package into their own registry and inherit write access to it
- * (repository_url takeover, deletion).
+ * (repository_url takeover, deletion) — and create the cross-organization `group_package`
+ * row the enforcement migration refuses.
  */
 
 beforeEach(function () {
@@ -25,7 +26,7 @@ beforeEach(function () {
     $this->groupB = Group::factory()->for($this->orgB)->create();
 
     // A package that already belongs to Org B through Org B's registry.
-    $this->foreignPackage = Package::factory()->create(['name' => 'b/theirs']);
+    $this->foreignPackage = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/theirs']);
     $this->groupB->packages()->attach($this->foreignPackage->id);
 
     [, $this->apiKey] = ApiKey::issue($this->adminA, 'w', ApiKeyPermission::Write);
@@ -73,8 +74,8 @@ it('allows re-attaching a package already reachable in the own organization', fu
     // The picker's quick-add creates a package WITH its registry (group_ids in the same
     // request) and then posts the attach, so by the time this route sees the id the
     // package is already in scope. Re-attaching is idempotent and must stay allowed.
-    $fresh = Package::factory()->create(['name' => 'a/fresh']);
-    $own = Package::factory()->create(['name' => 'a/mine']);
+    $fresh = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/fresh']);
+    $own = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/mine']);
     $this->groupA->packages()->attach([$fresh->id, $own->id]);
 
     $this->actingAs($this->adminA)
@@ -110,12 +111,69 @@ it('creates a quick-added package into its registry in one request, so no orphan
     expect($package->groups()->pluck('groups.id')->all())->toBe([$this->groupA->id]);
 });
 
-it('allows a super admin to share a package across organizations', function () {
+it('refuses even a super admin from attaching a package into a foreign orgs registry', function () {
+    // A package may only be attached to registries of its own organization — the
+    // invariant the enforcement migration hardened onto packages.organization_id and
+    // group_package. It used to have an exemption here: a super-admin's scope "spans
+    // all organizations", so the attach check was skipped outright. But since Task 5/6
+    // a cross-organization attach achieves nothing (the foreign registry cannot serve or
+    // touch what it doesn't own) and the exemption let a super-admin create exactly the
+    // group_package row the migration refuses on the next fresh install — an escape
+    // hatch to an unusable, migration-blocking state is not a feature worth keeping.
     $super = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin, 'is_super_admin' => true]);
 
     $this->actingAs($super)
         ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
-        ->assertRedirect()->assertSessionHasNoErrors();
+        ->assertForbidden();
 
-    expect($this->groupA->packages()->count())->toBe(1);
+    expect($this->groupA->packages()->count())->toBe(0);
+});
+
+it('refuses even a super admin from syncing a foreign orgs package into a registry through the api', function () {
+    // The API copy of the same invariant — ScopesApiToUser::assertCanAttachPackages()
+    // dropped its seesAllOrganizations() exemption for the same reason the console
+    // copy did.
+    $super = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin, 'is_super_admin' => true]);
+    [, $superKey] = ApiKey::issue($super, 'w', ApiKeyPermission::Write);
+
+    $this->withToken($superKey)
+        ->putJson("/api/v1/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0);
+});
+
+it('refuses an admin of two organizations from moving a package between them', function () {
+    // The one case that distinguishes "the target organization" from "the caller's reach".
+    // This admin legitimately administers both organizations, so every scope check passes
+    // and spansAllOrganizations() is irrelevant (they are not a super-admin) — the refusal
+    // comes solely from assertCanAttachPackages() comparing the package's owner against the
+    // TARGET registry's organization rather than against everything the caller can reach.
+    // A future "simplification" to scopedOrgIds() would silently make this attach succeed
+    // and create exactly the cross-organization group_package row the enforcement migration
+    // refuses, which is why it is pinned here.
+    $bothOrgs = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin]);
+    $bothOrgs->organizations()->attach($this->orgB->id, ['role' => UserRole::Admin->value]);
+
+    expect($bothOrgs->fresh()->administeredOrganizationIds())
+        ->toEqualCanonicalizing([$this->orgA->id, $this->orgB->id]);
+
+    $this->actingAs($bothOrgs)
+        ->post("/admin/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0)
+        ->and($this->foreignPackage->fresh()->organization_id)->toBe($this->orgB->id);
+});
+
+it('refuses the same move through the api', function () {
+    $bothOrgs = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin]);
+    $bothOrgs->organizations()->attach($this->orgB->id, ['role' => UserRole::Admin->value]);
+    [, $key] = ApiKey::issue($bothOrgs, 'w', ApiKeyPermission::Write);
+
+    $this->withToken($key)
+        ->putJson("/api/v1/groups/{$this->groupA->id}/packages", ['package_ids' => [$this->foreignPackage->id]])
+        ->assertForbidden();
+
+    expect($this->groupA->packages()->count())->toBe(0);
 });

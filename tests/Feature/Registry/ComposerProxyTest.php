@@ -61,7 +61,7 @@ it('omits available-packages on the root endpoint when an upstream is active', f
 
 it('still lists available-packages when no upstream is configured', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'local/pkg']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'local/pkg']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json')
@@ -71,7 +71,7 @@ it('still lists available-packages when no upstream is configured', function () 
 it('prefers a local package over the upstream and does not call it', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
-    $pkg = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'local/pkg']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'local/pkg']);
     PackageVersion::factory()->for($pkg)->create();
     $group->packages()->attach($pkg);
 
@@ -83,8 +83,11 @@ it('prefers a local package over the upstream and does not call it', function ()
 it('does not leak a locally-hosted but inaccessible package name to the upstream', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
-    // Package exists locally but is NOT assigned to this group.
-    $secret = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
+    // Package is hosted by this organization but is NOT assigned to this group. The org
+    // has to match: the guard is organization-scoped, and "not assigned" is what this
+    // test is about — a foreign organization's name deliberately falls through instead
+    // (OrgScopedUpstreamFallthroughTest).
+    $secret = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'private/secret']);
     PackageVersion::factory()->for($secret)->create();
 
     Http::fake();

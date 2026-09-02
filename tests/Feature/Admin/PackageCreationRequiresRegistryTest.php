@@ -88,8 +88,8 @@ it('lets a super-admin see and re-home an orphan left behind by an earlier creat
     // every organization, so orphans appear in the package listing and the attach guard
     // stands down for them. No migration deletes or reassigns anything.
     $org = Organization::factory()->create(['is_operator' => true]);
-    $orphan = Package::factory()->create(['name' => 'acme/already-orphaned']);
     $home = Group::factory()->for($org)->create();
+    $orphan = Package::factory()->for($org)->create(['name' => 'acme/already-orphaned']);
 
     $super = User::factory()->for($org)->create(['role' => UserRole::Admin, 'is_super_admin' => true]);
 

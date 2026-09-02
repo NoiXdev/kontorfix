@@ -60,6 +60,8 @@ trait ScopesApiToUser
     }
 
     /**
+     * Packages carry their organization outright (`organization_id`).
+     *
      * @param  Builder<Package>  $query
      * @return Builder<Package>
      */
@@ -69,9 +71,7 @@ trait ScopesApiToUser
             return $query;
         }
 
-        $orgIds = $this->readableOrgIds();
-
-        return $query->whereHas('groups', fn (Builder $g) => $g->whereIn('organization_id', $orgIds));
+        return $query->whereIn('organization_id', $this->readableOrgIds());
     }
 
     protected function assertCanReadGroup(Group $group): void
@@ -88,7 +88,7 @@ trait ScopesApiToUser
             return;
         }
 
-        abort_unless($package->groups()->whereIn('organization_id', $this->readableOrgIds())->exists(), 403);
+        abort_unless(in_array($package->organization_id, $this->readableOrgIds(), true), 403);
     }
 
     /** Aborts 403 unless the caller administers (admin/maintainer, or super) the org. */
@@ -102,7 +102,7 @@ trait ScopesApiToUser
         $this->assertCanWriteOrg($group->organization_id);
     }
 
-    /** A package is writable if it is attached to a registry in an administered org (or super). */
+    /** A package is writable if it is owned by an organization the caller administers (or super). */
     protected function assertCanWritePackage(Package $package): void
     {
         if ($this->seesAllOrganizations()) {
@@ -110,29 +110,32 @@ trait ScopesApiToUser
         }
 
         abort_unless(
-            $package->groups()->whereIn('organization_id', $this->apiUser()->administeredOrganizationIds())->exists(),
+            in_array($package->organization_id, $this->apiUser()->administeredOrganizationIds(), true),
             403,
         );
     }
 
     /**
-     * Aborts 403 unless every submitted package may be attached by the caller: it must
-     * already be attached to a registry in an organization the key owner administers.
-     * Pulling in a package that lives only in a foreign organization — or in none at all —
-     * would otherwise grant write access to it through assertCanWritePackage().
+     * Aborts 403 unless every submitted package is owned by the organization it is being
+     * attached into. A package owned elsewhere is refused, otherwise attaching it would
+     * grant write access to it through assertCanWritePackage().
+     *
+     * Checked against the target organization specifically, not the caller's broader
+     * administered set: a key owner who administers several organizations must not be
+     * able to move a package from one of them into another just because both are
+     * administered, and the migration that hardened `packages.organization_id` refuses
+     * exactly such a cross-organization `group_package` row on the next fresh install —
+     * so this holds even for a super-admin, which is why there is no
+     * seesAllOrganizations() exemption here unlike the rest of this trait.
      *
      * The decision itself lives in {@see GuardsPackageAttachment}, shared with the web
-     * console; only the set of organizations that count as the caller's differs.
+     * console; only how the target organization is resolved differs.
      *
      * @param  array<int, string>  $packageIds
      */
-    protected function assertCanAttachPackages(array $packageIds): void
+    protected function assertCanAttachPackages(array $packageIds, string $organizationId): void
     {
-        if ($this->seesAllOrganizations()) {
-            return;
-        }
-
-        $this->assertPackagesReachableIn($packageIds, $this->apiUser()->administeredOrganizationIds());
+        $this->assertPackagesReachableIn($packageIds, [$organizationId]);
     }
 
     /**

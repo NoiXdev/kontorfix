@@ -47,12 +47,12 @@ it('scopes the failed-packages widget to the admins own organizations', function
     $adminA = User::factory()->for($orgA)->create(['role' => UserRole::Admin]);
     $groupA = Group::factory()->for($orgA)->create();
 
-    $mine = Package::factory()->create(['name' => 'a/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'x', 'synced_at' => now()]);
+    $mine = Package::factory()->inOrgOf($groupA)->create(['name' => 'a/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'x', 'synced_at' => now()]);
     $groupA->packages()->attach($mine->id);
 
     // A failed package in a foreign org must not leak into the widget.
     $foreignGroup = Group::factory()->create();
-    $foreign = Package::factory()->create(['name' => 'b/broken', 'sync_status' => SyncStatus::Failed, 'synced_at' => now()]);
+    $foreign = Package::factory()->inOrgOf($foreignGroup)->create(['name' => 'b/broken', 'sync_status' => SyncStatus::Failed, 'synced_at' => now()]);
     $foreignGroup->packages()->attach($foreign->id);
 
     $this->actingAs($adminA)->get('/dashboard')

@@ -49,7 +49,7 @@ it('does not return customer results to a maintainer (customer detail is super-o
     $maintainer = User::factory()->operator()->create(['role' => UserRole::Maintainer]);
     // A package attached to a registry in the maintainer's own organization is visible.
     $group = Group::factory()->for($maintainer->organization)->create();
-    $pkg = Package::factory()->create(['name' => 'acme/widget']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/widget']);
     $group->packages()->attach($pkg->id);
     Organization::factory()->create(['name' => 'Acme GmbH', 'is_operator' => false]);
 

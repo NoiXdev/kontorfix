@@ -15,7 +15,7 @@ it('fully isolates two customers across list, detail, snippets and tokens', func
 
     $groupA = Group::factory()->for($orgA)->create(['slug' => 'acme']);
     $groupB = Group::factory()->for($orgB)->create(['slug' => 'other']);
-    $pkg = Package::factory()->create(['name' => 'acme/widget']);
+    $pkg = Package::factory()->inOrgOf($groupA)->create(['name' => 'acme/widget']);
     $groupA->packages()->attach($pkg);
 
     // Overview: only the member's own registry

@@ -26,11 +26,11 @@ beforeEach(function () {
     $this->groupB = Group::factory()->for($this->orgB)->create();
 
     // One failed package in each org.
-    $this->failedA = Package::factory()->create(['name' => 'a/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'boom A']);
+    $this->failedA = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'boom A']);
     $this->groupA->packages()->attach($this->failedA->id);
-    $this->okA = Package::factory()->create(['name' => 'a/ok', 'sync_status' => SyncStatus::Synced]);
+    $this->okA = Package::factory()->inOrgOf($this->groupA)->create(['name' => 'a/ok', 'sync_status' => SyncStatus::Synced]);
     $this->groupA->packages()->attach($this->okA->id);
-    $this->failedB = Package::factory()->create(['name' => 'b/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'boom B']);
+    $this->failedB = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/broken', 'sync_status' => SyncStatus::Failed, 'sync_error' => 'boom B']);
     $this->groupB->packages()->attach($this->failedB->id);
 
     $this->adminA = User::factory()->for($this->orgA)->create(['role' => UserRole::Admin]);

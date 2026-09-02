@@ -43,7 +43,7 @@ it('lets an org restrict within the global set', function () {
 it('404s the registry protocol for a globally disabled type', function () {
     SystemSetting::current()->update(['enabled_registry_types' => ['composer']]); // npm off
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz', 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/leftpad')->assertNotFound();
@@ -55,7 +55,7 @@ it('404s the registry protocol for a type disabled only for that org', function 
     // python globally on, but off for this org.
     $org = Organization::factory()->create(['enabled_registry_types' => ['composer', 'npm']]);
     $group = Group::factory()->for($org)->create(['slug' => 'kadenz', 'public' => true]);
-    $pkg = Package::factory()->create(['type' => PackageType::Python, 'name' => 'demo']);
+    $pkg = Package::factory()->for($org)->create(['type' => PackageType::Python, 'name' => 'demo']);
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/simple/demo/')->assertNotFound();

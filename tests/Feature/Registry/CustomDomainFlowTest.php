@@ -22,7 +22,7 @@ it('runs the full composer flow at the domain root: root -> p2 -> dist', functio
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
-    $pkg = Package::factory()->create(['type' => PackageType::Composer, 'name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
     (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
     $host = 'packages.kadenz.test';
@@ -45,7 +45,7 @@ it('runs the full npm flow at the domain root: packument -> tarball', function (
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'npm.kadenz.test']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad', 'dist_tags' => ['latest' => '1.0.0']]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad', 'dist_tags' => ['latest' => '1.0.0']]);
     $group->packages()->attach($pkg);
     $host = 'npm.kadenz.test';
     $headers = domainHeaders($group, $host);

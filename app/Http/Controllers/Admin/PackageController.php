@@ -157,12 +157,14 @@ class PackageController extends Controller
         $package->load(['versions', 'groups:id,name,slug,organization_id']);
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
-        // `assertCanTouchPackage()` only asserts that ONE of the package's registries is
-        // reachable in the active scope. Serialising the whole relation therefore handed a
-        // customer-org admin the id, name and slug of every *other* organization's registry
-        // the package is shared into. The state needs a super-admin's deliberate cross-org
-        // attach to arise at all, which is why this is small — but the caller has no business
-        // reading it, so they get a count instead.
+        // `assertCanTouchPackage()` asserts that the package's OWNER is in the active scope
+        // (it compares `organization_id` directly since Task 7); it says nothing about the
+        // registries the package is attached to. Serialising the whole relation therefore
+        // handed a customer-org admin the id, name and slug of every *other* organization's
+        // registry the package is shared into. Such a row can no longer be created — the
+        // attach guard and the enforcement migration both refuse it — but this filter stays:
+        // it is defensive against pre-invariant data, and the caller has no business reading
+        // those rows either way, so they get a count instead.
         $scope = app(OrgScope::class);
         $visibleGroups = $scope->spansAllOrganizations()
             ? $package->groups
@@ -304,6 +306,9 @@ class PackageController extends Controller
         // submitted mode) so the stored column is truthful regardless of what was sent.
         $attributes = $request->safe()->except('group_ids');
         $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        // The owner is the organization the selected registries belong to; the request has
+        // already refused a selection spanning more than one.
+        $attributes['organization_id'] = $request->ownerOrganizationId();
 
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);

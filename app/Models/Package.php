@@ -88,6 +88,7 @@ class Package extends Model
     }
 
     protected $fillable = [
+        'organization_id',
         'type',
         'source_mode',
         'name',
@@ -185,6 +186,17 @@ class Package extends Model
     public function pythonDists(): HasMany
     {
         return $this->hasMany(PythonDist::class);
+    }
+
+    /**
+     * The organization that owns this package. A package may only be attached to
+     * registries of this organization — see GuardsPackageAttachment.
+     *
+     * @return BelongsTo<Organization, $this>
+     */
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     /**

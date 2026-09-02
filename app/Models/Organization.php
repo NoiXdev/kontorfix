@@ -66,6 +66,18 @@ class Organization extends Model
     }
 
     /**
+     * Packages this organization owns. `organization_id` carries a `restrictOnDelete`
+     * foreign key, so this check is the readable half of that constraint — see
+     * OrganizationController::destroy().
+     *
+     * @return HasMany<Package, $this>
+     */
+    public function packages(): HasMany
+    {
+        return $this->hasMany(Package::class);
+    }
+
+    /**
      * @return HasMany<RegistryToken, $this>
      */
     public function registryTokens(): HasMany

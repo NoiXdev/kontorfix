@@ -105,7 +105,16 @@ trait ResolvesRegistryPackage
     {
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
-        $package = Package::where('type', $type)->where('name', $fullName)->first();
+
+        // Scoped to the organization that owns the addressed registry. The name is unique
+        // only within an organization, so an unscoped lookup could return another
+        // tenant's package and then lean on the access check to hide it — a check that is
+        // about assignment, not ownership.
+        $package = Package::where('type', $type)
+            ->where('name', $fullName)
+            ->where('organization_id', $group->organization_id)
+            ->first();
+
         if (! $package || ! $this->access()->canAccessPackage($token, $group, $package)) {
             return null;
         }
@@ -114,12 +123,22 @@ trait ResolvesRegistryPackage
     }
 
     /**
-     * Whether a package with this name exists locally at all (regardless of access/group).
-     * Prevents a privately hosted name from leaking to packagist/npmjs during
-     * the upstream fallthrough (dependency confusion protection).
+     * Whether this organization hosts the name — the dependency-confusion guard, which
+     * suppresses the upstream fallthrough so a privately hosted name is never resolved
+     * from packagist/npmjs.
+     *
+     * Scoped to the addressed organization, because the name is. Another organization's
+     * `acme/tools` is not this organization's, and letting it suppress the fallthrough
+     * would let one tenant shadow another tenant's upstream dependency — which is the
+     * confusion this guard exists to prevent, pointed the wrong way. Within its own
+     * namespace every organization is still fully protected, and that is the only
+     * namespace its clients resolve against.
      */
-    protected function packageExistsLocally(PackageType $type, string $fullName): bool
+    protected function packageExistsLocally(PackageType $type, string $fullName, Group $group): bool
     {
-        return Package::where('type', $type)->where('name', $fullName)->exists();
+        return Package::where('type', $type)
+            ->where('name', $fullName)
+            ->where('organization_id', $group->organization_id)
+            ->exists();
     }
 }

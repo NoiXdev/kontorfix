@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Storage;
 it('streams a stored npm tarball with the right content type', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $v = PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => [], 'dist_tarball_name' => 'leftpad-1.0.0.tgz', 'dist_path' => "tarballs/{$pkg->id}/leftpad-1.0.0.tgz"]);
     Storage::disk('artifacts')->put($v->dist_path, 'tarball-bytes');
     $group->packages()->attach($pkg);
@@ -23,7 +23,7 @@ it('streams a stored npm tarball with the right content type', function () {
 it('streams a scoped npm tarball', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
-    $pkg = Package::factory()->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => '@noixdev/ui-kit']);
     $v = PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => [], 'dist_tarball_name' => 'ui-kit-1.0.0.tgz', 'dist_path' => "tarballs/{$pkg->id}/ui-kit-1.0.0.tgz"]);
     Storage::disk('artifacts')->put($v->dist_path, 'scoped-bytes');
     $group->packages()->attach($pkg);

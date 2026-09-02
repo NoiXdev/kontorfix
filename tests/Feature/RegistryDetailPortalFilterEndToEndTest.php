@@ -15,8 +15,8 @@ it('shows the admin registry detail and the customer portal package list', funct
     $member = User::factory()->for($org)->create(['role' => UserRole::Member]);
     $group = Group::factory()->for($org)->create(['name' => 'Kadenz', 'slug' => 'kadenz']);
     Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
-    $a = Package::factory()->create(['name' => 'acme/alpha', 'type' => 'composer']);
-    $b = Package::factory()->create(['name' => 'beta/widget', 'type' => 'npm']);
+    $a = Package::factory()->for($org)->create(['name' => 'acme/alpha', 'type' => 'composer']);
+    $b = Package::factory()->for($org)->create(['name' => 'beta/widget', 'type' => 'npm']);
     $group->packages()->attach([$a->id, $b->id]);
 
     // Admin-Registry-Detail: Pakete + Domain + Setup sichtbar

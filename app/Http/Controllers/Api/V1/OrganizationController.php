@@ -37,9 +37,17 @@ class OrganizationController extends Controller
 
     public function destroy(Organization $organization): JsonResponse
     {
-        if ($organization->is_operator || $organization->users()->exists() || $organization->groups()->exists()) {
+        // Packages too, not only users and registries — the same four conditions the console
+        // copy checks (Admin\OrganizationController::destroy()). Deleting the organization's
+        // last registry cascades the pivot rows but leaves its packages alive and owned, so
+        // an organization with 0 users, 0 registries and N packages used to pass every check
+        // here and reach delete(), where the restrictOnDelete foreign key raised a bare
+        // SQLSTATE[23503] — a 500 with a stack trace on the API where the console returned a
+        // readable message. Both halves of the rule now say the same thing.
+        if ($organization->is_operator || $organization->users()->exists()
+            || $organization->groups()->exists() || $organization->packages()->exists()) {
             throw ValidationException::withMessages([
-                'organization' => 'Organisation ist Betreiber oder nicht leer (erst Registries/Nutzer entfernen).',
+                'organization' => 'Organisation ist Betreiber oder nicht leer (erst Pakete/Registries/Nutzer entfernen).',
             ]);
         }
 

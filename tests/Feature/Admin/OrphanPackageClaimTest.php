@@ -17,7 +17,7 @@ use App\Models\User;
 function orphanedPackage(Organization $owner): Package
 {
     $group = Group::factory()->for($owner)->create();
-    $package = Package::factory()->create();
+    $package = Package::factory()->inOrgOf($group)->create();
     $package->groups()->attach($group->id);
 
     $group->delete();
@@ -82,7 +82,7 @@ it('still syncs a package of the own organization through the api', function () 
     // validation — only the package's ownership differs, and this one goes through.
     $attacker = Organization::factory()->create();
     $attackerGroup = Group::factory()->for($attacker)->create();
-    $own = Package::factory()->create();
+    $own = Package::factory()->inOrgOf($attackerGroup)->create();
     $own->groups()->attach($attackerGroup->id);
 
     $admin = User::factory()->for($attacker)->create(['role' => UserRole::Admin]);
@@ -117,7 +117,7 @@ it('still creates a registry seeded with a package of the own organization throu
     // Reachability anchor for the case above.
     $attacker = Organization::factory()->create();
     $existing = Group::factory()->for($attacker)->create();
-    $own = Package::factory()->create();
+    $own = Package::factory()->inOrgOf($existing)->create();
     $own->groups()->attach($existing->id);
 
     $admin = User::factory()->for($attacker)->create(['role' => UserRole::Admin]);
@@ -152,7 +152,7 @@ it('still lets an org admin attach a package already reachable in their own scop
     $source = Group::factory()->for($org)->create();
     $target = Group::factory()->for($org)->create();
 
-    $package = Package::factory()->create();
+    $package = Package::factory()->inOrgOf($source)->create();
     $package->groups()->attach($source->id);
 
     $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);

@@ -9,9 +9,9 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 
 it('assigns pool packages to groups with constraints', function () {
-    $pkg = Package::factory()->create(['name' => 'kadenz/shop-bridge']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '1.2.0.0']);
     $group = Group::factory()->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'kadenz/shop-bridge']);
+    PackageVersion::factory()->for($pkg)->create(['version' => '1.2.0.0']);
 
     $group->packages()->attach($pkg, ['available_until' => now()->addYear()]);
 
@@ -21,24 +21,28 @@ it('assigns pool packages to groups with constraints', function () {
 });
 
 it('casts the pivot available_until to a datetime', function () {
-    $pkg = Package::factory()->create();
     $group = Group::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($pkg, ['available_until' => now()->addYear()]);
 
     expect($group->packages()->first()->pivot->available_until)
         ->toBeInstanceOf(Carbon::class);
 });
 
-it('enforces the unique constraint on package type and name', function () {
-    Package::factory()->create(['name' => 'acme/demo']);
+it('enforces the unique constraint on package type and name within one organization', function () {
+    // The name is scoped to the owning organization, not global — a bare
+    // Package::factory()->create() mints its own organization each time, so the
+    // constraint is only exercised by pinning both rows to the same one.
+    $org = Organization::factory()->create();
+    Package::factory()->for($org)->create(['name' => 'acme/demo']);
 
-    expect(fn () => Package::factory()->create(['name' => 'acme/demo']))
+    expect(fn () => Package::factory()->for($org)->create(['name' => 'acme/demo']))
         ->toThrow(QueryException::class);
 });
 
 it('prevents duplicate package assignments to the same group', function () {
-    $pkg = Package::factory()->create();
     $group = Group::factory()->create();
+    $pkg = Package::factory()->inOrgOf($group)->create();
     $group->packages()->attach($pkg);
 
     expect(fn () => $group->packages()->attach($pkg))

@@ -134,7 +134,7 @@ class PypiController extends Controller
 
         // A private name that exists locally must never be forwarded upstream (dependency
         // confusion protection) — mirror the Composer/npm behaviour.
-        if ($this->pythonExistsLocally($normalized)) {
+        if ($this->pythonExistsLocally($normalized, $group)) {
             abort(404);
         }
 
@@ -192,7 +192,18 @@ class PypiController extends Controller
         // pattern refuses those already; this does not rely on it.
         abort_unless(Str::isUuid($package), 404);
 
-        $pkg = Package::where('type', PackageType::Python)->whereKey($package)->first();
+        // Scoped like every other read path. A UUID cannot collide across organizations the
+        // way a name can, so this is not closing a guessing attack — it closes the same
+        // cross-organization pivot row the index and project page now refuse, which would
+        // otherwise still stream its distributions through the foreign registry.
+        //
+        // Redundant since RegistryAccessService::availablePackages() states the same rule, so
+        // canAccessPackage() below already refuses this row. Kept: it costs one predicate, and
+        // it lets this handler be read on its own without tracing into the access service.
+        $pkg = Package::where('type', PackageType::Python)
+            ->where('organization_id', $group->organization_id)
+            ->whereKey($package)
+            ->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
 
         $dist = $pkg->pythonDists()->where('filename', $filename)->firstOrFail();
@@ -214,16 +225,39 @@ class PypiController extends Controller
     /**
      * Python packages assigned to the group (unfiltered by access — callers refine).
      *
+     * Constrained to the owning organization for the same reason findLocal() is: the pivot
+     * row records assignment, and canAccessPackage() checks assignment and group access —
+     * neither compares the package's organization to the registry's. A cross-organization
+     * pivot row would therefore be served here. The enforcement migration now refuses to
+     * complete while such a row exists, so this constraint should never match anything;
+     * it is stated anyway, because this is the only ecosystem where ownership was left
+     * implied by the access check rather than written into the query, and an invariant
+     * that only one of three read paths spells out is one edit from being lost.
+     *
+     * Not made redundant by the same constraint now living in
+     * RegistryAccessService::availablePackages(): the publish path (upload()) resolves the
+     * target project through this method *without* canAccessPackage(), so here this is still
+     * the only statement of the rule.
+     *
      * @return Collection<int, Package>
      */
     private function pythonPackagesOfGroup(Group $group): Collection
     {
-        return $group->packages()->where('type', PackageType::Python)->get();
+        return $group->packages()
+            ->where('type', PackageType::Python)
+            ->where('packages.organization_id', $group->organization_id)
+            ->get();
     }
 
-    private function pythonExistsLocally(string $normalized): bool
+    /**
+     * The Python half of the dependency-confusion guard, scoped to the addressed
+     * organization for the reasons given on ResolvesRegistryPackage::packageExistsLocally().
+     */
+    private function pythonExistsLocally(string $normalized, Group $group): bool
     {
-        return Package::where('type', PackageType::Python)->get()
+        return Package::where('type', PackageType::Python)
+            ->where('organization_id', $group->organization_id)
+            ->get()
             ->contains(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
+use App\Models\Group;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Registry\RegistryTypeService;
 use App\Support\RepositoryUrlRules;
@@ -57,7 +58,23 @@ class StorePackageRequest extends FormRequest
                 'string',
                 'max:190',
                 "regex:{$nameRegex}",
-                Rule::unique('packages')->where('type', $this->input('type')),
+                // Scoped to the owning organization: the name is unique within one
+                // organization's namespace, not across the instance. A plain
+                // ->where('organization_id', ...) would pass '' straight into the query
+                // when the selection is absent or spans several organizations — and
+                // organization_id is a uuid column, so Postgres rejects '' outright with
+                // a QueryException instead of leaving the uniqueness rule to pass cleanly
+                // (withValidator() below is what actually reports that case). The closure
+                // matches nothing instead.
+                Rule::unique('packages')
+                    ->where('type', $this->input('type'))
+                    ->where(function ($query) {
+                        $owner = $this->ownerOrganizationId();
+
+                        return $owner === ''
+                            ? $query->whereRaw('1 = 0')
+                            : $query->where('organization_id', $owner);
+                    }),
             ],
             'repository_url' => $repositoryRule,
             // Optional access token for a private git repository (e.g. a GitHub PAT).
@@ -65,14 +82,13 @@ class StorePackageRequest extends FormRequest
             'repository_token' => ['nullable', 'string', 'max:500'],
             // Optionally reference a managed git credential instead of an inline token.
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
-            // At least one registry is mandatory. `packages.name` is unique per type across
-            // the whole instance, but a package belongs to an organization only through the
-            // registries it is attached to — so a package created with none burns the name
-            // instance-wide while being invisible to its own creator (every package listing
-            // joins through `groups`) and, since orphans are attachable only by a
-            // super-admin, unrecoverable for the creating organization. The attach gate in
-            // GuardsPackageAttachment remains the primary control against *taking* a
-            // package; this stops one being created into limbo in the first place.
+            // At least one registry is mandatory, and it is what resolves the owner:
+            // ownerOrganizationId() reads the organization off the selected registries, and
+            // that organization is both what `packages.organization_id` gets set to and what
+            // the uniqueness rule above scopes against. With no registry there is no owner to
+            // derive, which is precisely the ownerless row the enforcement migration refuses
+            // to migrate. (Historically this rule also stopped a name being burned
+            // instance-wide; `(organization_id, type, name)` makes that impossible now.)
             'group_ids' => ['required', 'array', 'min:1'],
             'group_ids.*' => ['uuid', 'exists:groups,id'],
         ];
@@ -96,12 +112,29 @@ class StorePackageRequest extends FormRequest
             : PackageSourceMode::defaultFor($type);
     }
 
+    /**
+     * The organization that will own the package: the one every selected registry belongs
+     * to. Returns an empty string when the selection is absent or spans several, which
+     * makes the uniqueness rule match nothing — withValidator() below is what reports it.
+     */
+    public function ownerOrganizationId(): string
+    {
+        $ids = Group::whereIn('id', (array) $this->input('group_ids', []))
+            ->pluck('organization_id')->unique();
+
+        return $ids->count() === 1 ? (string) $ids->first() : '';
+    }
+
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
             $type = PackageType::tryFrom((string) $this->input('type'));
             if ($type !== null && ! app(RegistryTypeService::class)->isGloballyEnabled($type)) {
                 $validator->errors()->add('type', 'Dieser Registry-Typ ist instanzweit deaktiviert.');
+            }
+
+            if ($this->input('group_ids') !== null && $this->ownerOrganizationId() === '') {
+                $validator->errors()->add('group_ids', 'Alle gewählten Registries müssen zur selben Organisation gehören.');
             }
         });
     }

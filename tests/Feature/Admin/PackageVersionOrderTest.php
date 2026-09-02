@@ -9,7 +9,7 @@ use App\Models\User;
 it('sends the admin detail page its versions newest first', function () {
     $org = Organization::factory()->create(['is_operator' => true]);
     $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
-    $package = Package::factory()->create();
+    $package = Package::factory()->create(['organization_id' => $org->id]);
     $package->groups()->attach(homeRegistryId($admin));
 
     foreach (['1.9.0', '1.10.0', '1.2.0'] as $v) {
