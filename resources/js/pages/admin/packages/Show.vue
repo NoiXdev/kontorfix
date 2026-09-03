@@ -11,6 +11,8 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
+import { usePackageSyncStatus } from '@/composables/usePackageSyncStatus';
+import { type SyncStatus } from '@/lib/syncStatusPoll';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
@@ -205,17 +207,28 @@ function saveAbandonment() {
         .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
 }
 
-// Live update of the sync status for the currently displayed package.
-// Local state, so the live update doesn't mutate the prop.
-const syncStatus = ref(props.package.sync_status);
-const syncError = ref(props.package.sync_error);
+// The displayed sync status. Local state, so neither source below mutates the prop.
+//
+// The broadcast used to be the only source, and it is the one that can be missed: creating
+// a package dispatches SyncPackage and redirects straight here, so a small repository is
+// routinely synced before this browser has finished subscribing — and the event goes to a
+// channel nobody had joined. The composable therefore also reconciles against the server
+// until the status is terminal, which is likewise the only thing that corrects the badge
+// when realtime is off (no Reverb key at build time) or the account may not subscribe.
+const {
+    status: syncStatus,
+    error: syncError,
+    apply: applySyncStatus,
+} = usePackageSyncStatus(props.package.id, {
+    status: props.package.sync_status,
+    error: props.package.sync_error,
+});
 
 function applyStatus(p: PackagePayload) {
     if (p.id !== props.package.id) {
         return;
     }
-    syncStatus.value = p.sync_status as typeof props.package.sync_status;
-    syncError.value = p.error ?? null;
+    applySyncStatus({ status: p.sync_status as SyncStatus, error: p.error ?? null });
 }
 
 // The composable decides whether this account may subscribe at all.
