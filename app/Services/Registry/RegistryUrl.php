@@ -16,7 +16,7 @@ class RegistryUrl
             return 'https://'.$domain->hostname;
         }
 
-        return rtrim((string) config('app.url'), '/').'/r/'.$group->slug;
+        return rtrim((string) config('app.url'), '/').$this->path($group);
     }
 
     /** Host part for auth.json / .npmrc (without scheme, without path). */
@@ -25,9 +25,19 @@ class RegistryUrl
         return (string) parse_url($this->base($group), PHP_URL_HOST);
     }
 
-    /** Path prefix: empty for a custom domain, otherwise /r/{slug}. */
+    /**
+     * The registry's path prefix, independent of how it is being addressed. This is the
+     * one statement of the URL form: every other site that needs it asks here, so a change
+     * to the form is a change to one line.
+     */
+    public function path(Group $group): string
+    {
+        return '/r/'.$group->slug;
+    }
+
+    /** Path prefix for a specific access path: empty for a custom domain, else path(). */
     public function pathPrefix(Group $group): string
     {
-        return $group->domains->isNotEmpty() ? '' : '/r/'.$group->slug;
+        return $group->domains->isNotEmpty() ? '' : $this->path($group);
     }
 }
