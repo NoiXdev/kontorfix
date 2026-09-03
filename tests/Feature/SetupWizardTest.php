@@ -43,6 +43,25 @@ it('keeps the derived organization slug clear of the registry slug', function ()
         ->and(Group::sole()->slug)->toBe('interne-pakete');
 });
 
+it('keeps the derived organization slug clear of a registry that already exists', function () {
+    // The wizard reopens whenever the instance holds no users, and an instance can reach
+    // that state with registries still in place — purged users, a dump restored without
+    // them. The derivation used to consult only `organizations` and the registry it is
+    // about to create alongside, so it could settle on the slug of a registry that was
+    // already there: the exact organization/registry collision App\Rules\UnclaimedSlug
+    // refuses at write time and 2026_09_03_100000 refuses to upgrade past, minted by the
+    // one path that consulted neither — and silently, since the wizard reports success.
+    Group::factory()->create(['slug' => 'acme-gmbh']);
+
+    $this->post('/setup', setupPayload())->assertRedirect(route('dashboard'));
+
+    // 'Acme GmbH' derives to 'acme-gmbh', which is taken; the wizard has to move on.
+    $operator = Organization::query()->where('is_operator', true)->sole();
+
+    expect($operator->slug)->toBe('acme-gmbh-2')
+        ->and(Group::query()->where('slug', $operator->slug)->exists())->toBeFalse();
+});
+
 it('shows the wizard while no user exists', function () {
     $this->get('/setup')->assertOk();
 });

@@ -199,7 +199,18 @@ class SetupController extends Controller
         $slug = $base;
         $suffix = 2;
 
-        while ($slug === $reserved || Organization::query()->where('slug', $slug)->exists()) {
+        // Both tables, not just `organizations` and the registry being created alongside:
+        // the wizard reopens whenever the instance holds no users, which an operator can
+        // reach with registries still in place (purged users, a dump restored without
+        // them). Checking only `organizations` there lets the derived organization slug
+        // land on an *existing* registry's slug — the one collision App\Rules\UnclaimedSlug
+        // and 2026_09_03_100000 exist to prevent, minted by the one path that guarded
+        // neither, and silently: nothing in the wizard would report it.
+        while (
+            $slug === $reserved
+            || Organization::query()->where('slug', $slug)->exists()
+            || Group::query()->where('slug', $slug)->exists()
+        ) {
             $slug = "{$base}-{$suffix}";
             $suffix++;
         }
