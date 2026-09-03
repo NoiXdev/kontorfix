@@ -482,14 +482,17 @@ class PackageController extends Controller
      * (super-admin always; a maintainer of the operator organization only once the
      * instance setting says so — see AppServiceProvider's gate definition).
      *
-     * Deliberately not guarded by assertCanTouchPackage(): the gate itself already
-     * authorizes a maintainer of *any* operator organization (it checks every
-     * `is_operator` row, not the caller's own home organization — see AppServiceProvider),
-     * so scoping this action to the caller's active organization would reject a caller the
-     * gate was written to allow. The ownership check below is what actually protects a
-     * customer-owned package; unsharing (`shared: false`) a package outside the caller's
-     * scope is a no-op on data nobody else could have made visible to them in the first
-     * place, not a privilege escalation.
+     * Deliberately not guarded by assertCanTouchPackage(): that helper checks the
+     * package's organization against the caller's *active console scope*
+     * (`OrgScope::ids()`, see the "active scope" vocabulary two methods above), which is
+     * the wrong tool for an action whose entire purpose is to act across organization
+     * scope — a super-admin (or a multi-org maintainer) who has the console scoped to one
+     * customer organization is still meant to share a package the operator organization
+     * owns, and `assertCanTouchPackage()` would reject that call on scope alone even
+     * though `share-packages` authorizes it unconditionally. The ownership check below
+     * (`$package->organization->is_operator`) is the actual security boundary for this
+     * action: it is what refuses a customer-owned package regardless of who is calling,
+     * and a caller-scope check adds nothing beyond it.
      */
     public function shared(Request $request, Package $package): RedirectResponse
     {
