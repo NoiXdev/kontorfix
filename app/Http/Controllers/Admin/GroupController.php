@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
+use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
@@ -120,7 +121,7 @@ class GroupController extends Controller
         ];
     }
 
-    public function store(StoreGroupRequest $request): RedirectResponse
+    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment): RedirectResponse
     {
         // The organization is the active scope (or, viewing "all", the explicitly chosen
         // one) — always validated to be one the user may administer.
@@ -130,6 +131,10 @@ class GroupController extends Controller
         // out of another one.
         $packageIds = $request->validated('package_ids', []);
         $this->assertCanAttachPackages($packageIds, $organizationId);
+
+        // …and a shared package may not be seeded alongside the own package it would
+        // shadow. Asked before the insert, so a refusal leaves no empty registry behind.
+        $sharedAssignment->assertCreatable($packageIds);
 
         $group = Group::create([
             'name' => $request->validated('name'),
@@ -160,7 +165,7 @@ class GroupController extends Controller
         return back()->with('success', 'Registry aktualisiert.');
     }
 
-    public function attachPackages(Request $request, Group $group): RedirectResponse
+    public function attachPackages(Request $request, Group $group, SharedAssignment $sharedAssignment): RedirectResponse
     {
         $this->assertAdministersGroup($group);
 
@@ -170,6 +175,7 @@ class GroupController extends Controller
         ]);
 
         $this->assertCanAttachPackages($data['package_ids'], $group->organization_id);
+        $sharedAssignment->assertAssignable($group, $data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.
         $group->packages()->syncWithoutDetaching($data['package_ids']);

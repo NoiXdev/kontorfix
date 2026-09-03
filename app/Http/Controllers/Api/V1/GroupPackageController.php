@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Api\PackageResource;
 use App\Models\Group;
+use App\Services\Package\SharedAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
@@ -21,7 +22,7 @@ class GroupPackageController extends Controller
         return PackageResource::collection($group->packages()->orderBy('name')->get());
     }
 
-    public function update(Request $request, Group $group): AnonymousResourceCollection
+    public function update(Request $request, Group $group, SharedAssignment $sharedAssignment): AnonymousResourceCollection
     {
         $this->assertCanWriteGroup($group);
 
@@ -31,6 +32,7 @@ class GroupPackageController extends Controller
         ]);
 
         $this->assertCanAttachPackages($validated['package_ids'] ?? [], $group->organization_id);
+        $sharedAssignment->assertAssignable($group, $validated['package_ids'] ?? []);
 
         $group->packages()->sync($validated['package_ids'] ?? []);
 

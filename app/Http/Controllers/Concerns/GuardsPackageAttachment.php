@@ -7,6 +7,18 @@ use App\Models\Package;
 /**
  * The one implementation of the cross-tenant attach check.
  *
+ * A package is reachable from a registry when its organization owns it, OR when it is
+ * marked `shared` — a package of the operator organization deliberately offered to every
+ * tenant. Ownership is therefore no longer the whole rule; it is the rule for everything
+ * the operator has not explicitly opened up. Only an operator-organization package can be
+ * marked shared (Admin\PackageController::shared), so the exception cannot be reached by a
+ * customer marking their own package.
+ *
+ * Reachability is not the whole of the shared decision either: a shared package may not
+ * shadow a customer's own package of the same name. That refusal lives in
+ * App\Services\Package\SharedAssignment and must be asked separately by every caller that
+ * writes a `group_package` row.
+ *
  * A package is owned by an organization outright (`packages.organization_id`), so this is
  * a comparison rather than a reconstruction. It used to re-derive ownership from the
  * registries a package happened to be attached to, which could not answer for a package
@@ -25,9 +37,10 @@ use App\Models\Package;
 trait GuardsPackageAttachment
 {
     /**
-     * Aborts 403 unless every submitted package is owned by one of the given organizations.
-     * An empty `$orgIds` refuses every non-empty submission. `assertCanAttachPackages()` in
-     * both {@see ScopesToAdministeredOrgs} and {@see ScopesApiToUser} always calls this with
+     * Aborts 403 unless every submitted package is owned by one of the given organizations
+     * or is shared. An empty `$orgIds` still refuses every non-empty submission of
+     * non-shared packages. `assertCanAttachPackages()` in both
+     * {@see ScopesToAdministeredOrgs} and {@see ScopesApiToUser} always calls this with
      * exactly one — the organization being attached into.
      *
      * @param  array<int, string>  $packageIds
@@ -40,6 +53,7 @@ trait GuardsPackageAttachment
         }
 
         $foreign = Package::whereIn('id', $packageIds)
+            ->where('shared', false)
             ->whereNotIn('organization_id', $orgIds)
             ->exists();
 
