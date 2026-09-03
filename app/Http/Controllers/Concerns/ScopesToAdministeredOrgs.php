@@ -75,6 +75,45 @@ trait ScopesToAdministeredOrgs
         return $query->whereIn('organization_id', $this->scopedOrgIds());
     }
 
+    /**
+     * Constrains a Package query to what may be *assigned* to a registry in the active
+     * scope, which since the shared-packages feature is wider than what the scope owns:
+     * own packages OR shared ones.
+     *
+     * Deliberately not the same question as {@see scopePackageQuery}, which stays the
+     * listing/ownership scope — a shared package of the operator organization is not the
+     * customer's to see in their package directory, edit or delete; it is only theirs to
+     * receive. This one exists so the assignment picker offers exactly the set
+     * {@see GuardsPackageAttachment::assertPackagesReachableIn()} will accept: a picker
+     * offering less hides the feature, one offering more produces a 403 on submit.
+     *
+     * That guard, not this method, is the security boundary. This is a listing filter, and
+     * the two are kept in step by the tests deriving both from the same sentence.
+     *
+     * The `spansAllOrganizations()` branch needs no shared clause: a scope that sees every
+     * organization already sees every shared package, since a shared package is owned by
+     * one of them. Adding `orWhere('shared', true)` to an otherwise unconstrained query
+     * would in fact NARROW it to shared packages only, because an empty nested where is
+     * dropped by the query builder and the `or` would become the whole condition.
+     *
+     * @param  Builder<Package>  $query
+     * @return Builder<Package>
+     */
+    protected function scopeAssignablePackageQuery(Builder $query): Builder
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            return $query;
+        }
+
+        $scopedOrgIds = $this->scopedOrgIds();
+
+        // Nested, so a caller's own `where` on top of this (the name filter) cannot be
+        // swallowed by the `or`.
+        return $query->where(fn (Builder $reachable) => $reachable
+            ->whereIn('organization_id', $scopedOrgIds)
+            ->orWhere('shared', true));
+    }
+
     /** Aborts 403 unless the given package is owned within the active scope. */
     protected function assertCanTouchPackage(Package $package): void
     {

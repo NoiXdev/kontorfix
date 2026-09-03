@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,11 @@ interface Pkg {
     id: string;
     name: string;
     type: 'composer' | 'npm' | 'python';
+    // Marked by App\Http\Controllers\Admin\PackageSearchController. A shared package is
+    // owned by the operator organization and may be assigned to any registry — assigning
+    // one hands a customer something other tenants receive too, so it is marked wherever it
+    // is offered or selected rather than only in the package directory.
+    shared: boolean;
 }
 
 const selected = defineModel<Pkg[]>({ default: () => [] });
@@ -284,6 +290,7 @@ onUnmounted(() => {
             >
                 <TypeBadge :type="pkg.type" />
                 <span class="font-mono">{{ pkg.name }}</span>
+                <SharedBadge v-if="pkg.shared" />
             </button>
 
             <p v-if="failed" class="px-3 py-2 text-sm text-destructive">Suche fehlgeschlagen — bitte erneut versuchen.</p>
@@ -443,6 +450,7 @@ onUnmounted(() => {
             >
                 <TypeBadge :type="pkg.type" />
                 <span class="font-mono">{{ pkg.name }}</span>
+                <SharedBadge v-if="pkg.shared" />
                 <button
                     type="button"
                     class="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"

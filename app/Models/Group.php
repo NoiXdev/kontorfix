@@ -106,28 +106,32 @@ class Group extends Model
      * through it which project a twine upload may target — questions that must never be able
      * to disagree about whether a given row counts.
      *
-     * PREMISE, and it is load-bearing: nothing in the application writes `available_until`.
-     * The column is created by a migration, declared on the pivot, and read here; no
-     * controller, request, job or service sets it. So an expired assignment stays expired,
-     * and SharedAssignment can safely permit what an expired row would otherwise have
-     * blocked — assigning or creating a customer's own package under a name a lapsed shared
-     * assignment used to serve. Its refusal at attach time is the only thing standing
-     * between a registry and serving an own and a shared package under one name.
+     * `available_until` HAS EXACTLY ONE WRITER: Admin\GroupController::updateAssignment(),
+     * the assignment dialog's date field (spec §6). Everything else only reads the column.
      *
-     * WHOEVER ADDS AN `available_until` EDITOR MUST RUN SharedAssignment ON THAT WRITE.
-     * Task 6 of the shared-packages plan surfaces this field in the assignment dialog (spec
-     * §6). The moment an operator can push a lapsed shared assignment back into the future,
-     * they can resurrect exactly the collision the attach guard refuses — through a write
-     * that changes no pivot membership at all, and so passes no guard today. Extending an
-     * assignment is an assignment: it has to ask SharedAssignment whether the name is free,
-     * or the invariant holds on three write paths and not the fourth.
+     * That writer asks SharedAssignment before it writes, and it has to. SharedAssignment's
+     * tolerance of expired rows — it permits assigning or creating a customer's own package
+     * under a name only a lapsed shared assignment used to serve — is safe only while an
+     * expired assignment stays expired. Pushing one back into the future reverses that
+     * decision retroactively and reaches the collision the attach guard refuses, through a
+     * request that changes no pivot membership at all and so passes none of the six
+     * membership writers' guards. Extending an assignment is an assignment.
      *
-     * Separately, and NOT a fourth entry point of that guard — the count above is about
-     * SharedAssignment's three, and this adds none: PypiController::upload() is a further
-     * *dependent* of this relation. It resolves its target project through this relation and
-     * through nothing else, never reaching canAccessPackage(), so an `available_until` pushed
-     * back into the future reopens a publish path and not only a read path. npm's equivalent
-     * reaches the same relation through RegistryAccessService::packageBelongsToGroup().
+     * ANY FURTHER WRITER OF THIS COLUMN MUST DO THE SAME. The reasoning above is a property
+     * of the column, not of the controller that happens to hold the form today.
+     *
+     * Separately, and NOT an entry point of that guard — the counts above are about
+     * SharedAssignment's three, and these add none — this relation has *dependents* that a
+     * date pushed back into the future reopens:
+     *   - PypiController::upload() resolves its target project through this relation and
+     *     through nothing else, never reaching canAccessPackage(), so it is a publish path
+     *     and not only a read path. npm's equivalent reaches the same relation through
+     *     RegistryAccessService::packageBelongsToGroup().
+     *   - Admin\GroupController::show() reports per assignment whether the registry serves
+     *     it, decided here rather than by comparing dates in the payload or the browser: a
+     *     second statement of the predicate could disagree with what the registry does, and
+     *     the console disagreeing with the registry about exactly this is what made an
+     *     expired assignment look live on that page.
      *
      * @return BelongsToMany<Package, $this, GroupPackage>
      */

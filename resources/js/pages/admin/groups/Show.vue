@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
@@ -11,10 +12,12 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { cn } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Copy, Plus, Trash2 } from 'lucide-vue-next';
+import { CalendarClock, Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import { availabilityLabel, availabilityNote, availabilityOf, EXPIRY_CONSEQUENCE, type AssignedPackage } from './packageAssignment';
 
 interface GroupInfo {
     id: string;
@@ -33,12 +36,10 @@ interface GroupInfo {
     url_pattern: string;
 }
 
-interface PackageRow {
-    id: string;
-    name: string;
-    type: string;
-    sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
-}
+// The assignment, not just the package: `shared` says whether other tenants receive it
+// too, and `available_until`/`in_force` say whether this registry actually serves it right
+// now. See `./packageAssignment` for what an expiry does — it is not what it looks like.
+type PackageRow = AssignedPackage;
 
 interface DomainRow {
     id: string;
@@ -144,7 +145,7 @@ function save() {
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
-const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' }[]>([]);
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python'; shared: boolean }[]>([]);
 
 // Which ecosystems this registry actually hosts — drives the setup snippets shown.
 const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
@@ -224,6 +225,61 @@ const pageProps = usePage();
 // Attaching a hostname is operator-only server-side (routes/web.php) — a hostname is an
 // instance-wide, globally unique claim. Detaching stays with the owning organization.
 const canAttachDomain = computed(() => (pageProps.props.auth as { can?: { super?: boolean } } | undefined)?.can?.super === true);
+
+// --- Availability of a single assignment (group_package.available_until) ---
+//
+// One row at a time: the editor opens on the row it edits, seeded with the day that row
+// already carries. `editedUntil` is the raw `YYYY-MM-DD` of the date input; the empty string
+// is "no date", which the server is sent as null.
+const editingAssignment = ref<string | null>(null);
+const editedUntil = ref('');
+const savingAssignment = ref(false);
+
+// Today, for the date input's `min`. The server refuses anything earlier — a past date is a
+// detach with a worse outcome, and detaching already exists — so the field says so up front
+// rather than letting the operator find out on submit.
+const today = computed(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+});
+
+function editAvailability(pkg: PackageRow) {
+    editingAssignment.value = pkg.id;
+    editedUntil.value = pkg.available_until ?? '';
+}
+
+function cancelAvailability() {
+    editingAssignment.value = null;
+    editedUntil.value = '';
+}
+
+// The guard that refuses a name collision (App\Services\Package\SharedAssignment) keys its
+// refusal `package_ids` — the key every other writer of this pivot uses. It is not this
+// form's field name, but it is the guard's, and restating the rule under a second key would
+// be a second statement of it. Rendered on the open row, next to the date field's own error.
+const assignmentErrors = computed(() => {
+    const errors = pageProps.props.errors as Record<string, string> | undefined;
+    return {
+        available_until: errors?.available_until,
+        collision: errors?.package_ids,
+    };
+});
+
+function saveAvailability(packageId: string) {
+    savingAssignment.value = true;
+    router.put(
+        route('admin.groups.packages.update', [props.group.id, packageId]),
+        { available_until: editedUntil.value === '' ? null : editedUntil.value },
+        {
+            preserveScroll: true,
+            onSuccess: () => cancelAvailability(),
+            onFinish: () => {
+                savingAssignment.value = false;
+            },
+        },
+    );
+}
+
 const plainTextToken = computed(() => (pageProps.props.flash as { plainTextToken?: string } | undefined)?.plainTextToken ?? null);
 const tokenCalloutDismissed = ref(false);
 watch(plainTextToken, (v) => {
@@ -372,8 +428,8 @@ async function copyToken() {
                                 <p class="font-mono text-xs text-muted-foreground">{{ nextUrl }}</p>
                                 <p v-if="slugChanged" class="text-xs text-copper-hi">
                                     Der Slug ist Teil der Registry-Adresse. Nach dem Speichern antwortet
-                                    <span class="font-mono">{{ props.group.url }}</span> nicht mehr — bestehende Client-Konfigurationen müssen auf
-                                    die neue Adresse umgestellt werden.
+                                    <span class="font-mono">{{ props.group.url }}</span> nicht mehr — bestehende Client-Konfigurationen müssen auf die
+                                    neue Adresse umgestellt werden.
                                 </p>
                                 <p v-else class="text-xs text-muted-foreground">
                                     Der Slug ist der Registry-Endpunkt. Eine Änderung wird vor dem Speichern noch einmal bestätigt.
@@ -413,35 +469,111 @@ async function copyToken() {
                                         <th class="px-4 py-3 font-medium">Name</th>
                                         <th class="px-4 py-3 font-medium">Typ</th>
                                         <th class="px-4 py-3 font-medium">Status</th>
+                                        <th class="px-4 py-3 font-medium">Verfügbarkeit</th>
                                         <th class="px-4 py-3 font-medium">Aktionen</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr
-                                        v-for="pkg in props.packages"
-                                        :key="pkg.id"
-                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                                    >
-                                        <td class="px-4 py-3 font-mono">
-                                            <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
-                                                {{ pkg.name }}
-                                            </Link>
-                                        </td>
-                                        <td class="px-4 py-3">{{ pkg.type }}</td>
-                                        <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
-                                        <td class="px-4 py-3">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                aria-label="Paket aus Registry entfernen"
-                                                @click="removePackage(pkg.id)"
+                                    <template v-for="pkg in props.packages" :key="pkg.id">
+                                        <!-- The row keeps its separator unless the editor is open under it, in
+                                             which case the editor row carries it instead. -->
+                                        <tr
+                                            :class="
+                                                editingAssignment === pkg.id ? '' : 'border-b border-sidebar-border/70 dark:border-sidebar-border'
+                                            "
+                                        >
+                                            <td class="px-4 py-3 font-mono">
+                                                <div class="flex items-center gap-2">
+                                                    <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
+                                                        {{ pkg.name }}
+                                                    </Link>
+                                                    <SharedBadge v-if="pkg.shared" />
+                                                </div>
+                                            </td>
+                                            <td class="px-4 py-3">{{ pkg.type }}</td>
+                                            <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
+                                            <td class="px-4 py-3">
+                                                <!-- The whole point of this column: an assignment past its date used
+                                                     to look exactly like a live one here, while the registry served
+                                                     nothing and the customer's build got a 404. -->
+                                                <span
+                                                    :class="
+                                                        cn(
+                                                            'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium',
+                                                            pkg.in_force
+                                                                ? 'border-sidebar-border/70 text-muted-foreground dark:border-sidebar-border'
+                                                                : 'border-destructive/30 bg-destructive/10 text-destructive',
+                                                        )
+                                                    "
+                                                >
+                                                    {{ availabilityLabel(availabilityOf(pkg)) }}
+                                                </span>
+                                            </td>
+                                            <td class="px-4 py-3">
+                                                <div class="flex items-center gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        :aria-label="`Verfügbarkeit von ${pkg.name} bearbeiten`"
+                                                        @click="editingAssignment === pkg.id ? cancelAvailability() : editAvailability(pkg)"
+                                                    >
+                                                        <CalendarClock class="size-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        aria-label="Paket aus Registry entfernen"
+                                                        @click="removePackage(pkg.id)"
+                                                    >
+                                                        <Trash2 class="size-4 text-destructive" />
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        <!-- What this assignment currently means for the customer. Shown without
+                                             opening the editor, because the operator reading a failing build needs
+                                             the diagnosis, not a form. -->
+                                        <tr
+                                            v-if="availabilityNote(availabilityOf(pkg)) && editingAssignment !== pkg.id"
+                                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                        >
+                                            <td
+                                                colspan="5"
+                                                class="px-4 pb-3 text-xs"
+                                                :class="pkg.in_force ? 'text-muted-foreground' : 'text-destructive'"
                                             >
-                                                <Trash2 class="size-4 text-destructive" />
-                                            </Button>
-                                        </td>
-                                    </tr>
+                                                {{ availabilityNote(availabilityOf(pkg)) }}
+                                            </td>
+                                        </tr>
+                                        <tr
+                                            v-if="editingAssignment === pkg.id"
+                                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                        >
+                                            <td colspan="5" class="px-4 pb-4">
+                                                <div class="flex flex-col gap-2">
+                                                    <Label :for="`available-until-${pkg.id}`">Verfügbar bis (leer = unbefristet)</Label>
+                                                    <Input
+                                                        :id="`available-until-${pkg.id}`"
+                                                        v-model="editedUntil"
+                                                        type="date"
+                                                        :min="today"
+                                                        class="max-w-xs"
+                                                    />
+                                                    <p class="max-w-2xl text-xs text-muted-foreground">{{ EXPIRY_CONSEQUENCE }}</p>
+                                                    <InputError :message="assignmentErrors.available_until" />
+                                                    <InputError :message="assignmentErrors.collision" />
+                                                    <div class="flex gap-2">
+                                                        <Button size="sm" :disabled="savingAssignment" @click="saveAvailability(pkg.id)">
+                                                            Speichern
+                                                        </Button>
+                                                        <Button variant="outline" size="sm" @click="cancelAvailability">Abbrechen</Button>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
                                     <tr v-if="props.packages.length === 0">
-                                        <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
+                                        <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
                                     </tr>
                                 </tbody>
                             </table>

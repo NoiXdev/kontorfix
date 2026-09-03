@@ -379,6 +379,12 @@ class PackageController extends Controller
                 'id' => $package->id,
                 'name' => $package->name,
                 'type' => $package->type,
+                // Always false — creation never marks a package shared, whatever the
+                // request says (see the attribute assembly above, and its regression test).
+                // Stated rather than omitted so the picker's selection chips carry the same
+                // shape as a searched row and the marker is decided by data, not by which
+                // way the entry got into the list.
+                'shared' => $package->shared,
             ], 201);
         }
 

@@ -79,6 +79,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');
     // Assign/remove packages directly from the registry (group) view.
     Route::post('groups/{group}/packages', [Admin\GroupController::class, 'attachPackages'])->name('groups.packages.store');
+    // The assignment itself, not its membership: `group_package.available_until` makes a
+    // share time-limited. A seventh writer of that pivot table, and the first that changes
+    // no membership — see GroupController::updateAssignment() for why it still has to ask
+    // SharedAssignment.
+    Route::put('groups/{group}/packages/{package}', [Admin\GroupController::class, 'updateAssignment'])->name('groups.packages.update');
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');

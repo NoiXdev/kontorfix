@@ -628,3 +628,104 @@ it('names both conflicts in the plural when a registry is already in the state t
 
     expect($customer->packages()->whereKey($unrelated->id)->exists())->toBeFalse();
 });
+
+// ---------------------------------------------------------------------------------------
+// The available_until EDITOR — the seventh writer, and the one that changes no pivot
+// membership at all.
+//
+// Until Task 6 nothing in the application wrote this column, and the guard's tolerance of
+// expired rows above rests on exactly that: an expired assignment stays expired, so
+// permitting what it would otherwise have blocked is safe. An editor breaks the premise. An
+// operator who can push a lapsed shared assignment back into the future can put the
+// registry into the very state every case above refuses — one registry serving an own and a
+// shared package under one name — through a request that attaches nothing.
+//
+// So this write asks the same question the six membership writers ask. Its post-state is
+// the one syncWithoutDetaching() has, and for the same reason: what the registry serves now
+// (the assignment as it stands, expiry applied) plus the row being pushed back into force.
+//
+// Validation refuses a date in the past, so every accepted write leaves the assignment in
+// force and the guard applies to all of them — there is no branch here that could be wrong
+// in one direction.
+// ---------------------------------------------------------------------------------------
+
+it('refuses to extend a lapsed shared assignment whose name the registry now serves', function () {
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    // Permitted precisely because the shared assignment had lapsed (the case above).
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $shared]), ['available_until' => now()->addYear()->toDateString()])
+        ->assertSessionHasErrors(['package_ids' => ALREADY_SERVED_MESSAGE]);
+
+    // The lapse stands: the registry still serves only the customer's own package.
+    expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeFalse();
+});
+
+it('refuses to make a lapsed shared assignment open-ended when the name is taken', function () {
+    // Clearing the date is the same act with no date in it, and it must not be the way
+    // around the refusal above.
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $shared]), ['available_until' => null])
+        ->assertSessionHasErrors(['package_ids' => ALREADY_SERVED_MESSAGE]);
+
+    expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeFalse();
+});
+
+it('refuses to extend a lapsed own assignment whose name a shared assignment now serves', function () {
+    // The mirror direction. The guard is stated over the resulting set and so has none of
+    // its own, but the editor could still have been wired to ask only about shared rows.
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own, ['available_until' => now()->subDay()]);
+
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $own]), ['available_until' => now()->addYear()->toDateString()])
+        ->assertSessionHasErrors(['package_ids' => SHARED_ALREADY_SERVED_MESSAGE]);
+
+    expect($customer->assignedPackages()->whereKey($own->id)->exists())->toBeFalse();
+});
+
+it('lets a lapsed shared assignment be extended when nothing else holds the name', function () {
+    // The refusals above must not be a blanket "no": a time-limited share whose date the
+    // operator wants to move is the ordinary case this dialog exists for.
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $shared]), ['available_until' => now()->addYear()->toDateString()])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeTrue();
+});
+
+it('does not treat an in-force assignment as colliding with itself when its date moves', function () {
+    // The package is in the registry's current assignment AND in the submission, so it
+    // appears twice in the post-state. Two rows of the same package are not two packages.
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->addDay()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $shared]), ['available_until' => now()->addYear()->toDateString()])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeTrue();
+});

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -257,12 +258,7 @@ const table = useTableState<PackageRow>({
                         <td class="px-4 py-3">
                             <div class="flex items-center gap-2">
                                 <TypeBadge :type="pkg.type" />
-                                <span
-                                    v-if="pkg.shared"
-                                    class="inline-flex items-center rounded-md border border-verdigris/30 bg-verdigris/15 px-2 py-0.5 font-sans text-xs font-medium text-verdigris"
-                                >
-                                    geteilt
-                                </span>
+                                <SharedBadge v-if="pkg.shared" />
                             </div>
                         </td>
                         <td class="px-4 py-3">
