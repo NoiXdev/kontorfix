@@ -93,6 +93,22 @@ describe('availabilityNote', () => {
         expect(availabilityNote({ state: 'permanent', day: null }, SHARED_ELSEWHERE)).toBeNull();
     });
 
+    it('never claims the organization owns the NAME, only a package of that name', () => {
+        // The rule is an existence question over (type, name) within the organization.
+        // "Der Name gehört der Organisation" overstates it and stops being true the moment
+        // the holding package is a different row from the one being described.
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).not.toContain('Der Name gehört');
+        expect(expiryConsequence(OWN)).not.toContain('Der Name gehört');
+        expect(immediateWithdrawalNote(OWN)).not.toContain('Der Name gehört');
+    });
+
+    it('does not make the operator the subject of the delivering', () => {
+        // "Verlängern Sie die Zuweisung, um wieder auszuliefern" reads as the operator doing
+        // the delivering; the German infinitive clause takes the main clause's subject.
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).not.toContain('um wieder auszuliefern');
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).toContain('um die Auslieferung fortzusetzen');
+    });
+
     it('says the same thing about delivery in both cases', () => {
         // The half that does not depend on ownership: the registry stops serving and the
         // request is not passed upstream. Losing it for one of the two would leave that
@@ -124,7 +140,11 @@ describe('availabilityNote', () => {
 
             expect(note).not.toContain('Entfernen Sie die Zuweisung, um den Namen freizugeben.');
             expect(note).toContain('gibt ihn nicht frei');
-            expect(note).toContain('Löschen des Pakets');
+            // What the rule actually is: the organization holds the name through A PACKAGE
+            // of that name, which need not be this row — so the release condition is stated
+            // over the packages, not over this assignment.
+            expect(note).toContain('durch ein Paket dieser Organisation belegt');
+            expect(note).toContain('kein Paket dieser Organisation diesen Namen mehr trägt');
         }
     });
 
@@ -179,6 +199,15 @@ describe('endsImmediately', () => {
 });
 
 describe('immediateWithdrawalNote', () => {
+    it('does not call this a withdrawal of a "Freigabe"', () => {
+        // In this console "Freigabe" is the `shared` marking itself
+        // (Admin\PackageController::shared, admin/system/Index.vue). This note renders on
+        // every row, and most of them were never shared, so the word would be simply false.
+        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+            expect(immediateWithdrawalNote(owned)).not.toContain('Freigabe');
+        }
+    });
+
     it('says delivery stops at once and the name still does not reach the upstream', () => {
         for (const owned of [OWN, SHARED_ELSEWHERE]) {
             expect(immediateWithdrawalNote(owned)).toContain('sofort');

@@ -9,8 +9,11 @@
  * told the opposite — that detaching frees nothing and only deleting the package does.
  *
  * The flag is therefore a SECOND STATEMENT of clause 1 of
- * `ResolvesRegistryPackage::packageExistsLocally()`, which suppresses the upstream for any
- * name this registry's organization owns, with no assignment involved. Two statements of one
+ * `ResolvesRegistryPackage::packageExistsLocally()` and of
+ * `PypiController::pythonExistsLocally()`, which suppress the upstream for any name this
+ * registry's organization owns, with no assignment involved. The field is type-agnostic, so
+ * both resolvers are pinned here — PyPI matches PEP 503-normalised names and the other two
+ * match verbatim, which is a second way the two statements can drift apart. Two statements of one
  * rule, correct the day they are written, is the shape that has cost this branch the most —
  * the guard-versus-serving predicate in Task 3, the site table that missed PyPI in Task 4.
  * Documenting the coupling does not enforce it, and the consequence of drift here is not a
@@ -25,13 +28,21 @@
  *
  * Both halves are checked against the real predicate, before and after the detach, so a
  * case where the name was never suppressed at all cannot pass by accident.
+ *
+ * The cases are chosen so that a per-row identity check — "is THIS row owned by the
+ * registry's organization" — fails at least one of them. That reading passed the first three
+ * for a year's worth of plausible fixtures, because each has one package per name; clause 1
+ * is an EXISTENCE question over `(type, name)` and the two only diverge when the
+ * organization owns a second row of that name.
  */
 
 use App\Enums\PackageType;
+use App\Http\Controllers\Registry\PypiController;
 use App\Http\Controllers\Registry\ResolvesRegistryPackage;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Services\Python\PythonName;
 use App\Services\RegistryAccessService;
 use Tests\TestCase;
 
@@ -46,7 +57,7 @@ use Tests\TestCase;
  * rule — both call the same method — so there is nothing here that can drift. If a third
  * caller appears, that is the moment to lift it.
  */
-function suppressesUpstream(PackageType $type, string $fullName, Group $group): bool
+function suppressesUpstreamVerbatim(PackageType $type, string $fullName, Group $group): bool
 {
     $probe = new class
     {
@@ -64,6 +75,25 @@ function suppressesUpstream(PackageType $type, string $fullName, Group $group): 
     };
 
     return $probe->hosts($type, $fullName, $group);
+}
+
+/** `PypiController::pythonExistsLocally()`, which is private on the controller. */
+function suppressesUpstreamPython(string $normalized, Group $group): bool
+{
+    return (bool) (new ReflectionMethod(PypiController::class, 'pythonExistsLocally'))
+        ->invoke(app(PypiController::class), $normalized, $group);
+}
+
+/**
+ * Whichever of the two resolvers answers for this package's ecosystem. The console field is
+ * type-agnostic, so the assertion has to be too — and PyPI is the half where the name the
+ * resolver matches is not the string in the column.
+ */
+function suppressesUpstream(Package $package, Group $group): bool
+{
+    return $package->type === PackageType::Python
+        ? suppressesUpstreamPython(PythonName::normalize($package->name), $group)
+        : suppressesUpstreamVerbatim($package->type, $package->name, $group);
 }
 
 /** The `owned_by_registry_org` this registry's console page reports for this assignment. */
@@ -89,12 +119,12 @@ function assertConsoleAgreesWithTheResolver(TestCase $test, Group $group, Packag
     // Assigned: the registry suppresses the upstream for this name whichever clause holds.
     // Without this half, a fixture that was never suppressed at all would satisfy the
     // "detaching releases it" case for the wrong reason.
-    expect(suppressesUpstream($package->type, $package->name, $group))->toBeTrue();
+    expect(suppressesUpstream($package, $group))->toBeTrue();
 
     $group->packages()->detach($package->id);
 
     // Detached: still suppressed exactly when the console said the organization owns it.
-    expect(suppressesUpstream($package->type, $package->name, $group))->toBe($reported);
+    expect(suppressesUpstream($package, $group))->toBe($reported);
 }
 
 it('agrees with the resolver for an own package in its own registry', function () {
@@ -127,4 +157,38 @@ it('agrees with the resolver for a shared package in an operator registry', func
     $group->packages()->attach($package);
 
     assertConsoleAgreesWithTheResolver($this, $group, $package);
+});
+
+it('agrees with the resolver when the organization owns another package of the same name', function () {
+    // The case a per-row identity check gets wrong, and it is reachable:
+    // SharedAssignment::assertNameUnclaimedIn() reads assignedPackages(), so a LAPSED shared
+    // assignment does not stop this organization creating its own package under that name.
+    // The registry then carries both rows, and the lapsed one renders the "abgelaufen" note.
+    $group = Group::factory()->create();
+    $shared = Package::factory()
+        ->for(Organization::factory()->create(['is_operator' => true]))
+        ->create(['type' => 'composer', 'name' => 'acme/tools', 'shared' => true]);
+    $group->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    // The own package of that name, which clause 1 matches on and which detaching the shared
+    // assignment does nothing about. Not assigned, so nothing but ownership is in play.
+    Package::factory()->inOrgOf($group)->create(['type' => 'composer', 'name' => 'acme/tools']);
+
+    assertConsoleAgreesWithTheResolver($this, $group, $shared);
+});
+
+it('agrees with the resolver for Python names that differ only by normalisation', function () {
+    // pythonExistsLocally() compares PEP 503-normalised names, so `Shared_Lib` and
+    // `shared-lib` are one name to the resolver and two strings in the column. A lookup that
+    // matched the stored name would call this row foreign and offer detaching as the release
+    // path, while the resolver goes on suppressing through the own package.
+    $group = Group::factory()->create();
+    $shared = Package::factory()
+        ->for(Organization::factory()->create(['is_operator' => true]))
+        ->create(['type' => 'python', 'name' => 'shared-lib', 'shared' => true]);
+    $group->packages()->attach($shared);
+
+    Package::factory()->inOrgOf($group)->create(['type' => 'python', 'name' => 'Shared_Lib']);
+
+    assertConsoleAgreesWithTheResolver($this, $group, $shared);
 });

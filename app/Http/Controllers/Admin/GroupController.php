@@ -16,6 +16,7 @@ use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Package\SharedAssignment;
+use App\Services\Python\PythonName;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
@@ -24,6 +25,7 @@ use App\Support\CredentialUrl;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -136,16 +138,33 @@ class GroupController extends Controller
      * operator gave and the one the date field has to be seeded with.
      *
      * `owned_by_registry_org` mirrors clause 1 of
-     * ResolvesRegistryPackage::packageExistsLocally(), which suppresses the upstream for a
-     * name this registry's ORGANIZATION owns, with no assignment involved at all. The
-     * availability copy needs it, and `shared` cannot answer for it: a shared package
-     * assigned to a registry of the operator organization satisfies both clauses, so
-     * detaching it would not release the name either. Without this the notes would tell an
-     * operator to detach — a destructive act — to release a name that detaching does not
-     * release, producing exactly the unexplainable 404 the copy exists to prevent.
+     * ResolvesRegistryPackage::packageExistsLocally() and of
+     * Registry\PypiController::pythonExistsLocally(), which suppress the upstream for a name
+     * this registry's ORGANIZATION owns, with no assignment involved at all. The availability
+     * copy needs it, and `shared` cannot answer for it: a shared package assigned to a
+     * registry of the operator organization satisfies both clauses, so detaching it would not
+     * release the name either. Without this the notes would tell an operator to detach — a
+     * destructive act — to release a name that detaching does not release, producing exactly
+     * the unexplainable 404 the copy exists to prevent.
      *
-     * The coupling is one-way and worth knowing: if that clause ever stopped keying on
-     * ownership, this field and the German copy built on it would both have to follow.
+     * It is an EXISTENCE question over `(type, name)`, not a property of the row, and the two
+     * genuinely diverge. SharedAssignment::assertNameUnclaimedIn() reads assignedPackages(),
+     * so a lapsed shared assignment does not stop the registry's own organization creating a
+     * package under that name — after which the registry carries an in-force own row and a
+     * lapsed shared row of one name. The lapsed shared row is the one that renders the
+     * "abgelaufen" note; a per-row identity check calls it foreign and offers detaching as
+     * the release path, while clause 1 goes on matching through the own package. That is the
+     * destructive-and-useless instruction this field exists to prevent, on the row most
+     * likely to be read.
+     *
+     * Python names are compared PEP 503-normalised, because pythonExistsLocally() does: an
+     * own `Shared_Lib` holds the name a shared `shared-lib` carries, and the stored strings
+     * never match. No SQL predicate states that, so those rows are normalised in PHP.
+     *
+     * The coupling is one-way and worth knowing: if either clause ever stopped keying on
+     * ownership, this field and the German copy built on it would both have to follow. It is
+     * asserted rather than only described, in
+     * tests/Feature/Admin/AssignmentOwnershipMatchesUpstreamGuardTest.php.
      *
      * A plain list rather than a Collection: Collection's TValue is invariant, so an array
      * shape in that position is rejected even against itself.
@@ -156,11 +175,15 @@ class GroupController extends Controller
     {
         $inForce = $group->assignedPackages()->pluck('packages.id')->all();
 
-        return $group->packages()->orderBy('name')
+        $rows = $group->packages()->orderBy('name')
             // `shared` is selected explicitly: a column-restricted get() that omitted it
             // would yield null rather than fail, and the marker would silently never appear.
-            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared', 'packages.organization_id'])
-            ->map(function (Package $p) use ($group, $inForce): array {
+            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared']);
+
+        $ownedNames = $this->namesHeldByOrganization($group, $rows);
+
+        return $rows
+            ->map(function (Package $p) use ($inForce, $ownedNames): array {
                 // The pivot row this package was loaded through. Read via getRelation()
                 // rather than `$p->pivot`, which is set dynamically by the belongsToMany
                 // and so is invisible to static analysis on a plain Package.
@@ -176,10 +199,69 @@ class GroupController extends Controller
                         ? $pivot->available_until?->toDateString()
                         : null,
                     'in_force' => in_array($p->id, $inForce, true),
-                    'owned_by_registry_org' => $p->organization_id === $group->organization_id,
+                    'owned_by_registry_org' => in_array(self::upstreamNameKey($p->type, $p->name), $ownedNames, true),
                 ];
             })
             ->all();
+    }
+
+    /**
+     * Of the names this page lists, the ones the registry's organization holds a package
+     * under — the `(type, name)` existence question clause 1 of
+     * ResolvesRegistryPackage::packageExistsLocally() and
+     * Registry\PypiController::pythonExistsLocally() actually ask.
+     *
+     * Two queries, because the two resolvers match names differently and only one of them
+     * can be expressed as a SQL `whereIn`:
+     *
+     *  - Composer and npm resolve the stored name verbatim, so the listed names filter the
+     *    lookup directly.
+     *  - PyPI resolves a PEP 503-normalised name, so an own `Shared_Lib` holds the name a
+     *    shared `shared-lib` carries while the stored strings never match. Nothing in SQL
+     *    states that normalisation, so the organization's Python packages are fetched and
+     *    normalised here. Bounded by the organization's Python package count, and only run
+     *    when the page actually lists a Python row.
+     *
+     * @param  Collection<int, Package>  $rows
+     * @return list<string>
+     */
+    private function namesHeldByOrganization(Group $group, Collection $rows): array
+    {
+        // Plain arrays throughout: `except()`/`only()` on an Eloquent collection filter by
+        // MODEL KEY, so applying either to the result of groupBy() calls getKey() on a
+        // collection and fatals.
+        $resolvedVerbatim = $rows->reject(fn (Package $p): bool => $p->type === PackageType::Python);
+
+        $held = [];
+
+        if ($resolvedVerbatim->isNotEmpty()) {
+            $held = Package::where('organization_id', $group->organization_id)
+                ->whereIn('type', $resolvedVerbatim->map(fn (Package $p): string => $p->type->value)->unique()->all())
+                ->whereIn('name', $resolvedVerbatim->map(fn (Package $p): string => $p->name)->unique()->all())
+                ->get(['type', 'name'])
+                ->map(fn (Package $p): string => self::upstreamNameKey($p->type, $p->name))
+                ->all();
+        }
+
+        if ($rows->contains(fn (Package $p): bool => $p->type === PackageType::Python)) {
+            $held = array_merge($held, Package::where('organization_id', $group->organization_id)
+                ->where('type', PackageType::Python)
+                ->get(['type', 'name'])
+                ->map(fn (Package $p): string => self::upstreamNameKey($p->type, $p->name))
+                ->all());
+        }
+
+        return array_values(array_unique($held));
+    }
+
+    /**
+     * The identity a resolver actually compares on: the type, plus the name in the form that
+     * resolver matches. Python is PEP 503-normalised through the same helper PypiController
+     * uses, so the two cannot disagree about which strings are one name.
+     */
+    private static function upstreamNameKey(PackageType $type, string $name): string
+    {
+        return $type->value.' '.($type === PackageType::Python ? PythonName::normalize($name) : $name);
     }
 
     /**

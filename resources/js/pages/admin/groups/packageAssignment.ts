@@ -145,8 +145,9 @@ const NOT_FORWARDED = 'Anfragen werden nicht an den Upstream weitergereicht, son
 /** How the name is released, in each of the two cases. Never both. */
 const RELEASED_BY_DETACHING = 'Entfernen Sie die Zuweisung, um den Namen freizugeben.';
 const HELD_BY_OWNERSHIP =
-    'Der Name gehört der Organisation dieser Registry und bleibt unabhängig von der Zuweisung belegt — ' +
-    'das Entfernen der Zuweisung gibt ihn nicht frei, nur das Löschen des Pakets.';
+    'Der Name ist durch ein Paket dieser Organisation belegt und bleibt unabhängig von der Zuweisung ' +
+    'reserviert — das Entfernen der Zuweisung gibt ihn nicht frei, sondern erst, wenn kein Paket dieser ' +
+    'Organisation diesen Namen mehr trägt.';
 
 function releaseSentence(ownedByRegistryOrg: boolean): string {
     return ownedByRegistryOrg ? HELD_BY_OWNERSHIP : RELEASED_BY_DETACHING;
@@ -174,7 +175,8 @@ export function availabilityNote(availability: Availability, ownedByRegistryOrg:
             return (
                 `Am ${availability.day} abgelaufen: Diese Registry liefert das Paket nicht mehr aus. ` +
                 `Builds, die es anfordern, erhalten einen 404 — die Registry reicht den Namen weiterhin ` +
-                `nicht an den Upstream weiter. Verlängern Sie die Zuweisung, um wieder auszuliefern. ` +
+                `nicht an den Upstream weiter. Verlängern Sie die Zuweisung, um die Auslieferung ` +
+                `fortzusetzen. ` +
                 releaseSentence(ownedByRegistryOrg)
             );
     }
@@ -190,8 +192,8 @@ export function availabilityNote(availability: Availability, ownedByRegistryOrg:
 export function expiryConsequence(ownedByRegistryOrg: boolean): string {
     return (
         `Nach diesem Tag liefert die Registry das Paket nicht mehr aus. Der Name bleibt dabei belegt: ` +
-        `${NOT_FORWARDED} (der Upstream, z. B. Packagist, wird nicht befragt). Das ist Absicht: Es ` +
-        `verhindert, dass ein fremdes Paket still an die Stelle des bisherigen tritt. ` +
+        `Anfragen werden nicht an den Upstream (z. B. Packagist) weitergereicht, sondern enden mit 404. ` +
+        `Das ist Absicht: Es verhindert, dass ein fremdes Paket still an die Stelle des bisherigen tritt. ` +
         `${releaseSentence(ownedByRegistryOrg)} Ohne Datum bleibt die Zuweisung unbefristet.`
     );
 }
@@ -228,6 +230,6 @@ export function immediateWithdrawalNote(ownedByRegistryOrg: boolean): string {
     return (
         `Dieses Datum liegt in der Vergangenheit: Die Registry stellt die Auslieferung sofort ein. Der Name ` +
         `bleibt weiterhin belegt und wird nicht an den Upstream weitergereicht — das ist der sichere Weg, ` +
-        `eine Freigabe zurückzunehmen. ${releaseSentence(ownedByRegistryOrg)}`
+        `die Auslieferung zu beenden. ${releaseSentence(ownedByRegistryOrg)}`
     );
 }
