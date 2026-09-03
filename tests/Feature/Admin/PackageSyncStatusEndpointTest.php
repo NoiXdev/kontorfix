@@ -64,6 +64,48 @@ it('reports the failure text alongside a failed status', function () {
         ->assertExactJson(['status' => 'failed', 'error' => 'Repository nicht erreichbar.']);
 });
 
+/**
+ * The audience the poll actually exists for.
+ *
+ * A non-super-admin cannot join the `operator` channel (routes/channels.php admits
+ * super-admins only, because it carries every organization's package names and raw sync
+ * errors), so `admin.packages.sync-status` is the *only* way their badge ever becomes
+ * correct. Every other positive case in this file uses an operator-org admin, i.e. a
+ * super-admin equivalent — which would stay green while a tightening of
+ * assertCanTouchPackage() or OrgScope silently switched the poll off for exactly the
+ * people who depend on it.
+ */
+it('lets an admin of the owning organization read the status', function () {
+    $org = Organization::factory()->create();
+    $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
+    $package = Package::factory()->for($org)->create([
+        'type' => PackageType::Composer,
+        'source_mode' => PackageSourceMode::Git,
+        'sync_status' => SyncStatus::Syncing,
+    ]);
+
+    $this->actingAs($admin)
+        ->getJson(route('admin.packages.sync-status', $package))
+        ->assertOk()
+        ->assertExactJson(['status' => 'syncing', 'error' => null]);
+});
+
+it('lets a maintainer of the owning organization read the status and its failure text', function () {
+    $org = Organization::factory()->create();
+    $maintainer = User::factory()->for($org)->create(['role' => UserRole::Maintainer]);
+    $package = Package::factory()->for($org)->create([
+        'type' => PackageType::Composer,
+        'source_mode' => PackageSourceMode::Git,
+        'sync_status' => SyncStatus::Failed,
+        'sync_error' => 'Repository nicht erreichbar.',
+    ]);
+
+    $this->actingAs($maintainer)
+        ->getJson(route('admin.packages.sync-status', $package))
+        ->assertOk()
+        ->assertExactJson(['status' => 'failed', 'error' => 'Repository nicht erreichbar.']);
+});
+
 // Same guard as every other read of this package. `sync_error` can quote raw output from
 // the tenant's repository, so this must not become a softer door into it than `show`.
 it('forbids reading the status of a package outside the administered org', function () {

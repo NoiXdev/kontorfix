@@ -215,14 +215,20 @@ function saveAbandonment() {
 // channel nobody had joined. The composable therefore also reconciles against the server
 // until the status is terminal, which is likewise the only thing that corrects the badge
 // when realtime is off (no Reverb key at build time) or the account may not subscribe.
+//
+// The seed is passed as a getter, not a snapshot: Inertia sets `preserveState: true` for
+// post/put/patch/delete, so clicking "Erneut synchronisieren" re-renders this page with
+// `sync_status` back at `pending` without remounting the component. Reading the prop once
+// would have left the badge frozen on the previous terminal value.
 const {
     status: syncStatus,
     error: syncError,
+    stale: syncStatusStale,
     apply: applySyncStatus,
-} = usePackageSyncStatus(props.package.id, {
+} = usePackageSyncStatus(props.package.id, () => ({
     status: props.package.sync_status,
     error: props.package.sync_error,
-});
+}));
 
 function applyStatus(p: PackagePayload) {
     if (p.id !== props.package.id) {
@@ -267,6 +273,15 @@ useOperatorChannel({
                 <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">Zuletzt synchronisiert: {{ props.package.synced_at }}</div>
                 <div v-if="syncError" class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {{ syncError }}
+                </div>
+                <!-- The page stopped polling before the sync reached an answer. Saying so beats
+                     leaving a badge that has quietly frozen on "Wartet" or "Läuft…". -->
+                <div
+                    v-if="syncStatusStale"
+                    role="status"
+                    class="w-fit rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400"
+                >
+                    Status konnte nicht aktualisiert werden — Seite neu laden.
                 </div>
 
                 <!-- Usage stats -->
