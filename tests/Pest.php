@@ -88,6 +88,33 @@ function adminOf(Organization $org): User
 }
 
 /**
+ * An admin of the operator organization who is NOT thereby a global super-admin.
+ *
+ * This cannot be built as "a UserRole::Admin whose home organization has is_operator:
+ * true" — that is precisely User::isSuperAdmin()'s own grandfather clause
+ * (`$user->role === UserRole::Admin && $user->organization?->is_operator`), so a user
+ * built that way already passes Gate::before and every gate trivially, making it
+ * indistinguishable from superAdmin() and unable to exercise the conditional
+ * `shared_package_role` path at all. Instead this grants the admin role on the operator
+ * organization through an additional membership (organization_user pivot), the same
+ * per-org role mechanism PerOrgRoleScopeTest exercises — which User::roleIn() honours
+ * without tripping isSuperAdmin().
+ *
+ * Declared here rather than locally for the same reason as superAdmin()/adminOf() above:
+ * a top-level function only exists once its declaring file has been required, so a test
+ * file using it would fail to run standalone if it lived in just one test file.
+ */
+function operatorOrgAdmin(): User
+{
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $home = Organization::factory()->create(['is_operator' => false]);
+    $user = User::factory()->for($home)->create(['role' => UserRole::Member]);
+    $user->organizations()->attach($operator->id, ['role' => UserRole::Admin->value]);
+
+    return $user;
+}
+
+/**
  * A registry in the user's own organization, to be passed as the mandatory `group_ids` of a
  * package create. Creating a package into no registry is refused (StorePackageRequest): the
  * row would burn its instance-global name while being invisible to its own creator.

@@ -89,6 +89,7 @@ class Package extends Model
 
     protected $fillable = [
         'organization_id',
+        'shared',
         'type',
         'source_mode',
         'name',
@@ -124,6 +125,7 @@ class Package extends Model
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
             'abandoned_at' => 'datetime',
+            'shared' => 'bool',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',
         ];
