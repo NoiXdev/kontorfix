@@ -27,3 +27,13 @@ it('never lets a plain organization admin share, whatever the setting', function
         expect($admin->can('share-packages'))->toBeFalse();
     }
 });
+
+it('never lets a maintainer of a non-operator organization share, whatever the setting', function () {
+    $org = Organization::factory()->create(['is_operator' => false]);
+    $maintainer = maintainerOf($org);
+
+    foreach (SharedPackageRole::cases() as $role) {
+        SystemSetting::current()->update(['shared_package_role' => $role]);
+        expect($maintainer->can('share-packages'))->toBeFalse();
+    }
+});

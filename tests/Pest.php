@@ -88,6 +88,21 @@ function adminOf(Organization $org): User
 }
 
 /**
+ * A maintainer of the given organization — a plain (non-operator) org maintainer.
+ *
+ * Added for the share-packages gate's regression coverage: a Maintainer of an ordinary
+ * customer organization must never satisfy `roleIn($anyOperatorOrgId) === Maintainer`, since
+ * the gate iterates every is_operator organization and asks that question of the caller.
+ * Declared here rather than in the test file for the same reason as the other helpers above:
+ * a top-level function only exists once its declaring file has been required, so a test file
+ * using it would fail to run standalone if it lived in just one test file.
+ */
+function maintainerOf(Organization $org): User
+{
+    return User::factory()->for($org)->create(['role' => UserRole::Maintainer]);
+}
+
+/**
  * A maintainer of the operator organization — the tier `share-packages` actually
  * delegates to when `shared_package_role` is widened, per SharedPackageRole's docblock.
  *

@@ -195,7 +195,7 @@ class AppServiceProvider extends ServiceProvider
         // Who may mark a package as shared, per the instance setting. A super-admin always
         // may; a maintainer of the operator organization only when the setting says so. A
         // plain organization admin never may — a shared package is served into other
-        // tenants registries, which is not theirs to decide.
+        // tenants' registries, which is not theirs to decide.
         //
         // Deliberately not an admin check: an admin whose home organization is the operator
         // organization is already a super-admin via User::isSuperAdmin()'s grandfather
