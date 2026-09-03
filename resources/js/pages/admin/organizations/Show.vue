@@ -7,12 +7,15 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Trash2 } from 'lucide-vue-next';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 interface RegistryRow {
     id: string;
     name: string;
     slug: string;
+    // Supplied by App\Services\Registry\RegistryUrl — the /r/{org}/{registry} address,
+    // stated once in PHP rather than reassembled here from the bare slug.
+    url_path: string;
     packages_count: number;
     domains: string[];
 }
@@ -46,6 +49,11 @@ const props = defineProps<{
         slug: string;
         is_operator: boolean;
         notification_cadence: string;
+        // How many registries this organization owns — every one of them changes URL when
+        // the organization slug changes, since it is the first segment of each address.
+        // Supplied so the confirmation dialog can name the count rather than guess it from
+        // a `registries` list that a future page might paginate or filter.
+        registries_count: number;
     };
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
@@ -76,15 +84,48 @@ const cadenceOptions = [
     { value: 'off', label: 'Aus' },
 ];
 
-// Cadence lives on the same `update()` route as the organization's name, so the current
-// name travels along unchanged rather than the form clobbering it with an empty value.
-const cadenceForm = useForm<{ name: string; notification_cadence: string }>({
+// Name, slug and cadence all live on the same `update()` route, so every field travels
+// along on each submit rather than the form clobbering the others with an empty value.
+const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string }>({
     name: props.organization.name,
+    slug: props.organization.slug,
     notification_cadence: props.organization.notification_cadence,
 });
 
-function saveCadence() {
-    cadenceForm.put(route('admin.organizations.update', props.organization.id), { preserveScroll: true });
+const slugChanged = computed(() => settingsForm.slug !== props.organization.slug);
+
+// The organization slug is the first path segment of every registry URL it owns — unlike a
+// registry's own slug edit (admin/groups/Show.vue), which moves exactly one address, this
+// one moves all of them. Named so the confirmation states the count instead of a vague
+// "some registries".
+const registryImpact = computed(() => {
+    const n = props.organization.registries_count;
+    if (n === 0) {
+        return 'Diese Organisation besitzt aktuell keine Registries.';
+    }
+    if (n === 1) {
+        return 'Die 1 Registry dieser Organisation ändert dadurch ihre Adresse.';
+    }
+    return `Alle ${n} Registries dieser Organisation ändern dadurch ihre Adresse.`;
+});
+
+function saveSettings() {
+    settingsForm.put(route('admin.organizations.update', props.organization.id), {
+        preserveScroll: true,
+        // Same shape as the registry-slug confirmation in admin/groups/Show.vue: a native
+        // confirm in `onBefore`, so a declined dialog cancels the request outright.
+        onBefore: () =>
+            !slugChanged.value ||
+            confirm(
+                'Slug der Organisation ändern?\n\n' +
+                    `Bisher: ${props.organization.slug}\n` +
+                    `Neu:    ${settingsForm.slug}\n\n` +
+                    `${registryImpact.value}\n\n` +
+                    'Die bisherigen Adressen antworten danach nicht mehr. Bestehende Client-Konfigurationen, ' +
+                    'die auf sie zeigen (composer.json, .npmrc, pip.conf, CI-Variablen), funktionieren erst ' +
+                    'wieder, wenn sie auf die neuen Adressen umgestellt sind.',
+            ),
+    });
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -182,21 +223,59 @@ function detachMember(userId: string) {
 
             <section class="flex flex-col gap-3">
                 <div>
-                    <h2 class="text-lg font-medium">Ausfall-Digest</h2>
+                    <h2 class="text-lg font-medium">Organisation bearbeiten</h2>
                     <p class="text-sm text-muted-foreground">
-                        Wie oft diese Organisation eine Sammel-Mail über neue Hintergrund-Fehlschläge erhält. „Aus“ stoppt jede Mail für diese
-                        Organisation, unabhängig davon, wie viele Empfänger eingetragen sind.
+                        Name, Slug und Ausfall-Digest dieser Organisation. Der Slug ist der oberste Namensraum der Registry-Adresse — er steht als
+                        erstes Segment vor jeder Registry dieser Organisation.
                     </p>
                 </div>
                 <form
-                    class="flex flex-wrap items-end gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
-                    @submit.prevent="saveCadence"
+                    class="flex flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                    @submit.prevent="saveSettings"
                 >
-                    <div class="grid gap-2">
-                        <SearchableSelect v-model="cadenceForm.notification_cadence" class="w-48" :options="cadenceOptions" />
-                        <InputError :message="cadenceForm.errors.notification_cadence" />
+                    <div class="flex flex-col gap-1.5">
+                        <label for="org-name" class="text-sm font-medium">Name</label>
+                        <input
+                            id="org-name"
+                            v-model="settingsForm.name"
+                            type="text"
+                            class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs focus:border-ring focus:ring-1 focus:ring-ring focus:outline-hidden"
+                        />
+                        <InputError :message="settingsForm.errors.name" />
                     </div>
-                    <Button type="submit" :disabled="cadenceForm.processing" class="ml-auto">Speichern</Button>
+
+                    <div class="flex flex-col gap-1.5">
+                        <label for="org-slug" class="text-sm font-medium">Slug</label>
+                        <input
+                            id="org-slug"
+                            v-model="settingsForm.slug"
+                            type="text"
+                            class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-xs focus:border-ring focus:ring-1 focus:ring-ring focus:outline-hidden"
+                        />
+                        <p v-if="slugChanged" class="text-xs text-copper-hi">
+                            Der Slug ist Teil der Adresse jeder Registry dieser Organisation. {{ registryImpact }} Bestehende
+                            Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt sind.
+                        </p>
+                        <p v-else class="text-xs text-muted-foreground">
+                            Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch
+                            einmal bestätigt.
+                        </p>
+                        <InputError :message="settingsForm.errors.slug" />
+                    </div>
+
+                    <div class="grid gap-2">
+                        <label for="org-cadence" class="text-sm font-medium">Ausfall-Digest</label>
+                        <p class="text-xs text-muted-foreground">
+                            Wie oft diese Organisation eine Sammel-Mail über neue Hintergrund-Fehlschläge erhält. „Aus“ stoppt jede Mail für diese
+                            Organisation, unabhängig davon, wie viele Empfänger eingetragen sind.
+                        </p>
+                        <SearchableSelect id="org-cadence" v-model="settingsForm.notification_cadence" class="w-48" :options="cadenceOptions" />
+                        <InputError :message="settingsForm.errors.notification_cadence" />
+                    </div>
+
+                    <div>
+                        <Button type="submit" :disabled="settingsForm.processing">Speichern</Button>
+                    </div>
                 </form>
             </section>
 
@@ -207,7 +286,7 @@ function detachMember(userId: string) {
                         <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
                             <tr>
                                 <th class="px-4 py-3 font-medium">Name</th>
-                                <th class="px-4 py-3 font-medium">Slug</th>
+                                <th class="px-4 py-3 font-medium">URL</th>
                                 <th class="px-4 py-3 font-medium">Pakete</th>
                                 <th class="px-4 py-3 font-medium">Domains</th>
                             </tr>
@@ -219,7 +298,7 @@ function detachMember(userId: string) {
                                 class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                             >
                                 <td class="px-4 py-3">{{ registry.name }}</td>
-                                <td class="px-4 py-3 font-mono text-xs">{{ registry.slug }}</td>
+                                <td class="px-4 py-3 font-mono text-xs">{{ registry.url_path }}</td>
                                 <td class="px-4 py-3">{{ registry.packages_count }}</td>
                                 <td class="px-4 py-3 font-mono text-xs">{{ registry.domains.join(', ') || '—' }}</td>
                             </tr>
