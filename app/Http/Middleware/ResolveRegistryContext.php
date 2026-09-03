@@ -4,12 +4,19 @@ namespace App\Http\Middleware;
 
 use App\Models\Domain;
 use App\Models\Organization;
+use App\Services\Registry\LegacySlugRedirector;
+use App\Services\Registry\RegistryUrl;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class ResolveRegistryContext
 {
+    public function __construct(
+        private readonly LegacySlugRedirector $legacy,
+        private readonly RegistryUrl $urls,
+    ) {}
+
     public function handle(Request $request, Closure $next): Response
     {
         $orgSlug = $request->route('orgSlug');
@@ -20,17 +27,34 @@ class ResolveRegistryContext
             // organization, so both segments are part of the lookup.
             //
             // Resolved as two seeks rather than one query carrying the organization as a
-            // correlated EXISTS. The only index on `groups` is (organization_id, slug), and
-            // Postgres cannot seek a composite index on its second column: filtering by
-            // slug first is a sequential scan over every registry on the instance, on every
-            // metadata request, and one `composer install` fires hundreds. Measured on 400
-            // registries: "Seq Scan on groups … Rows Removed by Filter: 200" against an
-            // "Index Scan using groups_organization_id_slug_unique … (organization_id = …
-            // AND slug = …)" for the shape below. An unknown organization answers 404
-            // exactly as an unknown registry does — the client is told no more than that
-            // this URL names nothing.
+            // correlated EXISTS. `groups` carries a composite index on (organization_id,
+            // slug) for exactly this lookup, plus a separate index on `slug` alone for the
+            // legacy fallback below — and Postgres cannot seek the composite one on its
+            // second column: filtering by slug first against it is a sequential scan over
+            // every registry on the instance, on every metadata request, and one
+            // `composer install` fires hundreds. Measured on 400 registries:
+            // "Seq Scan on groups … Rows Removed by Filter: 200" against an "Index Scan
+            // using groups_organization_id_slug_unique … (organization_id = … AND slug = …)"
+            // for the shape below.
             $organization = Organization::where('slug', $orgSlug)->first();
-            abort_if($organization === null, 404);
+
+            if ($organization === null) {
+                // Not necessarily an unknown URL: the router already committed to this
+                // canonical two-segment route before this middleware runs, and a legacy
+                // one-segment URL can still land here when its own remaining path happens
+                // to satisfy some endpoint's pattern one segment later than usual. pip is
+                // the concrete case — GET /r/{slug}/simple/{project} reads as
+                // {orgSlug}={slug}, {groupSlug}="simple", then npm's bare {package} pattern
+                // for {project} — a real route match, so LegacySlugRedirectController's own
+                // route (registered after this one) never gets tried at all. $orgSlug is
+                // then not an organization slug but a legacy registry slug; hand it to the
+                // same resolver LegacySlugRedirectController uses, which also refuses to
+                // guess when that slug is ambiguous (see LegacySlugRedirector).
+                $legacyGroup = $this->legacy->resolve($orgSlug);
+                abort_if($legacyGroup === null, 404);
+
+                return $this->legacy->respond($this->legacy->target($legacyGroup, $request, $this->urls, 2), $request);
+            }
 
             $group = $organization->groups()->where('slug', $slug)->first();
             abort_if($group === null, 404);

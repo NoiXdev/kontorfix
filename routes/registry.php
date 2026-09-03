@@ -109,5 +109,8 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 Route::middleware(['registry.context', 'registry.auth'])->group($registryEndpoints);
 
 // Legacy slug access, registered last on purpose — see LegacySlugRedirectController.
-Route::get('/r/{groupSlug}/{rest?}', LegacySlugRedirectController::class)
+// GET for composer.json/.npmrc/pip.conf reads, PUT for npm publish, POST for twine
+// upload — a bare-slug URL that used to 404 for every method should not now 405 a write
+// just because a read of the same shape got a route.
+Route::match(['GET', 'PUT', 'POST'], '/r/{groupSlug}/{rest?}', LegacySlugRedirectController::class)
     ->where(['groupSlug' => '[a-z0-9-]+', 'rest' => '.*']);
