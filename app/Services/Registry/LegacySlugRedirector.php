@@ -64,19 +64,30 @@ class LegacySlugRedirector
      * "/"-separated path segments to drop (the leading slash itself never produces a
      * segment — "r" and the legacy slug segment are what get dropped).
      *
-     * Built from the untouched REQUEST_URI rather than decoded route parameters or
+     * Built from undecoded input rather than from decoded route parameters or
      * Request::getQueryString(): both decode-then-reencode, which corrupts a rest segment
      * that already carries percent-encoding (e.g. a project name containing %2F or %3F)
      * and reorders/collapses/reencodes a query string (Symfony's getQueryString() runs it
      * through parse_str + ksort + http_build_query). Byte-for-byte passthrough is what
      * preserves a project name or query value exactly as the client sent it.
+     *
+     * The path comes from getPathInfo() and only the query string from the raw REQUEST_URI.
+     * getPathInfo() is undecoded too — Symfony's preparePathInfo() slices REQUEST_URI, it
+     * does not urldecode — so nothing is lost, and it additionally strips the base URL.
+     * Splitting the raw REQUEST_URI instead used to drop $skipSegments counted from the
+     * *host* root, which is only the same thing when the application is deployed at the
+     * document root. Under a subdirectory deployment — which AppUrl explicitly supports and
+     * RegistryUrl::origin() propagates — /sub/r/tools/… dropped "sub" and "r", left "tools"
+     * in the rest, and produced /sub/r/{org}/{group}/tools/… with the registry segment
+     * doubled. The target is built relative to the application root (the redirect() helper
+     * prepends the root again), so the base URL must not be part of it.
      */
     public function target(Group $group, Request $request, RegistryUrl $urls, int $skipSegments): string
     {
         $requestUri = (string) $request->server->get('REQUEST_URI', '');
-        [$rawPath, $rawQuery] = array_pad(explode('?', $requestUri, 2), 2, null);
+        [, $rawQuery] = array_pad(explode('?', $requestUri, 2), 2, null);
 
-        $segments = explode('/', ltrim($rawPath, '/'));
+        $segments = explode('/', ltrim($request->getPathInfo(), '/'));
         $rest = implode('/', array_slice($segments, $skipSegments));
 
         $target = $urls->path($group).($rest === '' ? '' : '/'.$rest);

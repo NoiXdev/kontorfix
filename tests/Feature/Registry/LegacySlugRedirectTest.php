@@ -201,12 +201,38 @@ it('passes a percent-encoded rest segment through unchanged instead of corruptin
     // controller sees it, so building the redirect from it would turn a literal %2F into
     // an actual "/" (silently reshaping the path) and a %23 into "#" (silently truncating
     // everything the client sent after it, since "#" starts a fragment). Reconstructing
-    // the target from the untouched REQUEST_URI instead means the encoding survives.
+    // the target from undecoded input instead means the encoding survives — getPathInfo()
+    // slices REQUEST_URI without urldecoding it, so this holds after the base-URL fix below.
     $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-enc', 'public' => true]);
     $org = $group->organization;
 
     $this->get("/r/{$group->slug}/p2/vendor/na%20me.json")
         ->assertRedirect("/r/{$org->slug}/{$group->slug}/p2/vendor/na%20me.json");
+});
+
+it('redirects correctly when the application is deployed under a subdirectory', function () {
+    // AppUrl's docblock supports an APP_URL carrying a subdirectory path, and
+    // RegistryUrl::origin() propagates it. Counting the segments to drop off the raw
+    // REQUEST_URI ignores that: under /sub/ the two dropped segments are "sub" and "r", so
+    // the legacy slug segment stayed in the rest and the target came out with the registry
+    // named twice — /sub/r/{org}/{group}/{group}/packages.json. getPathInfo() strips the
+    // base URL first, so the two dropped segments are the ones actually meant.
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-sub', 'public' => true]);
+    $org = $group->organization;
+
+    // A subdirectory deployment is two things at once: APP_URL carries the path (AppUrl
+    // normalises it, PinUrlRoot roots every generated absolute URL at it), and the front
+    // controller sits at /sub/index.php, from which Symfony derives the base URL that
+    // getPathInfo() strips. Both have to be set, or the test proves only half of it.
+    config(['app.url' => 'http://localhost/sub']);
+
+    $this->withServerVariables([
+        'SCRIPT_NAME' => '/sub/index.php',
+        'SCRIPT_FILENAME' => '/sub/index.php',
+        'PHP_SELF' => '/sub/index.php',
+    ])->get("/sub/r/{$group->slug}/packages.json")
+        ->assertStatus(301)
+        ->assertRedirect("http://localhost/sub/r/{$org->slug}/{$group->slug}/packages.json");
 });
 
 it('redirects a HEAD request on a legacy url instead of 405ing it', function () {
