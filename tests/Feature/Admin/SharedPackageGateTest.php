@@ -8,13 +8,13 @@ it('defaults to letting only a super-admin share', function () {
     expect(SystemSetting::current()->shared_package_role)->toBe(SharedPackageRole::SuperAdmin);
 
     expect(superAdmin()->can('share-packages'))->toBeTrue()
-        ->and(operatorOrgAdmin()->can('share-packages'))->toBeFalse();
+        ->and(operatorMaintainer()->can('share-packages'))->toBeFalse();
 });
 
-it('lets an operator-organization admin share once the setting says so', function () {
-    SystemSetting::current()->update(['shared_package_role' => SharedPackageRole::OperatorAdmin]);
+it('lets a maintainer of the operator organization share once the setting says so', function () {
+    SystemSetting::current()->update(['shared_package_role' => SharedPackageRole::OperatorMaintainer]);
 
-    expect(operatorOrgAdmin()->can('share-packages'))->toBeTrue()
+    expect(operatorMaintainer()->can('share-packages'))->toBeTrue()
         ->and(superAdmin()->can('share-packages'))->toBeTrue();
 });
 

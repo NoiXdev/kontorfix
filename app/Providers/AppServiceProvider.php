@@ -193,32 +193,36 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Who may mark a package as shared, per the instance setting. A super-admin always
-        // may; an operator-organization admin only when the setting says so. A plain
-        // organization admin never may — a shared package is served into other tenants'
-        // registries, which is not theirs to decide.
+        // may; a maintainer of the operator organization only when the setting says so. A
+        // plain organization admin never may — a shared package is served into other
+        // tenants registries, which is not theirs to decide.
         //
-        // "Operator-organization admin" is deliberately checked via User::roleIn() (which
-        // also recognises an admin role granted on an additional organization through the
-        // organization_user pivot — see PerOrgRoleScopeTest), not via the shorter
-        // `$user->role === UserRole::Admin && $user->organization?->is_operator` on the
-        // home organization alone. That shorter form is exactly User::isSuperAdmin()'s own
-        // grandfather clause, so anyone satisfying it is already a super-admin and this
-        // branch would never run — Gate::before (and the isSuperAdmin() check just above)
-        // would already have returned true. Routing through roleIn() lets an operator-org
-        // *membership* short of the home-org grandfather actually reach this branch.
+        // Deliberately not an admin check: an admin whose home organization is the operator
+        // organization is already a super-admin via User::isSuperAdmin()'s grandfather
+        // clause (role === Admin && organization?->is_operator), so that population already
+        // bypasses this gate through Gate::before before the closure below ever runs — see
+        // SharedPackageRole's docblock. A maintainer of the operator organization is the
+        // tier that genuinely sits below super-admin.
+        //
+        // User::roleIn() covers both shapes a maintainer of the operator organization can
+        // take with one check: a Maintainer whose home organization IS the operator
+        // organization (roleIn returns $user->role directly once isSuperAdmin() is ruled
+        // out), and a Maintainer role granted through an additional-organization membership
+        // on the operator organization (the organization_user pivot — see
+        // PerOrgRoleScopeTest). Confirmed by reading roleIn(), not assumed.
         Gate::define('share-packages', function (User $user): bool {
             if ($user->isSuperAdmin()) {
                 return true;
             }
 
-            if (SystemSetting::current()->shared_package_role !== SharedPackageRole::OperatorAdmin) {
+            if (SystemSetting::current()->shared_package_role !== SharedPackageRole::OperatorMaintainer) {
                 return false;
             }
 
             return Organization::query()
                 ->where('is_operator', true)
                 ->pluck('id')
-                ->contains(fn (string $operatorOrgId): bool => $user->roleIn($operatorOrgId) === UserRole::Admin);
+                ->contains(fn (string $operatorOrgId): bool => $user->roleIn($operatorOrgId) === UserRole::Maintainer);
         });
     }
 }

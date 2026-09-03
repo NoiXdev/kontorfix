@@ -88,30 +88,30 @@ function adminOf(Organization $org): User
 }
 
 /**
- * An admin of the operator organization who is NOT thereby a global super-admin.
+ * A maintainer of the operator organization — the tier `share-packages` actually
+ * delegates to when `shared_package_role` is widened, per SharedPackageRole's docblock.
  *
- * This cannot be built as "a UserRole::Admin whose home organization has is_operator:
- * true" — that is precisely User::isSuperAdmin()'s own grandfather clause
- * (`$user->role === UserRole::Admin && $user->organization?->is_operator`), so a user
- * built that way already passes Gate::before and every gate trivially, making it
- * indistinguishable from superAdmin() and unable to exercise the conditional
- * `shared_package_role` path at all. Instead this grants the admin role on the operator
- * organization through an additional membership (organization_user pivot), the same
- * per-org role mechanism PerOrgRoleScopeTest exercises — which User::roleIn() honours
- * without tripping isSuperAdmin().
+ * Given the straightforward shape (home organization IS the operator organization, role
+ * Maintainer): unlike the admin tier, `UserRole::Maintainer` never trips
+ * `User::isSuperAdmin()`'s grandfather clause (`role === Admin && organization?->is_operator`
+ * — Maintainer never satisfies `role === Admin`), so this is a real, reachable population
+ * distinct from superAdmin(), with no need for the pivot-membership workaround the
+ * admin-tier version of this helper required. `User::roleIn()` returns `$user->role`
+ * directly for the home organization once isSuperAdmin() is ruled out, so this resolves to
+ * UserRole::Maintainer exactly as the gate expects.
+ *
+ * A pivot-membership variant (Maintainer role on the operator organization via an
+ * additional, non-home membership) would also satisfy the gate — roleIn() covers that shape
+ * too, see AppServiceProvider's share-packages gate — but no test here needs to exercise
+ * that path, so it is dropped in favour of this simpler, more representative shape.
  *
  * Declared here rather than locally for the same reason as superAdmin()/adminOf() above:
  * a top-level function only exists once its declaring file has been required, so a test
  * file using it would fail to run standalone if it lived in just one test file.
  */
-function operatorOrgAdmin(): User
+function operatorMaintainer(): User
 {
-    $operator = Organization::factory()->create(['is_operator' => true]);
-    $home = Organization::factory()->create(['is_operator' => false]);
-    $user = User::factory()->for($home)->create(['role' => UserRole::Member]);
-    $user->organizations()->attach($operator->id, ['role' => UserRole::Admin->value]);
-
-    return $user;
+    return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Maintainer]);
 }
 
 /**
