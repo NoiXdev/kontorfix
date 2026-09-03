@@ -185,6 +185,19 @@ curl -s "${auth[@]}" -H "Content-Type: application/json" \
   -d "{\"package_ids\":[\"$PACKAGE_ID\"]}"
 ```
 
+> **Behaviour change: `PUT groups/{group}` now moves the registry URL.**
+> A registry is addressed at `/r/<organization-slug>/<registry-slug>`, and `PUT
+> groups/{group}` applies a `slug` field in the request body. Earlier versions accepted the
+> field and ignored it, so a script that does a `GET` and `PUT`s the whole body back —
+> fetch, change one field, save — used to leave the address alone. It no longer does: a
+> stale `slug` replayed from a cached `GET` relocates the registry. The request succeeds
+> and nothing warns; what breaks is the `composer.json`, `.npmrc` or `pip.conf` still
+> pointing at the old address.
+>
+> Send only the fields you mean to change (`slug` is optional — omit it and the address
+> stays put), or re-`GET` immediately before the `PUT`. The old address is **not** kept as
+> an alias, and a registry reached through a custom domain keeps that domain unchanged.
+
 **Issue a registry (pull) token for a Composer client**
 
 ```bash
