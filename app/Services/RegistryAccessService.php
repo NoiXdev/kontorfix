@@ -7,7 +7,6 @@ use App\Models\Group;
 use App\Models\GroupPackage;
 use App\Models\Package;
 use App\Models\RegistryToken;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
@@ -104,8 +103,8 @@ class RegistryAccessService
     }
 
     /**
-     * The single place for the expiry predicate of the group assignment — and for the
-     * ownership predicate that goes with it.
+     * The single place for the ownership predicate of the group assignment — and the one
+     * caller-facing statement of the expiry predicate, which the relation itself carries.
      *
      * Constrained to the addressed registry's organization for the same reason findLocal()
      * and the PyPI read paths are: the pivot row records *assignment*, and canAccessPackage()
@@ -125,11 +124,9 @@ class RegistryAccessService
      */
     private function availablePackages(Group $group): BelongsToMany
     {
-        return $group->packages()
-            ->where('packages.organization_id', $group->organization_id)
-            ->where(function (Builder $q) {
-                $q->whereNull('group_package.available_until')
-                    ->orWhere('group_package.available_until', '>', now());
-            });
+        // The expiry predicate itself lives on the relation (Group::assignedPackages), so
+        // the attach-time guard asks the same question of a row that this read path does.
+        return $group->assignedPackages()
+            ->where('packages.organization_id', $group->organization_id);
     }
 }

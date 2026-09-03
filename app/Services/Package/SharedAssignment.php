@@ -51,9 +51,21 @@ class SharedAssignment
     private const SHARED_ALREADY_SERVED = 'Diese Registry führt bereits ein geteiltes Paket mit demselben Namen: %s. '
         .'Entfernen Sie es zuerst aus dieser Registry, bevor Sie ein eigenes Paket unter diesem Namen zuweisen.';
 
+    /**
+     * Neither side arrived with this request, so the registry was already in the conflict
+     * state. Unreachable through the application — every write that could produce it is
+     * refused above — but stated rather than guessed at, and worded without claiming which
+     * side is the new one, because with neither arriving there is no new one.
+     */
+    private const ALREADY_IN_CONFLICT = 'Diese Registry führt bereits ein eigenes und ein geteiltes Paket mit '
+        .'demselben Namen: %s. Entfernen Sie eines der beiden aus dieser Registry.';
+
     /** A package being created would claim a name a shared assignment already serves. */
-    private const NAME_HELD_BY_SHARED = 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: %s. '
+    private const NAME_HELD_BY_SHARED = 'Die Registry %s führt dieses Paket bereits als geteiltes Paket. '
         .'Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.';
+
+    private const NAME_HELD_BY_SHARED_PLURAL = 'Folgende Registrys führen dieses Paket bereits als geteiltes '
+        .'Paket: %s. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.';
 
     /**
      * For a write that leaves the registry serving exactly the submission — `sync()`, and
@@ -81,13 +93,19 @@ class SharedAssignment
     {
         $submitted = $this->packages($packageIds);
 
+        // assignedPackages(), not packages(): an assignment past its `available_until` is
+        // not part of what the registry serves — RegistryAccessService reads it through the
+        // same relation — so it cannot be shadowed and must not block anything. Applied to
+        // the existing assignment only; the submission has no pivot row to expire yet.
+        //
         // Columns qualified because the relation query joins `group_package`. A package
         // that is both assigned and submitted appears twice in the union; it is not
         // de-duplicated, because the predicate below asks whether a name carries a shared
         // AND a non-shared row, and a duplicate contributes the same `shared` value twice.
         // A de-duplication here was tried and removed: no mutation of it could be made to
         // fail a test, which is what it means for a line to be doing nothing.
-        $assigned = $group->packages()->get(['packages.id', 'packages.type', 'packages.name', 'packages.shared']);
+        $assigned = $group->assignedPackages()
+            ->get(['packages.id', 'packages.type', 'packages.name', 'packages.shared']);
 
         $this->refuseShadowing($assigned->concat($submitted), $submitted);
     }
@@ -111,8 +129,10 @@ class SharedAssignment
             return;
         }
 
+        // assignedPackages(), for the same reason as above: an expired shared assignment
+        // serves nothing, so it holds no name.
         $holders = Group::whereIn('id', $groupIds)
-            ->whereHas('packages', fn ($q) => $q
+            ->whereHas('assignedPackages', fn ($q) => $q
                 ->where('packages.shared', true)
                 ->where('packages.type', $type)
                 ->where('packages.name', $name))
@@ -124,7 +144,10 @@ class SharedAssignment
         }
 
         throw ValidationException::withMessages([
-            'name' => sprintf(self::NAME_HELD_BY_SHARED, $holders->implode(', ')),
+            'name' => sprintf(
+                $holders->count() === 1 ? self::NAME_HELD_BY_SHARED : self::NAME_HELD_BY_SHARED_PLURAL,
+                $holders->implode(', '),
+            ),
         ]);
     }
 
@@ -200,9 +223,11 @@ class SharedAssignment
         return match (true) {
             $sharedArriving && $ownArriving => self::SUBMITTED_TOGETHER,
             $sharedArriving => self::ALREADY_SERVED,
-            // Includes the case where neither was submitted, which means the registry was
-            // already in this state before the request — still worth refusing over.
-            default => self::SHARED_ALREADY_SERVED,
+            $ownArriving => self::SHARED_ALREADY_SERVED,
+            // Neither arrived: the registry was already in this state before the request,
+            // which no write reachable from the application can produce. Refused anyway,
+            // and worded so it does not tell the operator they just did something.
+            default => self::ALREADY_IN_CONFLICT,
         };
     }
 }

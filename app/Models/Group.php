@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Database\Factories\GroupFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -93,6 +94,24 @@ class Group extends Model
         return $this->belongsToMany(Package::class)
             ->using(GroupPackage::class)
             ->withPivot('version_constraint', 'available_until');
+    }
+
+    /**
+     * The assignments that are actually in force: `available_until` makes an assignment
+     * time-limited, and an expired row serves nothing.
+     *
+     * The one statement of that predicate. RegistryAccessService decides what a registry
+     * serves with it, and App\Services\Package\SharedAssignment decides whether a name is
+     * already taken with it — two questions that must never be able to disagree about
+     * whether a given row counts.
+     *
+     * @return BelongsToMany<Package, $this, GroupPackage>
+     */
+    public function assignedPackages(): BelongsToMany
+    {
+        return $this->packages()->where(fn (Builder $q) => $q
+            ->whereNull('group_package.available_until')
+            ->orWhere('group_package.available_until', '>', now()));
     }
 
     /**

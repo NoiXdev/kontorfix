@@ -60,8 +60,8 @@ it('refuses to un-share a package still assigned to another organizations regist
         // The registries by name, so the operator knows where to go — and the message text,
         // not just the key: a QueryException from the invariant this refusal protects would
         // also arrive as "an error".
-        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch Registrys anderer Organisationen '
-            .'zugewiesen: Kundenregistry. Entfernen Sie es dort zuerst.']);
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch der Registry Kundenregistry einer anderen '
+            .'Organisation zugewiesen. Entfernen Sie es dort zuerst.']);
 
     expect($package->fresh()->shared)->toBeTrue()
         ->and($customer->packages()->whereKey($package->id)->exists())->toBeTrue();
@@ -104,6 +104,39 @@ it('does not apply the un-share check when sharing', function () {
         ->put(route('admin.packages.shared', $package), ['shared' => true])
         ->assertRedirect()
         ->assertSessionHasNoErrors();
+
+    expect($package->fresh()->shared)->toBeTrue();
+});
+
+it('names every registry, in the plural, when the package is assigned to more than one', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    $package->groups()->attach(Group::factory()->create(['name' => 'Erste Registry']));
+    $package->groups()->attach(Group::factory()->create(['name' => 'Zweite Registry']));
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch Registrys anderer Organisationen '
+            .'zugewiesen: Erste Registry, Zweite Registry. Entfernen Sie es dort zuerst.']);
+
+    expect($package->fresh()->shared)->toBeTrue();
+});
+
+it('refuses the un-share even when the cross-organization assignment has expired', function () {
+    // Deliberately unlike SharedAssignment, which skips expired rows because they serve
+    // nothing. What the enforcement migration refuses is the ROW — it joins group_package
+    // and never reads available_until — so an expired row blocks the un-share just the same.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    $customer = Group::factory()->create(['name' => 'Kundenregistry']);
+    $package->groups()->attach($customer, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch der Registry Kundenregistry einer anderen '
+            .'Organisation zugewiesen. Entfernen Sie es dort zuerst.']);
 
     expect($package->fresh()->shared)->toBeTrue();
 });

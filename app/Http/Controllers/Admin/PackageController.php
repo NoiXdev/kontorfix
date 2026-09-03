@@ -535,6 +535,11 @@ class PackageController extends Controller
         // silently, so the name would fall through to the public index it was there to
         // pre-empt. Refuse and name the registries, the way the migrations do, rather than
         // detaching rows on the operator's behalf: the destructive step stays explicit.
+        //
+        // Every row counts here, expired or not — deliberately unlike SharedAssignment,
+        // which asks what a registry SERVES and so skips expired assignments. The invariant
+        // this protects is about the row existing at all: the migration above joins
+        // `group_package` and never looks at `available_until`.
         if (! $data['shared']) {
             $foreign = $package->groups()
                 ->where('groups.organization_id', '!=', $package->organization_id)
@@ -543,8 +548,11 @@ class PackageController extends Controller
 
             if ($foreign->isNotEmpty()) {
                 throw ValidationException::withMessages([
-                    'shared' => 'Dieses Paket ist noch Registrys anderer Organisationen zugewiesen: '
-                        .$foreign->implode(', ').'. Entfernen Sie es dort zuerst.',
+                    'shared' => $foreign->count() === 1
+                        ? "Dieses Paket ist noch der Registry {$foreign->first()} einer anderen Organisation "
+                            .'zugewiesen. Entfernen Sie es dort zuerst.'
+                        : 'Dieses Paket ist noch Registrys anderer Organisationen zugewiesen: '
+                            .$foreign->implode(', ').'. Entfernen Sie es dort zuerst.',
                 ]);
             }
         }

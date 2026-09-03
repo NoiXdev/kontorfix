@@ -47,6 +47,12 @@ const ALREADY_SERVED_MESSAGE = 'Diese Registry führt bereits ein eigenes Paket 
 const SUBMITTED_TOGETHER_MESSAGE = 'Diese Auswahl enthält ein eigenes und ein geteiltes Paket mit demselben Namen: '
     .'composer acme/tools. Ein geteiltes Paket darf ein eigenes nicht verdecken.';
 
+const NAME_HELD_MESSAGE = 'Die Registry Kundenregistry führt dieses Paket bereits als geteiltes Paket. '
+    .'Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.';
+
+const NAME_HELD_PLURAL_MESSAGE = 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: '
+    .'Erste Registry, Zweite Registry. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.';
+
 const SHARED_ALREADY_SERVED_MESSAGE = 'Diese Registry führt bereits ein geteiltes Paket mit demselben Namen: '
     .'composer acme/tools. Entfernen Sie es zuerst aus dieser Registry, bevor Sie ein eigenes Paket unter diesem '
     .'Namen zuweisen.';
@@ -324,8 +330,7 @@ it('refuses creating a package whose name a shared assignment already serves the
             'repository_url' => 'https://git.example.com/acme/tools.git',
             'group_ids' => [$customer->id],
         ])
-        ->assertSessionHasErrors(['name' => 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: '
-            .'Kundenregistry. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.']);
+        ->assertSessionHasErrors(['name' => NAME_HELD_MESSAGE]);
 
     // Refused before the insert, so there is no orphan package either.
     expect(Package::where('name', 'acme/tools')->where('shared', false)->exists())->toBeFalse();
@@ -344,8 +349,7 @@ it('refuses creating a package whose name a shared assignment already serves the
             'group_ids' => [$customer->id],
         ])
         ->assertUnprocessable()
-        ->assertJsonValidationErrors(['name' => 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: '
-            .'Kundenregistry. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.']);
+        ->assertJsonValidationErrors(['name' => NAME_HELD_MESSAGE]);
 
     expect(Package::where('name', 'acme/tools')->where('shared', false)->exists())->toBeFalse();
 });
@@ -391,4 +395,131 @@ it('never creates a package as shared, whatever the request says', function () {
         ->assertSessionHasNoErrors();
 
     expect(Package::where('name', 'acme/sneaky')->firstOrFail()->shared)->toBeFalse();
+});
+
+// ---------------------------------------------------------------------------------------
+// available_until: an expired assignment serves nothing, so it holds no name. The predicate
+// is Group::assignedPackages(), the same one RegistryAccessService decides serving with —
+// if the two disagreed, the guard would reserve names the registry does not actually serve.
+// Applied to existing assignments only; a submission has no pivot row to expire yet.
+// ---------------------------------------------------------------------------------------
+
+it('lets an own package be assigned over an expired shared assignment', function () {
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$own->id]])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->whereKey($own->id)->exists())->toBeTrue();
+});
+
+it('still refuses an own package over a shared assignment that has not expired yet', function () {
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->addDay()]);
+
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$own->id]])
+        ->assertSessionHasErrors(['package_ids' => SHARED_ALREADY_SERVED_MESSAGE]);
+
+    expect($customer->packages()->whereKey($own->id)->exists())->toBeFalse();
+});
+
+it('lets a shared package be assigned over an expired own assignment', function () {
+    // The same rule from the other side: an expired own assignment is not being shadowed.
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own, ['available_until' => now()->subDay()]);
+
+    $shared = sharedPackage('acme/tools');
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$shared->id]])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->whereKey($shared->id)->exists())->toBeTrue();
+});
+
+it('lets a package be created under a name only an expired shared assignment holds', function () {
+    Queue::fake();
+
+    $customer = Group::factory()->create();
+    $customer->packages()->attach(sharedPackage('acme/tools'), ['available_until' => now()->subDay()]);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$customer->id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->where('packages.shared', false)->where('packages.name', 'acme/tools')->exists())
+        ->toBeTrue();
+});
+
+it('refuses creating a package whose name a shared assignment holds until a future date', function () {
+    $customer = Group::factory()->create(['name' => 'Kundenregistry']);
+    $customer->packages()->attach(sharedPackage('acme/tools'), ['available_until' => now()->addDay()]);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$customer->id],
+        ])
+        ->assertSessionHasErrors(['name' => NAME_HELD_MESSAGE]);
+
+    expect(Package::where('name', 'acme/tools')->where('shared', false)->exists())->toBeFalse();
+});
+
+it('names every holding registry, in the plural, when more than one holds the name', function () {
+    // StorePackageRequest refuses a selection spanning two organizations, so the two
+    // registries have to belong to one — which is the shape an operator actually hits.
+    $org = Organization::factory()->create();
+    $first = Group::factory()->for($org)->create(['name' => 'Erste Registry']);
+    $second = Group::factory()->for($org)->create(['name' => 'Zweite Registry']);
+
+    $shared = sharedPackage('acme/tools');
+    $first->packages()->attach($shared);
+    $second->packages()->attach($shared);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$first->id, $second->id],
+        ])
+        ->assertSessionHasErrors(['name' => NAME_HELD_PLURAL_MESSAGE]);
+});
+
+it('refuses an unrelated assignment into a registry already in the conflict state', function () {
+    // Neither side of the collision arrives with this request. No write the application
+    // allows can produce this state — it is reached here by writing the pivot directly — but
+    // the guard still refuses, and must not tell the operator they just assigned something.
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach([$own->id, sharedPackage('acme/tools')->id]);
+
+    $unrelated = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/other']);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$unrelated->id]])
+        ->assertSessionHasErrors(['package_ids' => 'Diese Registry führt bereits ein eigenes und ein geteiltes '
+            .'Paket mit demselben Namen: composer acme/tools. Entfernen Sie eines der beiden aus dieser Registry.']);
+
+    expect($customer->packages()->whereKey($unrelated->id)->exists())->toBeFalse();
 });
