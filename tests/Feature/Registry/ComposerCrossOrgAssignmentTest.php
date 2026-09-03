@@ -40,7 +40,7 @@ it('does not list another organization\'s package in available-packages', functi
 
     // No Composer upstream on the registry, so root() serves the available-packages list
     // rather than the metadata-url-only document.
-    $root = $this->getJson("/r/{$mine->slug}/packages.json")->assertOk()->json();
+    $root = $this->getJson(registryPath($mine).'/packages.json')->assertOk()->json();
 
     expect($root)->toHaveKey('available-packages')
         ->and($root['available-packages'])->not->toContain('acme/internal-lib');
@@ -66,7 +66,7 @@ it('still serves a package owned by the registry\'s own organization', function 
     ]);
     $mine->packages()->attach($own);
 
-    $root = $this->getJson("/r/{$mine->slug}/packages.json")->assertOk()->json();
+    $root = $this->getJson(registryPath($mine).'/packages.json')->assertOk()->json();
 
     expect($root['available-packages'])->toContain('acme/own-lib')
         ->and(app(RegistryAccessService::class)->packageBelongsToGroup($mine, $own))->toBeTrue();

@@ -17,7 +17,7 @@ it('builds the zip lazily, stores it on the artifacts disk and streams it', func
     (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
-    $res = $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip');
+    $res = $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip');
 
     $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     $res->assertOk()->assertHeader('content-type', 'application/zip');
@@ -32,9 +32,9 @@ it('serves the cached zip on the second request without rebuilding', function ()
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
     // Second request: dist_path is set, no rebuild needed
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
     $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     expect($pkg->versions()->where('version', '1.0.0.0')->first()->dist_path)
@@ -50,7 +50,7 @@ it('rebuilds the dist when a tag was force-pushed to a new commit', function () 
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
     $oldSha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$oldSha}.zip");
 
@@ -63,7 +63,7 @@ it('rebuilds the dist when a tag was force-pushed to a new commit', function () 
     $newSha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;
     expect($newSha)->not->toBe($oldSha);
 
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
     // New SHA path is built and served — no stale delivery.
     Storage::disk('artifacts')->assertExists("dists/{$pkg->id}/{$newSha}.zip");
@@ -100,7 +100,7 @@ it('waits out a briefly busy mirror lock instead of failing the download', funct
     $contended = $make('acme/demo');
 
     $started = microtime(true);
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/control/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/control/1.0.0.0.zip')->assertOk();
     $controlElapsed = microtime(true) - $started;
 
     // Someone else is mid-sync on this mirror and lets go on their own, exactly as a
@@ -110,7 +110,7 @@ it('waits out a briefly busy mirror lock instead of failing the download', funct
     expect(Cache::lock('mirror:'.$contended->id, 1, 'someone-else')->get())->toBeTrue();
 
     $started = microtime(true);
-    $res = $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip');
+    $res = $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip');
     $contendedElapsed = microtime(true) - $started;
 
     $res->assertOk()->assertHeader('content-type', 'application/zip');
@@ -153,7 +153,7 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
     expect(Cache::lock('mirror:'.$pkg->id, 900, 'someone-else')->get())->toBeTrue();
 
     $started = microtime(true);
-    $res = $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip');
+    $res = $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip');
     $elapsed = microtime(true) - $started;
 
     // 503 rather than 500: the package is fine, the archive will exist shortly, and the
@@ -177,7 +177,7 @@ it('denies dist download without access', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     // Package NOT assigned
     $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertNotFound();
+        ->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertNotFound();
 });
 
 it('returns 404 for an unknown version of an assigned package', function () {
@@ -188,5 +188,5 @@ it('returns 404 for an unknown version of an assigned package', function () {
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/dists/acme/demo/9.9.9.0.zip')->assertNotFound();
+        ->get(registryPath($group).'/dists/acme/demo/9.9.9.0.zip')->assertNotFound();
 });

@@ -36,13 +36,13 @@ it('refuses a relative path component in a composer p2 name instead of proxying 
     // fetched and is cached — so the refusals below are the name guard and not a route
     // miss, the registry context or the token check.
     $this->withHeaders(tokenHeaderFor($this->group))
-        ->getJson('/r/kadenz/p2/symfony/console.json')->assertOk();
+        ->getJson(registryPath($this->group).'/p2/symfony/console.json')->assertOk();
     expect(UpstreamMetadataCache::count())->toBe(1);
     Http::assertSentCount(1);
 
     foreach ([['..', '..'], ['symfony', '..'], ['..', 'console'], ['.', 'console']] as [$vendor, $name]) {
         $this->withHeaders(tokenHeaderFor($this->group))
-            ->getJson("/r/kadenz/p2/{$vendor}/{$name}.json")
+            ->getJson(registryPath($this->group)."/p2/{$vendor}/{$name}.json")
             ->assertNotFound();
     }
 
@@ -60,13 +60,13 @@ it('refuses a relative path component in an npm packument name instead of proxyi
     ]);
 
     $this->withHeaders(tokenHeaderFor($this->group))
-        ->getJson('/r/kadenz/lodash')->assertOk();
+        ->getJson(registryPath($this->group).'/lodash')->assertOk();
     expect(UpstreamMetadataCache::count())->toBe(1);
     Http::assertSentCount(1);
 
     foreach (['..', '.', '@scope/..', '@scope/.'] as $name) {
         $this->withHeaders(tokenHeaderFor($this->group))
-            ->getJson('/r/kadenz/'.$name)
+            ->getJson(registryPath($this->group).'/'.$name)
             ->assertNotFound();
     }
 

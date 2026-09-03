@@ -46,9 +46,9 @@ it('404s the registry protocol for a globally disabled type', function () {
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/leftpad')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/leftpad')->assertNotFound();
     // Composer stays available.
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/packages.json')->assertOk();
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/packages.json')->assertOk();
 });
 
 it('404s the registry protocol for a type disabled only for that org', function () {
@@ -58,7 +58,7 @@ it('404s the registry protocol for a type disabled only for that org', function 
     $pkg = Package::factory()->for($org)->create(['type' => PackageType::Python, 'name' => 'demo']);
     $group->packages()->attach($pkg);
 
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/simple/demo/')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/simple/demo/')->assertNotFound();
 });
 
 it('blocks creating a package of a globally disabled type', function () {

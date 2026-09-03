@@ -71,7 +71,7 @@ it('still serves the package when the cache is full — a full cache is not an o
     Http::fake(['cdn.test/*' => Http::response('zip-bytes', 200)]);
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk()->assertHeader('content-type', 'application/zip');
 
     expect($response->streamedContent())->toBe('zip-bytes');

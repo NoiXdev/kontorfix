@@ -74,7 +74,7 @@ it('serves an oversize artifact in full over http while declining to cache it', 
     Http::fake(['cdn.test/*' => Http::response(str_repeat('Z', 1024 * 1024), 200)]);
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk();
 
     // Declining to cache must never turn into "this package cannot be installed".
@@ -92,7 +92,7 @@ it('caches an artifact that fits, on the way past to the client', function () {
     Http::fake(['cdn.test/*' => Http::response('zip-bytes', 200)]);
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertOk();
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")->assertOk();
 
     expect($response->streamedContent())->toBe('zip-bytes');
 
@@ -123,7 +123,7 @@ it('still builds the dist when another request holds the lock and never lets go'
     expect(Cache::lock('dist-build:'.$path, 300)->get())->toBeTrue();
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')
+        ->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')
         ->assertOk()->assertHeader('content-type', 'application/zip');
 
     Storage::disk('artifacts')->assertExists($path);
@@ -140,7 +140,7 @@ it('releases the dist lock after a build so the next cold version is not blocked
     $sha = $package->versions()->where('version', '1.0.0.0')->sole()->source_reference;
     $path = "dists/{$package->id}/{$sha}.zip";
 
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
     expect(Cache::lock('dist-build:'.$path, 300)->get())->toBeTrue();
 });

@@ -17,6 +17,10 @@ const props = defineProps<{
         from_address: string | null;
         from_name: string | null;
     };
+    // The registry URL form with both slugs left open, from RegistryUrl::template(). The
+    // organization's slug is derived server-side from its name, so this mask cannot know
+    // the first segment — but it must still show the right shape, and gets it from there.
+    registryUrlTemplate: string;
 }>();
 
 // When a setup token is configured, the wizard stays locked until it is presented.
@@ -130,6 +134,12 @@ watch(
                 .replace(/^-+|-+$/g, '');
         }
     },
+);
+
+// Substituted into, never assembled: the organization segment is named rather than guessed
+// because the server derives that slug from the organization's name.
+const registryUrlPreview = computed(() =>
+    props.registryUrlTemplate.replace('{organization}', '<organisation>').replace('{registry}', form.registry_slug || 'slug'),
 );
 
 const testRecipient = ref('');
@@ -307,7 +317,7 @@ function submit() {
                         <Label for="registry_slug">Slug</Label>
                         <Input id="registry_slug" v-model="form.registry_slug" placeholder="interne-pakete" @input="slugTouched = true" />
                         <p class="text-xs text-muted-foreground">
-                            Erreichbar unter <code>/r/{{ form.registry_slug || 'slug' }}</code>
+                            Erreichbar unter <code>{{ registryUrlPreview }}</code> — das erste Segment wird aus dem Organisationsnamen abgeleitet.
                         </p>
                         <InputError :message="form.errors.registry_slug" />
                     </div>

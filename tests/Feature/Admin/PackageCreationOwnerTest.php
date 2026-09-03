@@ -1,21 +1,11 @@
 <?php
 
-use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
-use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 
-/**
- * An admin of the given organization — the shape PackageProbeTest's probeAdmin() and
- * CreateFormRedirectTest's redirectSuperAdmin() both use, reused here for a plain
- * (non-operator) org admin.
- */
-function adminOf(Organization $org): User
-{
-    return User::factory()->for($org)->create(['role' => UserRole::Admin]);
-}
+// adminOf() lives in tests/Pest.php — see the note there.
 
 it('owns a created package where its registries are owned', function () {
     // A real repository_url dispatches SyncPackage, which would otherwise try an actual

@@ -6,6 +6,7 @@ use App\Models\MailSetting;
 use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -26,6 +27,40 @@ function setupPayload(array $overrides = []): array
         'storage_driver' => 'local',
     ], $overrides);
 }
+
+it('keeps the derived organization slug clear of the registry slug', function () {
+    // The wizard is the one place that mints an organization slug and a registry slug in
+    // one transaction, and the two share a namespace in the registry URL — so the wizard is
+    // also the one place that could create, on a brand-new instance, exactly the collision
+    // the migration refuses to upgrade past. The organization yields: its slug is derived,
+    // the registry's is what the installer typed.
+    $this->post('/setup', setupPayload([
+        'organization_name' => 'Interne Pakete',
+        'registry_slug' => 'interne-pakete',
+    ]))->assertRedirect(route('dashboard'));
+
+    expect(Organization::sole()->slug)->not->toBe('interne-pakete')
+        ->and(Group::sole()->slug)->toBe('interne-pakete');
+});
+
+it('keeps the derived organization slug clear of a registry that already exists', function () {
+    // The wizard reopens whenever the instance holds no users, and an instance can reach
+    // that state with registries still in place — purged users, a dump restored without
+    // them. The derivation used to consult only `organizations` and the registry it is
+    // about to create alongside, so it could settle on the slug of a registry that was
+    // already there: the exact organization/registry collision App\Rules\UnclaimedSlug
+    // refuses at write time and 2026_09_03_100000 refuses to upgrade past, minted by the
+    // one path that consulted neither — and silently, since the wizard reports success.
+    Group::factory()->create(['slug' => 'acme-gmbh']);
+
+    $this->post('/setup', setupPayload())->assertRedirect(route('dashboard'));
+
+    // 'Acme GmbH' derives to 'acme-gmbh', which is taken; the wizard has to move on.
+    $operator = Organization::query()->where('is_operator', true)->sole();
+
+    expect($operator->slug)->toBe('acme-gmbh-2')
+        ->and(Group::query()->where('slug', $operator->slug)->exists())->toBeFalse();
+});
 
 it('shows the wizard while no user exists', function () {
     $this->get('/setup')->assertOk();
@@ -213,7 +248,14 @@ it('unlocks the wizard with the correct setup token', function () {
     // POST, not `?token=`: the token is an instance-takeover secret and must not land
     // in an access log or the browser history. See SetupTokenTransportTest.
     $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
-    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
+    $this->get('/setup')->assertInertia(fn ($page) => $page
+        ->where('locked', false)
+        // The unlocked wizard is the render that shows the registry slug field, and it
+        // previews the address from this template. Drop the key and the mask dies at setup
+        // time on `undefined.replace()` with the PHP suite green — nothing else sees a
+        // missing server prop. Asserted against RegistryUrl so the URL form stays stated
+        // in one place (see tests/Unit/RegistryUrlTest.php).
+        ->where('registryUrlTemplate', app(RegistryUrl::class)->template()));
 });
 
 it('refuses to complete setup without the token when one is configured', function () {

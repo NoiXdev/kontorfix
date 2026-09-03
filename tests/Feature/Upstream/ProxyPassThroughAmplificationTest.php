@@ -120,7 +120,7 @@ it('re-checks the cache after taking the fetch lock instead of fetching upstream
     app()->instance(UpstreamCache::class, $cache);
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk();
 
     expect($response->streamedContent())->toBe('from-disk')
@@ -138,7 +138,7 @@ it('still fetches upstream when nothing filled the cache — the anchor for the 
     Http::fake(['cdn.test/*' => Http::response('from-upstream', 200)]);
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk();
 
     // Same route, same token, same upstream, same metadata row — so the assertion above
@@ -161,7 +161,7 @@ it('serves the artifact anyway when the fetch lock cannot be had', function () {
     Cache::lock('upstream-fetch:'.$path, 300)->get();
 
     $response = $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk();
 
     // Waiting is bounded and never refuses the download: a legitimate large artifact under

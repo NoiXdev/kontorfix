@@ -9,32 +9,37 @@ beforeEach(function () {
     $this->admin = User::factory()->for($this->operator)->create(['role' => UserRole::Admin]);
 });
 
-it('stores a cadence the enum allows', function () {
+it('stores a cadence the enum allows, and still refuses to escalate is_operator', function () {
     $org = Organization::factory()->create();
 
-    // 'is_operator' and 'slug' are submitted alongside the cadence to prove the update
-    // route cannot be used to escalate a customer org into the operator org (or hijack
-    // its slug) even if a caller adds those fields to the request body — the FormRequest's
-    // validated() only carries 'name' and 'notification_cadence' through to update().
+    // 'is_operator' is submitted alongside the cadence to prove the update route cannot be
+    // used to escalate a customer org into the operator org even if a caller adds that
+    // field to the request body — the FormRequest's validated() only carries 'name',
+    // 'slug' and 'notification_cadence' through to update(). 'slug' is deliberately
+    // included too, but as of App\Http\Requests\Admin\UpdateOrganizationRequest (Task 5:
+    // editable organization slugs) it is a legitimate field on this same route rather than
+    // an extraneous one, so it is expected to actually apply.
     $this->actingAs($this->admin)
         ->put(route('admin.organizations.update', $org), [
             'name' => $org->name,
             'notification_cadence' => 'daily',
             'is_operator' => true,
-            'slug' => 'hijacked-slug',
+            'slug' => 'new-cadence-slug',
         ])
         ->assertSessionHasNoErrors();
 
     $fresh = $org->fresh();
     expect($fresh->notification_cadence)->toBe('daily')
         ->and($fresh->is_operator)->toBeFalse()
-        ->and($fresh->slug)->toBe($org->slug);
+        ->and($fresh->slug)->toBe('new-cadence-slug');
 });
 
 it('rejects a cadence outside the three allowed values', function () {
     $org = Organization::factory()->create();
 
     $this->actingAs($this->admin)
-        ->put(route('admin.organizations.update', $org), ['name' => $org->name, 'notification_cadence' => 'monthly'])
+        ->put(route('admin.organizations.update', $org), [
+            'name' => $org->name, 'notification_cadence' => 'monthly', 'slug' => $org->slug,
+        ])
         ->assertSessionHasErrors('notification_cadence');
 });

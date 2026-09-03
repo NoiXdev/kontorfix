@@ -22,7 +22,7 @@ class PythonSimpleIndexBuilder
     private const SIMPLE_API_VERSION = '1.4';
 
     /**
-     * The project detail page. `$baseUrl` is the registry root (…/r/{slug} or the custom
+     * The project detail page. `$baseUrl` is the registry root (…/r/{orgSlug}/{groupSlug} or the custom
      * domain), used to build absolute file URLs.
      *
      * @param  Collection<int, PythonDist>  $dists

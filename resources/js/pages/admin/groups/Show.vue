@@ -24,6 +24,13 @@ interface GroupInfo {
     portal_enabled: boolean;
     organization: string | null;
     organization_id: string | null;
+    // Supplied by App\Services\Registry\RegistryUrl — the URL form is stated once, in PHP.
+    // `url_path` is the path as shown in the header, `url` the canonical URL as it stands,
+    // and `url_pattern` that URL with `{registry}` where the slug goes, for the "and this is
+    // what it becomes" half of the confirmation. Nothing here is assembled in this file.
+    url_path: string;
+    url: string;
+    url_pattern: string;
 }
 
 interface PackageRow {
@@ -106,12 +113,34 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 const form = useForm({
     name: props.group.name,
+    slug: props.group.slug,
     public: props.group.public,
     portal_enabled: props.group.portal_enabled,
 });
 
+const slugChanged = computed(() => form.slug !== props.group.slug);
+
+// The URL the registry would answer to after the change, taken from the pattern the
+// controller supplied — this file substitutes, it never builds a registry URL.
+const nextUrl = computed(() => props.group.url_pattern.replace('{registry}', form.slug || '…'));
+
 function save() {
-    form.put(route('admin.groups.update', props.group.id), { preserveScroll: true });
+    form.put(route('admin.groups.update', props.group.id), {
+        preserveScroll: true,
+        // Same shape as the other confirmations in this console (admin/oidc/Index.vue's
+        // destroyProvider and the registry delete on the group list): a native confirm in
+        // `onBefore`, so a declined dialog cancels the request outright.
+        onBefore: () =>
+            !slugChanged.value ||
+            confirm(
+                'Slug der Registry ändern?\n\n' +
+                    `Bisher:  ${props.group.url}\n` +
+                    `Neu:     ${nextUrl.value}\n\n` +
+                    'Die bisherige Adresse antwortet danach nicht mehr. Bestehende Client-Konfigurationen, ' +
+                    'die auf sie zeigen (composer.json, .npmrc, pip.conf, CI-Variablen), funktionieren erst ' +
+                    'wieder, wenn sie auf die neue Adresse umgestellt sind.',
+            ),
+    });
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
@@ -264,7 +293,7 @@ async function copyToken() {
                     </button>
                 </div>
                 <p class="text-sm text-muted-foreground">
-                    Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter <code class="font-mono">/r/{{ props.group.slug }}</code
+                    Diese Gruppe <strong>ist</strong> eine Registry — erreichbar unter <code class="font-mono">{{ props.group.url_path }}</code
                     ><template v-if="props.group.organization"> · Kunde / Org: {{ props.group.organization }}</template>
                 </p>
                 <p
@@ -333,9 +362,23 @@ async function copyToken() {
                             </label>
 
                             <div class="flex flex-col gap-1.5">
-                                <span class="text-sm font-medium">Slug</span>
-                                <p class="font-mono text-sm text-muted-foreground">/r/{{ props.group.slug }}</p>
-                                <p class="text-xs text-muted-foreground">Der Slug ist der feste Registry-Endpunkt und kann nicht geändert werden.</p>
+                                <label for="registry-slug" class="text-sm font-medium">Slug</label>
+                                <input
+                                    id="registry-slug"
+                                    v-model="form.slug"
+                                    type="text"
+                                    class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-xs focus:border-ring focus:ring-1 focus:ring-ring focus:outline-hidden"
+                                />
+                                <p class="font-mono text-xs text-muted-foreground">{{ nextUrl }}</p>
+                                <p v-if="slugChanged" class="text-xs text-copper-hi">
+                                    Der Slug ist Teil der Registry-Adresse. Nach dem Speichern antwortet
+                                    <span class="font-mono">{{ props.group.url }}</span> nicht mehr — bestehende Client-Konfigurationen müssen auf
+                                    die neue Adresse umgestellt werden.
+                                </p>
+                                <p v-else class="text-xs text-muted-foreground">
+                                    Der Slug ist der Registry-Endpunkt. Eine Änderung wird vor dem Speichern noch einmal bestätigt.
+                                </p>
+                                <p v-if="form.errors.slug" class="text-sm text-destructive">{{ form.errors.slug }}</p>
                             </div>
 
                             <div>

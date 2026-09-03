@@ -43,11 +43,11 @@ it('serves git-mirror python dists over the simple index and streams the sdist',
     $group->packages()->attach($pkg->id);
     (new SyncPackage($pkg))->handle();
 
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/simple/acme-lib/')
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/simple/acme-lib/')
         ->assertOk()
         ->assertSee('acme_lib-1.1.0.tar.gz');
 
-    $this->withHeaders(tokenHeaderFor($group))->get("/r/kadenz/pypi/files/{$pkg->id}/acme_lib-1.1.0.tar.gz")
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group)."/pypi/files/{$pkg->id}/acme_lib-1.1.0.tar.gz")
         ->assertOk();
 });
 
@@ -61,6 +61,6 @@ it('rejects publishing to a git-mirror npm package', function () {
     $group->packages()->attach($pkg->id);
 
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '9.9.9', 'leftpad-9.9.9.tgz', 'x'))
+        ->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '9.9.9', 'leftpad-9.9.9.tgz', 'x'))
         ->assertStatus(409);
 });

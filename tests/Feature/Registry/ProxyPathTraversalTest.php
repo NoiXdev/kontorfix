@@ -55,7 +55,7 @@ it('refuses a backslash-traversal version instead of reaching the artifacts disk
     $traversal = 'x\\..\\..\\..\\..\\..\\..\\dists\\'.$victimPackageId.'\\'.$victimReference;
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/attacker/proxy/composer/{$up->id}/acme/demo/".rawurlencode($traversal))
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/".rawurlencode($traversal))
         ->assertNotFound();
 
     Http::assertNothingSent();
@@ -75,7 +75,7 @@ it('does not let a hostile upstream version pre-seed another registry groups dis
     Http::fake(['cdn.test/*' => Http::response('ATTACKER-CONTROLLED-BYTES', 200)]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/attacker/proxy/composer/{$up->id}/acme/demo/".rawurlencode($traversal))
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/".rawurlencode($traversal))
         ->assertNotFound();
 
     // Nothing at all may land outside the proxy cache prefix.
@@ -91,7 +91,7 @@ it('still serves an ordinary composer version through the proxy', function () {
     Http::fake(['cdn.test/*' => Http::response('zip-bytes', 200)]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk();
 });
 

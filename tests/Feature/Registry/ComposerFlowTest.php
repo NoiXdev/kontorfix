@@ -17,7 +17,7 @@ it('completes the full composer client flow: root -> p2 -> dist', function () {
     $headers = tokenHeaderFor($group);
 
     // 1. Like `composer update`: fetch the root document.
-    $root = $this->withHeaders($headers)->getJson('/r/kadenz/packages.json')->assertOk()->json();
+    $root = $this->withHeaders($headers)->getJson(registryPath($group).'/packages.json')->assertOk()->json();
     expect($root['available-packages'])->toContain('acme/demo');
 
     // 2. Resolve metadata via the metadata-url template.
@@ -39,9 +39,9 @@ it('serves a client that lacks a token nothing but a 401 challenge across the fl
     (new SyncPackage($pkg))->handle();
     $group->packages()->attach($pkg);
 
-    $this->getJson('/r/kadenz/packages.json')->assertUnauthorized();
-    $this->getJson('/r/kadenz/p2/acme/demo.json')->assertUnauthorized();
-    $this->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertUnauthorized();
+    $this->getJson(registryPath($group).'/packages.json')->assertUnauthorized();
+    $this->getJson(registryPath($group).'/p2/acme/demo.json')->assertUnauthorized();
+    $this->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertUnauthorized();
 });
 
 /*

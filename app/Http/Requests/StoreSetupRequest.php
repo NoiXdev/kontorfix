@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\ValidatesMailSettings;
+use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Password;
 
@@ -39,7 +40,17 @@ class StoreSetupRequest extends FormRequest
             'organization_name' => ['required', 'string', 'max:190'],
 
             'registry_name' => ['required', 'string', 'max:190'],
-            'registry_slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', 'unique:groups,slug'],
+            // No instance-wide `unique:groups,slug`: a registry slug is unique only within
+            // its organization, and the wizard reaches this validation before the registry
+            // has an organization to be scoped to yet. The instance is not necessarily empty
+            // here — the wizard reopens whenever no users exist, which purged users or a
+            // dump restored without them can reach with registries still in place — but
+            // per-organization uniqueness needs no instance-wide check regardless. What does
+            // bite here is the shared namespace with organization slugs — and the
+            // organization this wizard creates is the one it could collide with, which is
+            // why SetupController derives that slug around the registry's (and, since
+            // b80ae4a, around any existing registry's slug too).
+            'registry_slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', UnclaimedSlug::byOrganization()],
             'registry_public' => ['boolean'],
 
             // Mail rules are shared with the admin settings screen and the test probe.

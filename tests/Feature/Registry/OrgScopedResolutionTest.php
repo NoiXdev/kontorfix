@@ -24,7 +24,7 @@ it('does not serve one organization a package owned by another', function () {
     // test's subject: unscope its organization_id constraint and this request returns 200
     // (the pivot row above makes the package accessible to a public group), so the test
     // goes red. The guard is covered separately in OrgScopedUpstreamFallthroughTest.
-    $this->get("/r/{$mine->slug}/p2/acme/tools.json")->assertNotFound();
+    $this->get(registryPath($mine).'/p2/acme/tools.json')->assertNotFound();
 });
 
 it('does not serve another organization\'s package even when an upstream can answer', function () {
@@ -48,7 +48,7 @@ it('does not serve another organization\'s package even when an upstream can ans
     PackageVersion::factory()->for($foreign)->create(['version_pretty' => 'v6.6.6']);
     $mine->packages()->attach($foreign);
 
-    $res = $this->get("/r/{$mine->slug}/p2/acme/tools.json");
+    $res = $this->get(registryPath($mine).'/p2/acme/tools.json');
 
     expect($res->getContent())->not->toContain('v6.6.6');
     Http::assertSentCount(1);
@@ -61,5 +61,5 @@ it('serves a package owned by the addressed organization', function () {
     ]);
     $group->packages()->attach($package);
 
-    $this->get("/r/{$group->slug}/p2/acme/tools.json")->assertOk();
+    $this->get(registryPath($group).'/p2/acme/tools.json')->assertOk();
 });

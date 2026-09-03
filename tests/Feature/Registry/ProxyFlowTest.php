@@ -23,10 +23,10 @@ it('completes the composer proxy flow: metadata -> rewritten dist -> cached down
     $headers = tokenHeaderFor($group);
 
     // 1. Proxy the p2 metadata and read the rewritten dist URL.
-    $meta = $this->withHeaders($headers)->getJson('/r/kadenz/p2/acme/demo.json')->assertOk()->json();
+    $meta = $this->withHeaders($headers)->getJson(registryPath($group).'/p2/acme/demo.json')->assertOk()->json();
     $version = MetadataMinifier::expand($meta['packages']['acme/demo'])[0];
     $distPath = parse_url($version['dist']['url'], PHP_URL_PATH);
-    expect($distPath)->toContain("/r/kadenz/proxy/composer/{$up->id}/acme/demo/");
+    expect($distPath)->toContain(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/");
 
     // 2. Load via the proxy route (cache-on-first). The body has to be consumed: the
     // artifact is now cached while it is relayed, so the caching happens when a real
@@ -54,9 +54,9 @@ it('completes the npm proxy flow: packument -> rewritten tarball -> cached downl
     ]);
     $headers = tokenHeaderFor($group);
 
-    $doc = $this->withHeaders($headers)->getJson('/r/kadenz/left-pad')->assertOk()->json();
+    $doc = $this->withHeaders($headers)->getJson(registryPath($group).'/left-pad')->assertOk()->json();
     $tarballPath = parse_url($doc['versions']['1.0.0']['dist']['tarball'], PHP_URL_PATH);
-    expect($tarballPath)->toContain("/r/kadenz/proxy/npm/{$up->id}/left-pad/-/");
+    expect($tarballPath)->toContain(registryPath($group)."/proxy/npm/{$up->id}/left-pad/-/");
 
     $this->withHeaders($headers)->get($tarballPath)->assertOk()->assertHeader('content-type', 'application/octet-stream');
 });
@@ -73,12 +73,12 @@ it('enforces strict mode end-to-end: metadata and download both 404 until allowl
     ]);
     $headers = tokenHeaderFor($group);
 
-    $this->withHeaders($headers)->getJson('/r/kadenz/p2/gated/pkg.json')->assertNotFound();
-    $this->withHeaders($headers)->get("/r/kadenz/proxy/composer/{$up->id}/gated/pkg/1.0.0.0")->assertNotFound();
+    $this->withHeaders($headers)->getJson(registryPath($group).'/p2/gated/pkg.json')->assertNotFound();
+    $this->withHeaders($headers)->get(registryPath($group)."/proxy/composer/{$up->id}/gated/pkg/1.0.0.0")->assertNotFound();
 
     $up->allowedPackages()->create(['name' => 'gated/pkg']);
-    $this->withHeaders($headers)->getJson('/r/kadenz/p2/gated/pkg.json')->assertOk();
-    $this->withHeaders($headers)->get("/r/kadenz/proxy/composer/{$up->id}/gated/pkg/1.0.0.0")->assertOk();
+    $this->withHeaders($headers)->getJson(registryPath($group).'/p2/gated/pkg.json')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group)."/proxy/composer/{$up->id}/gated/pkg/1.0.0.0")->assertOk();
 });
 
 /*

@@ -47,7 +47,7 @@ it('sets the universal headers on a stateless registry response', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'hdr', 'public' => true]);
     $group->packages()->attach(Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']));
 
-    $res = $this->getJson('/r/hdr/packages.json');
+    $res = $this->getJson(registryPath($group).'/packages.json');
 
     $res->assertOk();
     $res->assertHeader('X-Content-Type-Options', 'nosniff');
@@ -69,7 +69,7 @@ it('keeps the document-only headers off a non-html response', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'hdr', 'public' => true]);
     $group->packages()->attach(Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']));
 
-    $res = $this->getJson('/r/hdr/packages.json');
+    $res = $this->getJson(registryPath($group).'/packages.json');
 
     $res->assertOk();
     expect($res->headers->get('Content-Security-Policy'))->toBeNull();

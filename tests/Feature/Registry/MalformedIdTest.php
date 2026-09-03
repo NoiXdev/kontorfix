@@ -43,7 +43,7 @@ it('never 500s on a malformed upstream id in the composer proxy route', function
 
     foreach (malformedIds() as $id) {
         $this->withHeaders($headers)
-            ->get("/r/kadenz/proxy/composer/{$id}/acme/demo/1.0.0.0")
+            ->get(registryPath($group)."/proxy/composer/{$id}/acme/demo/1.0.0.0")
             ->assertNotFound();
     }
 });
@@ -55,11 +55,11 @@ it('never 500s on a malformed upstream id in either npm proxy route', function (
 
     foreach (malformedIds() as $id) {
         $this->withHeaders($headers)
-            ->get("/r/kadenz/proxy/npm/{$id}/demo/-/demo-1.0.0.tgz")
+            ->get(registryPath($group)."/proxy/npm/{$id}/demo/-/demo-1.0.0.tgz")
             ->assertNotFound();
 
         $this->withHeaders($headers)
-            ->get("/r/kadenz/proxy/npm/{$id}/@acme/demo/-/demo-1.0.0.tgz")
+            ->get(registryPath($group)."/proxy/npm/{$id}/@acme/demo/-/demo-1.0.0.tgz")
             ->assertNotFound();
     }
 });
@@ -70,7 +70,7 @@ it('never 500s on a malformed package id in the pypi download route', function (
 
     foreach (malformedIds() as $id) {
         $this->withHeaders($headers)
-            ->get("/r/kadenz/pypi/files/{$id}/demo-1.0.0-py3-none-any.whl")
+            ->get(registryPath($group)."/pypi/files/{$id}/demo-1.0.0-py3-none-any.whl")
             ->assertNotFound();
     }
 });
@@ -83,7 +83,7 @@ it('still serves a well-formed id, so the constraint did not just close the rout
     // 404 because no such package is cached — but it is the controller's 404, reached
     // through the route, not the router refusing to match the id at all.
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertNotFound();
 
     expect(Str::isUuid($up->id))->toBeTrue();
@@ -95,6 +95,6 @@ it('refuses a malformed id anonymously on a public group too', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'oeffentlich', 'public' => true]);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.test']);
 
-    $this->get('/r/oeffentlich/proxy/composer/'.str_repeat('-', 36).'/acme/demo/1.0.0.0')
+    $this->get(registryPath($group).'/proxy/composer/'.str_repeat('-', 36).'/acme/demo/1.0.0.0')
         ->assertNotFound();
 });

@@ -13,6 +13,7 @@ use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\Registry\RegistryTypeService;
+use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,7 +39,7 @@ class OrganizationController extends Controller
         ]);
     }
 
-    public function show(Organization $organization, RegistryTypeService $types): Response
+    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url): Response
     {
         return Inertia::render('admin/organizations/Show', [
             'organization' => [
@@ -47,7 +48,16 @@ class OrganizationController extends Controller
                 'slug' => $organization->slug,
                 'is_operator' => $organization->is_operator,
                 'notification_cadence' => $organization->notification_cadence,
+                // Changing the slug moves the URL of every registry this organization owns
+                // (the organization segment is the first path component of all of them) —
+                // the console confirms that before submitting, naming exactly how many.
+                'registries_count' => $organization->groups()->count(),
             ],
+            // The bare URL form with both slugs left open (see GroupController::index,
+            // where the create sheet uses the same thing for the same reason): the slug
+            // confirmation dialog substitutes the organization segment for its "before" and
+            // "after" preview, and must never assemble a /r/... path of its own.
+            'registryUrlTemplate' => $url->template(),
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).
             'registryTypes' => [
@@ -55,11 +65,20 @@ class OrganizationController extends Controller
                 'effective' => $types->effectiveFor($organization),
                 'overridden' => $organization->enabled_registry_types !== null,
             ],
-            'registries' => $organization->groups()->withCount('packages')->with('domains:id,group_id,hostname')->get()
+            // `organization:id,name,slug` alongside `domains`: RegistryUrl::path() reads
+            // `$group->organization->slug` — a column-restricted eager load that omitted it
+            // would yield a silent null there (Eloquent strict mode is off repo-wide), and
+            // `pathFor()`'s `string` parameter type turns that into a TypeError instead of a
+            // shipped /r//{slug}. See GroupController::index for the identical reasoning.
+            'registries' => $organization->groups()->withCount('packages')
+                ->with(['domains:id,group_id,hostname', 'organization:id,name,slug'])->get()
                 ->map(fn (Group $group) => [
                     'id' => $group->id,
                     'name' => $group->name,
                     'slug' => $group->slug,
+                    // The address the operator would paste into a client, stated by the
+                    // application rather than re-derived from `slug` in the table cell.
+                    'url_path' => $url->path($group),
                     'packages_count' => $group->packages_count,
                     'domains' => $group->domains->map(fn (Domain $domain) => $domain->hostname)->values(),
                 ]),

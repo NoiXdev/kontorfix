@@ -13,6 +13,9 @@ interface RegistryHit {
     id: string;
     name: string;
     slug: string;
+    // The registry's path, supplied by the search endpoint from RegistryUrl. Rebuilding it
+    // from `slug` here would drop the organization segment and render a URL that 404s.
+    url_path: string;
 }
 
 interface CustomerHit {
@@ -258,7 +261,7 @@ onBeforeUnmount(() => {
                                     @mouseenter="activeIndex = registryOffset + index"
                                 >
                                     <span class="font-medium">{{ reg.name }}</span>
-                                    <span class="font-mono text-xs text-muted-foreground">/r/{{ reg.slug }}</span>
+                                    <span class="font-mono text-xs text-muted-foreground">{{ reg.url_path }}</span>
                                 </button>
                             </li>
                         </ul>

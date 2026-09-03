@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
 use App\Services\Mail\MailManager;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupGate;
 use App\Services\Setup\SetupStatus;
 use App\Services\Setup\SetupToken;
@@ -44,7 +45,7 @@ class SetupController extends Controller
             ->withErrors(['token' => 'Das Setup-Token ist ungültig. Es steht in den Startup-Logs des Containers.']);
     }
 
-    public function show(Request $request, SetupGate $gate): Response
+    public function show(Request $request, SetupGate $gate, RegistryUrl $url): Response
     {
         // One of the two routes in the setup group that EnsureSetupTokenPresented lets
         // through while locked, because this page *is* the token prompt (the other is
@@ -62,6 +63,11 @@ class SetupController extends Controller
                 'from_address' => config('mail.from.address'),
                 'from_name' => config('mail.from.name'),
             ],
+            // The registry URL form, with both slugs left open. The wizard mints the
+            // organization and its first registry in one go and derives the organization's
+            // slug from its name (uniqueOrganizationSlug below), so the mask cannot know
+            // the first segment — but it must still show the right shape, from here.
+            'registryUrlTemplate' => $url->template(),
         ]);
     }
 
@@ -104,7 +110,7 @@ class SetupController extends Controller
 
             $organization = Organization::create([
                 'name' => $data['organization_name'],
-                'slug' => $this->uniqueOrganizationSlug($data['organization_name']),
+                'slug' => $this->uniqueOrganizationSlug($data['organization_name'], (string) $data['registry_slug']),
                 // The organization running the instance is the operator — this is what
                 // grants access to the /admin surface via the `operator` middleware.
                 'is_operator' => true,
@@ -177,7 +183,15 @@ class SetupController extends Controller
         ]);
     }
 
-    private function uniqueOrganizationSlug(string $name): string
+    /**
+     * @param  string  $reserved  a slug this organization may not take — the registry being
+     *                            created alongside it. Organization and registry slugs share
+     *                            one namespace in the registry URL (see App\Rules\UnclaimedSlug),
+     *                            and the wizard is the one place that mints both at once. The
+     *                            organization yields, because its slug is derived and the
+     *                            registry's is what the installer typed.
+     */
+    private function uniqueOrganizationSlug(string $name, string $reserved = ''): string
     {
         // Slugs are derived rather than asked for — one less field in the wizard.
         // A name of only non-latin characters slugs to '', hence the fallback.
@@ -185,7 +199,18 @@ class SetupController extends Controller
         $slug = $base;
         $suffix = 2;
 
-        while (Organization::query()->where('slug', $slug)->exists()) {
+        // Both tables, not just `organizations` and the registry being created alongside:
+        // the wizard reopens whenever the instance holds no users, which an operator can
+        // reach with registries still in place (purged users, a dump restored without
+        // them). Checking only `organizations` there lets the derived organization slug
+        // land on an *existing* registry's slug — the one collision App\Rules\UnclaimedSlug
+        // and 2026_09_03_100000 exist to prevent, minted by the one path that guarded
+        // neither, and silently: nothing in the wizard would report it.
+        while (
+            $slug === $reserved
+            || Organization::query()->where('slug', $slug)->exists()
+            || Group::query()->where('slug', $slug)->exists()
+        ) {
             $slug = "{$base}-{$suffix}";
             $suffix++;
         }

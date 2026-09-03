@@ -26,7 +26,7 @@ it('blocks a foreign-org publish token from publishing to a public registry', fu
     [, $evil] = RegistryToken::issue($orgB, 'evil', null, TokenAbility::Publish);
 
     $this->withHeaders(['Authorization' => 'Bearer '.$evil])
-        ->putJson('/r/orga-public/leftpad', publishBody('leftpad', '9.9.9', 'leftpad-9.9.9.tgz', 'evil-bytes'))
+        ->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '9.9.9', 'leftpad-9.9.9.tgz', 'evil-bytes'))
         ->assertForbidden();
 
     // No side effect: no version, no tarball, no dist-tag override.
@@ -46,7 +46,7 @@ it('still allows a legitimate same-org publish token to publish to the public re
     // Token belongs to the target group (or rather its org): publishHeaderFor() issues
     // a publish token for group->organization with group_id = group.
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/orga-public/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'ok-bytes'))
+        ->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'ok-bytes'))
         ->assertOk();
 
     expect($pkg->fresh()->versions()->where('version', '1.0.0')->exists())->toBeTrue()
@@ -62,5 +62,5 @@ it('still allows anonymous read of the public registry (read short-circuit uncha
     $group->packages()->attach($pkg);
 
     // Anonymous GET on the packument of the public registry remains allowed.
-    $this->getJson('/r/orga-public/leftpad')->assertOk();
+    $this->getJson(registryPath($group).'/leftpad')->assertOk();
 });

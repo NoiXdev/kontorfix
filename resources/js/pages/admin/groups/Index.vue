@@ -14,6 +14,9 @@ interface GroupRow {
     id: string;
     name: string;
     slug: string;
+    // The registry's path, from App\Services\Registry\RegistryUrl — not rebuilt from `slug`,
+    // which alone is only half of the address.
+    url_path: string;
     public: boolean;
     portal_enabled: boolean;
     packages_count: number;
@@ -25,11 +28,15 @@ interface GroupRow {
 interface OrgOption {
     id: string;
     name: string;
+    slug: string;
 }
 
 const props = defineProps<{
     groups: GroupRow[];
     organizations: OrgOption[];
+    // The registry URL form with both slugs left open, from RegistryUrl::template().
+    // Handed straight to the create sheet, which has no registry to ask about yet.
+    registryUrlTemplate: string;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Gruppen', href: '/admin/groups' }];
@@ -39,6 +46,10 @@ const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
 
+// The URL form as a human-readable label — the placeholders the backend left open, filled
+// with words rather than with a shape guessed here.
+const urlFormLabel = computed(() => props.registryUrlTemplate.replace('{organization}', '<organisation>').replace('{registry}', '<slug>'));
+
 const visibilityOptions = [
     { value: 'public', label: 'Öffentlich' },
     { value: 'private', label: 'Privat' },
@@ -46,7 +57,11 @@ const visibilityOptions = [
 
 const columns: ColumnDef<GroupRow>[] = [
     { key: 'name', label: 'Name' },
-    { key: 'slug', label: 'Slug' },
+    // The cell renders `url_path`, so the column has to sort and search on it too. Keyed on
+    // `slug` the header said "Slug", the order followed the bare slug and a search for
+    // "/r/acme" matched nothing — one thing shown, another ordered. Same fix as the
+    // registries table on admin/organizations/Show.vue, whose header reads "URL".
+    { key: 'url_path', label: 'URL' },
     { key: 'organization', label: 'Kunde / Org' },
     { key: 'domains', label: 'Domains', sortable: false },
     { key: 'packages_count', label: 'Pakete', sortAs: 'number' },
@@ -57,7 +72,9 @@ const columns: ColumnDef<GroupRow>[] = [
 const table = useTableState<GroupRow>({
     rows: () => props.groups,
     columns,
-    searchKeys: ['name', 'slug'],
+    // `url_path` contains the slug verbatim, so searching a bare slug still matches — and a
+    // pasted "/r/acme/tools" now matches too, which is the form the table actually shows.
+    searchKeys: ['name', 'url_path'],
     defaultSort: { key: 'name', direction: 'asc' },
     filters: {
         org: {
@@ -98,7 +115,8 @@ function destroyGroup(id: string) {
                 <div>
                     <h1 class="text-xl font-semibold">Gruppen = Registries</h1>
                     <p class="text-sm text-muted-foreground">
-                        Jede Gruppe ist eine Registry mit eigenem <code class="font-mono">/r/&lt;slug&gt;</code>-Endpunkt.
+                        Jede Gruppe ist eine Registry mit eigenem <code class="font-mono">{{ urlFormLabel }}</code
+                        >-Endpunkt.
                     </p>
                 </div>
                 <Button @click="sheetOpen = true">
@@ -134,7 +152,7 @@ function destroyGroup(id: string) {
                         <td class="px-4 py-3">
                             <Link :href="route('admin.groups.show', group.id)" class="hover:underline">{{ group.name }}</Link>
                         </td>
-                        <td class="px-4 py-3 font-mono">/r/{{ group.slug }}</td>
+                        <td class="px-4 py-3 font-mono">{{ group.url_path }}</td>
                         <td class="px-4 py-3 text-muted-foreground">{{ group.organization ?? '—' }}</td>
                         <td class="px-4 py-3 text-muted-foreground">
                             {{ group.domains.length > 0 ? group.domains.join(', ') : '—' }}
@@ -171,6 +189,6 @@ function destroyGroup(id: string) {
             </DataTable>
         </div>
 
-        <GroupSheet v-model:open="sheetOpen" :organizations="props.organizations" />
+        <GroupSheet v-model:open="sheetOpen" :organizations="props.organizations" :url-template="props.registryUrlTemplate" />
     </AppLayout>
 </template>

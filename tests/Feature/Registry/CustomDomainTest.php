@@ -60,10 +60,10 @@ it('still serves the slug route unchanged after the domain-resolution refactor',
     $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     $group->packages()->attach($pkg);
 
-    $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json');
+    $res = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/packages.json');
 
     $res->assertOk()
-        ->assertJsonPath('metadata-url', '/r/kadenz/p2/%package%.json')
+        ->assertJsonPath('metadata-url', registryPath($group).'/p2/%package%.json')
         ->assertJsonPath('available-packages.0', 'acme/demo');
 });
 

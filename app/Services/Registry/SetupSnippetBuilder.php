@@ -72,8 +72,8 @@ class SetupSnippetBuilder
     private function npm(Group $group): string
     {
         $appHost = (string) parse_url((string) config('app.url'), PHP_URL_HOST);
-        $pathUrl = rtrim((string) config('app.url'), '/').'/r/'.$group->slug.'/';
-        $pathAuthority = $appHost.'/r/'.$group->slug.'/';
+        $pathUrl = rtrim((string) config('app.url'), '/').$this->url->path($group).'/';
+        $pathAuthority = $appHost.$this->url->path($group).'/';
 
         $block = "# Pfad-Variante — funktioniert sofort, ohne DNS-Eintrag\n"
             .$this->npmLines($group, $pathUrl, $pathAuthority);

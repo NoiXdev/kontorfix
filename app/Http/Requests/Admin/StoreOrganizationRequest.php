@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreOrganizationRequest extends FormRequest
@@ -18,7 +19,9 @@ class StoreOrganizationRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:190'],
-            'slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', 'unique:organizations,slug'],
+            // Unique among organizations, and never equal to a registry slug: the two share
+            // one namespace in the registry URL. See App\Rules\UnclaimedSlug.
+            'slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', 'unique:organizations,slug', UnclaimedSlug::byRegistry()],
         ];
     }
 }

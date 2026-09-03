@@ -15,11 +15,11 @@ it('completes the full npm flow: publish -> packument -> tarball', function () {
 
     // 1. Like `npm publish`: PUT with versions + _attachments.
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', $bytes))
+        ->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', $bytes))
         ->assertOk();
 
     // 2. Like `npm install`: fetch the packument, read dist.tarball.
-    $doc = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/leftpad')->assertOk()->json();
+    $doc = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/leftpad')->assertOk()->json();
     expect($doc['dist-tags']['latest'])->toBe('1.0.0')
         ->and($doc['versions']['1.0.0']['dist']['integrity'])->toBe('sha512-'.base64_encode(hash('sha512', $bytes, true)));
 
@@ -38,10 +38,10 @@ it('completes the same flow for a scoped package', function () {
     $group->packages()->attach($pkg);
 
     $this->withHeaders(publishHeaderFor($group))
-        ->putJson('/r/kadenz/@noixdev/ui-kit', publishBody('@noixdev/ui-kit', '2.1.0', 'ui-kit-2.1.0.tgz', 'scoped'))
+        ->putJson(registryPath($group).'/@noixdev/ui-kit', publishBody('@noixdev/ui-kit', '2.1.0', 'ui-kit-2.1.0.tgz', 'scoped'))
         ->assertOk();
 
-    $doc = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/@noixdev/ui-kit')->assertOk()->json();
+    $doc = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/@noixdev/ui-kit')->assertOk()->json();
     $path = parse_url($doc['versions']['2.1.0']['dist']['tarball'], PHP_URL_PATH);
     $this->withHeaders(tokenHeaderFor($group))->get($path)->assertOk();
 });
@@ -52,9 +52,9 @@ it('serves the npm endpoints a 401 across the board without a token', function (
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
     $group->packages()->attach($pkg);
 
-    $this->getJson('/r/kadenz/leftpad')->assertUnauthorized();
-    $this->get('/r/kadenz/leftpad/-/leftpad-1.0.0.tgz')->assertUnauthorized();
-    $this->putJson('/r/kadenz/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x'))->assertUnauthorized();
+    $this->getJson(registryPath($group).'/leftpad')->assertUnauthorized();
+    $this->get(registryPath($group).'/leftpad/-/leftpad-1.0.0.tgz')->assertUnauthorized();
+    $this->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x'))->assertUnauthorized();
 });
 
 /*

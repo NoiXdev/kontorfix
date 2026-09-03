@@ -24,7 +24,7 @@ it('does not fall through to upstream for a name this organization owns', functi
     // Owned by this organization but not assigned to this registry: still must not leak.
     Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'acme/tools']);
 
-    $this->get("/r/{$group->slug}/p2/acme/tools.json")->assertNotFound();
+    $this->get(registryPath($group).'/p2/acme/tools.json')->assertNotFound();
 
     Http::assertNothingSent();
 });
@@ -38,7 +38,7 @@ it('falls through to upstream for a name another organization owns', function ()
     $theirs = Group::factory()->create(['public' => true]);
     Package::factory()->inOrgOf($theirs)->create(['type' => PackageType::Composer, 'name' => 'acme/tools']);
 
-    $this->get("/r/{$mine->slug}/p2/acme/tools.json");
+    $this->get(registryPath($mine).'/p2/acme/tools.json');
 
     // Deliberate: another tenant's private `acme/tools` must not shadow my legitimate
     // upstream dependency of the same name. That shadowing is the confusion this guard
@@ -54,7 +54,7 @@ it('does not fall through to npmjs for an npm name this organization owns', func
     ]);
     Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'internal-lib']);
 
-    $this->get("/r/{$group->slug}/internal-lib")->assertNotFound();
+    $this->get(registryPath($group).'/internal-lib')->assertNotFound();
 
     Http::assertNothingSent();
 });
@@ -68,7 +68,7 @@ it('falls through to npmjs for an npm name another organization owns', function 
     $theirs = Group::factory()->create(['public' => true]);
     Package::factory()->inOrgOf($theirs)->create(['type' => PackageType::Npm, 'name' => 'internal-lib']);
 
-    $this->get("/r/{$mine->slug}/internal-lib");
+    $this->get(registryPath($mine).'/internal-lib');
 
     Http::assertSentCount(1);
 });
@@ -81,6 +81,6 @@ it('falls through to the python upstream for a project another organization owns
     $theirs = Group::factory()->create(['public' => true]);
     Package::factory()->inOrgOf($theirs)->create(['type' => PackageType::Python, 'name' => 'internal-lib']);
 
-    $this->get("/r/{$mine->slug}/simple/internal-lib/")
+    $this->get(registryPath($mine).'/simple/internal-lib/')
         ->assertRedirect('https://pypi.org/simple/internal-lib/');
 });

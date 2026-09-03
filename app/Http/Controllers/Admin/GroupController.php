@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
 use App\Support\ActivityPresenter;
@@ -25,18 +26,24 @@ class GroupController extends Controller
 {
     use ScopesToAdministeredOrgs;
 
-    public function index(): Response
+    public function index(RegistryUrl $url): Response
     {
         // Only registries of organizations the user may administer (and within the
         // active sidebar scope). A super-admin's scope spans every organization.
         return Inertia::render('admin/groups/Index', [
             'groups' => $this->scopeGroupQuery(
-                Group::withCount('packages')->with(['domains:id,group_id,hostname', 'organization:id,name'])
+                // `slug` alongside `name`: see show() below — a column-restricted eager
+                // load that omits it yields a null slug rather than an error, so any URL
+                // built from this payload would silently come out as /r//{groupSlug}.
+                Group::withCount('packages')->with(['domains:id,group_id,hostname', 'organization:id,name,slug'])
             )->orderBy('name')->get()
                 ->map(fn (Group $g) => [
                     'id' => $g->id,
                     'name' => $g->name,
                     'slug' => $g->slug,
+                    // The address the operator would paste into a client, stated by the
+                    // application rather than re-derived from `slug` in the table cell.
+                    'url_path' => $url->path($g),
                     'public' => $g->public,
                     'portal_enabled' => $g->portal_enabled,
                     'packages_count' => $g->packages_count,
@@ -46,14 +53,21 @@ class GroupController extends Controller
                 ]),
             // The org picker only offers organizations the user may create registries in.
             'organizations' => app(OrgScope::class)->organizations(),
+            // The URL form with both slugs left open — the create sheet previews an address
+            // for a registry that does not exist yet and must not invent the form for it.
+            // The path only: the sheet shows it against the browser's own origin, which is
+            // the host the operator is actually talking to.
+            'registryUrlTemplate' => $url->template(),
         ]);
     }
 
-    public function show(Group $group, SetupSnippetBuilder $snippets): Response
+    public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url): Response
     {
         $this->assertAdministersGroup($group);
 
-        $group->load(['organization:id,name', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
+        // `slug` on the organization is load-bearing, not decoration: the setup snippets
+        // address the registry as /r/{orgSlug}/{groupSlug} via RegistryUrl.
+        $group->load(['organization:id,name,slug', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
 
         return Inertia::render('admin/groups/Show', [
             'group' => [
@@ -64,6 +78,15 @@ class GroupController extends Controller
                 'portal_enabled' => $group->portal_enabled,
                 'organization' => $group->organization?->name,
                 'organization_id' => $group->organization_id,
+                // Three statements of the same URL form, all of them made here: the path as
+                // rendered in the header, the canonical URL as it stands today, and that URL
+                // with the slug left open so the confirmation dialog can show what a change
+                // would turn it into. Deliberately canonical() and not base(): a registry on
+                // a custom domain still moves its /r/… address when the slug changes, and a
+                // dialog built from the domain URL would show the same string twice.
+                'url_path' => $url->path($group),
+                'url' => $url->canonical($group),
+                'url_pattern' => $url->pattern($group),
             ],
             // The belongsToMany join makes `id` ambiguous — hence qualify packages.id.
             'packages' => $group->packages()->orderBy('name')->get(['packages.id', 'name', 'type', 'sync_status'])
@@ -128,6 +151,10 @@ class GroupController extends Controller
             'name' => $request->validated('name'),
             'public' => $request->boolean('public'),
             'portal_enabled' => $request->boolean('portal_enabled'),
+            // Present only when the request actually carried a slug (see UpdateGroupRequest).
+            // Changing it moves the registry's URL and breaks client configurations pointing
+            // at the old one, which is why the console confirms before it submits.
+            ...$request->safe()->only('slug'),
         ]);
 
         return back()->with('success', 'Registry aktualisiert.');

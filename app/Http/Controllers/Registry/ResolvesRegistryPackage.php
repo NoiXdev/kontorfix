@@ -7,6 +7,7 @@ use App\Models\Group;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Http\AppUrl;
+use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryAccessService;
 use App\Services\Upstream\UpstreamCache;
 use Illuminate\Http\Request;
@@ -51,16 +52,18 @@ trait ResolvesRegistryPackage
             return $request->getSchemeAndHttpHost();
         }
 
-        return (AppUrl::root() ?? $request->getSchemeAndHttpHost()).'/r/'.$group->slug;
+        return (AppUrl::root() ?? $request->getSchemeAndHttpHost()).app(RegistryUrl::class)->path($group);
     }
 
     /**
      * Path prefix for metadata URLs (e.g. metadata-url in packages.json): empty
-     * for a custom domain (registry sits at the host root), otherwise /r/{slug}.
+     * for a custom domain (registry sits at the host root), otherwise /r/{orgSlug}/{groupSlug}.
      */
     protected function registryPathPrefix(Request $request, Group $group): string
     {
-        return $request->attributes->get('registryDomainMode') === true ? '' : "/r/{$group->slug}";
+        return $request->attributes->get('registryDomainMode') === true
+            ? ''
+            : app(RegistryUrl::class)->path($group);
     }
 
     /**

@@ -30,13 +30,29 @@ it('creates a group with slug and assigns existing pool packages', function () {
 });
 
 it('rejects duplicate and malformed slugs', function () {
-    Group::factory()->create(['slug' => 'kadenz']);
+    // The duplicate has to sit in the organization the registry is being created in: a
+    // slug is unique within one organization, not across the instance.
     $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    Group::factory()->create(['slug' => 'kadenz', 'organization_id' => $admin->organization_id]);
 
     $this->actingAs($admin)->post('/admin/groups', ['name' => 'X', 'slug' => 'kadenz'])
         ->assertSessionHasErrors('slug');
     $this->actingAs($admin)->post('/admin/groups', ['name' => 'X', 'slug' => 'Invalid Slug!'])
         ->assertSessionHasErrors('slug');
+});
+
+it('lets another organization create a registry under an already-taken slug', function () {
+    // The counterpart to the refusal above, and the point of scoping the slug: the same
+    // name is free again in every other organization. Without this the uniqueness rule
+    // could be satisfied by keeping the old instance-wide check.
+    $admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
+    Group::factory()->create(['slug' => 'kadenz']);
+
+    $this->actingAs($admin)->post('/admin/groups', ['name' => 'X', 'slug' => 'kadenz'])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect();
+
+    expect(Group::where('slug', 'kadenz')->where('organization_id', $admin->organization_id)->exists())->toBeTrue();
 });
 
 it('forbids members from managing groups', function () {

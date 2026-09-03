@@ -10,10 +10,10 @@ it('serves packages.json with metadata-url and available packages', function () 
     $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
     $group->packages()->attach($pkg);
 
-    $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json');
+    $res = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/packages.json');
 
     $res->assertOk()
-        ->assertJsonPath('metadata-url', '/r/kadenz/p2/%package%.json')
+        ->assertJsonPath('metadata-url', registryPath($group).'/p2/%package%.json')
         ->assertJsonPath('available-packages.0', 'acme/demo');
 });
 
@@ -24,7 +24,7 @@ it('serves p2 metadata for an assigned package', function () {
     $group->packages()->attach($pkg);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->getJson('/r/kadenz/p2/acme/demo.json')
+        ->getJson(registryPath($group).'/p2/acme/demo.json')
         ->assertOk()->assertJsonStructure(['packages' => ['acme/demo']]);
 });
 
@@ -33,9 +33,9 @@ it('returns 401 without token and 404 for unassigned packages', function () {
     $other = Package::factory()->create(['name' => 'acme/secret']);
     PackageVersion::factory()->for($other)->create();
 
-    $this->getJson('/r/kadenz/packages.json')->assertUnauthorized();
+    $this->getJson(registryPath($group).'/packages.json')->assertUnauthorized();
     $this->withHeaders(tokenHeaderFor($group))
-        ->getJson('/r/kadenz/p2/acme/secret.json')->assertNotFound(); // never 403: no leak of whether the package exists
+        ->getJson(registryPath($group).'/p2/acme/secret.json')->assertNotFound(); // never 403: no leak of whether the package exists
 });
 
 it('allows anonymous access to public groups', function () {
@@ -43,7 +43,7 @@ it('allows anonymous access to public groups', function () {
     $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/open']);
     $group->packages()->attach($pkg);
 
-    $this->getJson('/r/pub/packages.json')
+    $this->getJson(registryPath($group).'/packages.json')
         ->assertOk()->assertJsonPath('available-packages.0', 'acme/open');
 });
 
@@ -56,5 +56,5 @@ it('returns 404 (not 401) when a valid token has no access to the group', functi
     $attacker = Group::factory()->for(Organization::factory())->create(['slug' => 'attacker']);
 
     $this->withHeaders(tokenHeaderFor($attacker))
-        ->getJson('/r/victim/packages.json')->assertNotFound();
+        ->getJson(registryPath($victim).'/packages.json')->assertNotFound();
 });
