@@ -57,7 +57,11 @@ const visibilityOptions = [
 
 const columns: ColumnDef<GroupRow>[] = [
     { key: 'name', label: 'Name' },
-    { key: 'slug', label: 'Slug' },
+    // The cell renders `url_path`, so the column has to sort and search on it too. Keyed on
+    // `slug` the header said "Slug", the order followed the bare slug and a search for
+    // "/r/acme" matched nothing — one thing shown, another ordered. Same fix as the
+    // registries table on admin/organizations/Show.vue, whose header reads "URL".
+    { key: 'url_path', label: 'URL' },
     { key: 'organization', label: 'Kunde / Org' },
     { key: 'domains', label: 'Domains', sortable: false },
     { key: 'packages_count', label: 'Pakete', sortAs: 'number' },
@@ -68,7 +72,9 @@ const columns: ColumnDef<GroupRow>[] = [
 const table = useTableState<GroupRow>({
     rows: () => props.groups,
     columns,
-    searchKeys: ['name', 'slug'],
+    // `url_path` contains the slug verbatim, so searching a bare slug still matches — and a
+    // pasted "/r/acme/tools" now matches too, which is the form the table actually shows.
+    searchKeys: ['name', 'url_path'],
     defaultSort: { key: 'name', direction: 'asc' },
     filters: {
         org: {
