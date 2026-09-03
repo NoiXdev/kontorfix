@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -9,8 +10,8 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -103,9 +104,6 @@ function resetFilters() {
     filterGroup.value = '';
 }
 
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
-
 // Live hint for sync events via the operator channel.
 const liveHint = ref<{ message: string; failed: boolean } | null>(null);
 let hintTimer: ReturnType<typeof setTimeout> | undefined;
@@ -170,12 +168,7 @@ const table = useTableState<PackageRow>({
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div
                 v-if="liveHint"

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
@@ -10,9 +11,11 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
+import { usePackageSyncStatus } from '@/composables/usePackageSyncStatus';
+import { type SyncStatus } from '@/lib/syncStatusPoll';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -204,21 +207,34 @@ function saveAbandonment() {
         .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
 }
 
-// Toast for one-off actions like resync — same pattern as Index.vue's flashSuccess.
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
-
-// Live update of the sync status for the currently displayed package.
-// Local state, so the live update doesn't mutate the prop.
-const syncStatus = ref(props.package.sync_status);
-const syncError = ref(props.package.sync_error);
+// The displayed sync status. Local state, so neither source below mutates the prop.
+//
+// The broadcast used to be the only source, and it is the one that can be missed: creating
+// a package dispatches SyncPackage and redirects straight here, so a small repository is
+// routinely synced before this browser has finished subscribing — and the event goes to a
+// channel nobody had joined. The composable therefore also reconciles against the server
+// until the status is terminal, which is likewise the only thing that corrects the badge
+// when realtime is off (no Reverb key at build time) or the account may not subscribe.
+//
+// The seed is passed as a getter, not a snapshot: Inertia sets `preserveState: true` for
+// post/put/patch/delete, so clicking "Erneut synchronisieren" re-renders this page with
+// `sync_status` back at `pending` without remounting the component. Reading the prop once
+// would have left the badge frozen on the previous terminal value.
+const {
+    status: syncStatus,
+    error: syncError,
+    stale: syncStatusStale,
+    apply: applySyncStatus,
+} = usePackageSyncStatus(props.package.id, () => ({
+    status: props.package.sync_status,
+    error: props.package.sync_error,
+}));
 
 function applyStatus(p: PackagePayload) {
     if (p.id !== props.package.id) {
         return;
     }
-    syncStatus.value = p.sync_status as typeof props.package.sync_status;
-    syncError.value = p.error ?? null;
+    applySyncStatus({ status: p.sync_status as SyncStatus, error: p.error ?? null });
 }
 
 // The composable decides whether this account may subscribe at all.
@@ -233,12 +249,7 @@ useOperatorChannel({
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center gap-3">
@@ -262,6 +273,15 @@ useOperatorChannel({
                 <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">Zuletzt synchronisiert: {{ props.package.synced_at }}</div>
                 <div v-if="syncError" class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {{ syncError }}
+                </div>
+                <!-- The page stopped polling before the sync reached an answer. Saying so beats
+                     leaving a badge that has quietly frozen on "Wartet" or "Läuft…". -->
+                <div
+                    v-if="syncStatusStale"
+                    role="status"
+                    class="w-fit rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400"
+                >
+                    Status konnte nicht aktualisiert werden — Seite neu laden.
                 </div>
 
                 <!-- Usage stats -->

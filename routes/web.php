@@ -58,6 +58,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::post('packages/probe', [Admin\PackageController::class, 'probe'])
         ->middleware('throttle:10,1')->name('packages.probe');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
+    // Just the sync status, polled by the detail page with a backoff until it turns
+    // terminal. It exists because the `PackageSynced` broadcast can only reach a browser
+    // that has already subscribed, and creation redirects here the instant the job is
+    // dispatched — see PackageController::syncStatus() for the full reasoning.
+    Route::get('packages/{package}/sync-status', [Admin\PackageController::class, 'syncStatus'])->name('packages.sync-status');
     // Edit a package's repository source (URL, private-repo credential/token).
     Route::put('packages/{package}', [Admin\PackageController::class, 'update'])->name('packages.update');
     // Mark/unmark a package as abandoned. Split from the repository-source update above:

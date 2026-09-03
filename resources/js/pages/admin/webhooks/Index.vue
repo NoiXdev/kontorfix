@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -77,7 +78,6 @@ const props = defineProps<{
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Webhooks', href: '/admin/webhooks' }];
 
 const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 const newSecret = computed(() => page.props.flash?.incomingWebhookSecret ?? null);
 const newSecretUrl = computed(() => page.props.flash?.incomingWebhookUrl ?? null);
 
@@ -199,12 +199,7 @@ function destroyIncoming(id: string) {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <!-- Reveal-once secret callout after creating/regenerating an incoming hook -->
             <div v-if="newSecret" class="rounded-xl border border-copper/30 bg-copper/10 p-4">

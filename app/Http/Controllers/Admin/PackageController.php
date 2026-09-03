@@ -242,6 +242,35 @@ class PackageController extends Controller
         ]);
     }
 
+    /**
+     * The package's sync status alone, for the detail page to reconcile itself against.
+     *
+     * `PackageSynced` is broadcast on the `operator` channel the moment the job finishes.
+     * Creating a package dispatches `SyncPackage` and redirects straight to this package's
+     * detail page, so the browser still has to load the page, open the WebSocket,
+     * authenticate at `/broadcasting/auth` and subscribe — and for a small repository the
+     * job routinely wins that race. Reverb does not replay to a channel nobody had joined,
+     * so the badge stayed on "Wartet" until somebody reloaded by hand. Realtime is also
+     * optional here: `resources/js/echo.ts` only builds `window.Echo` when a Reverb key was
+     * present at asset-build time, and with none the page would never have been corrected
+     * at all.
+     *
+     * Deliberately not the `show` action with a partial reload: that one loads versions,
+     * registries with their organizations, Python distributions and the activity log to
+     * answer a question about two columns. Same guard as every other read of this package.
+     */
+    public function syncStatus(Package $package): JsonResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        return response()->json([
+            'status' => $package->sync_status->value,
+            // Same exposure as `show` above, behind the same guard — the detail page
+            // prints this text next to the failed badge.
+            'error' => $package->sync_error,
+        ]);
+    }
+
     public function probe(Request $request, RepositoryProbe $probe): JsonResponse
     {
         // Same URL shape — and the same German messages — as StorePackageRequest, from the
