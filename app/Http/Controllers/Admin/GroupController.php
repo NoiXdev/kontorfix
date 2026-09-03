@@ -135,10 +135,22 @@ class GroupController extends Controller
      * the last moment of that day (see updateAssignment()), so the day is the value the
      * operator gave and the one the date field has to be seeded with.
      *
+     * `owned_by_registry_org` mirrors clause 1 of
+     * ResolvesRegistryPackage::packageExistsLocally(), which suppresses the upstream for a
+     * name this registry's ORGANIZATION owns, with no assignment involved at all. The
+     * availability copy needs it, and `shared` cannot answer for it: a shared package
+     * assigned to a registry of the operator organization satisfies both clauses, so
+     * detaching it would not release the name either. Without this the notes would tell an
+     * operator to detach — a destructive act — to release a name that detaching does not
+     * release, producing exactly the unexplainable 404 the copy exists to prevent.
+     *
+     * The coupling is one-way and worth knowing: if that clause ever stopped keying on
+     * ownership, this field and the German copy built on it would both have to follow.
+     *
      * A plain list rather than a Collection: Collection's TValue is invariant, so an array
      * shape in that position is rejected even against itself.
      *
-     * @return list<array{id:string, name:string, type:value-of<PackageType>, sync_status:value-of<SyncStatus>, shared:bool, available_until:?string, in_force:bool}>
+     * @return list<array{id:string, name:string, type:value-of<PackageType>, sync_status:value-of<SyncStatus>, shared:bool, available_until:?string, in_force:bool, owned_by_registry_org:bool}>
      */
     private function assignedPackagePayload(Group $group): array
     {
@@ -147,8 +159,8 @@ class GroupController extends Controller
         return $group->packages()->orderBy('name')
             // `shared` is selected explicitly: a column-restricted get() that omitted it
             // would yield null rather than fail, and the marker would silently never appear.
-            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared'])
-            ->map(function (Package $p) use ($inForce): array {
+            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared', 'packages.organization_id'])
+            ->map(function (Package $p) use ($group, $inForce): array {
                 // The pivot row this package was loaded through. Read via getRelation()
                 // rather than `$p->pivot`, which is set dynamically by the belongsToMany
                 // and so is invisible to static analysis on a plain Package.
@@ -164,6 +176,7 @@ class GroupController extends Controller
                         ? $pivot->available_until?->toDateString()
                         : null,
                     'in_force' => in_array($p->id, $inForce, true),
+                    'owned_by_registry_org' => $p->organization_id === $group->organization_id,
                 ];
             })
             ->all();

@@ -715,6 +715,31 @@ it('lets a lapsed shared assignment be extended when nothing else holds the name
     expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeTrue();
 });
 
+it('lets an in-force shared assignment be withdrawn with a date in the past', function () {
+    // The safe withdrawal, on the one row type where the guard is actually involved: the
+    // package is shared, in force, and in a registry of another organization. Delivery must
+    // stop while the assignment — and with it the suppression of the upstream — survives.
+    //
+    // Stated here rather than only in GroupAssignmentAvailabilityTest, whose version of this
+    // case uses an own package with no name conflict and so never reaches SharedAssignment.
+    // The guard runs unconditionally, including on a write that lapses an assignment; a
+    // future tightening that refused a past date for a shared package would pass every other
+    // test on this branch.
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared, ['available_until' => now()->addYear()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.packages.update', [$customer, $shared]), ['available_until' => now()->subDay()->toDateString()])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->assignedPackages()->whereKey($shared->id)->exists())->toBeFalse()
+        // Still assigned: this is what keeps the name from falling through to the upstream,
+        // and it is the whole difference between withdrawing and detaching.
+        ->and($customer->packages()->whereKey($shared->id)->exists())->toBeTrue();
+});
+
 it('does not treat an in-force assignment as colliding with itself when its date moves', function () {
     // The package is in the registry's current assignment AND in the submission, so it
     // appears twice in the post-state. Two rows of the same package are not two packages.

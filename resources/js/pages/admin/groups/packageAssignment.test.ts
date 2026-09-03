@@ -4,9 +4,9 @@ import {
     availabilityNote,
     availabilityOf,
     endsImmediately,
-    EXPIRY_CONSEQUENCE,
+    expiryConsequence,
     formatDay,
-    IMMEDIATE_WITHDRAWAL_NOTE,
+    immediateWithdrawalNote,
 } from './packageAssignment';
 
 /*
@@ -70,39 +70,92 @@ describe('availabilityLabel', () => {
     });
 });
 
+/*
+ * Every text below is asserted in BOTH ownership cases, because the whole hazard is a
+ * sentence that is true in one and destructive in the other.
+ *
+ * A shared package owned elsewhere is suppressed by its assignment alone, so detaching
+ * releases the name. A package this registry's organization owns is suppressed by ownership
+ * (packageExistsLocally() clause 1), so detaching releases nothing and the operator has
+ * destroyed an assignment and still gets a 404. Both notes render for every row of the
+ * table — own packages are the majority of them — so a suite that only ever checked the
+ * shared wording would pass the exact copy this round removed.
+ */
+
+/** Owned by the registry's own organization: detaching does not release the name. */
+const OWN = true;
+/** Shared, owned elsewhere: the assignment is the only thing holding the name. */
+const SHARED_ELSEWHERE = false;
+
 describe('availabilityNote', () => {
     it('has nothing to add for an open-ended assignment', () => {
-        expect(availabilityNote({ state: 'permanent', day: null })).toBeNull();
+        expect(availabilityNote({ state: 'permanent', day: null }, OWN)).toBeNull();
+        expect(availabilityNote({ state: 'permanent', day: null }, SHARED_ELSEWHERE)).toBeNull();
     });
 
-    it('warns that a lapsed assignment blocks the name rather than releasing it', () => {
-        const note = availabilityNote({ state: 'lapsed', day: '31.12.2026' });
+    it('says the same thing about delivery in both cases', () => {
+        // The half that does not depend on ownership: the registry stops serving and the
+        // request is not passed upstream. Losing it for one of the two would leave that
+        // operator with no explanation for the 404 at all.
+        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+            for (const state of ['limited', 'lapsed'] as const) {
+                const note = availabilityNote({ state, day: '31.12.2026' }, owned);
 
-        expect(note).toContain('31.12.2026');
-        // What the customer is seeing right now…
-        expect(note).toContain('404');
-        // …that the request does not reach the upstream rather than falling through to it…
-        expect(note).toContain('nicht an den Upstream');
-        // …and the act that releases the name.
-        expect(note).toContain('entfernen');
+                expect(note).toContain('31.12.2026');
+                expect(note).toContain('404');
+                expect(note).toContain('nicht an den Upstream');
+            }
+        }
     });
 
-    it('warns before the date what the date will do', () => {
-        const note = availabilityNote({ state: 'limited', day: '31.12.2026' });
+    it('tells the operator to detach only when detaching would release the name', () => {
+        for (const state of ['limited', 'lapsed'] as const) {
+            expect(availabilityNote({ state, day: '31.12.2026' }, SHARED_ELSEWHERE)).toContain(
+                'Entfernen Sie die Zuweisung, um den Namen freizugeben.',
+            );
+        }
+    });
 
-        expect(note).toContain('31.12.2026');
-        expect(note).toContain('404');
-        expect(note).toContain('nicht an den Upstream');
-        expect(note).toContain('entfernt');
+    it('tells the operator for an own package that detaching would NOT release the name', () => {
+        // The destructive instruction this round removed: for a package the organization
+        // owns, removing the assignment frees nothing and only deleting the package does.
+        for (const state of ['limited', 'lapsed'] as const) {
+            const note = availabilityNote({ state, day: '31.12.2026' }, OWN);
+
+            expect(note).not.toContain('Entfernen Sie die Zuweisung, um den Namen freizugeben.');
+            expect(note).toContain('gibt ihn nicht frei');
+            expect(note).toContain('Löschen des Pakets');
+        }
     });
 
     it('never calls the upstream by a single vendor name', () => {
         // The registry's upstream URL is configurable and has its own tab on this page, so
         // naming Packagist as the destination would be wrong as often as it was right.
-        // EXPIRY_CONSEQUENCE names it once, explicitly as an example.
-        for (const state of ['limited', 'lapsed'] as const) {
-            expect(availabilityNote({ state, day: '31.12.2026' })).not.toContain('Packagist');
+        // expiryConsequence() names it once, explicitly as an example.
+        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+            for (const state of ['limited', 'lapsed'] as const) {
+                expect(availabilityNote({ state, day: '31.12.2026' }, owned)).not.toContain('Packagist');
+            }
         }
+    });
+});
+
+describe('expiryConsequence', () => {
+    it('says the date does not reopen the upstream, in both cases', () => {
+        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+            expect(expiryConsequence(owned)).toContain('404');
+            expect(expiryConsequence(owned)).toContain('nicht an den Upstream');
+        }
+    });
+
+    it('says what an empty date field means', () => {
+        expect(expiryConsequence(SHARED_ELSEWHERE)).toContain('unbefristet');
+    });
+
+    it('offers detaching as the release path only where it is one', () => {
+        expect(expiryConsequence(SHARED_ELSEWHERE)).toContain('um den Namen freizugeben');
+        expect(expiryConsequence(OWN)).not.toContain('um den Namen freizugeben');
+        expect(expiryConsequence(OWN)).toContain('gibt ihn nicht frei');
     });
 });
 
@@ -125,28 +178,22 @@ describe('endsImmediately', () => {
     });
 });
 
-describe('IMMEDIATE_WITHDRAWAL_NOTE', () => {
+describe('immediateWithdrawalNote', () => {
     it('says delivery stops at once and the name still does not reach the upstream', () => {
-        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('sofort');
-        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('nicht an den Upstream');
+        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+            expect(immediateWithdrawalNote(owned)).toContain('sofort');
+            expect(immediateWithdrawalNote(owned)).toContain('nicht an den Upstream');
+        }
     });
 
-    it('distinguishes withdrawing from detaching', () => {
+    it('distinguishes withdrawing from detaching where they differ', () => {
         // The two ways to stop delivering. Only one of them keeps the name suppressed, and
         // an operator who confuses them opens the very fallthrough spec §4 closes.
-        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('Entfernen der Zuweisung');
-        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('frei');
-    });
-});
-
-describe('EXPIRY_CONSEQUENCE', () => {
-    it('states that the upstream is not reopened by the date passing', () => {
-        expect(EXPIRY_CONSEQUENCE).toContain('404');
-        expect(EXPIRY_CONSEQUENCE).toContain('nicht an den Upstream');
-        expect(EXPIRY_CONSEQUENCE).toContain('bis die Zuweisung entfernt wird');
+        expect(immediateWithdrawalNote(SHARED_ELSEWHERE)).toContain('Entfernen Sie die Zuweisung, um den Namen freizugeben.');
     });
 
-    it('says what an empty date field means', () => {
-        expect(EXPIRY_CONSEQUENCE).toContain('unbefristet');
+    it('does not offer detaching as a release path for an own package', () => {
+        expect(immediateWithdrawalNote(OWN)).not.toContain('um den Namen freizugeben');
+        expect(immediateWithdrawalNote(OWN)).toContain('gibt ihn nicht frei');
     });
 });

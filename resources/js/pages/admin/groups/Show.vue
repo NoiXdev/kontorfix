@@ -22,8 +22,8 @@ import {
     availabilityNote,
     availabilityOf,
     endsImmediately,
-    EXPIRY_CONSEQUENCE,
-    IMMEDIATE_WITHDRAWAL_NOTE,
+    expiryConsequence,
+    immediateWithdrawalNote,
     type AssignedPackage,
 } from './packageAssignment';
 
@@ -268,6 +268,9 @@ function editAvailability(pkg: PackageRow) {
 function cancelAvailability() {
     editingAssignment.value = null;
     editedUntil.value = '';
+    // Otherwise reopening the same row after cancelling brings back the refusal it was
+    // cancelled out of — stale rather than misleading, but there is nothing to say.
+    submittedAssignment.value = null;
 }
 
 /**
@@ -277,7 +280,15 @@ function cancelAvailability() {
  * package's.
  */
 function hasBlockRow(pkg: PackageRow): boolean {
-    return editingAssignment.value === pkg.id || availabilityNote(availabilityOf(pkg)) !== null;
+    return editingAssignment.value === pkg.id || noteFor(pkg) !== null;
+}
+
+/**
+ * This row's consequence note. The ownership flag decides whether detaching would release
+ * the name, which is the one thing in the text an operator can act on wrongly.
+ */
+function noteFor(pkg: PackageRow): string | null {
+    return availabilityNote(availabilityOf(pkg), pkg.owned_by_registry_org);
 }
 
 // The guard that refuses a name collision (App\Services\Package\SharedAssignment) keys its
@@ -296,7 +307,8 @@ const assignmentErrors = computed(() => {
 
     return {
         available_until: errors?.available_until,
-        collision: errors?.package_ids === undefined ? undefined : `Die Zuweisung kann nicht verlängert werden: ${errors.package_ids}`,
+        collision:
+            errors?.package_ids === undefined ? undefined : `Die Verfügbarkeit der Zuweisung kann nicht geändert werden: ${errors.package_ids}`,
     };
 });
 
@@ -573,7 +585,7 @@ async function copyToken() {
                                              opening the editor, because the operator reading a failing build needs
                                              the diagnosis, not a form. -->
                                         <tr
-                                            v-if="availabilityNote(availabilityOf(pkg)) && editingAssignment !== pkg.id"
+                                            v-if="noteFor(pkg) && editingAssignment !== pkg.id"
                                             class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                                         >
                                             <td
@@ -581,7 +593,7 @@ async function copyToken() {
                                                 class="px-4 pb-3 text-xs"
                                                 :class="pkg.in_force ? 'text-muted-foreground' : 'text-destructive'"
                                             >
-                                                {{ availabilityNote(availabilityOf(pkg)) }}
+                                                {{ noteFor(pkg) }}
                                             </td>
                                         </tr>
                                         <tr
@@ -594,9 +606,11 @@ async function copyToken() {
                                                     <!-- No `min`: a date already past is legitimate, and is the only
                                                          way to say "stop delivering now, keep the name blocked". -->
                                                     <Input :id="`available-until-${pkg.id}`" v-model="editedUntil" type="date" class="max-w-xs" />
-                                                    <p class="max-w-2xl text-xs text-muted-foreground">{{ EXPIRY_CONSEQUENCE }}</p>
+                                                    <p class="max-w-2xl text-xs text-muted-foreground">
+                                                        {{ expiryConsequence(pkg.owned_by_registry_org) }}
+                                                    </p>
                                                     <p v-if="withdrawsImmediately" class="max-w-2xl text-xs text-copper-hi">
-                                                        {{ IMMEDIATE_WITHDRAWAL_NOTE }}
+                                                        {{ immediateWithdrawalNote(pkg.owned_by_registry_org) }}
                                                     </p>
                                                     <InputError :message="assignmentErrors.available_until" />
                                                     <InputError :message="assignmentErrors.collision" />

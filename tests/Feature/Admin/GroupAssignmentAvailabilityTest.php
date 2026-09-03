@@ -77,6 +77,44 @@ it('says of each assignment whether the package is shared', function () {
         ->assertInertia(fn ($page) => $page->where('packages.0.shared', false)->etc());
 });
 
+it('says of each assignment whether this registrys organization owns the package', function () {
+    // What decides whether DETACHING would release the name. `shared` cannot answer it:
+    // ResolvesRegistryPackage::packageExistsLocally() suppresses the upstream on ownership
+    // alone (clause 1), so for an own package the name stays claimed with or without the
+    // assignment — and the availability notes must not tell that operator to detach.
+    $group = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($group)->create(['name' => 'aaa/eigen']);
+    $shared = Package::factory()
+        ->for(Organization::factory()->create(['is_operator' => true]))
+        ->create(['name' => 'zzz/geteilt', 'shared' => true]);
+    $group->packages()->attach($own);
+    $group->packages()->attach($shared);
+
+    $this->actingAs(superAdmin())->get(route('admin.groups.show', $group))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('packages.0.owned_by_registry_org', true)
+            ->where('packages.1.owned_by_registry_org', false)
+            ->etc());
+});
+
+it('reports a shared package in the operators own registry as owned by it', function () {
+    // The case `shared` gets wrong, and the reason the payload carries ownership rather than
+    // reusing the marker: a shared package assigned to a registry of the organization that
+    // owns it satisfies BOTH clauses, so detaching releases nothing there either.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $group = Group::factory()->create(['organization_id' => $operator->id]);
+    $shared = Package::factory()->for($operator)->create(['shared' => true]);
+    $group->packages()->attach($shared);
+
+    $this->actingAs(superAdmin())->get(route('admin.groups.show', $group))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('packages.0.shared', true)
+            ->where('packages.0.owned_by_registry_org', true)
+            ->etc());
+});
+
 it('keeps serving a package through the whole day it is available until', function () {
     Carbon::setTestNow('2026-06-01 09:00:00');
     $group = Group::factory()->create();
