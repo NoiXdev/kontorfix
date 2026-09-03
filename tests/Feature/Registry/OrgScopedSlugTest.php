@@ -1,0 +1,56 @@
+<?php
+
+use App\Models\Group;
+use App\Models\Organization;
+use App\Models\Package;
+use Illuminate\Database\UniqueConstraintViolationException;
+
+it('lets two organizations hold the same registry slug', function () {
+    $a = Group::factory()->create(['slug' => 'packages']);
+    $b = Group::factory()->create(['slug' => 'packages']);
+
+    expect($a->organization_id)->not->toBe($b->organization_id)
+        ->and($b->exists)->toBeTrue();
+});
+
+it('still refuses the same slug twice inside one organization', function () {
+    $org = Organization::factory()->create();
+    Group::factory()->for($org)->create(['slug' => 'packages']);
+
+    expect(fn () => Group::factory()->for($org)->create(['slug' => 'packages']))
+        ->toThrow(UniqueConstraintViolationException::class);
+});
+
+it('serves a registry at the organization-scoped url', function () {
+    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    $package = Package::factory()->inOrgOf($group)->create([
+        'type' => 'composer', 'name' => 'acme/tools',
+    ]);
+    $group->packages()->attach($package);
+
+    $org = $group->organization;
+
+    $this->get("/r/{$org->slug}/{$group->slug}/packages.json")->assertOk();
+});
+
+it('no longer serves the registry at the bare slug url', function () {
+    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+
+    // The legacy form is a redirect, added in the next task — not a 200.
+    $this->get("/r/{$group->slug}/packages.json")->assertStatus(404);
+});
+
+it('does not serve a registry under another organization slug', function () {
+    // Both segments are part of the lookup: the slug alone no longer identifies a
+    // registry, so a registry addressed under a foreign organization must not resolve.
+    // Without this, one tenant could read another's registry through its own org slug.
+    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    $package = Package::factory()->inOrgOf($group)->create([
+        'type' => 'composer', 'name' => 'acme/tools',
+    ]);
+    $group->packages()->attach($package);
+
+    $stranger = Organization::factory()->create(['slug' => 'stranger']);
+
+    $this->get("/r/{$stranger->slug}/{$group->slug}/packages.json")->assertStatus(404);
+});

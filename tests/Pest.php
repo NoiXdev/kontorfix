@@ -6,6 +6,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
+use App\Services\Registry\RegistryUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Process;
 use Tests\TestCase;
@@ -82,6 +83,18 @@ function superAdmin(): User
 function homeRegistryId(User $user): string
 {
     return (string) Group::factory()->create(['organization_id' => $user->organization_id])->id;
+}
+
+/**
+ * The registry's path prefix, taken from the application's own statement of the URL form
+ * rather than spelled out again here. A test that addresses a registry through this keeps
+ * asserting what it meant — that this registry answers — instead of pinning a URL shape
+ * that lives in App\Services\Registry\RegistryUrl. The shape itself is pinned once, in
+ * tests/Feature/Registry/OrgScopedSlugTest.php and tests/Unit/RegistryUrlTest.php.
+ */
+function registryPath(Group $group): string
+{
+    return app(RegistryUrl::class)->path($group);
 }
 
 function tokenHeaderFor(Group $group): array

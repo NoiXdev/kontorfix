@@ -57,7 +57,7 @@ trait ResolvesRegistryPackage
 
     /**
      * Path prefix for metadata URLs (e.g. metadata-url in packages.json): empty
-     * for a custom domain (registry sits at the host root), otherwise /r/{slug}.
+     * for a custom domain (registry sits at the host root), otherwise /r/{orgSlug}/{groupSlug}.
      */
     protected function registryPathPrefix(Request $request, Group $group): string
     {

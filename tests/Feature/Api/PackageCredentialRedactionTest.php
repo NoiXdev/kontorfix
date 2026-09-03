@@ -71,7 +71,7 @@ it('does not serve the repository pat as composer source metadata', function () 
     PackageVersion::factory()->for($this->package)->create();
 
     $res = $this->withHeaders(tokenHeaderFor($this->group))
-        ->getJson('/r/kadenz/p2/acme/demo.json')->assertOk();
+        ->getJson(registryPath($this->group).'/p2/acme/demo.json')->assertOk();
 
     expect($res->getContent())->not->toContain('ghp_AAAABBBBCCCCDDDDEEEE');
     expect($res->json('packages')['acme/demo'][0]['source']['url'])->toBe(PCR_REDACTED);

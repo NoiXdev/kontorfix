@@ -27,7 +27,7 @@ it('accepts a twine upload and stores the distribution file', function () {
     $bytes = 'fake-sdist-content';
     $file = UploadedFile::fake()->createWithContent('my_package-1.0.0.tar.gz', $bytes);
 
-    $this->withHeaders(publishHeaderFor($group))->post('/r/kadenz/', [
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
         ':action' => 'file_upload',
         'name' => 'My.Package',
         'version' => '1.0.0',
@@ -53,7 +53,7 @@ it('infers a wheel filetype from the filename', function () {
     [$group, $pkg] = pythonRegistry();
     $file = UploadedFile::fake()->createWithContent('my_package-1.0.0-py3-none-any.whl', 'wheelbytes');
 
-    $this->withHeaders(publishHeaderFor($group))->post('/r/kadenz/', [
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
         'name' => 'My.Package', 'version' => '1.0.0', 'content' => $file,
     ])->assertOk();
 
@@ -70,7 +70,7 @@ it('serves the PEP 503 simple index resolving the normalised name', function () 
     ]);
 
     // Request under a differently-punctuated name — must resolve to the same project.
-    $res = $this->withHeaders(tokenHeaderFor($group))->get('/r/kadenz/simple/My_Package/')->assertOk();
+    $res = $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/simple/My_Package/')->assertOk();
     $res->assertSee('my_package-1.0.0.tar.gz', false);
     $res->assertSee('#sha256='.str_repeat('a', 64), false);
     $res->assertSee('data-requires-python="&gt;=3.9"', false);
@@ -85,7 +85,7 @@ it('serves PEP 691 JSON when the client asks for it', function () {
     ]);
 
     $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->assertJsonPath('name', 'my-package')
         ->assertJsonPath('files.0.filename', 'my_package-1.0.0.tar.gz')
@@ -105,7 +105,7 @@ it('declares Simple API version 1.4 in the JSON representation', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -129,7 +129,7 @@ it('lists every project version once, in the versions key', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -149,7 +149,7 @@ it('reports the mandatory size on every file', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -167,7 +167,7 @@ it('reports upload-time as an ISO 8601 instant', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -183,7 +183,7 @@ it('declares the same version in the HTML representation', function () {
     ]);
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->getContent();
 
@@ -195,7 +195,7 @@ it('declares the same version on the root index route', function () {
     [$group] = pythonRegistry();
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple')
+        ->get(registryPath($group).'/simple')
         ->assertOk()
         ->getContent();
 
@@ -206,12 +206,12 @@ it('lists a readable project by its normalised name on the root index', function
     [$group] = pythonRegistry(name: 'My.Package');
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple')
+        ->get(registryPath($group).'/simple')
         ->assertOk()
         ->getContent();
 
     // PEP 503 normalisation collapses '.', '_', '-' runs to a single '-' and lowercases.
-    expect($html)->toContain('<a href="http://localhost/r/kadenz/simple/my-package/">my-package</a>');
+    expect($html)->toContain('<a href="http://localhost'.registryPath($group).'/simple/my-package/">my-package</a>');
 });
 
 it('does not list a project the caller cannot access on the root index', function () {
@@ -222,7 +222,7 @@ it('does not list a project the caller cannot access on the root index', functio
     $group->packages()->attach($hidden, ['available_until' => now()->subDay()]);
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple')
+        ->get(registryPath($group).'/simple')
         ->assertOk()
         ->getContent();
 
@@ -239,7 +239,7 @@ it('reports an active status for a live package', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -256,7 +256,7 @@ it('omits the reason key for a live package', function () {
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -277,7 +277,7 @@ it('reports deprecated with the composed reason for an abandoned package', funct
     ]);
 
     $json = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => 'application/vnd.pypi.simple.v1+json'])
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->json();
 
@@ -301,7 +301,7 @@ it('puts both markers in the HTML representation', function () {
     ]);
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->getContent();
 
@@ -323,7 +323,7 @@ it('escapes the reason in the HTML representation', function () {
     ]);
 
     $html = $this->withHeaders(tokenHeaderFor($group))
-        ->get('/r/kadenz/simple/my-package/')
+        ->get(registryPath($group).'/simple/my-package/')
         ->assertOk()
         ->getContent();
 
@@ -352,7 +352,7 @@ it('downloads a stored distribution and counts the download', function () {
     ]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/pypi/files/{$pkg->id}/my_package-1.0.0.tar.gz")
+        ->get(registryPath($group)."/pypi/files/{$pkg->id}/my_package-1.0.0.tar.gz")
         ->assertOk();
 
     expect($dist->fresh()->download_count)->toBe(1);
@@ -372,14 +372,14 @@ it('never forwards a locally-known project to an upstream (dependency confusion)
     $secret = Package::factory()->inOrgOf($groupB)->create(['type' => PackageType::Python, 'name' => 'internal-lib']);
     $groupB->packages()->attach($secret);
 
-    $this->withHeaders(tokenHeaderFor($groupA))->get('/r/a/simple/internal-lib/')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($groupA))->get(registryPath($groupA).'/simple/internal-lib/')->assertNotFound();
 });
 
 it('redirects an unknown project to the configured python upstream', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'a', 'public' => true]);
     Upstream::factory()->for($group)->create(['type' => PackageType::Python, 'url' => 'https://pypi.org', 'enabled' => true]);
 
-    $this->withHeaders(tokenHeaderFor($group))->get('/r/a/simple/requests/')
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/simple/requests/')
         ->assertRedirect('https://pypi.org/simple/requests/');
 });
 
@@ -390,7 +390,7 @@ it('rejects an upload without publish ability', function () {
     $file = UploadedFile::fake()->createWithContent('my_package-1.0.0.tar.gz', 'x');
 
     $this->withHeaders(['Authorization' => 'Bearer '.$read])
-        ->post('/r/kadenz/', ['name' => 'My.Package', 'version' => '1.0.0', 'content' => $file])
+        ->post(registryPath($group).'/', ['name' => 'My.Package', 'version' => '1.0.0', 'content' => $file])
         ->assertForbidden();
 
     expect($pkg->fresh()->pythonDists()->count())->toBe(0);
@@ -402,7 +402,7 @@ it('rejects an upload for a project not in this registry', function () {
     $file = UploadedFile::fake()->createWithContent('other-1.0.0.tar.gz', 'x');
 
     $this->withHeaders(publishHeaderFor($group))
-        ->post('/r/kadenz/', ['name' => 'other', 'version' => '1.0.0', 'content' => $file])
+        ->post(registryPath($group).'/', ['name' => 'other', 'version' => '1.0.0', 'content' => $file])
         ->assertNotFound();
 });
 
@@ -411,7 +411,7 @@ it('rejects a sha256 digest mismatch', function () {
     [$group] = pythonRegistry();
     $file = UploadedFile::fake()->createWithContent('my_package-1.0.0.tar.gz', 'real');
 
-    $this->withHeaders(publishHeaderFor($group))->post('/r/kadenz/', [
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
         'name' => 'My.Package', 'version' => '1.0.0', 'sha256_digest' => str_repeat('0', 64), 'content' => $file,
     ])->assertStatus(400);
 });
@@ -420,7 +420,7 @@ it('rejects a duplicate distribution filename with 409', function () {
     Storage::fake('artifacts');
     [$group] = pythonRegistry();
 
-    $upload = fn () => $this->withHeaders(publishHeaderFor($group))->post('/r/kadenz/', [
+    $upload = fn () => $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
         'name' => 'My.Package', 'version' => '1.0.0', 'content' => UploadedFile::fake()->createWithContent('my_package-1.0.0.tar.gz', 'x'),
     ]);
 

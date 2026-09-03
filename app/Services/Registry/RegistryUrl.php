@@ -32,7 +32,8 @@ class RegistryUrl
      */
     public function path(Group $group): string
     {
-        return '/r/'.$group->slug;
+        // The organization scopes the slug, so it is part of the address.
+        return '/r/'.$group->organization->slug.'/'.$group->slug;
     }
 
     /** Path prefix for a specific access path: empty for a custom domain, else path(). */

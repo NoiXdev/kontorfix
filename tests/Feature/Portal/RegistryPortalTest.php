@@ -32,7 +32,7 @@ it('shows a registry with setup snippets and its packages', function () {
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registry')
             ->where('registry.slug', 'acme')
-            ->where('snippets.composer', fn ($v) => str_contains($v, '/r/acme'))
+            ->where('snippets.composer', fn ($v) => str_contains($v, registryPath($group)))
             ->has('packages', 1)
             ->where('packages.0.name', 'acme/widget'));
 });

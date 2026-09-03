@@ -141,7 +141,7 @@ it('does not durably cache a truncated artifact fetched over http', function () 
     Http::fake(['cdn.test/*' => Http::response('zip-bytes', 200, ['Content-Length' => '4096'])]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk()->streamedContent();
 
     // Nothing was committed, so the next request re-fetches instead of serving a poisoned
@@ -161,7 +161,7 @@ it('still caches a complete artifact fetched over http', function () {
     Http::fake(['cdn.test/*' => Http::response('zip-bytes', 200, ['Content-Length' => '9'])]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get("/r/kadenz/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
+        ->get(registryPath($group)."/proxy/composer/{$up->id}/acme/demo/1.0.0.0")
         ->assertOk()->streamedContent();
 
     Storage::disk('artifacts')->assertExists("proxy/{$up->id}/composer/acme/demo/1.0.0.0.zip");

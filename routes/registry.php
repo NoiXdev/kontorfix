@@ -7,7 +7,7 @@ use App\Http\Controllers\Registry\PypiController;
 use Illuminate\Support\Facades\Route;
 
 // Registry endpoints are defined ONCE and registered under two access paths:
-// via slug prefix (/r/{groupSlug}/...) and at the host root for custom domains.
+// via slug prefix (/r/{orgSlug}/{groupSlug}/...) and at the host root for custom domains.
 // Group resolution is handled exclusively by `registry.context` (see
 // ResolveRegistryContext) — controllers read the group from the request attributes.
 
@@ -96,9 +96,10 @@ $registryEndpoints = function () use ($uuid) {
     });
 };
 
-// Slug access: {groupSlug} as a plain parameter, resolved by the middleware.
-Route::prefix('/r/{groupSlug}')
-    ->where(['groupSlug' => '[a-z0-9-]+'])
+// Slug access: the organization scopes the registry slug, so both segments are needed to
+// identify one registry. Resolved by the middleware; see ResolveRegistryContext.
+Route::prefix('/r/{orgSlug}/{groupSlug}')
+    ->where(['orgSlug' => '[a-z0-9-]+', 'groupSlug' => '[a-z0-9-]+'])
     ->middleware(['registry.context', 'registry.auth'])
     ->group($registryEndpoints);
 

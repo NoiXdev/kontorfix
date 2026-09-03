@@ -53,7 +53,9 @@ class GroupController extends Controller
     {
         $this->assertAdministersGroup($group);
 
-        $group->load(['organization:id,name', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
+        // `slug` on the organization is load-bearing, not decoration: the setup snippets
+        // address the registry as /r/{orgSlug}/{groupSlug} via RegistryUrl.
+        $group->load(['organization:id,name,slug', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
 
         return Inertia::render('admin/groups/Show', [
             'group' => [

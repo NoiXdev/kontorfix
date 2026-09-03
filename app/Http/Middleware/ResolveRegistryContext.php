@@ -12,18 +12,22 @@ class ResolveRegistryContext
 {
     public function handle(Request $request, Closure $next): Response
     {
+        $orgSlug = $request->route('orgSlug');
         $slug = $request->route('groupSlug');
 
         if ($slug !== null) {
-            // Slug access: /r/{slug}/...
-            $group = Group::where('slug', $slug)->first();
+            // Slug access: /r/{orgSlug}/{groupSlug}/... A slug is unique only within its
+            // organization, so both segments are part of the lookup.
+            $group = Group::where('slug', $slug)
+                ->whereHas('organization', fn ($q) => $q->where('slug', $orgSlug))
+                ->first();
             abort_if($group === null, 404);
             $request->attributes->set('registryGroup', $group);
             $request->attributes->set('registryDomainMode', false);
 
-            // Controller actions no longer know {groupSlug} as a parameter. Without this,
-            // Laravel's (purely positional) controller dispatch would shift all subsequent
-            // route parameters by one.
+            // Controller actions know neither parameter. Without this, Laravel's purely
+            // positional controller dispatch would shift every later route parameter.
+            $request->route()->forgetParameter('orgSlug');
             $request->route()->forgetParameter('groupSlug');
         } else {
             // Domain access: registry at the host root. Unknown host -> 404

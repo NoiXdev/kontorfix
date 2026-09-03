@@ -53,7 +53,7 @@ it('reaches the pypi upstream fallthrough anonymously on a public group', functi
         'type' => PackageType::Python, 'url' => 'https://pypi.org', 'enabled' => true,
     ]);
 
-    $this->get('/r/anchor/simple/requests/')
+    $this->get(registryPath($group).'/simple/requests/')
         ->assertRedirect('https://pypi.org/simple/requests/');
 });
 
@@ -63,7 +63,7 @@ it('does not hand the mirror credential to an anonymous client in a redirect', f
         'type' => PackageType::Python, 'url' => CREDENTIALLED_MIRROR, 'enabled' => true,
     ]);
 
-    $response = $this->get('/r/leak/simple/requests/');
+    $response = $this->get(registryPath($group).'/simple/requests/');
 
     // Not redirected at all: a credential-free redirect to a private mirror would fail
     // the client with a 401 anyway, while still naming the internal host and telling it
@@ -96,7 +96,7 @@ it('never leaks the mirror credential through the composer metadata fallthrough'
         'type' => PackageType::Composer, 'url' => CREDENTIALLED_MIRROR, 'enabled' => true,
     ]);
 
-    $response = $this->get('/r/composer-mirror/p2/acme/widget.json');
+    $response = $this->get(registryPath($group).'/p2/acme/widget.json');
 
     expect($response->getStatusCode())->toBe(200);
     expectNoMirrorCredential($response);
@@ -117,7 +117,7 @@ it('never leaks the mirror credential through the npm packument fallthrough', fu
         'type' => PackageType::Npm, 'url' => CREDENTIALLED_MIRROR, 'enabled' => true,
     ]);
 
-    $response = $this->get('/r/npm-mirror/left-pad');
+    $response = $this->get(registryPath($group).'/left-pad');
 
     expect($response->getStatusCode())->toBe(200);
     expectNoMirrorCredential($response);
@@ -162,5 +162,5 @@ it('keeps the dependency-confusion guard ahead of the credential check', functio
         Package::factory()->inOrgOf($other)->create(['type' => PackageType::Python, 'name' => 'internal-lib'])
     );
 
-    $this->get('/r/confusion/simple/internal-lib/')->assertNotFound();
+    $this->get(registryPath($group).'/simple/internal-lib/')->assertNotFound();
 });

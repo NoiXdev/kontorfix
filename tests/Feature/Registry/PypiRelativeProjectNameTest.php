@@ -28,10 +28,10 @@ function pypiNameGroup(): Group
 }
 
 it('refuses a relative path component in a pypi project name', function () {
-    pypiNameGroup();
+    $group = pypiNameGroup();
 
     foreach (['..', '.', '%2E%2E'] as $project) {
-        $this->get("/r/kadenz/simple/{$project}/")->assertNotFound();
+        $this->get(registryPath($group)."/simple/{$project}/")->assertNotFound();
     }
 });
 
@@ -39,17 +39,17 @@ it('still forwards an ordinary unknown project — the anchor for the case above
     // Same route, same public group, same enabled upstream, and the fallthrough fires: so
     // the 404 above is the name guard and not a missing upstream, a route miss or the
     // access check answering first.
-    pypiNameGroup();
+    $group = pypiNameGroup();
 
-    $this->get('/r/kadenz/simple/real-pkg/')
+    $this->get(registryPath($group).'/simple/real-pkg/')
         ->assertRedirect('https://pypi.org/simple/real-pkg/');
 });
 
 it('keeps accepting the dots a real project name contains', function () {
     // `zope.interface` and friends: the refusal is of a segment that IS a relative
     // component, never of a name that merely contains a dot.
-    pypiNameGroup();
+    $group = pypiNameGroup();
 
-    $this->get('/r/kadenz/simple/zope.interface/')
+    $this->get(registryPath($group).'/simple/zope.interface/')
         ->assertRedirect('https://pypi.org/simple/zope-interface/');
 });

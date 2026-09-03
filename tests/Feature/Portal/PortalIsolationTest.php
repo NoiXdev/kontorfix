@@ -25,7 +25,7 @@ it('fully isolates two customers across list, detail, snippets and tokens', func
     // Own detail: snippets + package visible
     $this->actingAs($memberA)->get("/portal/registries/{$groupA->id}")
         ->assertOk()
-        ->assertInertia(fn ($p) => $p->where('snippets.npm', fn ($v) => str_contains($v, '/r/acme/'))->has('packages', 1));
+        ->assertInertia(fn ($p) => $p->where('snippets.npm', fn ($v) => str_contains($v, registryPath($groupA).'/'))->has('packages', 1));
 
     // Foreign detail: forbidden
     $this->actingAs($memberA)->get("/portal/registries/{$groupB->id}")->assertForbidden();

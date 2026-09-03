@@ -17,8 +17,8 @@ it('counts downloads and records the dist size when a dist is served', function 
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
-    $this->withHeaders($headers)->get('/r/kadenz/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
 
     $version = $pkg->versions()->where('version', '1.0.0.0')->first();
     expect($version->download_count)->toBe(2);

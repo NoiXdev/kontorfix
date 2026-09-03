@@ -36,7 +36,7 @@ function crossOrgPythonAssignment(): array
 it('does not list another organization\'s package in the simple index', function () {
     [$mine] = crossOrgPythonAssignment();
 
-    $this->get("/r/{$mine->slug}/simple")
+    $this->get(registryPath($mine).'/simple')
         ->assertOk()
         ->assertDontSee('internal-lib');
 });
@@ -45,7 +45,7 @@ it('does not serve another organization\'s project page', function () {
     [$mine] = crossOrgPythonAssignment();
 
     // No upstream configured, so the refusal is a flat 404 rather than a fallthrough.
-    $this->get("/r/{$mine->slug}/simple/internal-lib/")->assertNotFound();
+    $this->get(registryPath($mine).'/simple/internal-lib/')->assertNotFound();
 });
 
 it('does not stream a distribution of another organization\'s package', function () {
@@ -59,6 +59,6 @@ it('does not stream a distribution of another organization\'s package', function
     // this test would pass whatever the ownership check does.
     Storage::disk('artifacts')->put($dist->path, 'sdist-bytes');
 
-    $this->get("/r/{$mine->slug}/pypi/files/{$foreign->id}/internal_lib-1.0.0.tar.gz")
+    $this->get(registryPath($mine)."/pypi/files/{$foreign->id}/internal_lib-1.0.0.tar.gz")
         ->assertNotFound();
 });

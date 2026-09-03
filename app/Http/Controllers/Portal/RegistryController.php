@@ -29,7 +29,8 @@ class RegistryController extends Controller
         // any additional memberships), not just their home org.
         $groups = Group::whereIn('organization_id', $request->user()->accessibleOrganizationIds())
             ->where('portal_enabled', true)
-            ->with('domains')
+            // `organization` too: RegistryUrl::path() reads its slug, and this is a loop.
+            ->with(['domains', 'organization'])
             ->withCount('packages')
             ->orderBy('name')
             ->get();
@@ -48,7 +49,7 @@ class RegistryController extends Controller
     public function show(Request $request, Group $group): Response
     {
         $this->authorize('view', $group);
-        $group->load('domains');
+        $group->load(['domains', 'organization']);
 
         // Load versions descending by released_at and pick the newest one in PHP —
         // NO limit(1) in the eager load (that would constrain across all packages, not per package).

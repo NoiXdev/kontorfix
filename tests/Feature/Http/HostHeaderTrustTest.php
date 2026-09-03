@@ -77,12 +77,12 @@ it('roots the slug-mode registry metadata at the application url, not at the req
     $group->packages()->attach($pkg);
 
     $body = json_encode($this->withHeaders(tokenHeaderFor($group))
-        ->getJson(ATTACKER.'/r/kadenz/p2/acme/demo.json')
+        ->getJson(ATTACKER.registryPath($group).'/p2/acme/demo.json')
         ->assertOk()
         ->json());
 
     expect($body)->not->toContain('attacker.example.net')
-        ->and($body)->toContain(str_replace('/', '\/', (string) config('app.url').'/r/kadenz/dists/'));
+        ->and($body)->toContain(str_replace('/', '\/', (string) config('app.url').registryPath($group).'/dists/'));
 });
 
 it('trusts the application host, its subdomains and the loopback names', function () {

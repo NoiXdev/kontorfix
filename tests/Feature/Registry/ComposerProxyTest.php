@@ -26,10 +26,10 @@ it('proxies composer metadata from the upstream and rewrites dist urls', functio
     $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org', 'policy' => UpstreamPolicy::Proxy]);
     fakePackagistP2('symfony/console', 'v6.0.0', 'https://api.github.com/repos/symfony/console/zipball/abc');
 
-    $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/symfony/console.json')->assertOk()->json();
+    $res = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/symfony/console.json')->assertOk()->json();
     $v = MetadataMinifier::expand($res['packages']['symfony/console'])[0];
 
-    expect($v['dist']['url'])->toStartWith('http://localhost/r/kadenz/proxy/composer/'.$up->id.'/symfony/console/');
+    expect($v['dist']['url'])->toStartWith('http://localhost'.registryPath($group).'/proxy/composer/'.$up->id.'/symfony/console/');
 });
 
 it('serves 404 for a proxied package not on the strict allowlist, 200 once allowlisted', function () {
@@ -37,10 +37,10 @@ it('serves 404 for a proxied package not on the strict allowlist, 200 once allow
     $up = Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org', 'policy' => UpstreamPolicy::Strict]);
     fakePackagistP2('evil/pkg', 'v1.0.0', 'https://x/y.zip');
 
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/evil/pkg.json')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/evil/pkg.json')->assertNotFound();
 
     $up->allowedPackages()->create(['name' => 'evil/pkg']);
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/evil/pkg.json')->assertOk();
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/evil/pkg.json')->assertOk();
 });
 
 it('returns 404 when the upstream itself has no such package', function () {
@@ -48,15 +48,15 @@ it('returns 404 when the upstream itself has no such package', function () {
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org']);
     Http::fake(['*' => Http::response('', 404)]);
 
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/nope/nope.json')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/nope/nope.json')->assertNotFound();
 });
 
 it('omits available-packages on the root endpoint when an upstream is active', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer]);
 
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json')
-        ->assertOk()->assertJsonMissing(['available-packages'])->assertJsonPath('metadata-url', '/r/kadenz/p2/%package%.json');
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/packages.json')
+        ->assertOk()->assertJsonMissing(['available-packages'])->assertJsonPath('metadata-url', registryPath($group).'/p2/%package%.json');
 });
 
 it('still lists available-packages when no upstream is configured', function () {
@@ -64,7 +64,7 @@ it('still lists available-packages when no upstream is configured', function () 
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Composer, 'name' => 'local/pkg']);
     $group->packages()->attach($pkg);
 
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/packages.json')
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/packages.json')
         ->assertOk()->assertJsonPath('available-packages.0', 'local/pkg');
 });
 
@@ -76,7 +76,7 @@ it('prefers a local package over the upstream and does not call it', function ()
     $group->packages()->attach($pkg);
 
     Http::fake();
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/local/pkg.json')->assertOk();
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/local/pkg.json')->assertOk();
     Http::assertNothingSent();
 });
 
@@ -91,7 +91,7 @@ it('does not leak a locally-hosted but inaccessible package name to the upstream
     PackageVersion::factory()->for($secret)->create();
 
     Http::fake();
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/private/secret.json')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/private/secret.json')->assertNotFound();
     Http::assertNothingSent(); // the private name must never reach packagist
 });
 
@@ -100,7 +100,7 @@ it('returns 502 when the upstream errors', function () {
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org']);
     Http::fake(['*' => Http::response('boom', 500)]);
 
-    $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/some/pkg.json')->assertStatus(502);
+    $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/some/pkg.json')->assertStatus(502);
 });
 
 it('does not fabricate a dist for source-only upstream versions', function () {
@@ -113,7 +113,7 @@ it('does not fabricate a dist for source-only upstream versions', function () {
         ]]],
     ], 200)]);
 
-    $res = $this->withHeaders(tokenHeaderFor($group))->getJson('/r/kadenz/p2/meta/pkg.json')->assertOk()->json();
+    $res = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/meta/pkg.json')->assertOk()->json();
     $v = MetadataMinifier::expand($res['packages']['meta/pkg'])[0];
     expect($v)->not->toHaveKey('dist');
 });
