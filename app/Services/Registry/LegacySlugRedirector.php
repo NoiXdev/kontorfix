@@ -73,9 +73,17 @@ class LegacySlugRedirector
      * safe to follow. 308 for a write (PUT publish, POST upload): permanent AND
      * method-and-body-preserving, so a redirected `npm publish` or `twine upload` does not
      * silently turn into a GET against the canonical URL and lose the payload.
+     *
+     * Deliberately `getMethod() === 'HEAD'` rather than `Request::isMethod('get')`: HEAD is
+     * a read (package clients use it for existence/cache-validation checks against
+     * composer.json/.npmrc-configured registries) but `isMethod('get')` is false for it, so
+     * that check alone would wrongly hand a HEAD request a body-preserving 308 instead of
+     * the plain 301 every client already expects for a read.
      */
     public function respond(string $target, Request $request): RedirectResponse
     {
-        return redirect($target, $request->isMethod('get') ? 301 : 308);
+        $isRead = in_array($request->getMethod(), ['GET', 'HEAD'], true);
+
+        return redirect($target, $isRead ? 301 : 308);
     }
 }

@@ -151,3 +151,38 @@ it('passes a percent-encoded rest segment through unchanged instead of corruptin
     $this->get("/r/{$group->slug}/p2/vendor/na%20me.json")
         ->assertRedirect("/r/{$org->slug}/{$group->slug}/p2/vendor/na%20me.json");
 });
+
+it('redirects a HEAD request on a legacy url instead of 405ing it', function () {
+    // Route::get() registers ['GET', 'HEAD'] automatically; Route::match() does not — HEAD
+    // has to be listed explicitly, or a HEAD probe against a legacy URL 405s instead of
+    // getting the same 301 a GET would. HEAD is not exotic here: package clients use it for
+    // existence and cache-validation checks, and a 405 is a hard error where a 301 works.
+    $group = Group::factory()->create(['slug' => 'oldslug-head', 'public' => true]);
+    $org = $group->organization;
+
+    $this->head("/r/{$group->slug}/packages.json")
+        ->assertStatus(301)
+        ->assertRedirect("/r/{$org->slug}/{$group->slug}/packages.json");
+});
+
+it('does not let the pip fallback swallow a legitimate canonical request', function () {
+    // The ResolveRegistryContext fallback only ever fires when the organization lookup for
+    // the first segment comes back empty — UnclaimedSlug keeps organization and registry
+    // slugs in disjoint namespaces, so a *real* organization slug should never reach it.
+    // Pin that directly rather than leaving it to follow from the gate condition: an
+    // organization that genuinely owns a registry slugged "simple" — the exact literal
+    // segment pip's index-url path uses — must resolve normally through the ordinary
+    // two-segment lookup, not get treated as if "simple" in the first segment position
+    // were itself a legacy registry slug pretending to be an organization.
+    $org = Organization::factory()->create(['slug' => 'realorg']);
+    $group = Group::factory()->for($org)->create(['slug' => 'simple', 'public' => true]);
+    $package = Package::factory()->inOrgOf($group)->create([
+        'type' => 'composer', 'name' => 'acme/tools',
+    ]);
+    $group->packages()->attach($package);
+
+    $this->get('/r/realorg/simple/packages.json')
+        ->assertOk()
+        ->assertHeaderMissing('Location')
+        ->assertJsonPath('metadata-url', '/r/realorg/simple/p2/%package%.json');
+});

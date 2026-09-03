@@ -109,8 +109,20 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 Route::middleware(['registry.context', 'registry.auth'])->group($registryEndpoints);
 
 // Legacy slug access, registered last on purpose — see LegacySlugRedirectController.
-// GET for composer.json/.npmrc/pip.conf reads, PUT for npm publish, POST for twine
-// upload — a bare-slug URL that used to 404 for every method should not now 405 a write
-// just because a read of the same shape got a route.
-Route::match(['GET', 'PUT', 'POST'], '/r/{groupSlug}/{rest?}', LegacySlugRedirectController::class)
+// GET/HEAD for composer.json/.npmrc/pip.conf reads, PUT for npm publish, POST for twine
+// upload — a bare-slug URL that used to 404 for every method should not now 405 a read or
+// a write just because some other method on the same shape got a route. 'HEAD' is listed
+// explicitly rather than relied on implicitly: \Illuminate\Routing\Route::__construct()
+// happens to append HEAD to any method list that already contains GET (verified against
+// this app's actual vendored Laravel 13.25, not assumed), so Route::match() would answer
+// HEAD correctly even without it here — but LegacySlugRedirector::respond() below still
+// needs its own explicit GET-or-HEAD check, since that framework behaviour only affects
+// which *route* matches, not which redirect status the controller then picks.
+//
+// No DELETE here (npm unpublish): the canonical registry endpoints below register no
+// DELETE route at all — this app does not implement unpublish yet — so a legacy DELETE
+// would have nothing real to redirect to; it would just reach the canonical URL one hop
+// later and 404/405 there instead of here. Add it the moment a canonical unpublish route
+// exists, not before.
+Route::match(['GET', 'HEAD', 'PUT', 'POST'], '/r/{groupSlug}/{rest?}', LegacySlugRedirectController::class)
     ->where(['groupSlug' => '[a-z0-9-]+', 'rest' => '.*']);
