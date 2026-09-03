@@ -25,6 +25,7 @@ interface PackageRow {
     groups_count: number;
     synced_at: string | null;
     is_abandoned: boolean;
+    shared: boolean;
 }
 
 interface GroupOption {
@@ -253,7 +254,17 @@ const table = useTableState<PackageRow>({
                                 </span>
                             </div>
                         </td>
-                        <td class="px-4 py-3"><TypeBadge :type="pkg.type" /></td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-2">
+                                <TypeBadge :type="pkg.type" />
+                                <span
+                                    v-if="pkg.shared"
+                                    class="inline-flex items-center rounded-md border border-verdigris/30 bg-verdigris/15 px-2 py-0.5 font-sans text-xs font-medium text-verdigris"
+                                >
+                                    geteilt
+                                </span>
+                            </div>
+                        </td>
                         <td class="px-4 py-3">
                             <span :title="pkg.sync_status === 'failed' ? (pkg.sync_error ?? undefined) : undefined">
                                 <StatusPill :status="pkg.sync_status" />

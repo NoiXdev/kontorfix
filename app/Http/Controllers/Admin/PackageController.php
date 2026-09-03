@@ -96,6 +96,7 @@ class PackageController extends Controller
                 'groups_count' => $p->groups_count,
                 'synced_at' => $p->synced_at?->diffForHumans(),
                 'is_abandoned' => $p->isAbandoned(),
+                'shared' => $p->shared,
             ]);
 
         return Inertia::render('admin/packages/Index', [
@@ -151,7 +152,7 @@ class PackageController extends Controller
             ->all();
     }
 
-    public function show(Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
+    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
     {
         $this->assertCanTouchPackage($package);
 
@@ -205,7 +206,12 @@ class PackageController extends Controller
                 'abandoned_at' => $package->abandoned_at?->toDateString(),
                 'replacement_package' => $package->replacement_package,
                 'abandonment_reason' => $package->abandonment_reason,
+                'shared' => $package->shared,
             ],
+            // Whether the viewer holds the share-packages ability at all — passed rather
+            // than re-derived in Vue so the front end never restates the gate's rule (the
+            // instance setting it reads is not itself exposed to the client).
+            'canSharePackages' => (bool) $request->user()?->can('share-packages'),
             // Managed credentials assignable to this package (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
@@ -469,6 +475,42 @@ class PackageController extends Controller
         ]);
 
         return back()->with('success', $abandoned ? 'Paket als verwaist markiert.' : 'Markierung als verwaist entfernt.');
+    }
+
+    /**
+     * Marks or unmarks a package as shared, gated by the `share-packages` ability
+     * (super-admin always; a maintainer of the operator organization only once the
+     * instance setting says so — see AppServiceProvider's gate definition).
+     *
+     * Deliberately not guarded by assertCanTouchPackage(): the gate itself already
+     * authorizes a maintainer of *any* operator organization (it checks every
+     * `is_operator` row, not the caller's own home organization — see AppServiceProvider),
+     * so scoping this action to the caller's active organization would reject a caller the
+     * gate was written to allow. The ownership check below is what actually protects a
+     * customer-owned package; unsharing (`shared: false`) a package outside the caller's
+     * scope is a no-op on data nobody else could have made visible to them in the first
+     * place, not a privilege escalation.
+     */
+    public function shared(Request $request, Package $package): RedirectResponse
+    {
+        abort_unless($request->user()?->can('share-packages'), 403);
+
+        $data = $request->validate(['shared' => ['required', 'boolean']]);
+
+        // Only a package the operator organization owns may be shared. A customer-owned
+        // shared package would let that customer delete a dependency other customers'
+        // builds resolve through it.
+        if ($data['shared'] && ! $package->organization->is_operator) {
+            throw ValidationException::withMessages([
+                'shared' => 'Nur Pakete der Betreiber-Organisation können geteilt werden.',
+            ]);
+        }
+
+        $package->update(['shared' => $data['shared']]);
+
+        return back()->with('success', $data['shared']
+            ? 'Paket wird jetzt für andere Organisationen freigegeben.'
+            : 'Freigabe für andere Organisationen aufgehoben.');
     }
 
     public function destroy(Package $package): RedirectResponse
