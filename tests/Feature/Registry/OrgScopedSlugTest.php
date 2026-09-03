@@ -3,6 +3,7 @@
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PackageVersion;
 use Illuminate\Database\UniqueConstraintViolationException;
 
 it('lets two organizations hold the same registry slug', function () {
@@ -53,4 +54,22 @@ it('does not serve a registry under another organization slug', function () {
     $stranger = Organization::factory()->create(['slug' => 'stranger']);
 
     $this->get("/r/{$stranger->slug}/{$group->slug}/packages.json")->assertStatus(404);
+});
+
+it('hands the controller the route parameters that follow the two-segment prefix', function () {
+    // The controller action knows neither URL segment, and Laravel's controller dispatch is
+    // purely positional: an {orgSlug} left on the route arrives as the action's first
+    // argument — {vendor} here — shifting every later parameter by one, so the metadata
+    // lookup asks for the wrong package. Hence the two forgetParameter() calls in
+    // ResolveRegistryContext; this is what proves they are both there.
+    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    $package = Package::factory()->inOrgOf($group)->create([
+        'type' => 'composer', 'name' => 'acme/tools',
+    ]);
+    PackageVersion::factory()->for($package)->create();
+    $group->packages()->attach($package);
+
+    $this->getJson(registryPath($group).'/p2/acme/tools.json')
+        ->assertOk()
+        ->assertJsonStructure(['packages' => ['acme/tools']]);
 });

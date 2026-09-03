@@ -31,7 +31,10 @@ class GroupController extends Controller
         // active sidebar scope). A super-admin's scope spans every organization.
         return Inertia::render('admin/groups/Index', [
             'groups' => $this->scopeGroupQuery(
-                Group::withCount('packages')->with(['domains:id,group_id,hostname', 'organization:id,name'])
+                // `slug` alongside `name`: see show() below — a column-restricted eager
+                // load that omits it yields a null slug rather than an error, so any URL
+                // built from this payload would silently come out as /r//{groupSlug}.
+                Group::withCount('packages')->with(['domains:id,group_id,hostname', 'organization:id,name,slug'])
             )->orderBy('name')->get()
                 ->map(fn (Group $g) => [
                     'id' => $g->id,

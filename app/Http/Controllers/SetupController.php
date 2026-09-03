@@ -104,7 +104,7 @@ class SetupController extends Controller
 
             $organization = Organization::create([
                 'name' => $data['organization_name'],
-                'slug' => $this->uniqueOrganizationSlug($data['organization_name']),
+                'slug' => $this->uniqueOrganizationSlug($data['organization_name'], (string) $data['registry_slug']),
                 // The organization running the instance is the operator — this is what
                 // grants access to the /admin surface via the `operator` middleware.
                 'is_operator' => true,
@@ -177,7 +177,15 @@ class SetupController extends Controller
         ]);
     }
 
-    private function uniqueOrganizationSlug(string $name): string
+    /**
+     * @param  string  $reserved  a slug this organization may not take — the registry being
+     *                            created alongside it. Organization and registry slugs share
+     *                            one namespace in the registry URL (see App\Rules\UnclaimedSlug),
+     *                            and the wizard is the one place that mints both at once. The
+     *                            organization yields, because its slug is derived and the
+     *                            registry's is what the installer typed.
+     */
+    private function uniqueOrganizationSlug(string $name, string $reserved = ''): string
     {
         // Slugs are derived rather than asked for — one less field in the wizard.
         // A name of only non-latin characters slugs to '', hence the fallback.
@@ -185,7 +193,7 @@ class SetupController extends Controller
         $slug = $base;
         $suffix = 2;
 
-        while (Organization::query()->where('slug', $slug)->exists()) {
+        while ($slug === $reserved || Organization::query()->where('slug', $slug)->exists()) {
             $slug = "{$base}-{$suffix}";
             $suffix++;
         }

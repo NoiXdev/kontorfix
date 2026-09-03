@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Rules\UnclaimedSlug;
 use App\Services\Scope\OrgScope;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
@@ -49,6 +50,9 @@ class StoreGroupRequest extends FormRequest
                         ? $query->whereRaw('1 = 0')
                         : $query->where('organization_id', $owner);
                 }),
+                // …and never equal to an organization slug, in any organization: the two
+                // share one namespace in the registry URL. See App\Rules\UnclaimedSlug.
+                UnclaimedSlug::byOrganization(),
             ],
             'public' => ['boolean'],
             'portal_enabled' => ['boolean'],

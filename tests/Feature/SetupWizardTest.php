@@ -27,6 +27,21 @@ function setupPayload(array $overrides = []): array
     ], $overrides);
 }
 
+it('keeps the derived organization slug clear of the registry slug', function () {
+    // The wizard is the one place that mints an organization slug and a registry slug in
+    // one transaction, and the two share a namespace in the registry URL — so the wizard is
+    // also the one place that could create, on a brand-new instance, exactly the collision
+    // the migration refuses to upgrade past. The organization yields: its slug is derived,
+    // the registry's is what the installer typed.
+    $this->post('/setup', setupPayload([
+        'organization_name' => 'Interne Pakete',
+        'registry_slug' => 'interne-pakete',
+    ]))->assertRedirect(route('dashboard'));
+
+    expect(Organization::sole()->slug)->not->toBe('interne-pakete')
+        ->and(Group::sole()->slug)->toBe('interne-pakete');
+});
+
 it('shows the wizard while no user exists', function () {
     $this->get('/setup')->assertOk();
 });
