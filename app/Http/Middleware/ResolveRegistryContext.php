@@ -48,8 +48,10 @@ class ResolveRegistryContext
                 // for {project} — a real route match, so LegacySlugRedirectController's own
                 // route (registered after this one) never gets tried at all. $orgSlug is
                 // then not an organization slug but a legacy registry slug; hand it to the
-                // same resolver LegacySlugRedirectController uses, which also refuses to
-                // guess when that slug is ambiguous (see LegacySlugRedirector).
+                // same resolver LegacySlugRedirectController uses. That resolver matches the
+                // frozen `legacy_slug` column rather than the live `slug`, so a slug shared by
+                // two organizations still resolves unambiguously here too, to whichever
+                // registry held it when the instance was upgraded (see LegacySlugRedirector).
                 $legacyGroup = $this->legacy->resolve($orgSlug);
                 abort_if($legacyGroup === null, 404);
 

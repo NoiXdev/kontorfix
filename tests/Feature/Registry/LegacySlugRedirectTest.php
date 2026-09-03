@@ -72,13 +72,13 @@ it('lets the canonical form win where both could match', function () {
  * matches, it is unique, and only the incumbent has one.
  */
 it('does not let a registry created after the upgrade capture an incumbent legacy address', function () {
-    // The incumbent was here when the instance was upgraded, so /r/shared/… is frozen to it.
-    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared', 'public' => true]);
-
     // A different organization now creates a registry with the same slug — legal since the
     // slug is only unique per organization, and available to any org admin with no
     // cross-org rights whatsoever. Created after the upgrade, so no legacy address.
     $newcomer = Group::factory()->create(['slug' => 'shared', 'public' => true]);
+
+    // The incumbent was here when the instance was upgraded, so /r/shared/… is frozen to it.
+    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared', 'public' => true]);
 
     expect($newcomer->legacy_slug)->toBeNull()
         ->and($newcomer->organization_id)->not->toBe($incumbent->organization_id);
@@ -152,8 +152,8 @@ it('redirects the exact per-project url pip requests, not just the index root', 
  * LegacySlugRedirectController — both call the same resolver, and both have to be pinned.
  */
 it('keeps pip\'s per-project url on the incumbent when a newcomer shares the slug', function () {
-    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared-pip', 'public' => true]);
     Group::factory()->create(['slug' => 'shared-pip', 'public' => true]);
+    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared-pip', 'public' => true]);
 
     $this->get('/r/shared-pip/simple/some-project/')
         ->assertStatus(301)

@@ -770,6 +770,20 @@ is interrupted and the instance serves traffic before the rest goes through. `do
 the column again: with instance-wide uniqueness restored, a bare slug identifies one registry
 and there is nothing left for a frozen address to disambiguate.
 
+**Anyone who ran this branch locally before `2026_09_03_100000` was amended needs a fresh
+migrate.** Laravel's `migrations` table keys a run on filename, not on content, so an
+already-applied copy of this migration is never re-run once the file changes underneath it.
+An earlier revision of it did not add `groups.legacy_slug` at all; a database migrated under
+that revision simply has no such column, and the failure shows up later and unhelpfully — at
+the first legacy-slug lookup or slug rename, as a raw `column "legacy_slug" does not exist`,
+not at migrate time. `migrate:rollback` does not fix it either: `down()` on the file as it
+exists *now* tries to drop a column and unique index that were never added on that database,
+which fails — Postgres runs each migration in its own transaction, so the failure aborts
+atomically rather than leaving a half-applied schema, but the instance stays on the stale
+revision either way. The remedy is a fresh migrate (`php artisan migrate:fresh`, only ever
+against your own local/test database, never with `--env` against a shared one), not a
+rollback-and-reapply.
+
 A companion migration, `2026_09_03_100100_add_index_to_groups_slug.php`, adds back a plain
 index on `groups.slug` alone (the composite `(organization_id, slug)` index cannot seek on
 `slug` by itself). It was introduced for the legacy lookup, which at the time matched `slug`

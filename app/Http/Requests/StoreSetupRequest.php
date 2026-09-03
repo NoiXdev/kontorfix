@@ -41,10 +41,15 @@ class StoreSetupRequest extends FormRequest
 
             'registry_name' => ['required', 'string', 'max:190'],
             // No instance-wide `unique:groups,slug`: a registry slug is unique only within
-            // its organization, and the wizard only ever runs against an empty instance
-            // anyway. What does bite here is the shared namespace with organization slugs —
-            // and the organization this wizard creates is the one it could collide with,
-            // which is why SetupController derives that slug around the registry's.
+            // its organization, and the wizard reaches this validation before the registry
+            // has an organization to be scoped to yet. The instance is not necessarily empty
+            // here — the wizard reopens whenever no users exist, which purged users or a
+            // dump restored without them can reach with registries still in place — but
+            // per-organization uniqueness needs no instance-wide check regardless. What does
+            // bite here is the shared namespace with organization slugs — and the
+            // organization this wizard creates is the one it could collide with, which is
+            // why SetupController derives that slug around the registry's (and, since
+            // b80ae4a, around any existing registry's slug too).
             'registry_slug' => ['required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/', UnclaimedSlug::byOrganization()],
             'registry_public' => ['boolean'],
 

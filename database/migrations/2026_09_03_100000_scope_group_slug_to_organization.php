@@ -40,6 +40,20 @@ use Illuminate\Support\Facades\Schema;
  *
  * This migration has never shipped in a release — it is introduced on the same branch as
  * the column — so amending it is legitimate; a released one would have had to stay frozen.
+ *
+ * That legitimacy has a sharp edge for anyone who already ran this branch locally before
+ * this file was amended: Laravel's `migrations` table keys a run on filename
+ * (`2026_09_03_100000_scope_group_slug_to_organization`), not on content, so an already-applied
+ * copy is never re-run and the amendment never reaches that database. Concretely: an earlier
+ * revision of this migration did not add `groups.legacy_slug` at all, so a developer who ran
+ * that revision has a `groups` table with no such column — and hits `column "legacy_slug" does
+ * not exist` at the first legacy-slug lookup or slug rename, not at migrate time. `migrate:rollback`
+ * does not repair this either: `down()` on the *currently checked-out* file tries to drop a
+ * column and unique index that were never added, which fails; Postgres runs each migration in
+ * its own transaction, so that failure aborts atomically rather than leaving a half-applied
+ * schema, but it still leaves the instance on the stale revision. The fix is a fresh migrate
+ * (`php artisan migrate:fresh`, never against a shared/production database) rather than a
+ * rollback-and-reapply.
  */
 return new class extends Migration
 {

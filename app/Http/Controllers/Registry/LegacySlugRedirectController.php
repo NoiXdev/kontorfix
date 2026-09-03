@@ -14,12 +14,15 @@ use Illuminate\Http\Request;
  * keeps working on a read and sees the canonical URL in its logs.
  *
  * Registered AFTER the canonical route: Laravel matches the first route that fits, so
- * /r/{org}/{group} wins whenever a request's shape could satisfy both. That is enough to
- * keep an unambiguous legacy slug safe, but not a shared one — see LegacySlugRedirector for
- * why a slug shared by two organizations must 404 here rather than pick one, and see
+ * /r/{org}/{group} wins whenever a request's shape could satisfy both. See
  * ResolveRegistryContext for the other place a legacy URL can land: when its shape
  * satisfies the canonical route syntactically (pip's /simple/{project} is the concrete
  * case), this route never runs at all.
+ *
+ * A slug shared by two organizations is not ambiguous here: LegacySlugRedirector matches
+ * `groups.legacy_slug`, which is unique and populated only for the registry that already
+ * held the slug when the instance was upgraded, so a shared slug always 301s to that
+ * incumbent rather than to whichever organization later claimed the same live `slug`.
  */
 class LegacySlugRedirectController extends Controller
 {

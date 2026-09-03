@@ -30,6 +30,14 @@ class Group extends Model
      *
      * Lives on the model rather than in the two update paths (console and JSON API): the
      * column is an invariant of the row, not a concern of whoever happens to write it.
+     *
+     * This is also what keeps a non-NULL `legacy_slug` always equal to the row's own live
+     * `slug`: it is only ever frozen from `slug` (at migration time) and only ever cleared,
+     * never independently changed, so the two can never drift apart while `legacy_slug` is
+     * set. That equality is load-bearing for `App\Rules\UnclaimedSlug`, which checks
+     * `groups.slug` and never `legacy_slug` directly — a frozen legacy address is still
+     * covered, because it can only ever equal the `slug` of the very row that is already
+     * being checked.
      */
     protected static function booted(): void
     {
