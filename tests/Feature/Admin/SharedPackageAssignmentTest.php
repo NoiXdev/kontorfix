@@ -6,6 +6,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Factories\Sequence;
 use Illuminate\Support\Facades\Queue;
 
 /*
@@ -520,6 +521,110 @@ it('refuses an unrelated assignment into a registry already in the conflict stat
         ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$unrelated->id]])
         ->assertSessionHasErrors(['package_ids' => 'Diese Registry führt bereits ein eigenes und ein geteiltes '
             .'Paket mit demselben Namen: composer acme/tools. Entfernen Sie eines der beiden aus dieser Registry.']);
+
+    expect($customer->packages()->whereKey($unrelated->id)->exists())->toBeFalse();
+});
+
+// ---------------------------------------------------------------------------------------
+// One request can collide on several names at once, and one message names them all — so
+// every refusal text comes in both numbers.
+// ---------------------------------------------------------------------------------------
+
+it('names every colliding package, in the plural, when one request shadows two names', function () {
+    $customer = Group::factory()->create();
+    $customer->packages()->attach([
+        Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/one'])->id,
+        Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/two'])->id,
+    ]);
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one', 'shared' => true],
+        ['type' => 'composer', 'name' => 'acme/two', 'shared' => true],
+    ))->create();
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => $shared->modelKeys()])
+        // Both names in one message, sorted, and the sentence in the plural.
+        ->assertSessionHasErrors(['package_ids' => 'Diese Registry führt bereits eigene Pakete mit denselben '
+            .'Namen: composer acme/one, composer acme/two. Ein geteiltes Paket darf ein eigenes nicht verdecken.']);
+
+    expect($customer->packages()->count())->toBe(2);
+});
+
+it('names both colliding packages in the plural when they arrive in one submission', function () {
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one'],
+        ['type' => 'composer', 'name' => 'acme/two'],
+    ))->create();
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one', 'shared' => true],
+        ['type' => 'composer', 'name' => 'acme/two', 'shared' => true],
+    ))->create();
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), [
+            'package_ids' => array_merge($own->modelKeys(), $shared->modelKeys()),
+        ])
+        ->assertSessionHasErrors(['package_ids' => 'Diese Auswahl enthält jeweils ein eigenes und ein geteiltes '
+            .'Paket mit denselben Namen: composer acme/one, composer acme/two. '
+            .'Ein geteiltes Paket darf ein eigenes nicht verdecken.']);
+
+    expect($customer->packages()->count())->toBe(0);
+});
+
+it('names both shared packages in the plural when two own packages arrive over them', function () {
+    $customer = Group::factory()->create();
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one', 'shared' => true],
+        ['type' => 'composer', 'name' => 'acme/two', 'shared' => true],
+    ))->create();
+    $customer->packages()->attach($shared->modelKeys());
+
+    $own = Package::factory()->inOrgOf($customer)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one'],
+        ['type' => 'composer', 'name' => 'acme/two'],
+    ))->create();
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => $own->modelKeys()])
+        ->assertSessionHasErrors(['package_ids' => 'Diese Registry führt bereits geteilte Pakete mit denselben '
+            .'Namen: composer acme/one, composer acme/two. Entfernen Sie sie zuerst aus dieser Registry, '
+            .'bevor Sie eigene Pakete unter diesen Namen zuweisen.']);
+
+    expect($customer->packages()->count())->toBe(2);
+});
+
+it('names both conflicts in the plural when a registry is already in the state twice over', function () {
+    // The plural of the fallback text. Like its singular, the state is written directly:
+    // no application write can produce it, which is the whole reason the text avoids
+    // telling the operator what they just did.
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one'],
+        ['type' => 'composer', 'name' => 'acme/two'],
+    ))->create();
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->count(2)->state(new Sequence(
+        ['type' => 'composer', 'name' => 'acme/one', 'shared' => true],
+        ['type' => 'composer', 'name' => 'acme/two', 'shared' => true],
+    ))->create();
+
+    $customer->packages()->attach(array_merge($own->modelKeys(), $shared->modelKeys()));
+
+    $unrelated = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/other']);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$unrelated->id]])
+        ->assertSessionHasErrors(['package_ids' => 'Diese Registry führt bereits jeweils ein eigenes und ein '
+            .'geteiltes Paket mit denselben Namen: composer acme/one, composer acme/two. '
+            .'Entfernen Sie jeweils eines der beiden aus dieser Registry.']);
 
     expect($customer->packages()->whereKey($unrelated->id)->exists())->toBeFalse();
 });

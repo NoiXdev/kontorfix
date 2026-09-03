@@ -105,6 +105,22 @@ class Group extends Model
      * already taken with it — two questions that must never be able to disagree about
      * whether a given row counts.
      *
+     * PREMISE, and it is load-bearing: nothing in the application writes `available_until`.
+     * The column is created by a migration, declared on the pivot, and read here; no
+     * controller, request, job or service sets it. So an expired assignment stays expired,
+     * and SharedAssignment can safely permit what an expired row would otherwise have
+     * blocked — assigning or creating a customer's own package under a name a lapsed shared
+     * assignment used to serve. Its refusal at attach time is the only thing standing
+     * between a registry and serving an own and a shared package under one name.
+     *
+     * WHOEVER ADDS AN `available_until` EDITOR MUST RUN SharedAssignment ON THAT WRITE.
+     * Task 6 of the shared-packages plan surfaces this field in the assignment dialog (spec
+     * §6). The moment an operator can push a lapsed shared assignment back into the future,
+     * they can resurrect exactly the collision the attach guard refuses — through a write
+     * that changes no pivot membership at all, and so passes no guard today. Extending an
+     * assignment is an assignment: it has to ask SharedAssignment whether the name is free,
+     * or the invariant holds on three write paths and not the fourth.
+     *
      * @return BelongsToMany<Package, $this, GroupPackage>
      */
     public function assignedPackages(): BelongsToMany

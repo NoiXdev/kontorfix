@@ -39,26 +39,53 @@ use Illuminate\Validation\ValidationException;
  */
 class SharedAssignment
 {
-    /** The registry already serves the own package; a shared one of that name is arriving. */
-    private const ALREADY_SERVED = 'Diese Registry führt bereits ein eigenes Paket mit demselben Namen: %s. '
-        .'Ein geteiltes Paket darf ein eigenes nicht verdecken.';
-
-    /** Both sides of the collision arrive in one submission. */
-    private const SUBMITTED_TOGETHER = 'Diese Auswahl enthält ein eigenes und ein geteiltes Paket mit demselben '
-        .'Namen: %s. Ein geteiltes Paket darf ein eigenes nicht verdecken.';
-
-    /** The reverse: the registry already serves the shared package, an own one is arriving. */
-    private const SHARED_ALREADY_SERVED = 'Diese Registry führt bereits ein geteiltes Paket mit demselben Namen: %s. '
-        .'Entfernen Sie es zuerst aus dieser Registry, bevor Sie ein eigenes Paket unter diesem Namen zuweisen.';
-
     /**
-     * Neither side arrived with this request, so the registry was already in the conflict
-     * state. Unreachable through the application — every write that could produce it is
-     * refused above — but stated rather than guessed at, and worded without claiming which
-     * side is the new one, because with neither arriving there is no new one.
+     * One refusal can name several colliding packages at once — two shared packages
+     * submitted over two own ones is one request, one message, two names — so each text
+     * comes in both numbers. Same inline-count idiom as the registry lists below and as
+     * the Vue side (resources/js/pages/portal/Registries.vue); there is no lang/ directory
+     * and no trans_choice anywhere in app/.
+     *
+     * Keyed by the situation rather than by the text, because {@see explain} decides the
+     * situation from the post-state and the count is only known afterwards.
+     *
+     * @var array<string, array{0: string, 1: string}>
      */
-    private const ALREADY_IN_CONFLICT = 'Diese Registry führt bereits ein eigenes und ein geteiltes Paket mit '
-        .'demselben Namen: %s. Entfernen Sie eines der beiden aus dieser Registry.';
+    private const MESSAGES = [
+        // The registry already serves the own package; a shared one of that name is arriving.
+        'already_served' => [
+            'Diese Registry führt bereits ein eigenes Paket mit demselben Namen: %s. '
+                .'Ein geteiltes Paket darf ein eigenes nicht verdecken.',
+            'Diese Registry führt bereits eigene Pakete mit denselben Namen: %s. '
+                .'Ein geteiltes Paket darf ein eigenes nicht verdecken.',
+        ],
+        // Both sides of the collision arrive in one submission.
+        'submitted_together' => [
+            'Diese Auswahl enthält ein eigenes und ein geteiltes Paket mit demselben Namen: %s. '
+                .'Ein geteiltes Paket darf ein eigenes nicht verdecken.',
+            'Diese Auswahl enthält jeweils ein eigenes und ein geteiltes Paket mit denselben Namen: %s. '
+                .'Ein geteiltes Paket darf ein eigenes nicht verdecken.',
+        ],
+        // The reverse: the registry already serves the shared package, an own one is arriving.
+        'shared_already_served' => [
+            'Diese Registry führt bereits ein geteiltes Paket mit demselben Namen: %s. '
+                .'Entfernen Sie es zuerst aus dieser Registry, bevor Sie ein eigenes Paket unter diesem Namen '
+                .'zuweisen.',
+            'Diese Registry führt bereits geteilte Pakete mit denselben Namen: %s. '
+                .'Entfernen Sie sie zuerst aus dieser Registry, bevor Sie eigene Pakete unter diesen Namen '
+                .'zuweisen.',
+        ],
+        // Neither side arrived with this request, so the registry was already in the conflict
+        // state. Unreachable through the application — every write that could produce it is
+        // refused above — but stated rather than guessed at, and worded without claiming which
+        // side is the new one, because with neither arriving there is no new one.
+        'already_in_conflict' => [
+            'Diese Registry führt bereits ein eigenes und ein geteiltes Paket mit demselben Namen: %s. '
+                .'Entfernen Sie eines der beiden aus dieser Registry.',
+            'Diese Registry führt bereits jeweils ein eigenes und ein geteiltes Paket mit denselben Namen: %s. '
+                .'Entfernen Sie jeweils eines der beiden aus dieser Registry.',
+        ],
+    ];
 
     /** A package being created would claim a name a shared assignment already serves. */
     private const NAME_HELD_BY_SHARED = 'Die Registry %s führt dieses Paket bereits als geteiltes Paket. '
@@ -200,7 +227,16 @@ class SharedAssignment
 
         throw ValidationException::withMessages([
             'package_ids' => array_map(
-                fn (string $message, array $names) => sprintf($message, implode(', ', $names)),
+                // Sorted so the message is the same whatever order the pivot returned rows
+                // in — the assigned side of the union carries no ORDER BY.
+                function (string $situation, array $names): string {
+                    sort($names);
+
+                    return sprintf(
+                        self::MESSAGES[$situation][count($names) === 1 ? 0 : 1],
+                        implode(', ', $names),
+                    );
+                },
                 array_keys($namesByMessage),
                 $namesByMessage,
             ),
@@ -209,11 +245,13 @@ class SharedAssignment
 
     /**
      * Which side of the collision the operator submitted, and therefore what to tell them
-     * to do about it.
+     * to do about it. Returns a key into {@see MESSAGES}; the number is decided later, once
+     * every colliding name for that situation has been collected.
      *
      * @param  Collection<int, Package>  $shared
      * @param  Collection<int, Package>  $own
      * @param  array<int, mixed>  $arrivingIds
+     * @return key-of<self::MESSAGES>
      */
     private function explain(Collection $shared, Collection $own, array $arrivingIds): string
     {
@@ -221,13 +259,13 @@ class SharedAssignment
         $ownArriving = $own->contains(fn (Package $p) => in_array($p->getKey(), $arrivingIds, true));
 
         return match (true) {
-            $sharedArriving && $ownArriving => self::SUBMITTED_TOGETHER,
-            $sharedArriving => self::ALREADY_SERVED,
-            $ownArriving => self::SHARED_ALREADY_SERVED,
+            $sharedArriving && $ownArriving => 'submitted_together',
+            $sharedArriving => 'already_served',
+            $ownArriving => 'shared_already_served',
             // Neither arrived: the registry was already in this state before the request,
             // which no write reachable from the application can produce. Refused anyway,
             // and worded so it does not tell the operator they just did something.
-            default => self::ALREADY_IN_CONFLICT,
+            default => 'already_in_conflict',
         };
     }
 }

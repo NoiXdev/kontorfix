@@ -527,19 +527,21 @@ class PackageController extends Controller
         }
 
         // Un-sharing is the reverse of an attach, and it can invalidate assignments that
-        // were legitimate while the flag was set. Before Task 3 no cross-organization
-        // `group_package` row could exist at all; now they can, and clearing `shared`
-        // would leave them violating the invariant
-        // 2026_09_02_110000_enforce_package_organization.php enforces — and, once
-        // resolution is scoped again, would drop the package out of those registries
-        // silently, so the name would fall through to the public index it was there to
-        // pre-empt. Refuse and name the registries, the way the migrations do, rather than
-        // detaching rows on the operator's behalf: the destructive step stays explicit.
+        // were legitimate while the flag was set. The invariant at stake is the ownership
+        // rule this application has held since packages became organization-owned: a
+        // `group_package` row may only join a package to a registry of the organization
+        // that owns it. `shared` is the single exception, so clearing it turns every
+        // cross-organization row for this package back into a violation — one the ownership
+        // enforcement refuses to migrate over — and, once resolution is scoped again, drops
+        // the package out of those registries silently, so the name falls through to the
+        // public index it was assigned there to pre-empt. Refuse and name the registries,
+        // the way that enforcement does, rather than detaching rows on the operator's
+        // behalf: the destructive step stays explicit.
         //
         // Every row counts here, expired or not — deliberately unlike SharedAssignment,
-        // which asks what a registry SERVES and so skips expired assignments. The invariant
-        // this protects is about the row existing at all: the migration above joins
-        // `group_package` and never looks at `available_until`.
+        // which asks what a registry SERVES and so skips expired assignments. The rule
+        // above is about the row existing at all and says nothing about `available_until`,
+        // so a lapsed row is exactly as much of a violation as a live one.
         if (! $data['shared']) {
             $foreign = $package->groups()
                 ->where('groups.organization_id', '!=', $package->organization_id)
