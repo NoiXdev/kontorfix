@@ -765,9 +765,13 @@ organization owns, since the organization segment is the first half of all of th
 registry on a custom domain keeps working under that domain unchanged, and only its `/r/`
 address moves. Both edit dialogs (`resources/js/pages/admin/groups/Show.vue`,
 `resources/js/pages/admin/organizations/Show.vue`) show the affected address(es) — built
-server-side from `RegistryUrl::canonical()` / `RegistryUrl::template()`, never assembled in
-Vue — and ask for confirmation before submitting, precisely because there is nothing to
-redirect a client back from once it happens.
+server-side from `RegistryUrl`, never assembled in Vue — and ask for confirmation before
+submitting, precisely because there is nothing to redirect a client back from once it
+happens. Three methods feed those dialogs, one per shape of question: `canonical()` for the
+registry's current address, `pattern()` for its "and this is what it becomes" preview (the
+organization segment filled in, the registry segment left open), and `template()` for the
+organization dialog and the create sheet, which have no single address to show and leave
+both segments open.
 
 **Upgrade note for API clients.** `Api\V1\GroupController::update()` persists a submitted
 `slug` field (`$group->update([..., ...$request->safe()->only('slug')])`); before this branch

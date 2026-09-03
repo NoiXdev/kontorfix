@@ -26,8 +26,10 @@ function sqlOf(callable $work): array
 }
 
 it('resolves the registry through an index-seekable lookup, not a scan over every registry', function () {
-    // The only index on `groups` is (organization_id, slug). Postgres cannot seek a
-    // composite index on its second column, so a lookup that filters on `slug` and carries
+    // The index for this lookup is (organization_id, slug); the only other one that could
+    // serve it is the plain `slug` index 2026_09_03_100100 adds for the bare-slug namespace
+    // checks, and that one has nothing to say about the organization. Postgres cannot seek
+    // a composite index on its second column, so a lookup that filters on `slug` and carries
     // the organization as a correlated EXISTS is a sequential scan over every registry on
     // the instance. Measured on 400 registries before this was fixed: "Seq Scan on groups
     // … Rows Removed by Filter: 200". Resolving the organization first turns both halves

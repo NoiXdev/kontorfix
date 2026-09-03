@@ -153,10 +153,15 @@ it('passes a percent-encoded rest segment through unchanged instead of corruptin
 });
 
 it('redirects a HEAD request on a legacy url instead of 405ing it', function () {
-    // Route::get() registers ['GET', 'HEAD'] automatically; Route::match() does not — HEAD
-    // has to be listed explicitly, or a HEAD probe against a legacy URL 405s instead of
-    // getting the same 301 a GET would. HEAD is not exotic here: package clients use it for
-    // existence and cache-validation checks, and a 405 is a hard error where a 301 works.
+    // What is actually at stake is the redirect *status*, not the routing. The routing
+    // claim this comment used to make — that Route::match() drops HEAD unless it is listed
+    // — was checked against this app's vendored Laravel 13.25 and refuted:
+    // Illuminate\Routing\Route::__construct() appends HEAD to any method list containing
+    // GET, so the route matches either way (routes/registry.php lists it anyway, and says
+    // why). The real hazard is LegacySlugRedirector::respond(): HEAD is a read, but
+    // Request::isMethod('get') is false for it, so a naive check hands a HEAD probe a
+    // body-preserving 308 instead of the plain 301 every client expects for a read. HEAD is
+    // not exotic here — package clients use it for existence and cache-validation checks.
     $group = Group::factory()->create(['slug' => 'oldslug-head', 'public' => true]);
     $org = $group->organization;
 
