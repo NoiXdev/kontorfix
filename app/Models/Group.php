@@ -122,11 +122,12 @@ class Group extends Model
      * assignment is an assignment: it has to ask SharedAssignment whether the name is free,
      * or the invariant holds on three write paths and not the fourth.
      *
-     * That editor moves a fourth write besides those three: PypiController::upload() resolves
-     * its target project through this relation and through nothing else — it never reaches
-     * canAccessPackage() — so an `available_until` pushed back into the future reopens a
-     * publish path, not only a read path. npm's equivalent runs through
-     * RegistryAccessService::packageBelongsToGroup() and therefore through this relation too.
+     * Separately, and NOT a fourth entry point of that guard — the count above is about
+     * SharedAssignment's three, and this adds none: PypiController::upload() is a further
+     * *dependent* of this relation. It resolves its target project through this relation and
+     * through nothing else, never reaching canAccessPackage(), so an `available_until` pushed
+     * back into the future reopens a publish path and not only a read path. npm's equivalent
+     * reaches the same relation through RegistryAccessService::packageBelongsToGroup().
      *
      * @return BelongsToMany<Package, $this, GroupPackage>
      */
