@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -9,10 +10,10 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Plus, Trash2 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 
 interface OrganizationRow {
     id: string;
@@ -28,9 +29,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Kunden', href: '/admin/organizations' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 // Derived from the existing `is_operator` prop — not a separate controller-supplied
 // option list, just labels for the two values that field already takes.
@@ -90,12 +88,7 @@ function destroyOrganization(id: string) {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Kunden</h1>

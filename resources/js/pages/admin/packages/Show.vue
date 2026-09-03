@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
@@ -11,8 +12,8 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOperatorChannel, type PackagePayload } from '@/composables/useOperatorChannel';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 
@@ -204,10 +205,6 @@ function saveAbandonment() {
         .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
 }
 
-// Toast for one-off actions like resync — same pattern as Index.vue's flashSuccess.
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
-
 // Live update of the sync status for the currently displayed package.
 // Local state, so the live update doesn't mutate the prop.
 const syncStatus = ref(props.package.sync_status);
@@ -233,12 +230,7 @@ useOperatorChannel({
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center gap-3">

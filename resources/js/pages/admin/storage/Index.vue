@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, useForm } from '@inertiajs/vue3';
 import { PlugZap } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { ref } from 'vue';
 
 type Driver = 'local' | 's3';
 
@@ -29,9 +30,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Speicher', href: '/admin/storage' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const form = useForm({
     driver: props.settings.driver,
@@ -109,12 +107,7 @@ async function testConnection() {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Speicher-Backend</h1>

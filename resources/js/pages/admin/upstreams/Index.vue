@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
+import { type BreadcrumbItem } from '@/types';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { Pencil, Plus, Trash2 } from 'lucide-vue-next';
 import { computed } from 'vue';
 
@@ -36,9 +37,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Upstreams', href: '/admin/upstreams' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 // Upstream types are the registry types — from the single source of truth.
 const { options: registryTypeOptions } = useRegistryTypes();
@@ -120,12 +118,7 @@ function destroyUpstream(id: string) {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Upstreams</h1>

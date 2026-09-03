@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Database, Mail } from 'lucide-vue-next';
-import { computed } from 'vue';
 
 const props = defineProps<{
     settings: {
@@ -16,9 +16,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'System', href: '/admin/system' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const form = useForm({
     registration_enabled: props.settings.registration_enabled,
@@ -39,12 +36,7 @@ function save() {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div>
                 <h1 class="text-xl font-semibold">Systemeinstellungen</h1>

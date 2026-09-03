@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
 
@@ -33,9 +34,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Git-Tokens', href: '/admin/git-credentials' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 const providerOptions = computed(() => props.providers.map((p) => ({ value: p.value, label: p.label })));
 const orgOptions = computed(() => props.organizations.map((o) => ({ value: o.id, label: o.name })));
@@ -128,12 +126,7 @@ async function runTest(id: string) {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex items-center justify-between">
                 <div>

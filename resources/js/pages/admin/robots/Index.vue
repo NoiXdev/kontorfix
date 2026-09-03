@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -31,7 +32,6 @@ const props = defineProps<{
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Robots', href: '/admin/robots' }];
 
 const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 // Plaintext callout: the API key is shown only once (via flash).
 const plainApiKey = computed(() => page.props.flash?.plainApiKey ?? null);
@@ -148,12 +148,7 @@ function roleLabel(role: string) {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div>
                 <h1 class="text-xl font-semibold">Robots</h1>

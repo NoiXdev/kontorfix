@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
-import { type BreadcrumbItem, type SharedData } from '@/types';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { type BreadcrumbItem } from '@/types';
+import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, ShieldCheck, ShieldOff, Trash2 } from 'lucide-vue-next';
-import { computed } from 'vue';
 
 type Role = 'member' | 'maintainer' | 'admin';
 
@@ -30,9 +30,6 @@ const props = defineProps<{
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'OIDC-Provider', href: '/admin/oidc' }];
-
-const page = usePage<SharedData>();
-const flashSuccess = computed(() => page.props.flash?.success ?? null);
 
 // Derived from the existing `enabled` prop — labels for the two values that
 // boolean already takes, not a separate controller-supplied option list.
@@ -104,12 +101,7 @@ const badgeClasses = (on: boolean) =>
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
-            <div
-                v-if="flashSuccess"
-                class="fixed top-4 right-4 z-50 rounded-md border border-verdigris/30 bg-verdigris/15 px-4 py-2 text-sm text-verdigris shadow-lg"
-            >
-                {{ flashSuccess }}
-            </div>
+            <FlashToast />
 
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">OIDC-Provider</h1>
