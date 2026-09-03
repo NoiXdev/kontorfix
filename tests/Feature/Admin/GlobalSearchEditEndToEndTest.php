@@ -14,8 +14,8 @@ it('finds a registry via global search, renames it, and finds it under the new n
         ->assertOk()
         ->assertJsonPath('registries.0.name', 'Kadenz Registry');
 
-    // 2) Rename (slug stays the same)
-    $this->actingAs($admin)->put("/admin/groups/{$group->id}", ['name' => 'Umbenannt', 'public' => true, 'slug' => 'hack'])
+    // 2) Rename, keeping the slug it was submitted with
+    $this->actingAs($admin)->put("/admin/groups/{$group->id}", ['name' => 'Umbenannt', 'public' => true, 'slug' => 'kadenz'])
         ->assertRedirect()->assertSessionHasNoErrors();
     $fresh = $group->fresh();
     expect($fresh->name)->toBe('Umbenannt')->and($fresh->slug)->toBe('kadenz')->and($fresh->public)->toBeTrue();

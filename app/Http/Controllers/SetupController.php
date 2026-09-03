@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
 use App\Services\Mail\MailManager;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupGate;
 use App\Services\Setup\SetupStatus;
 use App\Services\Setup\SetupToken;
@@ -44,7 +45,7 @@ class SetupController extends Controller
             ->withErrors(['token' => 'Das Setup-Token ist ungültig. Es steht in den Startup-Logs des Containers.']);
     }
 
-    public function show(Request $request, SetupGate $gate): Response
+    public function show(Request $request, SetupGate $gate, RegistryUrl $url): Response
     {
         // One of the two routes in the setup group that EnsureSetupTokenPresented lets
         // through while locked, because this page *is* the token prompt (the other is
@@ -62,6 +63,11 @@ class SetupController extends Controller
                 'from_address' => config('mail.from.address'),
                 'from_name' => config('mail.from.name'),
             ],
+            // The registry URL form, with both slugs left open. The wizard mints the
+            // organization and its first registry in one go and derives the organization's
+            // slug from its name (uniqueOrganizationSlug below), so the mask cannot know
+            // the first segment — but it must still show the right shape, from here.
+            'registryUrlTemplate' => $url->template(),
         ]);
     }
 

@@ -17,6 +17,7 @@ use App\Models\PythonDist;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
 use App\Services\Registry\RegistryTypeService;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
@@ -150,11 +151,15 @@ class PackageController extends Controller
             ->all();
     }
 
-    public function show(Package $package, PackageDependencies $deps): Response
+    public function show(Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
     {
         $this->assertCanTouchPackage($package);
 
-        $package->load(['versions', 'groups:id,name,slug,organization_id']);
+        // `groups.organization:id,slug` on top of the group's own columns: the registry list
+        // below prints each registry's URL, and RegistryUrl reads the organization's slug for
+        // the first segment. Without the relation this would be one lazy load per row; without
+        // `slug` in it, a silent null and a /r//{groupSlug} on screen.
+        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug']);
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         // `assertCanTouchPackage()` asserts that the package's OWNER is in the active scope
@@ -222,7 +227,7 @@ class PackageController extends Controller
                 'download_count' => $d->download_count,
                 'uploaded_at' => $d->uploaded_at?->toDateString(),
             ]),
-            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug])->values(),
+            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
             'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
             'stats' => $isPython ? [
                 'downloads' => (int) $dists->sum('download_count'),

@@ -63,16 +63,28 @@ function something()
 /**
  * A super admin: an operator-organization admin, privileged across every organization.
  *
- * Shared here (rather than local to one test file, like PackageCreationOwnerTest.php's
- * adminOf() or CreateFormRedirectTest.php's redirectSuperAdmin()) because it needs to run
- * whether or not the file that happens to invoke it is the one loaded alongside it —
- * PHPUnit only defines a top-level function once its declaring file has been required, so a
- * test file that used the version formerly declared in PackageCreationOwnerTest.php would
- * throw "Call to undefined function" whenever run on its own.
+ * Shared here (rather than local to one test file, like CreateFormRedirectTest.php's
+ * redirectSuperAdmin()) because it needs to run whether or not the file that happens to
+ * invoke it is the one loaded alongside it — PHPUnit only defines a top-level function once
+ * its declaring file has been required, so a test file that used the version formerly
+ * declared in PackageCreationOwnerTest.php would throw "Call to undefined function"
+ * whenever run on its own.
  */
 function superAdmin(): User
 {
     return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
+}
+
+/**
+ * An admin of the given organization — a plain (non-operator) org admin.
+ *
+ * Moved here from PackageCreationOwnerTest.php for exactly the reason spelled out above:
+ * a second file now uses it, and a top-level function only exists once its declaring file
+ * has been required, so running that other file on its own would have failed.
+ */
+function adminOf(Organization $org): User
+{
+    return User::factory()->for($org)->create(['role' => UserRole::Admin]);
 }
 
 /**

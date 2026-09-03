@@ -17,9 +17,14 @@ class OrgScope
     private const SESSION_KEY = 'admin.scope_org_id';
 
     /**
-     * Organizations the current user may administer, as {id,name}.
+     * Organizations the current user may administer, as {id,name,slug}.
      *
-     * @return list<array{id: string, name: string}>
+     * The slug is here because the organization is the first segment of every registry URL:
+     * the registry create sheet previews the address of a registry that does not exist yet,
+     * and picking a different owner moves it. Every other consumer of this list is a plain
+     * {value,label} picker and simply ignores the extra key.
+     *
+     * @return list<array{id: string, name: string, slug: string}>
      */
     public function organizations(): array
     {
@@ -29,8 +34,8 @@ class OrgScope
         }
 
         return Organization::whereIn('id', $user->administeredOrganizationIds())
-            ->orderBy('name')->get(['id', 'name'])
-            ->map(fn (Organization $o) => ['id' => $o->id, 'name' => $o->name])
+            ->orderBy('name')->get(['id', 'name', 'slug'])
+            ->map(fn (Organization $o) => ['id' => $o->id, 'name' => $o->name, 'slug' => $o->slug])
             ->all();
     }
 

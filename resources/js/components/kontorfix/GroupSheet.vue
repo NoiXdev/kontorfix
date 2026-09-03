@@ -8,7 +8,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
 import { useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 
 // Must match `PackagePicker.vue`'s own (correct, wider) local `Pkg` — this component only
 // ever receives package objects from `<PackagePicker v-model="selected">` below, and that
@@ -25,13 +25,19 @@ interface Pkg {
 interface OrgOption {
     id: string;
     name: string;
+    // First segment of every registry URL, so the preview below can name it once the
+    // operator has picked an owner.
+    slug: string;
 }
 
 const props = withDefaults(
     defineProps<{
         organizations?: OrgOption[];
+        // The registry URL form with both slugs left open, from RegistryUrl::template().
+        // This sheet substitutes into it — it never assembles a registry URL itself.
+        urlTemplate?: string;
     }>(),
-    { organizations: () => [] },
+    { organizations: () => [], urlTemplate: '' },
 );
 
 const open = defineModel<boolean>('open', { default: false });
@@ -50,6 +56,15 @@ const form = useForm({
 });
 
 const origin = window.location.origin;
+
+// The organization segment is only known once an owner is picked; "Standard (Betreiber)"
+// leaves the choice to the server (active scope, else the user's own organization), so the
+// preview names the segment instead of guessing a slug for it.
+const orgSlug = computed(() => props.organizations.find((o) => o.id === form.organization_id)?.slug ?? '<organisation>');
+
+const urlFormLabel = computed(() => props.urlTemplate.replace('{organization}', '<organisation>').replace('{registry}', '<slug>'));
+
+const urlPreview = computed(() => origin + props.urlTemplate.replace('{organization}', orgSlug.value).replace('{registry}', form.slug || '…'));
 
 const selected = ref<Pkg[]>([]);
 const slugTouched = ref(false);
@@ -102,7 +117,8 @@ function close() {
             <SheetHeader>
                 <SheetTitle>Neue Registry (Gruppe)</SheetTitle>
                 <p class="text-sm text-muted-foreground">
-                    Jede Gruppe ist eine Registry mit eigenem <span class="font-mono">/r/&lt;slug&gt;</span>-Endpunkt.
+                    Jede Gruppe ist eine Registry mit eigenem <span class="font-mono">{{ urlFormLabel }}</span
+                    >-Endpunkt.
                 </p>
             </SheetHeader>
 
@@ -117,7 +133,7 @@ function close() {
                     <Label for="group-slug">Slug</Label>
                     <Input id="group-slug" v-model="form.slug" placeholder="kadenz" autocomplete="off" @input="onSlugInput" />
                     <p class="text-sm text-muted-foreground">
-                        Erreichbar unter <span class="font-mono">{{ origin }}/r/{{ form.slug || '…' }}</span>
+                        Erreichbar unter <span class="font-mono">{{ urlPreview }}</span>
                     </p>
                     <InputError :message="form.errors.slug" />
                 </div>

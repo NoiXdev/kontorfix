@@ -48,6 +48,9 @@ interface GroupRow {
     id: string;
     name: string;
     slug: string;
+    // The registry's path, from App\Services\Registry\RegistryUrl — the slug alone is only
+    // the second of the address's two segments.
+    url_path: string;
 }
 
 interface ActivityRow {
@@ -343,7 +346,7 @@ useOperatorChannel({
                                         <td class="px-4 py-3">
                                             <Link :href="route('admin.groups.index')" class="hover:underline">{{ group.name }}</Link>
                                         </td>
-                                        <td class="px-4 py-3 font-mono text-xs text-muted-foreground">/r/{{ group.slug }}</td>
+                                        <td class="px-4 py-3 font-mono text-xs text-muted-foreground">{{ group.url_path }}</td>
                                     </tr>
                                     <tr
                                         v-if="props.sharedElsewhere > 0"

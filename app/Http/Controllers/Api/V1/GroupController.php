@@ -54,7 +54,15 @@ class GroupController extends Controller
     {
         $this->assertCanWriteGroup($group);
 
-        $group->update(['name' => $request->validated('name'), 'public' => $request->boolean('public')]);
+        // The slug only when the caller actually sent one — a PUT that names just the fields
+        // it wants changed keeps leaving the registry's address alone. Validating it here and
+        // then dropping it would leave UnclaimedSlug enforced on the console only, which is
+        // precisely the half-enforced invariant it exists to close.
+        $group->update([
+            'name' => $request->validated('name'),
+            'public' => $request->boolean('public'),
+            ...$request->safe()->only('slug'),
+        ]);
 
         return new GroupResource($group);
     }

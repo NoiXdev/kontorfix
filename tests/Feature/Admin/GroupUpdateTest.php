@@ -9,15 +9,24 @@ beforeEach(function () {
     $this->admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
 });
 
-it('updates a registry name and visibility but never the slug', function () {
+it('updates a registry name, visibility and slug', function () {
     $group = Group::factory()->for(Organization::factory())->create(['name' => 'Alt', 'slug' => 'kadenz', 'public' => false]);
 
-    $this->actingAs($this->admin)->put("/admin/groups/{$group->id}", ['name' => 'Neu', 'public' => true, 'slug' => 'gehackt'])
+    $this->actingAs($this->admin)->put("/admin/groups/{$group->id}", ['name' => 'Neu', 'public' => true, 'slug' => 'umbenannt'])
         ->assertRedirect()->assertSessionHasNoErrors();
 
     $fresh = $group->fresh();
     expect($fresh->name)->toBe('Neu')->and($fresh->public)->toBeTrue()
-        ->and($fresh->slug)->toBe('kadenz');
+        ->and($fresh->slug)->toBe('umbenannt');
+});
+
+it('leaves the slug alone when the request does not carry one', function () {
+    $group = Group::factory()->for(Organization::factory())->create(['name' => 'Alt', 'slug' => 'kadenz']);
+
+    $this->actingAs($this->admin)->put("/admin/groups/{$group->id}", ['name' => 'Neu'])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($group->fresh()->slug)->toBe('kadenz');
 });
 
 it('requires a name', function () {
