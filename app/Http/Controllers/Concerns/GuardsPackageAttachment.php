@@ -105,6 +105,18 @@ trait GuardsPackageAttachment
      * Nothing here re-asks reachability: the pivot row already exists, so it passed
      * {@see assertPackagesReachableIn} when it was written.
      *
+     * THE `shared` CLAUSE CANNOT BE PINNED BY A TEST, and that is a property of the
+     * ownership invariant rather than a gap. Distinguishing it would need an existing
+     * assignment of a NON-shared package owned outside the caller's administration, and no
+     * such row is reachable: v0.8.0 lets a package be assigned only to registries of its own
+     * organization, un-sharing is refused while any cross-organization assignment survives,
+     * and anyone who administers a registry administers the organization that owns its
+     * non-shared packages. Replacing `true` with `false` therefore reddens exactly the tests
+     * that dropping the whole check reddens (mutations M3 and M4a of the task-6b report).
+     * The clause is kept anyway: without it this method would silently also enforce the
+     * ownership rule, which is neither what its name says nor what spec §4 asks of it, and a
+     * guard whose stated rule and actual rule differ is how this branch's defects started.
+     *
      * @param  array<int, string>  $packageIds
      */
     protected function assertMayManageSharedAssignments(array $packageIds): void
