@@ -53,6 +53,11 @@ class OrganizationController extends Controller
                 // the console confirms that before submitting, naming exactly how many.
                 'registries_count' => $organization->groups()->count(),
             ],
+            // The bare URL form with both slugs left open (see GroupController::index,
+            // where the create sheet uses the same thing for the same reason): the slug
+            // confirmation dialog substitutes the organization segment for its "before" and
+            // "after" preview, and must never assemble a /r/... path of its own.
+            'registryUrlTemplate' => $url->template(),
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).
             'registryTypes' => [

@@ -55,6 +55,11 @@ const props = defineProps<{
         // a `registries` list that a future page might paginate or filter.
         registries_count: number;
     };
+    // The bare URL form with both slugs left open — see admin/groups/Index.vue's use of the
+    // same field for a registry that does not exist yet. Here it lets the slug confirmation
+    // show the /r/... pattern before and after without ever assembling a path itself; see
+    // oldPathPattern/newPathPattern below.
+    registryUrlTemplate: string;
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
     users: UserRow[];
@@ -95,9 +100,19 @@ const settingsForm = useForm<{ name: string; slug: string; notification_cadence:
 const slugChanged = computed(() => settingsForm.slug !== props.organization.slug);
 
 // The organization slug is the first path segment of every registry URL it owns — unlike a
-// registry's own slug edit (admin/groups/Show.vue), which moves exactly one address, this
-// one moves all of them. Named so the confirmation states the count instead of a vague
-// "some registries".
+// registry's own slug edit (admin/groups/Show.vue), which shows one concrete before/after
+// URL because it moves exactly one address, this one moves all of them at once and for N
+// different registry slugs. A single before/after URL cannot represent that truthfully, so
+// the dialog shows the *pattern* instead — /r/{old-org}/… -> /r/{new-org}/… — built by
+// substituting only the organization segment into registryUrlTemplate (never assembled by
+// hand here) and leaving the registry segment as the same generic "…" GroupSheet.vue and
+// admin/groups/Show.vue already use for "some slug, not this specific one".
+const oldPathPattern = computed(() => props.registryUrlTemplate.replace('{organization}', props.organization.slug).replace('{registry}', '…'));
+const newPathPattern = computed(() =>
+    props.registryUrlTemplate.replace('{organization}', settingsForm.slug || '…').replace('{registry}', '…'),
+);
+
+// Named so the confirmation states the exact count instead of a vague "some registries".
 const registryImpact = computed(() => {
     const n = props.organization.registries_count;
     if (n === 0) {
@@ -109,6 +124,13 @@ const registryImpact = computed(() => {
     return `Alle ${n} Registries dieser Organisation ändern dadurch ihre Adresse.`;
 });
 
+// True when at least one of this organization's registries answers on a hostname of its
+// own — those keep working under that domain unchanged; only their /r/... address (still
+// reachable, just not usually the one clients are configured against) moves with the org
+// slug. Worth saying explicitly: an operator who only ever uses the custom domain should
+// not be alarmed, and one with clients pinned to /r/... must not be reassured.
+const hasCustomDomainRegistries = computed(() => props.registries.some((registry) => registry.domains.length > 0));
+
 function saveSettings() {
     settingsForm.put(route('admin.organizations.update', props.organization.id), {
         preserveScroll: true,
@@ -118,12 +140,14 @@ function saveSettings() {
             !slugChanged.value ||
             confirm(
                 'Slug der Organisation ändern?\n\n' +
-                    `Bisher: ${props.organization.slug}\n` +
-                    `Neu:    ${settingsForm.slug}\n\n` +
+                    `Bisher: ${oldPathPattern.value}\n` +
+                    `Neu:    ${newPathPattern.value}\n\n` +
                     `${registryImpact.value}\n\n` +
-                    'Die bisherigen Adressen antworten danach nicht mehr. Bestehende Client-Konfigurationen, ' +
-                    'die auf sie zeigen (composer.json, .npmrc, pip.conf, CI-Variablen), funktionieren erst ' +
-                    'wieder, wenn sie auf die neuen Adressen umgestellt sind.',
+                    (hasCustomDomainRegistries.value
+                        ? 'Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit. '
+                        : '') +
+                    'Bestehende Client-Konfigurationen, die auf die alten /r/-Adressen zeigen (composer.json, .npmrc, pip.conf, ' +
+                    'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.',
             ),
     });
 }
@@ -253,8 +277,12 @@ function detachMember(userId: string) {
                             class="w-full max-w-md rounded-md border border-input bg-background px-3 py-2 font-mono text-sm shadow-xs focus:border-ring focus:ring-1 focus:ring-ring focus:outline-hidden"
                         />
                         <p v-if="slugChanged" class="text-xs text-copper-hi">
-                            Der Slug ist Teil der Adresse jeder Registry dieser Organisation. {{ registryImpact }} Bestehende
-                            Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt sind.
+                            {{ oldPathPattern }} wird zu {{ newPathPattern }}. {{ registryImpact }}
+                            <template v-if="hasCustomDomainRegistries">
+                                Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit.
+                            </template>
+                            Bestehende Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt
+                            sind.
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
                             Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch

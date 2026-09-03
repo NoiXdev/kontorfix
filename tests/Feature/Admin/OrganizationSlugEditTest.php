@@ -2,6 +2,7 @@
 
 use App\Models\Group;
 use App\Models\Organization;
+use App\Services\Registry\RegistryUrl;
 
 it('changes an organization slug and with it every registry url it owns', function () {
     $org = Organization::factory()->create(['slug' => 'old-org']);
@@ -57,3 +58,26 @@ function cadenceOf(Organization $org): string
 {
     return $org->refresh()->notification_cadence;
 }
+
+/**
+ * The confirmation dialog cannot show a single before/after URL the way the registry-slug
+ * edit does (admin/groups/Show.vue) — one organization slug prefixes every registry this
+ * organization owns, for potentially many different registry slugs, and some of those
+ * registries may sit on a custom domain where the slug never appears at all. So instead of
+ * a URL, the console gets the bare path *pattern* with both slugs left open and substitutes
+ * only the organization segment locally — never assembling a /r/... path of its own. This
+ * pins that the Show page actually hands over that pattern (and the registries_count the
+ * dialog states alongside it), stated against RegistryUrl rather than a literal so the URL
+ * form stays declared in one place.
+ */
+it('hands the console the bare url pattern and the affected registry count', function () {
+    $org = Organization::factory()->create(['slug' => 'kunde']);
+    Group::factory()->for($org)->create();
+    Group::factory()->for($org)->create();
+
+    $this->actingAs(superAdmin())->get(route('admin.organizations.show', $org))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('registryUrlTemplate', app(RegistryUrl::class)->template())
+            ->where('organization.registries_count', 2));
+});
