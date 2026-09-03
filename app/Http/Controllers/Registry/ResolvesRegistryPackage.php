@@ -109,13 +109,30 @@ trait ResolvesRegistryPackage
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
 
-        // Scoped to the organization that owns the addressed registry. The name is unique
-        // only within an organization, so an unscoped lookup could return another
+        // Own-organization, or shared. Still scoped, and for the unchanged reason: the name
+        // is unique only within an organization, so an unscoped lookup could return another
         // tenant's package and then lean on the access check to hide it — a check that is
-        // about assignment, not ownership.
+        // about assignment, not ownership. A shared package is the one exception the
+        // namespace admits, because it is owned by the operator organization rather than by
+        // a tenant (spec §1) and is deliberately offered to others. It still has to be
+        // assigned to this registry — canAccessPackage() below enforces that through the
+        // pivot — so sharing grants eligibility, not access.
+        //
+        // Two rows can now match: a customer's own package and a shared one of the same
+        // name. Spec §5 settles which wins — the customer's own, never shadowed by something
+        // the operator added — and the order says so rather than leaving `first()` to
+        // whichever row the database happens to hand back first.
+        // App\Services\Package\SharedAssignment refuses every assignment that would produce
+        // the pair, so on a healthy instance this order decides nothing; it is stated
+        // because a resolution that is only right while the data is clean is not a
+        // resolution, and a direct database change or a data migration can still produce
+        // the pair the application refuses.
         $package = Package::where('type', $type)
             ->where('name', $fullName)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true))
+            ->orderByRaw('(packages.organization_id = ?) desc', [$group->organization_id])
             ->first();
 
         if (! $package || ! $this->access()->canAccessPackage($token, $group, $package)) {

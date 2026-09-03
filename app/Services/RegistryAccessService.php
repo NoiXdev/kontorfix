@@ -106,19 +106,24 @@ class RegistryAccessService
      * The single place for the ownership predicate of the group assignment — and the one
      * caller-facing statement of the expiry predicate, which the relation itself carries.
      *
-     * Constrained to the addressed registry's organization for the same reason findLocal()
-     * and the PyPI read paths are: the pivot row records *assignment*, and canAccessPackage()
-     * checks assignment and group access — neither compares the package's organization to the
-     * registry's. A cross-organization pivot row would therefore be served here, and this
-     * method feeds packagesFor() (Composer's `available-packages` index), packageBelongsToGroup()
-     * (the npm publish membership check) and canAccessPackage() (every ecosystem's access
-     * check). Without the constraint a registry with no Composer upstream listed another
-     * tenant's package *name* in available-packages — name disclosure, not content, since
-     * findLocal() still refused to serve it.
+     * Constrained to the addressed registry's organization — or shared — for the same reason
+     * findLocal() and the PyPI read paths are: the pivot row records *assignment*, and
+     * canAccessPackage() checks assignment and group access — neither compares the package's
+     * organization to the registry's. A cross-organization pivot row would therefore be served
+     * here, and this method feeds packagesFor() (Composer's `available-packages` index),
+     * packageBelongsToGroup() (the npm publish membership check) and canAccessPackage() (every
+     * ecosystem's access check). Without the constraint a registry with no Composer upstream
+     * listed another tenant's package *name* in available-packages — name disclosure, not
+     * content, since findLocal() still refused to serve it.
      *
-     * The enforcement migration now refuses to complete while such a row exists, so this
-     * should never match anything; it is stated anyway, because an invariant that only the
-     * read paths spell out one by one is one edit from being lost.
+     * A shared package is exactly the cross-organization row this refused, and now the one
+     * kind that is legitimate: it is owned by the operator organization rather than by a
+     * tenant (spec §1) and is deliberately offered to others. The pivot row is still what
+     * grants access — an unassigned shared package appears in no registry.
+     *
+     * The enforcement migration now refuses to complete while a *non-shared* cross-organization
+     * row exists, so that half should never match anything; it is stated anyway, because an
+     * invariant that only the read paths spell out one by one is one edit from being lost.
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */
@@ -126,7 +131,10 @@ class RegistryAccessService
     {
         // The expiry predicate itself lives on the relation (Group::assignedPackages), so
         // the attach-time guard asks the same question of a row that this read path does.
+        // Columns qualified because the relation query joins `group_package`.
         return $group->assignedPackages()
-            ->where('packages.organization_id', $group->organization_id);
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true));
     }
 }

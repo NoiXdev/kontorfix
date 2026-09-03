@@ -58,8 +58,15 @@ class PypiController extends Controller
         abort_unless($this->access->canPublishToGroup($token, $group), 403);
 
         $normalized = PythonName::normalize((string) $request->input('name', ''));
+        // Own-organization only, mirroring NpmController::respondPublish(). The read paths
+        // resolve a shared project from every registry it is assigned to; a customer's
+        // publish token adding a distribution to it would put that file into every other
+        // customer's builds. Sharing hands out reads, never writes — so the write path asks
+        // the narrower question, and answers a shared name the same way it answers an
+        // unknown one.
         $pkg = $this->pythonPackagesOfGroup($group)
-            ->first(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
+            ->first(fn (Package $p): bool => $p->organization_id === $group->organization_id
+                && PythonName::normalize($p->name) === $normalized);
         abort_if($pkg === null, 404, 'Unknown project for this registry.');
         // A git-mirror project derives its files from tags — reject uploads into it.
         abort_if($pkg->isGitSourced(), 409, 'This project mirrors a git repository and cannot be uploaded to.');
@@ -192,16 +199,20 @@ class PypiController extends Controller
         // pattern refuses those already; this does not rely on it.
         abort_unless(Str::isUuid($package), 404);
 
-        // Scoped like every other read path. A UUID cannot collide across organizations the
-        // way a name can, so this is not closing a guessing attack — it closes the same
-        // cross-organization pivot row the index and project page now refuse, which would
-        // otherwise still stream its distributions through the foreign registry.
+        // Scoped like every other read path — own-organization, or shared. A UUID cannot
+        // collide across organizations the way a name can, so this is not closing a guessing
+        // attack — it closes the same cross-organization pivot row the index and project page
+        // refuse, which would otherwise still stream its distributions through the foreign
+        // registry. The shared clause is what lets the files of a project this registry does
+        // serve actually be fetched; without it the project page would link to a 404.
         //
         // Redundant since RegistryAccessService::availablePackages() states the same rule, so
         // canAccessPackage() below already refuses this row. Kept: it costs one predicate, and
         // it lets this handler be read on its own without tracing into the access service.
         $pkg = Package::where('type', PackageType::Python)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true))
             ->whereKey($package)
             ->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
@@ -225,19 +236,31 @@ class PypiController extends Controller
     /**
      * Python packages assigned to the group (unfiltered by access — callers refine).
      *
-     * Constrained to the owning organization for the same reason findLocal() is: the pivot
-     * row records assignment, and canAccessPackage() checks assignment and group access —
-     * neither compares the package's organization to the registry's. A cross-organization
-     * pivot row would therefore be served here. The enforcement migration now refuses to
-     * complete while such a row exists, so this constraint should never match anything;
-     * it is stated anyway, because this is the only ecosystem where ownership was left
-     * implied by the access check rather than written into the query, and an invariant
-     * that only one of three read paths spells out is one edit from being lost.
+     * Own-organization, or shared, for the same reason findLocal() is: the pivot row records
+     * assignment, and canAccessPackage() checks assignment and group access — neither compares
+     * the package's organization to the registry's. A cross-organization pivot row would
+     * therefore be served here. The enforcement migration now refuses to complete while a
+     * *non-shared* such row exists, so that half should never match anything; it is stated
+     * anyway, because this is the only ecosystem where ownership was left implied by the
+     * access check rather than written into the query, and an invariant that only one of
+     * three read paths spells out is one edit from being lost.
      *
-     * Not made redundant by the same constraint now living in
+     * A shared package is the cross-organization row that is legitimate: owned by the
+     * operator organization (spec §1) and deliberately offered to others. Without this
+     * clause the PyPI half of the feature would not exist — worse, once the dependency-
+     * confusion guard counts an assigned shared name as hosted, pip would be answered with
+     * a flat 404 for a project the operator did assign.
+     *
+     * Not made redundant by the same predicate now living in
      * RegistryAccessService::availablePackages(): the publish path (upload()) resolves the
      * target project through this method *without* canAccessPackage(), so here this is still
-     * the only statement of the rule.
+     * the only statement of the rule — and upload() narrows it back to own-organization
+     * itself, because sharing hands out reads and never writes.
+     *
+     * Ordered own-organization-first for the reason given on
+     * ResolvesRegistryPackage::findLocal(): simpleProject() takes the first match by
+     * normalised name, and spec §5 says the customer's own project wins over a shared one of
+     * that name.
      *
      * @return Collection<int, Package>
      */
@@ -245,7 +268,10 @@ class PypiController extends Controller
     {
         return $group->packages()
             ->where('type', PackageType::Python)
-            ->where('packages.organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true))
+            ->orderByRaw('(packages.organization_id = ?) desc', [$group->organization_id])
             ->get();
     }
 
