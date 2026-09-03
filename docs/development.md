@@ -688,6 +688,96 @@ Pakete/Registries/Nutzer entfernen)" instead of a raw `SQLSTATE[23503]` foreign-
 page. To delete an organization: remove or reassign its packages, delete its registries, remove
 its users, then delete the organization.
 
+### Organization-scoped registry slugs
+
+The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is
+`App\Services\Registry\RegistryUrl::pathFor()`, and `routes/registry.php` constrains both
+segments to `[a-z0-9-]+`. A registry on a custom domain sits at that host's root instead
+(`registry.context` resolves it by `Domain::hostname`) and is unaffected by everything below;
+its address never contains either slug.
+
+**A registry slug is unique within its organization; an organization slug is globally
+unique.** `groups` carries a `unique(organization_id, slug)` index rather than a bare
+`unique(slug)`, so two organizations may each run a registry called `packages`. An
+organization slug may not equal *any* registry slug, and a registry slug may not equal *any*
+organization slug — the two share one namespace in the URL, and the rule runs both ways.
+`App\Rules\UnclaimedSlug` (`byRegistry()` / `byOrganization()`) enforces it, wired into
+`StoreOrganizationRequest`, `StoreGroupRequest`, `UpdateOrganizationRequest` and
+`UpdateGroupRequest` — create and update, on the console. The JSON API shares the group rule
+(`PUT /api/v1/groups/{group}` uses `UpdateGroupRequest` too), so it is enforced there as well;
+there is no API route to update an organization, so that half is console-only by having
+nothing else to cover.
+
+**Old one-segment `/r/{slug}/…` URLs answer with a 301** (308 for a write — see below), so
+existing `composer.json`, `.npmrc` and `pip.conf` keep working unchanged. The redirect is
+`App\Http\Controllers\Registry\LegacySlugRedirectController`, registered last in
+`routes/registry.php` so the canonical two-segment route always wins where a URL could match
+both. A customer who would rather not touch any client configuration at all can be given a
+custom domain instead — that address never had a slug in it to begin with.
+
+**The redirect refuses an ambiguous slug rather than guessing.** Since a registry slug is now
+unique only per organization, two organizations can legitimately hold the same slug — and a
+bare legacy URL then names one of them at random, which is exactly what the redirect must
+not do. `App\Services\Registry\LegacySlugRedirector::resolve()` looks up the slug and returns
+a group only when it matches exactly one; two or more matches 404 instead of picking one,
+because guessing wrong would silently serve another tenant's registry (public: dependency
+confusion; private: a confusing auth failure) and, with no `ORDER BY` on the lookup, the guess
+could flip after any `UPDATE` or `VACUUM`. This is also why an organization slug may not
+collide with a registry slug: with that collision disallowed, the canonical
+`/r/{orgSlug}/{groupSlug}` route can never accidentally consume a legacy URL's two segments as
+`{org}/{registry}` when the first segment was actually a legacy registry slug.
+
+**pip needs a special note.** pip does not follow a redirect for the index root and stop —
+for every project it builds `GET /r/{slug}/simple/{project}/` itself. That shape happens to
+satisfy the *canonical* two-segment route syntactically (`{orgSlug}={slug}`,
+`{groupSlug}="simple"`, and the remaining segment matches npm's bare packument route one
+segment later), so the request never reaches `LegacySlugRedirectController`'s own route at
+all. It is handled instead inside `App\Http\Middleware\ResolveRegistryContext`: when the
+first segment does not resolve as an organization slug, the middleware hands it to the same
+`LegacySlugRedirector` and redirects on a single match, 404s on none or an ambiguous match. An
+operator debugging a pip client that isn't finding its registry should know the mechanism
+differs from Composer's and npm's — it is a fallback inside the context middleware, not the
+dedicated legacy route.
+
+**The migration refuses rather than repairs.**
+`database/migrations/2026_09_03_100000_scope_group_slug_to_organization.php` checks, before
+doing anything else, whether any organization slug equals any registry slug — the exact
+collision `UnclaimedSlug` prevents going forward — and if it finds one, names every such pair
+(organization id, registry id, the shared slug) and aborts without changing the schema. It
+exists because the same collision that `UnclaimedSlug` refuses at write time can already be
+sitting in a pre-upgrade database, and letting the migration through unchecked would leave the
+legacy redirect resolving `/r/{slug}/…` to the wrong registry — the canonical route would
+match `{orgSlug}={slug}` first and never let the legacy route see the request. A wrong answer
+is worse than a stopped migration: the operator renames one side of the pair and runs it
+again. `down()` applies the same stance in reverse, refusing to restore instance-wide
+uniqueness while two organizations still hold one slug.
+
+A companion migration, `2026_09_03_100100_add_index_to_groups_slug.php`, adds back a plain
+index on `groups.slug` alone (the composite `(organization_id, slug)` index cannot seek on
+`slug` by itself) — needed because the legacy lookup above has no organization to filter by,
+and until a customer updates their client configuration that lookup can be most of their
+traffic.
+
+**Changing either slug breaks client configurations pointing at the old address, and there is
+no alias for the old slug.** Changing a registry's own slug moves only that registry's `/r/`
+address. Changing an organization's slug moves the `/r/` address of *every* registry that
+organization owns, since the organization segment is the first half of all of them; a
+registry on a custom domain keeps working under that domain unchanged, and only its `/r/`
+address moves. Both edit dialogs (`resources/js/pages/admin/groups/Show.vue`,
+`resources/js/pages/admin/organizations/Show.vue`) show the affected address(es) — built
+server-side from `RegistryUrl::canonical()` / `RegistryUrl::template()`, never assembled in
+Vue — and ask for confirmation before submitting, precisely because there is nothing to
+redirect a client back from once it happens.
+
+**Upgrade note for API clients.** `Api\V1\GroupController::update()` persists a submitted
+`slug` field (`$group->update([..., ...$request->safe()->only('slug')])`); before this branch
+`UpdateGroupRequest` did not validate `slug` at all, so a `PUT` that included it had the field
+silently ignored. A client that does a `GET` then `PUT`s the whole body back — a common
+pattern for a script that fetches, edits one field, and saves — will now move the registry's
+`/r/` address the moment it replays a stale cached `slug` value from an earlier `GET`. This is
+silent for the operator (the request succeeds, nothing errors) and loud only for whatever
+`composer.json`/`.npmrc`/`pip.conf` was still pointed at the old address.
+
 ### Storage
 
 The artifact storage (`local` or S3/MinIO) is configured by the operator admin and is treated
