@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Registry\ComposerController;
+use App\Http\Controllers\Registry\LegacySlugRedirectController;
 use App\Http\Controllers\Registry\NpmController;
 use App\Http\Controllers\Registry\ProxyDownloadController;
 use App\Http\Controllers\Registry\PypiController;
@@ -106,3 +107,7 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 // Domain access: root level. registry.context 404s unknown hosts, so these routes
 // don't shadow the main app (web routes are registered first -> first match).
 Route::middleware(['registry.context', 'registry.auth'])->group($registryEndpoints);
+
+// Legacy slug access, registered last on purpose — see LegacySlugRedirectController.
+Route::get('/r/{groupSlug}/{rest?}', LegacySlugRedirectController::class)
+    ->where(['groupSlug' => '[a-z0-9-]+', 'rest' => '.*']);
