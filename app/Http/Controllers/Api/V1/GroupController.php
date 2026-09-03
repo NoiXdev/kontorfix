@@ -40,9 +40,10 @@ class GroupController extends Controller
         $packageIds = $request->validated('package_ids', []);
         $this->assertCanAttachPackages($packageIds, $organizationId);
 
-        // …and never with a shared package standing beside the own package it would
-        // shadow. Before the insert, so a refusal leaves no empty registry behind.
-        $sharedAssignment->assertCreatable($packageIds);
+        // …and never leaving the registry serving a shared package beside an own one of
+        // the same name. The registry starts empty, so its post-state is the submission.
+        // Before the insert, so a refusal leaves no empty registry behind.
+        $sharedAssignment->assertReplacementAssignable($packageIds);
 
         $group = Group::create([
             'name' => $request->validated('name'),

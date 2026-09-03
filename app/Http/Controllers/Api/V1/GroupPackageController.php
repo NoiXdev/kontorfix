@@ -32,7 +32,10 @@ class GroupPackageController extends Controller
         ]);
 
         $this->assertCanAttachPackages($validated['package_ids'] ?? [], $group->organization_id);
-        $sharedAssignment->assertAssignable($group, $validated['package_ids'] ?? []);
+        // sync() replaces the assignment wholesale, so the submission IS the post-state:
+        // a PUT that swaps an own package for the shared one of the same name detaches the
+        // own row in the same write and shadows nothing.
+        $sharedAssignment->assertReplacementAssignable($validated['package_ids'] ?? []);
 
         $group->packages()->sync($validated['package_ids'] ?? []);
 

@@ -6,39 +6,57 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
+use Illuminate\Support\Facades\Queue;
 
 /*
  * v0.8.0 made a package attachable only to registries of the organization that owns it.
  * A package owned by the operator organization and marked `shared` is the one exception:
  * it may be assigned to any registry.
  *
- * The exception stops where it would shadow: a customer's own package always wins over a
- * shared one of the same name, so an assignment that would put both names into one
- * registry is refused rather than accepted and silently resolved one way or the other.
+ * The exception stops where it would shadow. The invariant, stated over the set a registry
+ * would serve AFTER a write rather than over the submission that causes it:
  *
- * Every case below runs through BOTH write surfaces — the console (`attachPackages`) and
- * `/api/v1` (`GroupPackageController::update`). The two resolve the target organization
- * their own way and each calls the guard itself; a green console test says nothing about
- * the API path, and this repository has shipped that exact gap before.
+ *   no shared package may carry the same (type, name) as a non-shared one.
+ *
+ * The cases below are derived from that sentence, not from the guard: for each write, the
+ * post-state is enumerated over every combination of own/shared already assigned and
+ * own/shared arriving, and the expectation read off the invariant. That matters, because
+ * the first version of this guard compared the submission against the existing assignment
+ * and so had a DIRECTION — it caught a shared package arriving over an own one and missed
+ * an own one arriving over a shared package already assigned, which reaches the identical
+ * end state. A test suite derived from that implementation would have shared its blind
+ * spot. Each writer's post-state:
+ *
+ *   sync($ids)                  → the submission          (Api\V1\GroupPackageController::update)
+ *   syncWithoutDetaching($ids)  → assigned ∪ submission   (Admin\GroupController::attachPackages)
+ *   create + sync($ids)         → the submission          (both GroupController::store)
+ *
+ * Every case runs through BOTH write surfaces — the console and /api/v1. The two resolve
+ * the target organization their own way and each asks the guard itself; a green console
+ * test says nothing about the API path, and this repository has shipped that gap before.
+ *
+ * The message text is the assertion, never the exception class or the status alone: a
+ * QueryException from the very collision this guard prevents would also arrive as "an
+ * error", and PDOException extends RuntimeException. The three texts also distinguish
+ * three situations whose remedies differ.
  */
 
-/*
- * The message text is the assertion, not just the exception class or the error key: a
- * QueryException from the very collision this guard prevents would also arrive as "an
- * error", and PDOException extends RuntimeException — a class-only assertion cannot tell a
- * clean refusal from the database failure the refusal exists to prevent. The two texts also
- * distinguish the two situations, whose remedies differ.
- */
 const ALREADY_SERVED_MESSAGE = 'Diese Registry führt bereits ein eigenes Paket mit demselben Namen: composer acme/tools. '
     .'Ein geteiltes Paket darf ein eigenes nicht verdecken.';
 
 const SUBMITTED_TOGETHER_MESSAGE = 'Diese Auswahl enthält ein eigenes und ein geteiltes Paket mit demselben Namen: '
     .'composer acme/tools. Ein geteiltes Paket darf ein eigenes nicht verdecken.';
 
+const SHARED_ALREADY_SERVED_MESSAGE = 'Diese Registry führt bereits ein geteiltes Paket mit demselben Namen: '
+    .'composer acme/tools. Entfernen Sie es zuerst aus dieser Registry, bevor Sie ein eigenes Paket unter diesem '
+    .'Namen zuweisen.';
+
+/**
+ * Only an operator-organization package can be marked shared (Admin\PackageController::shared),
+ * so `shared === true` already implies operator ownership; the factory states both.
+ */
 function sharedPackage(string $name = 'acme/shared'): Package
 {
-    // Only an operator-organization package can be marked shared (Admin\PackageController::shared),
-    // so `shared === true` already implies operator ownership; the factory states both.
     return Package::factory()
         ->for(Organization::factory()->create(['is_operator' => true]))
         ->create(['type' => 'composer', 'name' => $name, 'shared' => true]);
@@ -51,6 +69,11 @@ function writeKeyFor(User $user): string
 
     return $plain;
 }
+
+// ---------------------------------------------------------------------------------------
+// Reachability: a shared package may be assigned outside its own organization; nothing else
+// may.
+// ---------------------------------------------------------------------------------------
 
 it('lets a shared package be assigned to another organizations registry', function () {
     $shared = sharedPackage();
@@ -97,6 +120,10 @@ it('still refuses a non-shared package of another organization through the api',
     expect($customer->packages()->whereKey($foreign->id)->exists())->toBeFalse();
 });
 
+// ---------------------------------------------------------------------------------------
+// syncWithoutDetaching: post-state is assigned ∪ submission, so BOTH directions collide.
+// ---------------------------------------------------------------------------------------
+
 it('refuses a shared package whose name the registry already serves', function () {
     $customer = Group::factory()->create();
     $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
@@ -111,26 +138,24 @@ it('refuses a shared package whose name the registry already serves', function (
     expect($customer->packages()->whereKey($shared->id)->exists())->toBeFalse();
 });
 
-it('refuses a shared package whose name the registry already serves through the api', function () {
+it('refuses an own package whose name the registry already serves through a shared package', function () {
+    // The reverse of the case above, and the one a submission-versus-assignment rule
+    // misses: the end state is identical — one registry serving both rows under one name.
     $customer = Group::factory()->create();
-    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
-    $customer->packages()->attach($own);
-
     $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared);
 
-    $this->withToken(writeKeyFor(superAdmin()))
-        ->putJson("/api/v1/groups/{$customer->id}/packages", ['package_ids' => [$shared->id]])
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors(['package_ids' => ALREADY_SERVED_MESSAGE]);
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
 
-    // sync() would have replaced the whole set; the refusal must leave it untouched.
-    expect($customer->packages()->whereKey($shared->id)->exists())->toBeFalse()
-        ->and($customer->packages()->whereKey($own->id)->exists())->toBeTrue();
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$own->id]])
+        ->assertSessionHasErrors(['package_ids' => SHARED_ALREADY_SERVED_MESSAGE]);
+
+    expect($customer->packages()->whereKey($own->id)->exists())->toBeFalse();
 });
 
 it('refuses a shared package submitted alongside the own package it would shadow', function () {
-    // The collision the registry's current contents cannot reveal: both packages arrive in
-    // the same request, so "already serves" is only true once this very assignment lands.
+    // Neither is assigned yet, so only the submission reveals this one.
     $customer = Group::factory()->create();
     $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
     $shared = sharedPackage('acme/tools');
@@ -140,6 +165,74 @@ it('refuses a shared package submitted alongside the own package it would shadow
         ->assertSessionHasErrors(['package_ids' => SUBMITTED_TOGETHER_MESSAGE]);
 
     expect($customer->packages()->count())->toBe(0);
+});
+
+it('lets a shared package join a registry that serves a different name', function () {
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own);
+
+    $shared = sharedPackage('acme/other');
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$shared->id]])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->count())->toBe(2);
+});
+
+it('does not treat a re-submitted shared package as colliding with itself', function () {
+    // The invariant is about a shared row standing beside a NON-shared one, not about two
+    // rows sharing a name: syncWithoutDetaching() leaves one row either way, and a package
+    // that is both assigned and submitted appears twice in the post-state. A guard that
+    // read "more than one row under this name" instead would refuse this.
+    $customer = Group::factory()->create();
+    $shared = sharedPackage();
+    $customer->packages()->attach($shared);
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.groups.packages.store', $customer), ['package_ids' => [$shared->id]])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->count())->toBe(1);
+});
+
+// ---------------------------------------------------------------------------------------
+// sync: post-state is the submission alone, so a swap detaches the other side and is clean.
+// ---------------------------------------------------------------------------------------
+
+it('lets a shared package replace the own package of the same name through the api', function () {
+    $customer = Group::factory()->create();
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+    $customer->packages()->attach($own);
+
+    $shared = sharedPackage('acme/tools');
+
+    // sync() detaches the own package in the same write, so the registry never serves both
+    // and there is nothing to refuse.
+    $this->withToken(writeKeyFor(superAdmin()))
+        ->putJson("/api/v1/groups/{$customer->id}/packages", ['package_ids' => [$shared->id]])
+        ->assertOk();
+
+    expect($customer->packages()->whereKey($shared->id)->exists())->toBeTrue()
+        ->and($customer->packages()->whereKey($own->id)->exists())->toBeFalse();
+});
+
+it('lets an own package replace a shared package of the same name through the api', function () {
+    $customer = Group::factory()->create();
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared);
+
+    $own = Package::factory()->inOrgOf($customer)->create(['type' => 'composer', 'name' => 'acme/tools']);
+
+    $this->withToken(writeKeyFor(superAdmin()))
+        ->putJson("/api/v1/groups/{$customer->id}/packages", ['package_ids' => [$own->id]])
+        ->assertOk();
+
+    expect($customer->packages()->whereKey($own->id)->exists())->toBeTrue()
+        ->and($customer->packages()->whereKey($shared->id)->exists())->toBeFalse();
 });
 
 it('refuses a shared package submitted alongside the own package it would shadow through the api', function () {
@@ -155,10 +248,11 @@ it('refuses a shared package submitted alongside the own package it would shadow
     expect($customer->packages()->count())->toBe(0);
 });
 
+// ---------------------------------------------------------------------------------------
+// Registry creation: the registry starts empty, so its post-state is the submission.
+// ---------------------------------------------------------------------------------------
+
 it('refuses creating a registry that would serve a shared package over its own', function () {
-    // The third and fourth writers of `group_package`: registry creation seeds the pivot
-    // too, and a brand-new registry has no contents to compare against — only the
-    // submission itself can reveal this collision.
     $org = Organization::factory()->create();
     $own = Package::factory()->for($org)->create(['type' => 'composer', 'name' => 'acme/tools']);
     $shared = sharedPackage('acme/tools');
@@ -209,4 +303,92 @@ it('lets a registry be created with a shared package that shadows nothing', func
         ->assertSessionHasNoErrors();
 
     expect(Group::where('slug', 'fresh')->firstOrFail()->packages()->whereKey($shared->id)->exists())->toBeTrue();
+});
+
+// ---------------------------------------------------------------------------------------
+// The mirror direction: package creation reaches the same end state from the other side.
+// ---------------------------------------------------------------------------------------
+
+it('refuses creating a package whose name a shared assignment already serves there', function () {
+    $customer = Group::factory()->create(['name' => 'Kundenregistry']);
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared);
+
+    // The unique index is (organization_id, type, name) since v0.8.0, so the customer's own
+    // row is perfectly creatable — nothing but this guard stands between it and the registry
+    // serving two rows under one name.
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$customer->id],
+        ])
+        ->assertSessionHasErrors(['name' => 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: '
+            .'Kundenregistry. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.']);
+
+    // Refused before the insert, so there is no orphan package either.
+    expect(Package::where('name', 'acme/tools')->where('shared', false)->exists())->toBeFalse();
+});
+
+it('refuses creating a package whose name a shared assignment already serves there through the api', function () {
+    $customer = Group::factory()->create(['name' => 'Kundenregistry']);
+    $shared = sharedPackage('acme/tools');
+    $customer->packages()->attach($shared);
+
+    $this->withToken(writeKeyFor(superAdmin()))
+        ->postJson('/api/v1/packages', [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$customer->id],
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['name' => 'Folgende Registrys führen dieses Paket bereits als geteiltes Paket: '
+            .'Kundenregistry. Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen.']);
+
+    expect(Package::where('name', 'acme/tools')->where('shared', false)->exists())->toBeFalse();
+});
+
+it('lets a package be created under a name no shared assignment in its registries holds', function () {
+    Queue::fake();
+
+    $customer = Group::factory()->create();
+    // The same shared package assigned to a DIFFERENT registry must not block this create.
+    sharedPackage('acme/tools')->groups()->attach(Group::factory()->create());
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/tools',
+            'repository_url' => 'https://git.example.com/acme/tools.git',
+            'group_ids' => [$customer->id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($customer->packages()->where('packages.name', 'acme/tools')->exists())->toBeTrue();
+});
+
+it('never creates a package as shared, whatever the request says', function () {
+    Queue::fake();
+
+    // Pins the assumption the two package-create paths rely on: `shared` is fillable, but
+    // StorePackageRequest has no rule for it, so it never reaches $request->safe(). If
+    // someone adds that rule, this test fails and points at the two store() sites, which
+    // would otherwise start writing shared rows with no assignment-side check at all.
+    $group = Group::factory()->create();
+
+    $this->actingAs(superAdmin())
+        ->post(route('admin.packages.store'), [
+            'type' => 'composer',
+            'name' => 'acme/sneaky',
+            'repository_url' => 'https://git.example.com/acme/sneaky.git',
+            'group_ids' => [$group->id],
+            'shared' => true,
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect(Package::where('name', 'acme/sneaky')->firstOrFail()->shared)->toBeFalse();
 });

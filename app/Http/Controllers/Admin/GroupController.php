@@ -132,9 +132,11 @@ class GroupController extends Controller
         $packageIds = $request->validated('package_ids', []);
         $this->assertCanAttachPackages($packageIds, $organizationId);
 
-        // …and a shared package may not be seeded alongside the own package it would
-        // shadow. Asked before the insert, so a refusal leaves no empty registry behind.
-        $sharedAssignment->assertCreatable($packageIds);
+        // …and the registry must not end up serving a shared package under a name one of
+        // its own carries. sync() on a registry that does not exist yet leaves exactly the
+        // submission behind, so that is the whole post-state. Asked before the insert, so a
+        // refusal leaves no empty registry behind.
+        $sharedAssignment->assertReplacementAssignable($packageIds);
 
         $group = Group::create([
             'name' => $request->validated('name'),
@@ -175,6 +177,9 @@ class GroupController extends Controller
         ]);
 
         $this->assertCanAttachPackages($data['package_ids'], $group->organization_id);
+        // syncWithoutDetaching() keeps what is already assigned, so the post-state is
+        // that plus the submission — in either direction: a shared package arriving over
+        // an own one, or an own one arriving over a shared package already assigned.
         $sharedAssignment->assertAssignable($group, $data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.

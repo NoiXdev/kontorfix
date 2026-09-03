@@ -16,6 +16,7 @@ use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
+use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Scope\OrgScope;
@@ -325,7 +326,7 @@ class PackageController extends Controller
         return response()->json($result);
     }
 
-    public function store(StorePackageRequest $request): RedirectResponse|JsonResponse
+    public function store(StorePackageRequest $request, SharedAssignment $sharedAssignment): RedirectResponse|JsonResponse
     {
         // A package may only be attached to registries the user administers, so it can
         // never be slipped into another organization's registry.
@@ -333,6 +334,18 @@ class PackageController extends Controller
         foreach ($groupIds as $groupId) {
             $this->assertAdministersGroup(Group::findOrFail($groupId));
         }
+
+        // A package must not claim a name one of these registries already serves through a
+        // shared package: the end state would be one registry serving a shared and an own
+        // package under one name, which SharedAssignment refuses from the assignment side.
+        // `shared` is fillable but StorePackageRequest has no rule for it, so it never
+        // reaches $request->safe() and the row below is always created non-shared — if that
+        // ever changes, this call has to grow the assignment-side check too.
+        $sharedAssignment->assertNameUnclaimedIn(
+            $groupIds,
+            PackageType::from($request->validated('type')),
+            (string) $request->validated('name'),
+        );
 
         // A referenced credential must belong to an organization the user administers,
         // and may only be paired with a repository on the host it is bound to.
@@ -493,6 +506,10 @@ class PackageController extends Controller
      * (`$package->organization->is_operator`) is the actual security boundary for this
      * action: it is what refuses a customer-owned package regardless of who is calling,
      * and a caller-scope check adds nothing beyond it.
+     *
+     * The two directions are not symmetric. Setting the flag is what makes cross-organization
+     * assignments legal, so nothing can be outstanding when it is set; clearing it can strand
+     * assignments that were legal a moment earlier, so the clear is refused while any exist.
      */
     public function shared(Request $request, Package $package): RedirectResponse
     {
@@ -507,6 +524,29 @@ class PackageController extends Controller
             throw ValidationException::withMessages([
                 'shared' => 'Nur Pakete der Betreiber-Organisation können geteilt werden.',
             ]);
+        }
+
+        // Un-sharing is the reverse of an attach, and it can invalidate assignments that
+        // were legitimate while the flag was set. Before Task 3 no cross-organization
+        // `group_package` row could exist at all; now they can, and clearing `shared`
+        // would leave them violating the invariant
+        // 2026_09_02_110000_enforce_package_organization.php enforces — and, once
+        // resolution is scoped again, would drop the package out of those registries
+        // silently, so the name would fall through to the public index it was there to
+        // pre-empt. Refuse and name the registries, the way the migrations do, rather than
+        // detaching rows on the operator's behalf: the destructive step stays explicit.
+        if (! $data['shared']) {
+            $foreign = $package->groups()
+                ->where('groups.organization_id', '!=', $package->organization_id)
+                ->orderBy('groups.name')
+                ->pluck('groups.name');
+
+            if ($foreign->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'shared' => 'Dieses Paket ist noch Registrys anderer Organisationen zugewiesen: '
+                        .$foreign->implode(', ').'. Entfernen Sie es dort zuerst.',
+                ]);
+            }
         }
 
         $package->update(['shared' => $data['shared']]);

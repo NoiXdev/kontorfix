@@ -13,6 +13,7 @@ use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
 use App\Models\Package;
+use App\Services\Package\SharedAssignment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -44,13 +45,25 @@ class PackageController extends Controller
         return new PackageResource($package->load('versions'));
     }
 
-    public function store(StorePackageRequest $request): JsonResponse
+    public function store(StorePackageRequest $request, SharedAssignment $sharedAssignment): JsonResponse
     {
         // A package may only be attached to registries the caller administers.
         $groupIds = $request->validated('group_ids', []);
         foreach ($groupIds as $groupId) {
             $this->assertCanWriteGroup(Group::findOrFail($groupId));
         }
+
+        // A package must not claim a name one of these registries already serves through a
+        // shared package: the end state would be one registry serving a shared and an own
+        // package under one name, which SharedAssignment refuses from the assignment side.
+        // `shared` is fillable but StorePackageRequest has no rule for it, so it never
+        // reaches $request->safe() and the row below is always created non-shared — if that
+        // ever changes, this call has to grow the assignment-side check too.
+        $sharedAssignment->assertNameUnclaimedIn(
+            $groupIds,
+            PackageType::from($request->validated('type')),
+            (string) $request->validated('name'),
+        );
 
         // A git credential is an organization-owned secret: referencing a foreign one
         // would make the sync send that organization's decrypted token to the submitted
