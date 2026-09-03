@@ -6,6 +6,7 @@ use App\Models\MailSetting;
 use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
+use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
@@ -228,7 +229,14 @@ it('unlocks the wizard with the correct setup token', function () {
     // POST, not `?token=`: the token is an instance-takeover secret and must not land
     // in an access log or the browser history. See SetupTokenTransportTest.
     $this->post('/setup/unlock', ['token' => $token])->assertRedirect(route('setup.show'));
-    $this->get('/setup')->assertInertia(fn ($page) => $page->where('locked', false));
+    $this->get('/setup')->assertInertia(fn ($page) => $page
+        ->where('locked', false)
+        // The unlocked wizard is the render that shows the registry slug field, and it
+        // previews the address from this template. Drop the key and the mask dies at setup
+        // time on `undefined.replace()` with the PHP suite green — nothing else sees a
+        // missing server prop. Asserted against RegistryUrl so the URL form stays stated
+        // in one place (see tests/Unit/RegistryUrlTest.php).
+        ->where('registryUrlTemplate', app(RegistryUrl::class)->template()));
 });
 
 it('refuses to complete setup without the token when one is configured', function () {

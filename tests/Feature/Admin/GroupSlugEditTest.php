@@ -124,7 +124,15 @@ it('resolves the organization segment in every list that renders a registry url'
 
     $this->actingAs($admin)->get(route('admin.groups.index'))
         ->assertOk()
-        ->assertInertia(fn ($page) => $page->where('groups.0.url_path', '/r/kunde/acme'));
+        ->assertInertia(fn ($page) => $page
+            ->where('groups.0.url_path', '/r/kunde/acme')
+            // Not decoration: the create sheet substitutes into this at setup time, so a
+            // payload that stops carrying it leaves the whole registry list white with a
+            // TypeError on `undefined.replace()` — invisible to the PHP suite, to
+            // check:props (which counts declared props, not delivered ones) and to vue-tsc.
+            // Asserted against RegistryUrl rather than a literal so the URL form stays
+            // stated in one place.
+            ->where('registryUrlTemplate', app(RegistryUrl::class)->template()));
 
     $this->actingAs($admin)->get(route('admin.packages.show', $package))
         ->assertOk()
