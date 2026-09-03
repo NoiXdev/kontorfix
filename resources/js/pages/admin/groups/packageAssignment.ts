@@ -98,7 +98,13 @@ export function availabilityLabel(availability: Availability): string {
  *
  * The lapsed text has to answer the question the operator is actually asking when they read
  * it ("why is the build failing when the package is right there in the list?"), so it names
- * the 404 and the one action that ends it.
+ * the 404 and the two actions that end it.
+ *
+ * "Upstream" throughout, which is what this console calls the thing everywhere else — the
+ * registry has an Upstreams tab of its own, and the URL there is configurable, so naming
+ * Packagist as though it were the destination would be wrong as often as it was right. It
+ * also matters that the suppression happens HERE and not at the upstream: the name is not
+ * blocked at Packagist, the request simply never reaches it.
  */
 export function availabilityNote(availability: Availability): string | null {
     switch (availability.state) {
@@ -107,14 +113,15 @@ export function availabilityNote(availability: Availability): string | null {
         case 'limited':
             return (
                 `Diese Registry liefert das Paket bis einschließlich ${availability.day} aus. ` +
-                'Danach nicht mehr — der Name bleibt aber weiterhin belegt: Anfragen fallen nicht auf den ' +
-                'öffentlichen Index zurück, sondern enden mit 404, bis die Zuweisung entfernt wird.'
+                'Danach nicht mehr — der Name bleibt aber weiterhin belegt: Anfragen werden nicht an den ' +
+                'Upstream weitergereicht, sondern enden mit 404, bis die Zuweisung entfernt wird.'
             );
         case 'lapsed':
             return (
                 `Am ${availability.day} abgelaufen: Diese Registry liefert das Paket nicht mehr aus. ` +
-                'Builds, die es anfordern, erhalten einen 404 — der Name bleibt für den öffentlichen Index ' +
-                'gesperrt, bis Sie die Zuweisung entfernen. Verlängern Sie die Zuweisung oder entfernen Sie sie.'
+                'Builds, die es anfordern, erhalten einen 404 — die Registry reicht den Namen weiterhin ' +
+                'nicht an den Upstream weiter. Verlängern Sie die Zuweisung, oder entfernen Sie sie, um den ' +
+                'Namen freizugeben.'
             );
     }
 }
@@ -125,9 +132,42 @@ export function availabilityNote(availability: Availability): string | null {
  * Deliberately says what does NOT happen after the date as well as what does: "verfügbar
  * bis 31.12." reads as "afterwards it falls away", and that is the one reading this feature
  * does not implement.
+ *
+ * It also names the past-date case, because that is the only way to say "stop delivering
+ * now, and keep the name blocked". Detaching stops delivery too, but releases the name to
+ * the upstream — a different, less safe outcome, and the one spec §4 warns about.
  */
 export const EXPIRY_CONSEQUENCE =
     'Nach diesem Tag liefert die Registry das Paket nicht mehr aus. Der Name bleibt dabei belegt: Anfragen ' +
-    'fallen nicht auf den öffentlichen Index (Packagist, npm, PyPI) zurück, sondern enden mit 404 — so lange, ' +
-    'bis die Zuweisung entfernt wird. Das ist Absicht: es verhindert, dass ein fremdes Paket still an die ' +
-    'Stelle des bisherigen tritt. Ohne Datum bleibt die Zuweisung unbefristet.';
+    'werden nicht an den Upstream (z. B. Packagist) weitergereicht, sondern enden mit 404 — so lange, bis ' +
+    'die Zuweisung entfernt wird. Das ist Absicht: Es verhindert, dass ein fremdes Paket still an die Stelle ' +
+    'des bisherigen tritt. Ohne Datum bleibt die Zuweisung unbefristet.';
+
+/**
+ * Whether the day the operator has picked is already over, so saving ends delivery at once
+ * rather than at some point in the future.
+ *
+ * Both arguments are `YYYY-MM-DD`, which sorts lexicographically, so this is a plain string
+ * comparison. `today` comes from the SERVER (the page payload), never from the browser
+ * clock: the application runs in UTC and a browser west of it spends several hours on the
+ * previous day, which would have this answer disagree with what the stored value does.
+ *
+ * Strictly earlier, not earlier-or-equal: a date of today stores the END of today, so the
+ * assignment stays in force for the rest of the day and nothing happens immediately.
+ */
+export function endsImmediately(day: string, today: string): boolean {
+    return day !== '' && day < today;
+}
+
+/**
+ * The warning for that case — shown while the operator is still choosing, because a date in
+ * the past is the one entry whose effect is instantaneous and irreversible without a second
+ * edit.
+ *
+ * It says what makes this different from detaching, since those are the two ways to stop
+ * delivering and only one of them keeps the name safe.
+ */
+export const IMMEDIATE_WITHDRAWAL_NOTE =
+    'Dieses Datum liegt in der Vergangenheit: Die Registry stellt die Auslieferung sofort ein. Der Name ' +
+    'bleibt weiterhin belegt und wird nicht an den Upstream weitergereicht — das ist der sichere Weg, eine ' +
+    'Freigabe zurückzunehmen. Erst das Entfernen der Zuweisung gibt den Namen frei.';

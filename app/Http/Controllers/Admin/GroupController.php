@@ -103,6 +103,15 @@ class GroupController extends Controller
             // operator read "assigned" while the registry served nothing and the customer's
             // build got a 404 with nothing on this page to explain it.
             'packages' => $this->assignedPackagePayload($group),
+            // The application's own calendar day, for the availability editor.
+            //
+            // Stated by the server rather than read off the browser clock, because the two
+            // can disagree: the application runs in UTC (config/app.php) and a browser west
+            // of it is on the previous day for several hours. The editor uses this only to
+            // tell the operator whether the date they picked takes effect immediately, and
+            // that answer has to be the one the stored `available_until` will actually
+            // produce.
+            'today' => now()->toDateString(),
             'domains' => $group->domains->map(fn (Domain $d) => ['id' => $d->id, 'hostname' => $d->hostname]),
             'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => CredentialUrl::redact($u->url), 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
@@ -264,11 +273,22 @@ class GroupController extends Controller
      * union — harmless, since the predicate asks whether a name carries a shared and a
      * non-shared row and a duplicate contributes the same `shared` value twice.
      *
-     * Every accepted date is today or later (validation below), so every accepted write
-     * leaves the assignment in force and the guard applies to all of them unconditionally.
-     * A past date is refused rather than treated as an immediate expiry: that is a detach
-     * with a worse outcome — the registry stops serving AND, per spec §4, the name stays
-     * blocked from the public index — and detaching already means exactly that, deliberately.
+     * The guard runs on EVERY write, with no condition on the date. A rule phrased as "only
+     * when this leaves the assignment in force" has a direction and can forget a case; this
+     * one has none. It is conservative rather than wrong for a write that leaves the
+     * assignment lapsed: such a write adds nothing to what the registry serves and so cannot
+     * collide, but assertAssignable() counts the submission in regardless. The only action
+     * that costs is re-dating an already-lapsed row in a registry that already carries an
+     * own package of that name — a no-op edit in a state the operator should be resolving by
+     * detaching anyway.
+     *
+     * A DATE IN THE PAST IS ACCEPTED, and is the point rather than an oversight. Since spec
+     * §4's amendment, expiring and detaching no longer have the same outcome: a lapsed
+     * assignment stops delivery but keeps the name suppressed against the upstream, while
+     * detaching releases it. "Stop serving this now, and keep the name blocked" is the safe
+     * way to withdraw a share, and refusing a past date would leave no way to express it —
+     * the operator could only wait for the end of the day in the application's timezone, or
+     * detach, which is exactly the act §4 warns against.
      *
      * Reachability is not re-asserted here. The pivot row already exists, so it passed
      * assertCanAttachPackages() when it was written, and un-sharing is refused while any
@@ -287,8 +307,9 @@ class GroupController extends Controller
         $data = $request->validate([
             // A day, not an instant: the operator picks a date and the label says
             // "verfügbar bis" it. `present` so clearing the date is an explicit act rather
-            // than an omitted field.
-            'available_until' => ['present', 'nullable', 'date_format:Y-m-d', 'after_or_equal:today'],
+            // than an omitted field. No lower bound — see the note above on why a past date
+            // is a legitimate, and the safest, way to withdraw a share.
+            'available_until' => ['present', 'nullable', 'date_format:Y-m-d'],
         ]);
 
         $sharedAssignment->assertAssignable($group, [$package->id]);

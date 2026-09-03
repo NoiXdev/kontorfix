@@ -2,6 +2,7 @@
 import InputError from '@/components/InputError.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -89,6 +90,7 @@ function save() {
                         sich jeder Registry der Instanz zuweisen, nicht nur denen der besitzenden Organisation. Diese Einstellung ändern kann
                         ausschließlich ein Super-Admin — sonst könnte sich jemand die Berechtigung selbst erteilen.
                     </p>
+                    <Label for="shared_package_role" class="mb-1.5 block">Berechtigung zum Freigeben</Label>
                     <SearchableSelect
                         id="shared_package_role"
                         v-model="form.shared_package_role"

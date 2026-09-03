@@ -2,6 +2,7 @@
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -270,6 +271,11 @@ useOperatorChannel({
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>
                     <TypeBadge :type="props.package.type" />
                     <StatusPill :status="syncStatus" />
+                    <!-- Spec §6 wants the marker on the detail page, not only in the listing.
+                         Here rather than only on the toggle further down: that toggle renders
+                         behind `canSharePackages`, so without this an operator who may not
+                         change the flag saw no sign the package was shared at all. -->
+                    <SharedBadge v-if="props.package.shared" />
                 </div>
                 <p v-if="props.package.description" class="max-w-2xl text-sm text-muted-foreground">
                     {{ props.package.description }}

@@ -126,10 +126,13 @@ it('accepts today, so an assignment can be ended at the end of today', function 
     expect($group->assignedPackages()->whereKey($package->id)->exists())->toBeTrue();
 });
 
-it('refuses a date that has already passed', function () {
-    // "Verfügbar bis gestern" is not a statement about availability, it is a detach with a
-    // worse outcome: the registry stops serving AND the name stays blocked from the public
-    // index. Detaching is the act that means that, and it already exists.
+it('accepts a date that has already passed, and stops delivery at once', function () {
+    // Since spec §4's amendment, expiring and detaching are NOT the same act: a lapsed
+    // assignment stops delivery but keeps the name suppressed against the upstream, while
+    // detaching releases it. "Stop serving this now, and keep the name blocked" is the safe
+    // way to withdraw a share, and a past date is the only way to say it — refusing one
+    // would leave the operator waiting for the end of the day in the application's timezone,
+    // or detaching, which is the act §4 warns against.
     Carbon::setTestNow('2026-06-01 09:00:00');
     $group = Group::factory()->create();
     $package = Package::factory()->inOrgOf($group)->create();
@@ -137,9 +140,26 @@ it('refuses a date that has already passed', function () {
 
     $this->actingAs(superAdmin())
         ->put(route('admin.groups.packages.update', [$group, $package]), ['available_until' => '2026-05-31'])
-        ->assertSessionHasErrors('available_until');
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
 
-    expect($group->packages()->whereKey($package->id)->sole()->pivot->available_until)->toBeNull();
+    // Not served any more…
+    expect($group->assignedPackages()->whereKey($package->id)->exists())->toBeFalse()
+        // …and still assigned, which is what keeps the name from falling through upstream.
+        // Both halves matter: a write that detached instead would satisfy the first alone.
+        ->and($group->packages()->whereKey($package->id)->exists())->toBeTrue();
+});
+
+it('tells the page which day the application is on', function () {
+    // Read off the server, not the browser clock: the application runs in UTC and a browser
+    // west of it spends several hours on the previous day, so the editor's "this date is
+    // already past" warning would disagree with what the stored value actually does.
+    Carbon::setTestNow('2026-06-01 09:00:00');
+    $group = Group::factory()->create();
+
+    $this->actingAs(superAdmin())->get(route('admin.groups.show', $group))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('today', '2026-06-01')->etc());
 });
 
 it('refuses something that is not a date', function () {

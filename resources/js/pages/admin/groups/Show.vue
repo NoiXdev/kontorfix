@@ -17,7 +17,15 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { CalendarClock, Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import { availabilityLabel, availabilityNote, availabilityOf, EXPIRY_CONSEQUENCE, type AssignedPackage } from './packageAssignment';
+import {
+    availabilityLabel,
+    availabilityNote,
+    availabilityOf,
+    endsImmediately,
+    EXPIRY_CONSEQUENCE,
+    IMMEDIATE_WITHDRAWAL_NOTE,
+    type AssignedPackage,
+} from './packageAssignment';
 
 interface GroupInfo {
     id: string;
@@ -90,6 +98,11 @@ const props = defineProps<{
     setup: Setup;
     stats: { downloads: number; storage_bytes: number; packages: number };
     activities: ActivityRow[];
+    // The application's own calendar day (`YYYY-MM-DD`), from the controller. Not derived
+    // from the browser clock: the application runs in UTC and a browser west of it is on
+    // the previous day for several hours, so the two would disagree about whether a chosen
+    // date has already passed.
+    today: string;
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -235,13 +248,17 @@ const editingAssignment = ref<string | null>(null);
 const editedUntil = ref('');
 const savingAssignment = ref(false);
 
-// Today, for the date input's `min`. The server refuses anything earlier — a past date is a
-// detach with a worse outcome, and detaching already exists — so the field says so up front
-// rather than letting the operator find out on submit.
-const today = computed(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-});
+// A date already in the past is allowed, and is the safe way to withdraw a share: delivery
+// stops at once while the name stays suppressed against the upstream, which detaching does
+// not do. The field has no lower bound, so the consequence is spelled out while the operator
+// is still choosing. The comparison lives in `./packageAssignment` and runs against the
+// SERVER's day, never the browser's.
+const withdrawsImmediately = computed(() => endsImmediately(editedUntil.value, props.today));
+
+// The row whose editor was last submitted. The error bag is page-wide, so without this a
+// refusal on one assignment would still be showing in the editor of the next row the
+// operator opens, against a package it says nothing about.
+const submittedAssignment = ref<string | null>(null);
 
 function editAvailability(pkg: PackageRow) {
     editingAssignment.value = pkg.id;
@@ -253,20 +270,39 @@ function cancelAvailability() {
     editedUntil.value = '';
 }
 
+/**
+ * Whether a second row follows this package's main row — the editor, or the consequence
+ * note. Stated once because the main row's separator and those two rows' `v-if`s have to
+ * agree; when they drifted apart the note rendered below the separator and read as the next
+ * package's.
+ */
+function hasBlockRow(pkg: PackageRow): boolean {
+    return editingAssignment.value === pkg.id || availabilityNote(availabilityOf(pkg)) !== null;
+}
+
 // The guard that refuses a name collision (App\Services\Package\SharedAssignment) keys its
 // refusal `package_ids` — the key every other writer of this pivot uses. It is not this
 // form's field name, but it is the guard's, and restating the rule under a second key would
-// be a second statement of it. Rendered on the open row, next to the date field's own error.
+// be a second statement of it. The one sentence prepended here is context, not a second
+// statement: the guard's own text names the conflict and the remedy but not what was refused,
+// which on the attach path is obvious and here is not.
+//
+// Shown only on the row that was actually submitted; the error bag itself is page-wide.
 const assignmentErrors = computed(() => {
-    const errors = pageProps.props.errors as Record<string, string> | undefined;
+    const errors =
+        submittedAssignment.value !== null && submittedAssignment.value === editingAssignment.value
+            ? (pageProps.props.errors as Record<string, string> | undefined)
+            : undefined;
+
     return {
         available_until: errors?.available_until,
-        collision: errors?.package_ids,
+        collision: errors?.package_ids === undefined ? undefined : `Die Zuweisung kann nicht verlängert werden: ${errors.package_ids}`,
     };
 });
 
 function saveAvailability(packageId: string) {
     savingAssignment.value = true;
+    submittedAssignment.value = packageId;
     router.put(
         route('admin.groups.packages.update', [props.group.id, packageId]),
         { available_until: editedUntil.value === '' ? null : editedUntil.value },
@@ -475,11 +511,14 @@ async function copyToken() {
                                 </thead>
                                 <tbody>
                                     <template v-for="pkg in props.packages" :key="pkg.id">
-                                        <!-- The row keeps its separator unless the editor is open under it, in
-                                             which case the editor row carries it instead. -->
+                                        <!-- The separator belongs to the LAST row of this package's block, so
+                                             the main row gives it up whenever the note or the editor follows it.
+                                             Keeping it here would put the red 404 explanation below a separator,
+                                             where it reads as belonging to the next package — an outage warning
+                                             attributed to the wrong package is worse than none. -->
                                         <tr
                                             :class="
-                                                editingAssignment === pkg.id ? '' : 'border-b border-sidebar-border/70 dark:border-sidebar-border'
+                                                hasBlockRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'
                                             "
                                         >
                                             <td class="px-4 py-3 font-mono">
@@ -552,14 +591,13 @@ async function copyToken() {
                                             <td colspan="5" class="px-4 pb-4">
                                                 <div class="flex flex-col gap-2">
                                                     <Label :for="`available-until-${pkg.id}`">Verfügbar bis (leer = unbefristet)</Label>
-                                                    <Input
-                                                        :id="`available-until-${pkg.id}`"
-                                                        v-model="editedUntil"
-                                                        type="date"
-                                                        :min="today"
-                                                        class="max-w-xs"
-                                                    />
+                                                    <!-- No `min`: a date already past is legitimate, and is the only
+                                                         way to say "stop delivering now, keep the name blocked". -->
+                                                    <Input :id="`available-until-${pkg.id}`" v-model="editedUntil" type="date" class="max-w-xs" />
                                                     <p class="max-w-2xl text-xs text-muted-foreground">{{ EXPIRY_CONSEQUENCE }}</p>
+                                                    <p v-if="withdrawsImmediately" class="max-w-2xl text-xs text-copper-hi">
+                                                        {{ IMMEDIATE_WITHDRAWAL_NOTE }}
+                                                    </p>
                                                     <InputError :message="assignmentErrors.available_until" />
                                                     <InputError :message="assignmentErrors.collision" />
                                                     <div class="flex gap-2">

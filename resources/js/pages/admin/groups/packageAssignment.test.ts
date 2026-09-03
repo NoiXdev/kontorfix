@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { availabilityLabel, availabilityNote, availabilityOf, EXPIRY_CONSEQUENCE, formatDay } from './packageAssignment';
+import {
+    availabilityLabel,
+    availabilityNote,
+    availabilityOf,
+    endsImmediately,
+    EXPIRY_CONSEQUENCE,
+    formatDay,
+    IMMEDIATE_WITHDRAWAL_NOTE,
+} from './packageAssignment';
 
 /*
  * The cases are read off the two rules this module describes, not off its branches:
@@ -73,9 +81,9 @@ describe('availabilityNote', () => {
         expect(note).toContain('31.12.2026');
         // What the customer is seeing right now…
         expect(note).toContain('404');
-        // …that the name stays blocked rather than falling back…
-        expect(note).toContain('gesperrt');
-        // …and the one act that ends it.
+        // …that the request does not reach the upstream rather than falling through to it…
+        expect(note).toContain('nicht an den Upstream');
+        // …and the act that releases the name.
         expect(note).toContain('entfernen');
     });
 
@@ -84,14 +92,57 @@ describe('availabilityNote', () => {
 
         expect(note).toContain('31.12.2026');
         expect(note).toContain('404');
+        expect(note).toContain('nicht an den Upstream');
         expect(note).toContain('entfernt');
+    });
+
+    it('never calls the upstream by a single vendor name', () => {
+        // The registry's upstream URL is configurable and has its own tab on this page, so
+        // naming Packagist as the destination would be wrong as often as it was right.
+        // EXPIRY_CONSEQUENCE names it once, explicitly as an example.
+        for (const state of ['limited', 'lapsed'] as const) {
+            expect(availabilityNote({ state, day: '31.12.2026' })).not.toContain('Packagist');
+        }
+    });
+});
+
+describe('endsImmediately', () => {
+    it('is true only for a day that is already over', () => {
+        // The direction, stated over one fixed "today": yesterday takes effect at once,
+        // today does not (the stored value is the END of today) and neither does tomorrow.
+        expect(endsImmediately('2026-06-30', '2026-07-01')).toBe(true);
+        expect(endsImmediately('2026-07-01', '2026-07-01')).toBe(false);
+        expect(endsImmediately('2026-07-02', '2026-07-01')).toBe(false);
+    });
+
+    it('is false for an empty field, which means no date at all', () => {
+        expect(endsImmediately('', '2026-07-01')).toBe(false);
+    });
+
+    it('compares whole days, not months or years, across a boundary', () => {
+        expect(endsImmediately('2025-12-31', '2026-01-01')).toBe(true);
+        expect(endsImmediately('2026-01-02', '2025-12-31')).toBe(false);
+    });
+});
+
+describe('IMMEDIATE_WITHDRAWAL_NOTE', () => {
+    it('says delivery stops at once and the name still does not reach the upstream', () => {
+        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('sofort');
+        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('nicht an den Upstream');
+    });
+
+    it('distinguishes withdrawing from detaching', () => {
+        // The two ways to stop delivering. Only one of them keeps the name suppressed, and
+        // an operator who confuses them opens the very fallthrough spec §4 closes.
+        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('Entfernen der Zuweisung');
+        expect(IMMEDIATE_WITHDRAWAL_NOTE).toContain('frei');
     });
 });
 
 describe('EXPIRY_CONSEQUENCE', () => {
-    it('states that the public index is not reopened by the date passing', () => {
+    it('states that the upstream is not reopened by the date passing', () => {
         expect(EXPIRY_CONSEQUENCE).toContain('404');
-        expect(EXPIRY_CONSEQUENCE).toContain('nicht auf den öffentlichen Index');
+        expect(EXPIRY_CONSEQUENCE).toContain('nicht an den Upstream');
         expect(EXPIRY_CONSEQUENCE).toContain('bis die Zuweisung entfernt wird');
     });
 
