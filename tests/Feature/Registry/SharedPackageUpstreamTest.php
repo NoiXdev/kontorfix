@@ -4,8 +4,14 @@
 // assigned to the addressed registry counts as hosted, so a customer resolving a shared name
 // is never sent to Packagist, npmjs or PyPI — that is exactly the confusion the guard exists
 // to prevent, and shipping it through the feature meant to serve those customers would be
-// the worst way to introduce it. A shared package NOT assigned here is not hosted here, and
-// must not suppress a legitimate upstream dependency of the same name.
+// the worst way to introduce it. A shared package this registry was never handed is not
+// hosted here, and must not suppress a legitimate upstream dependency of the same name.
+//
+// And, per §4 as amended during execution, the two are not the same thing as an assignment
+// that LAPSED: the name was served from here, so it is in the customer's lock file, and
+// falling through would resolve it from the public index with no act by anyone. The guard
+// fails closed on anything this registry has ever served; detaching, an explicit act, is
+// what releases a name back to the upstream.
 //
 // EVERY test that makes a request in this file configures an upstream, and none of them
 // means anything without one: ComposerController::metadata() and
@@ -120,20 +126,93 @@ it('redirects to pypi for a shared python project assigned to another registry',
         ->assertRedirect('https://pypi.org/simple/shared-lib/');
 });
 
+// --- Lapsed versus detached ----------------------------------------------------------
+//
+// The one state where clause 2 of the guard is reachable end to end: a lapsed assignment
+// serves nothing, so resolution declines and the guard alone decides. It must answer "hosted"
+// — the customer consumed this name from here, and the alternative is that their next
+// `composer update` silently takes it from whoever owns it on Packagist. Detaching is the
+// operator's explicit release, and only that opens the fallthrough.
+
+it('does not send a shared composer name whose assignment lapsed upstream', function () {
+    Http::fake(['*' => Http::response(['minified' => 'composer/2.0', 'packages' => []], 200)]);
+    $group = registryWithUpstream(PackageType::Composer, 'https://repo.packagist.org');
+    $shared = sharedPackageAssignedTo(PackageType::Composer, 'acme/shared');
+    $group->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    // 404 and a loud build failure, not a quiet substitution.
+    $this->get(registryPath($group).'/p2/acme/shared.json')->assertNotFound();
+
+    Http::assertNothingSent();
+});
+
+it('falls through to packagist once a shared composer assignment is detached', function () {
+    Http::fake(['*' => Http::response(['minified' => 'composer/2.0', 'packages' => []], 200)]);
+    $group = registryWithUpstream(PackageType::Composer, 'https://repo.packagist.org');
+    $shared = sharedPackageAssignedTo(PackageType::Composer, 'acme/shared', $group);
+    $group->packages()->detach($shared);
+
+    $this->get(registryPath($group).'/p2/acme/shared.json');
+
+    Http::assertSentCount(1);
+});
+
+it('does not send a shared npm name whose assignment lapsed upstream', function () {
+    Http::fake(['*' => Http::response(['name' => 'shared-lib', 'versions' => []], 200)]);
+    $group = registryWithUpstream(PackageType::Npm, 'https://registry.npmjs.org');
+    $shared = sharedPackageAssignedTo(PackageType::Npm, 'shared-lib');
+    $group->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    $this->get(registryPath($group).'/shared-lib')->assertNotFound();
+
+    Http::assertNothingSent();
+});
+
+it('falls through to npmjs once a shared npm assignment is detached', function () {
+    Http::fake(['*' => Http::response(['name' => 'shared-lib', 'versions' => []], 200)]);
+    $group = registryWithUpstream(PackageType::Npm, 'https://registry.npmjs.org');
+    $shared = sharedPackageAssignedTo(PackageType::Npm, 'shared-lib', $group);
+    $group->packages()->detach($shared);
+
+    $this->get(registryPath($group).'/shared-lib');
+
+    Http::assertSentCount(1);
+});
+
+it('does not redirect a shared python project whose assignment lapsed to pypi', function () {
+    $group = registryWithUpstream(PackageType::Python, 'https://pypi.org');
+    $shared = sharedPackageAssignedTo(PackageType::Python, 'shared-lib');
+    $group->packages()->attach($shared, ['available_until' => now()->subDay()]);
+
+    // 404 rather than the 302 the configured upstream would otherwise produce.
+    $this->get(registryPath($group).'/simple/shared-lib/')->assertNotFound();
+});
+
+it('redirects to pypi once a shared python assignment is detached', function () {
+    $group = registryWithUpstream(PackageType::Python, 'https://pypi.org');
+    $shared = sharedPackageAssignedTo(PackageType::Python, 'shared-lib', $group);
+    $group->packages()->detach($shared);
+
+    $this->get(registryPath($group).'/simple/shared-lib/')
+        ->assertRedirect('https://pypi.org/simple/shared-lib/');
+});
+
 // --- The guard itself ----------------------------------------------------------------
 //
-// The tests above pin what the customer sees, and today the *resolution* half answers the
-// suppression cases: since Task 4, every row the guard's shared clause admits is a row
-// findLocal() and pythonPackagesOfGroup() already serve, so no request can reach the guard
-// with a shared name assigned to this registry. Measured, not assumed — before the guards
-// were widened, all six tests above already passed.
+// The tests above pin what the customer sees. For a LIVE assignment the *resolution* half
+// answers, not the guard: since Task 4, every row the shared clause admits with a live
+// assignment is a row findLocal() and pythonPackagesOfGroup() already serve, so no request
+// can reach the guard in that state. Measured, not assumed — before the guards were widened,
+// the first six tests above already passed. The lapsed cases are the exception, and they are
+// the only ones that reach the shared clause through HTTP.
 //
-// That makes the guard's shared clause unfalsifiable through HTTP and would leave it
-// covered by nothing: deleting it would not turn a single test red, and it would be one
+// That leaves the clause's positive direction for a live assignment covered by nothing at
+// all end to end: deleting it would not turn one of those six red, and it would be one
 // refactor of the resolution path away from being silently gone — at which point a shared
-// name would be answered by Packagist instead of by a 404. So the predicate is exercised
-// where it actually decides. No upstream is configured for these three, because no request
-// is made: the trap the header describes is about assertions on outbound HTTP.
+// name would be answered by Packagist instead of by a 404, and the guard would be returning
+// a wrong answer to its own question rather than a redundant one. So the predicate is also
+// exercised where it decides. No upstream is configured for these, because no request is
+// made: the trap the header describes is about assertions on outbound HTTP.
 
 /** `ResolvesRegistryPackage::packageExistsLocally()`, which is protected on the trait. */
 function hostsLocally(PackageType $type, string $fullName, Group $group): bool
@@ -199,18 +278,34 @@ it('does not count a shared package assigned to another registry as hosted', fun
         ->and(pythonHostsLocally('shared-lib', $group))->toBeFalse();
 });
 
-it('does not count a shared package whose assignment here has lapsed as hosted', function () {
+it('still counts a shared package whose assignment here has lapsed as hosted', function () {
     $group = Group::factory()->create(['public' => true]);
     $composer = sharedPackageAssignedTo(PackageType::Composer, 'acme/shared');
+    $npm = sharedPackageAssignedTo(PackageType::Npm, 'shared-lib');
     $python = sharedPackageAssignedTo(PackageType::Python, 'shared-lib');
     $group->packages()->attach($composer, ['available_until' => now()->subDay()]);
+    $group->packages()->attach($npm, ['available_until' => now()->subDay()]);
     $group->packages()->attach($python, ['available_until' => now()->subDay()]);
 
-    // A lapsed assignment serves nothing (Group::assignedPackages()), so the registry no
-    // longer hosts the name and must not keep suppressing the fallthrough for it. The guard
-    // and the resolution path have to agree about which rows count, or one of them decides
-    // the name is local while the other answers 404.
+    // packages(), not assignedPackages(): a lapsed assignment stops the registry SERVING the
+    // name and must not stop it CLAIMING it. The customer resolved this name from here, so
+    // the alternative to a 404 is their next build taking it from the public index, from
+    // whoever registered it there — dependency confusion arriving by the passage of time.
+    expect(hostsLocally(PackageType::Composer, 'acme/shared', $group))->toBeTrue()
+        ->and(hostsLocally(PackageType::Npm, 'shared-lib', $group))->toBeTrue()
+        ->and(pythonHostsLocally('shared-lib', $group))->toBeTrue();
+});
+
+it('does not count a shared package detached from this registry as hosted', function () {
+    $group = Group::factory()->create(['public' => true]);
+    $composer = sharedPackageAssignedTo(PackageType::Composer, 'acme/shared', $group);
+    $npm = sharedPackageAssignedTo(PackageType::Npm, 'shared-lib', $group);
+    $python = sharedPackageAssignedTo(PackageType::Python, 'shared-lib', $group);
+    $group->packages()->detach([$composer->id, $npm->id, $python->id]);
+
+    // The other side of the same rule: an explicit act releases the name, and only it does.
     expect(hostsLocally(PackageType::Composer, 'acme/shared', $group))->toBeFalse()
+        ->and(hostsLocally(PackageType::Npm, 'shared-lib', $group))->toBeFalse()
         ->and(pythonHostsLocally('shared-lib', $group))->toBeFalse();
 });
 

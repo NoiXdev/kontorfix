@@ -166,18 +166,38 @@ trait ResolvesRegistryPackage
      *    meant to serve them. A shared package is owned by the operator organization
      *    (spec §1), so clause 1 never covers it in a customer's registry.
      *
-     * The assignment in clause 2 is not decoration: an unassigned shared package is hosted
-     * by the instance but not *here*, and suppressing the fallthrough for it would blank out
-     * a legitimate upstream dependency for every registry the operator did not hand it to —
-     * a name the customer never agreed to receive locally. Sharing grants eligibility, not
-     * access, on this path as on every other. `assignedPackages()` rather than `packages()`,
-     * so a lapsed assignment counts as no assignment: what this registry no longer serves it
-     * no longer hosts, and this guard must not disagree with findLocal() about that.
+     * The assignment in clause 2 is not decoration: a shared package this registry was never
+     * handed is hosted by the instance but not *here*, and suppressing the fallthrough for it
+     * would blank out a legitimate upstream dependency of that name in every registry the
+     * operator did not share it with. Sharing grants eligibility, not access, on this path as
+     * on every other.
      *
-     * Wider than findLocal()'s served set by exactly clause 1, and never narrower: every row
-     * clause 2 admits is one findLocal() already returns, so this half only ever answers in
-     * states resolution declined. That is what a guard is for — it is the second line, and
-     * it must state the rule itself rather than inherit whatever shape resolution has today.
+     * `packages()` and NOT `assignedPackages()`, which is the one place on this branch where
+     * the guard deliberately outlives what the registry serves (spec §4, amended during
+     * execution). An expired assignment is not the same situation as one that never existed:
+     * the customer demonstrably did consume that name from here, so it is in their lock file
+     * and their `composer.json`. Reading the expiry here would mean the next `composer update`
+     * after an assignment lapses resolves that name from the public index — from whoever
+     * registered it there — silently, with no act by anyone, in the guard whose whole purpose
+     * is to prevent exactly that substitution. So the guard fails closed on anything this
+     * registry has ever served: a lapsed share answers 404 and a loud build failure rather
+     * than a quiet swap, which is the same choice spec §5 and the migration refusals make.
+     * Detaching the assignment stays the operator's clean way to release a name back to the
+     * public index — an explicit act opens the fallthrough, the passage of time does not.
+     *
+     * GIVEN the precondition every call site satisfies — authorizeGroup() has already passed,
+     * so canAccessGroup() is true — this is wider than findLocal()'s served set by exactly
+     * clause 1 plus lapsed shared assignments, and never narrower. Without that precondition
+     * the comparison says nothing at all: findLocal() returns null for every row while this
+     * still answers true, which is a guard erring closed and not a contradiction, but it is
+     * not the subset relation stated above. Clause 1 diverges from findLocal() on purpose and
+     * always has — that divergence is its entire reason for existing.
+     *
+     * @see tests/Feature/Registry/SharedPackageUpstreamTest.php — clause 2's positive
+     * direction (a shared package assigned here counts as hosted) is reachable through HTTP
+     * only via a lapsed assignment; for a live one, resolution answers first, so the direct
+     * predicate tests in that file are its only coverage and are not an implementation
+     * detail. Its negative direction is covered end-to-end as well.
      */
     protected function packageExistsLocally(PackageType $type, string $fullName, Group $group): bool
     {
@@ -187,7 +207,7 @@ trait ResolvesRegistryPackage
                 ->where('packages.organization_id', $group->organization_id)
                 ->orWhere(fn ($q2) => $q2
                     ->where('packages.shared', true)
-                    ->whereIn('packages.id', $group->assignedPackages()->select('packages.id'))))
+                    ->whereIn('packages.id', $group->packages()->select('packages.id'))))
             ->exists();
     }
 }

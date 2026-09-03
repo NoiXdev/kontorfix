@@ -297,6 +297,19 @@ class PypiController extends Controller
      * here would drop the organization half's unassigned rows and leak those names upstream;
      * reusing this one there would serve projects no operator assigned. Two questions, two
      * predicates, and only the shared half of this one is registry-scoped.
+     *
+     * The two also read different relations, and that difference is deliberate: that method
+     * reads assignedPackages(), this one packages(), so a project whose share has lapsed
+     * stops being served while its name keeps suppressing the fallthrough. Without that, the
+     * first `pip install` after an assignment expires resolves the project from pypi.org —
+     * from whoever registered the name there — with no act by anyone. See
+     * ResolvesRegistryPackage::packageExistsLocally() for the full argument.
+     *
+     * @see tests/Feature/Registry/SharedPackageUpstreamTest.php — as with the Composer and
+     * npm guard, the positive direction of the shared clause is reachable through HTTP only
+     * via a lapsed assignment; for a live one, pythonPackagesOfGroup() answers first, so the
+     * direct predicate test in that file is its only coverage. The negative direction is
+     * covered end-to-end too.
      */
     private function pythonExistsLocally(string $normalized, Group $group): bool
     {
@@ -305,7 +318,7 @@ class PypiController extends Controller
                 ->where('packages.organization_id', $group->organization_id)
                 ->orWhere(fn ($q2) => $q2
                     ->where('packages.shared', true)
-                    ->whereIn('packages.id', $group->assignedPackages()->select('packages.id'))))
+                    ->whereIn('packages.id', $group->packages()->select('packages.id'))))
             ->get()
             ->contains(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
     }
