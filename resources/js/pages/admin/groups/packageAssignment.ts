@@ -76,6 +76,20 @@ export interface AssignedPackage {
      * detaching releases nothing.
      */
     owned_by_registry_org: boolean;
+    /**
+     * Whether the current operator may detach this assignment or change its availability.
+     *
+     * False only for a SHARED package whose owning organization this operator does not
+     * administer: since spec §4 became enforced, deciding which customer receives a shared
+     * package — and until when — belongs to the operator organization, not to the customer
+     * receiving it. Both row actions are hidden in that case rather than shown and answered
+     * with a 403.
+     *
+     * Decided by the server (`Admin\GroupController::assignedPackagePayload()`) from the same
+     * question the guard asks, and deliberately NOT re-derived here from `shared`: `shared`
+     * says the package may leave its organization, not who may move it.
+     */
+    manageable: boolean;
 }
 
 export type AvailabilityState = 'permanent' | 'limited' | 'lapsed';

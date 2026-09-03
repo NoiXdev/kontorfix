@@ -166,10 +166,22 @@ class GroupController extends Controller
      * asserted rather than only described, in
      * tests/Feature/Admin/AssignmentOwnershipMatchesUpstreamGuardTest.php.
      *
+     * `manageable` is the console's copy of the answer
+     * {@see GuardsPackageAttachment::assertMayManageSharedAssignments()} gives for this row:
+     * whether this operator may detach it or re-date its availability. Since spec §4 became
+     * enforced, a customer admin may do neither to a SHARED assignment — that decision is
+     * the operator's, per customer — and the two row actions would otherwise sit there and
+     * answer 403, which is the same defect as a picker offering what the guard refuses, on
+     * the other side of the page.
+     *
+     * Stated per row, from the package's owning organization, rather than as one flag for
+     * the page: the guard asks per package, and a page-level flag would be a second, weaker
+     * statement of it.
+     *
      * A plain list rather than a Collection: Collection's TValue is invariant, so an array
      * shape in that position is rejected even against itself.
      *
-     * @return list<array{id:string, name:string, type:value-of<PackageType>, sync_status:value-of<SyncStatus>, shared:bool, available_until:?string, in_force:bool, owned_by_registry_org:bool}>
+     * @return list<array{id:string, name:string, type:value-of<PackageType>, sync_status:value-of<SyncStatus>, shared:bool, available_until:?string, in_force:bool, owned_by_registry_org:bool, manageable:bool}>
      */
     private function assignedPackagePayload(Group $group): array
     {
@@ -178,12 +190,14 @@ class GroupController extends Controller
         $rows = $group->packages()->orderBy('name')
             // `shared` is selected explicitly: a column-restricted get() that omitted it
             // would yield null rather than fail, and the marker would silently never appear.
-            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared']);
+            // `organization_id` for the same reason — it is what `manageable` is decided on.
+            ->get(['packages.id', 'name', 'type', 'sync_status', 'shared', 'packages.organization_id']);
 
         $ownedNames = $this->namesHeldByOrganization($group, $rows);
+        $administeredOrgIds = $this->administeredOrganizationIds();
 
         return $rows
-            ->map(function (Package $p) use ($inForce, $ownedNames): array {
+            ->map(function (Package $p) use ($inForce, $ownedNames, $administeredOrgIds): array {
                 // The pivot row this package was loaded through. Read via getRelation()
                 // rather than `$p->pivot`, which is set dynamically by the belongsToMany
                 // and so is invisible to static analysis on a plain Package.
@@ -200,6 +214,7 @@ class GroupController extends Controller
                         : null,
                     'in_force' => in_array($p->id, $inForce, true),
                     'owned_by_registry_org' => in_array(self::upstreamNameKey($p->type, $p->name), $ownedNames, true),
+                    'manageable' => ! $p->shared || in_array($p->organization_id, $administeredOrgIds, true),
                 ];
             })
             ->all();
@@ -399,6 +414,13 @@ class GroupController extends Controller
         // updateExistingPivot() reports zero affected rows and returns.
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
 
+        // Re-dating a SHARED assignment is a change to how long this customer receives the
+        // operator's package, which spec §4 reserves to whoever administers the owning
+        // organization. Asked after the 404 so a request naming a package this registry
+        // does not carry still answers "no such assignment" rather than leaking, by the
+        // choice of status code, whether the package is shared.
+        $this->assertMayManageSharedAssignments([$package->id]);
+
         $data = $request->validate([
             // A day, not an instant: the operator picks a date and the label says
             // "verfügbar bis" it. `present` so clearing the date is an explicit act rather
@@ -421,9 +443,19 @@ class GroupController extends Controller
         return back()->with('success', 'Verfügbarkeit der Zuweisung aktualisiert.');
     }
 
+    /**
+     * Ends an assignment.
+     *
+     * Detaching a SHARED package is the operator's act, not the receiving customer's: it
+     * ends the per-customer decision spec §4 exists to express, and — per that section as
+     * amended — it is also the one thing that releases the name back to the public index,
+     * so a customer admin doing it unilaterally would reopen a private name to the upstream
+     * for their own builds. Its own package stays entirely theirs to detach.
+     */
     public function detachPackage(Group $group, Package $package): RedirectResponse
     {
         $this->assertAdministersGroup($group);
+        $this->assertMayManageSharedAssignments([$package->id]);
 
         $group->packages()->detach($package->id);
 

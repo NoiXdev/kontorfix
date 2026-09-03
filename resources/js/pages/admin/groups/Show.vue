@@ -574,7 +574,10 @@ async function copyToken() {
                                                 </span>
                                             </td>
                                             <td class="px-4 py-3">
-                                                <div class="flex items-center gap-1">
+                                                <!-- Hidden rather than disabled for an assignment this operator may not
+                                                     manage: both actions answer 403, and the registry's own admin is not
+                                                     the one who decides whether their customer keeps a shared package. -->
+                                                <div v-if="pkg.manageable" class="flex items-center gap-1">
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -592,6 +595,7 @@ async function copyToken() {
                                                         <Trash2 class="size-4 text-destructive" />
                                                     </Button>
                                                 </div>
+                                                <span v-else class="text-xs text-muted-foreground">Vom Betreiber verwaltet</span>
                                             </td>
                                         </tr>
                                         <!-- What this assignment currently means for the customer. Shown without

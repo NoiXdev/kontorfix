@@ -117,8 +117,9 @@ trait ScopesApiToUser
 
     /**
      * Aborts 403 unless every submitted package is owned by the organization it is being
-     * attached into. A package owned elsewhere is refused, otherwise attaching it would
-     * grant write access to it through assertCanWritePackage().
+     * attached into, or is a shared package of an organization the caller administers. A
+     * package owned elsewhere is refused, otherwise attaching it would grant write access
+     * to it through assertCanWritePackage().
      *
      * Checked against the target organization specifically, not the caller's broader
      * administered set: a key owner who administers several organizations must not be
