@@ -5,7 +5,7 @@ use App\Models\Organization;
 use App\Models\Package;
 
 it('redirects an old bare-slug url to the organization-scoped one', function () {
-    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'packages', 'public' => true]);
     $org = $group->organization;
 
     $this->get("/r/{$group->slug}/packages.json")
@@ -14,7 +14,7 @@ it('redirects an old bare-slug url to the organization-scoped one', function () 
 });
 
 it('preserves the remaining path and the query string', function () {
-    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'packages', 'public' => true]);
     $org = $group->organization;
 
     $this->get("/r/{$group->slug}/p2/acme/tools.json?x=1")
@@ -45,8 +45,11 @@ it('lets the canonical form win where both could match', function () {
     ]);
     $canonical->packages()->attach($package);
 
+    // preUpgrade(): the legacy reading has to be genuinely available, or the test proves
+    // only that a non-existent legacy address loses. This registry really does still answer
+    // /r/acme/… — and the canonical route still has to win over it.
     $legacyOrg = Organization::factory()->create();
-    Group::factory()->for($legacyOrg)->create(['slug' => 'acme', 'public' => true]);
+    Group::factory()->for($legacyOrg)->preUpgrade()->create(['slug' => 'acme', 'public' => true]);
 
     // Pinned on the response body, not just the status: ComposerController::root() 200s
     // for any public composer-enabled group regardless of what packages it holds, so an
@@ -59,20 +62,67 @@ it('lets the canonical form win where both could match', function () {
         ->assertJsonPath('available-packages', ['acme/tools']);
 });
 
-it('refuses to guess when a legacy slug is shared by two organizations', function () {
-    // Before this branch `groups.slug` had its own instance-wide unique index, so a bare
-    // slug always named exactly one registry. Task 1 scoped that uniqueness to
-    // (organization_id, slug), so two organizations may now legitimately hold a registry
-    // with the same slug — a state OrgScopedSlugTest's "lets two organizations hold the
-    // same registry slug" advertises as a feature. A bare legacy URL can no longer assume
-    // its slug names one registry, and picking either candidate would silently serve one
-    // tenant's registry to a client that meant the other's — dependency confusion if the
-    // wrong guess is public, a confusing 401/404 if it's private, and nondeterministic
-    // either way since the lookup carries no ORDER BY. Refuse instead of guessing.
-    Group::factory()->create(['slug' => 'shared', 'public' => true]);
-    Group::factory()->create(['slug' => 'shared', 'public' => true]);
+/**
+ * Replaces "refuses to guess when a legacy slug is shared by two organizations". That test
+ * built two registries sharing one slug and pinned a 404, because the redirector matched
+ * the live `slug` and could not tell which one a bare legacy URL meant. The state is still
+ * legal — two organizations sharing a registry slug is the point of the branch — but it is
+ * no longer ambiguous, and pinning a 404 would now pin the *bug*: the incumbent's clients
+ * going dark the moment a stranger picks the same name. `legacy_slug` is what the redirect
+ * matches, it is unique, and only the incumbent has one.
+ */
+it('does not let a registry created after the upgrade capture an incumbent legacy address', function () {
+    // The incumbent was here when the instance was upgraded, so /r/shared/… is frozen to it.
+    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared', 'public' => true]);
 
-    $this->get('/r/shared/packages.json')->assertNotFound();
+    // A different organization now creates a registry with the same slug — legal since the
+    // slug is only unique per organization, and available to any org admin with no
+    // cross-org rights whatsoever. Created after the upgrade, so no legacy address.
+    $newcomer = Group::factory()->create(['slug' => 'shared', 'public' => true]);
+
+    expect($newcomer->legacy_slug)->toBeNull()
+        ->and($newcomer->organization_id)->not->toBe($incumbent->organization_id);
+
+    // Pinned on the redirect target, not merely on a 301: the failure this guards against
+    // is answering the *wrong* registry, which a status assertion alone would not see.
+    $this->get('/r/shared/packages.json')
+        ->assertStatus(301)
+        ->assertRedirect(registryPath($incumbent).'/packages.json');
+});
+
+it('stops answering a legacy address once the registry gives up that slug', function () {
+    // The documented decision is that a slug change moves the address and leaves no alias.
+    // Keeping the frozen address across a rename would break that both ways: the operator
+    // could not actually retire an address, and the released name would stay reserved
+    // instance-wide against every other tenant.
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'renamed-away', 'public' => true]);
+
+    $group->update(['slug' => 'the-new-name']);
+
+    expect($group->fresh()->legacy_slug)->toBeNull();
+
+    $this->get('/r/renamed-away/packages.json')->assertNotFound();
+});
+
+it('does not hand a client stranded by an organization rename a stranger registry', function () {
+    // The one cross-tenant *serve* the review could construct against the slug-matching
+    // redirector. Organization A is `alpha` and owns registry `tools`; a client is
+    // configured for /r/alpha/tools/…. A renames itself, which frees `alpha` — it names no
+    // organization any more, so UnclaimedSlug now happily lets organization C create a
+    // *registry* called `alpha`. The stale client's URL has no canonical reading (there is
+    // no /-/{file} endpoint one segment after a two-segment prefix), so it falls to the
+    // legacy route, where matching the live slug would have found C's registry and 301'd
+    // A's client onto C's tarball. Nothing may answer this address.
+    $orgA = Organization::factory()->create(['slug' => 'alpha']);
+    Group::factory()->for($orgA)->preUpgrade()->create(['slug' => 'tools', 'public' => true]);
+    $orgA->update(['slug' => 'alpha-gmbh']);
+
+    $orgC = Organization::factory()->create();
+    Group::factory()->for($orgC)->create(['slug' => 'alpha', 'public' => true]);
+
+    $this->get('/r/alpha/tools/-/tools-1.0.0.tgz')
+        ->assertNotFound()
+        ->assertHeaderMissing('Location');
 });
 
 it('redirects the exact per-project url pip requests, not just the index root', function () {
@@ -86,7 +136,7 @@ it('redirects the exact per-project url pip requests, not just the index root', 
     // genuine route match, so the dedicated legacy route never gets tried at all — the
     // fallback has to live in ResolveRegistryContext, at the point where the organization
     // lookup for "{slug}" comes back empty.
-    $group = Group::factory()->create(['slug' => 'oldslug', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug', 'public' => true]);
     $org = $group->organization;
 
     $this->get('/r/oldslug/simple/some-project/')
@@ -94,13 +144,20 @@ it('redirects the exact per-project url pip requests, not just the index root', 
         ->assertRedirect("/r/{$org->slug}/{$group->slug}/simple/some-project/");
 });
 
-it('refuses to guess pip\'s per-project url too, when the slug is shared', function () {
-    // Same ambiguity as the plain-route case above, but exercised through the
-    // ResolveRegistryContext fallback rather than LegacySlugRedirectController.
-    Group::factory()->create(['slug' => 'shared-pip', 'public' => true]);
+/**
+ * Replaces "refuses to guess pip's per-project url too, when the slug is shared", for the
+ * same reason as its plain-route sibling above: the shared slug is no longer ambiguous, so
+ * a 404 here would pin the incumbent's pip clients going dark rather than the safety
+ * property. Exercised through the ResolveRegistryContext fallback rather than
+ * LegacySlugRedirectController — both call the same resolver, and both have to be pinned.
+ */
+it('keeps pip\'s per-project url on the incumbent when a newcomer shares the slug', function () {
+    $incumbent = Group::factory()->preUpgrade()->create(['slug' => 'shared-pip', 'public' => true]);
     Group::factory()->create(['slug' => 'shared-pip', 'public' => true]);
 
-    $this->get('/r/shared-pip/simple/some-project/')->assertNotFound();
+    $this->get('/r/shared-pip/simple/some-project/')
+        ->assertStatus(301)
+        ->assertRedirect(registryPath($incumbent).'/simple/some-project/');
 });
 
 it('redirects an npm publish (PUT) instead of 405ing it', function () {
@@ -110,7 +167,7 @@ it('redirects an npm publish (PUT) instead of 405ing it', function () {
     // most HTTP clients only replay a 301/302 for GET, so a redirected PUT could silently
     // become a GET against the canonical URL and drop the publish payload. 308 is
     // permanent AND method-and-body-preserving.
-    $group = Group::factory()->create(['slug' => 'oldslug-npm', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-npm', 'public' => true]);
     $org = $group->organization;
 
     $this->put('/r/oldslug-npm/some-package')
@@ -119,7 +176,7 @@ it('redirects an npm publish (PUT) instead of 405ing it', function () {
 });
 
 it('redirects a twine upload (POST) to the registry root instead of 405ing it', function () {
-    $group = Group::factory()->create(['slug' => 'oldslug-pypi', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-pypi', 'public' => true]);
     $org = $group->organization;
 
     $this->post('/r/oldslug-pypi')
@@ -132,7 +189,7 @@ it('passes the query string through byte-for-byte instead of reordering it', fun
     // reorders "b=2&a=1" into "a=1&b=2". A customer's URL might carry a meaningful order
     // (or a repeated key, which the same normalisation would collapse) — the redirect
     // should hand it back exactly as the client sent it.
-    $group = Group::factory()->create(['slug' => 'oldslug-query', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-query', 'public' => true]);
     $org = $group->organization;
 
     $this->get("/r/{$group->slug}/packages.json?b=2&a=1")
@@ -145,7 +202,7 @@ it('passes a percent-encoded rest segment through unchanged instead of corruptin
     // an actual "/" (silently reshaping the path) and a %23 into "#" (silently truncating
     // everything the client sent after it, since "#" starts a fragment). Reconstructing
     // the target from the untouched REQUEST_URI instead means the encoding survives.
-    $group = Group::factory()->create(['slug' => 'oldslug-enc', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-enc', 'public' => true]);
     $org = $group->organization;
 
     $this->get("/r/{$group->slug}/p2/vendor/na%20me.json")
@@ -162,7 +219,7 @@ it('redirects a HEAD request on a legacy url instead of 405ing it', function () 
     // Request::isMethod('get') is false for it, so a naive check hands a HEAD probe a
     // body-preserving 308 instead of the plain 301 every client expects for a read. HEAD is
     // not exotic here — package clients use it for existence and cache-validation checks.
-    $group = Group::factory()->create(['slug' => 'oldslug-head', 'public' => true]);
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'oldslug-head', 'public' => true]);
     $org = $group->organization;
 
     $this->head("/r/{$group->slug}/packages.json")

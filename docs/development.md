@@ -715,15 +715,24 @@ existing `composer.json`, `.npmrc` and `pip.conf` keep working unchanged. The re
 both. A customer who would rather not touch any client configuration at all can be given a
 custom domain instead — that address never had a slug in it to begin with.
 
-**The redirect refuses an ambiguous slug rather than guessing.** Since a registry slug is now
-unique only per organization, two organizations can legitimately hold the same slug — and a
-bare legacy URL then names one of them at random, which is exactly what the redirect must
-not do. `App\Services\Registry\LegacySlugRedirector::resolve()` looks up the slug and returns
-a group only when it matches exactly one; two or more matches 404 instead of picking one,
-because guessing wrong would silently serve another tenant's registry (public: dependency
-confusion; private: a confusing auth failure) and, with no `ORDER BY` on the lookup, the guess
-could flip after any `UPDATE` or `VACUUM`. This is also why an organization slug may not
-collide with a registry slug: with that collision disallowed, the canonical
+**The legacy address is frozen, not re-derived.** `groups.legacy_slug` (nullable, uniquely
+indexed) holds the one-segment address a registry answered *before* the upgrade;
+`2026_09_03_100000` populates it from `slug` at migration time and the application never
+writes it afterwards. `LegacySlugRedirector::resolve()` matches that column and never the
+live `slug`, which is what keeps the redirect single-valued now that a slug is unique only
+per organization. Matching the live slug had two consequences, both cross-tenant and both
+reachable by any org admin with no cross-org rights: the moment a second organization created
+a registry with the same slug the first organization's un-migrated clients started failing —
+silently, the creating admin seeing success and the affected tenant seeing nothing — and an
+organization that renamed its own slug freed that name for a *registry* elsewhere, so a stale
+client of the renamed organization could be 301'd onto a stranger's artifact. Neither is
+possible against a frozen address: a registry created after the migration has `legacy_slug
+IS NULL` and can never capture an incumbent's address, and the unique index means one legacy
+address can never match two rows, so there is no ambiguity to refuse. **Renaming a registry
+clears `legacy_slug`** (`Group::booted()`), so a released name stops answering rather than
+becoming a permanent alias — the same "a slug change leaves no alias" rule the console
+dialogs warn about. This is also why an organization slug may not collide with a registry
+slug: with that collision disallowed, the canonical
 `/r/{orgSlug}/{groupSlug}` route can never accidentally consume a legacy URL's two segments as
 `{org}/{registry}` when the first segment was actually a legacy registry slug.
 
@@ -734,7 +743,7 @@ satisfy the *canonical* two-segment route syntactically (`{orgSlug}={slug}`,
 segment later), so the request never reaches `LegacySlugRedirectController`'s own route at
 all. It is handled instead inside `App\Http\Middleware\ResolveRegistryContext`: when the
 first segment does not resolve as an organization slug, the middleware hands it to the same
-`LegacySlugRedirector` and redirects on a single match, 404s on none or an ambiguous match. An
+`LegacySlugRedirector` and redirects when a frozen legacy address matches, 404s when none does. An
 operator debugging a pip client that isn't finding its registry should know the mechanism
 differs from Composer's and npm's — it is a fallback inside the context middleware, not the
 dedicated legacy route.
@@ -752,11 +761,21 @@ is worse than a stopped migration: the operator renames one side of the pair and
 again. `down()` applies the same stance in reverse, refusing to restore instance-wide
 uniqueness while two organizations still hold one slug.
 
+The same migration adds and populates `groups.legacy_slug`, deliberately rather than a
+companion migration of its own: it fills the column *before* dropping `groups_slug_unique`,
+which is the last moment at which the frozen value is provably unique instance-wide by
+database constraint rather than by inference. A later migration could only assume that
+nothing wrote a duplicate in between — true within one `migrate` run, false as soon as one
+is interrupted and the instance serves traffic before the rest goes through. `down()` drops
+the column again: with instance-wide uniqueness restored, a bare slug identifies one registry
+and there is nothing left for a frozen address to disambiguate.
+
 A companion migration, `2026_09_03_100100_add_index_to_groups_slug.php`, adds back a plain
 index on `groups.slug` alone (the composite `(organization_id, slug)` index cannot seek on
-`slug` by itself) — needed because the legacy lookup above has no organization to filter by,
-and until a customer updates their client configuration that lookup can be most of their
-traffic.
+`slug` by itself). It was introduced for the legacy lookup, which at the time matched `slug`
+directly; that lookup now seeks `legacy_slug` and its own unique index. What still needs the
+plain index is the bare-slug namespace check — `UnclaimedSlug::byRegistry()` on every
+organization create and slug edit, and the setup wizard's organization-slug derivation.
 
 **Changing either slug breaks client configurations pointing at the old address, and there is
 no alias for the old slug.** Changing a registry's own slug moves only that registry's `/r/`

@@ -10,13 +10,19 @@ use Illuminate\Support\Facades\Schema;
  * by an index, so dropping the constraint drops the index too), replacing it with a unique
  * index on (organization_id, slug). That composite index cannot be seeked by slug alone
  * (see the comment in ResolveRegistryContext), which is fine for the canonical lookup that
- * always has the organization first — but the legacy redirect path (LegacySlugRedirector,
- * used by both LegacySlugRedirectController and ResolveRegistryContext's own fallback for a
- * canonical route a legacy URL happens to satisfy syntactically) looks up a group by slug
- * alone, with no organization to seek by. Without an index on `slug` by itself, every
- * request from a not-yet-migrated customer's composer.json/.npmrc/pip.conf — plausibly all
- * of a customer's traffic until they update their config — is a sequential scan over every
- * registry on the instance.
+ * always has the organization first, but leaves nothing to seek for the lookups that carry
+ * a bare slug and no organization. Without an index on `slug` by itself each of those is a
+ * sequential scan over every registry on the instance.
+ *
+ * Corrected: this index was introduced for the legacy redirect path, which at the time
+ * matched `groups.slug` directly. It no longer does — LegacySlugRedirector seeks the frozen
+ * `groups.legacy_slug`, which carries a unique index of its own (added with the column in
+ * 2026_09_03_100000). What still needs this index is the namespace check that keeps a slug
+ * from naming both an organization and a registry: App\Rules\UnclaimedSlug::byRegistry() on
+ * every organization create and slug edit, and SetupController's organization-slug
+ * derivation, which loops until the candidate collides with neither table. Those are
+ * console-rate rather than client-rate, so the index is no longer hot-path — but it is
+ * still the difference between a seek and a full scan on a write path an operator waits on.
  */
 return new class extends Migration
 {

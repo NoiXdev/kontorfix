@@ -17,6 +17,29 @@ use Illuminate\Support\Facades\Schema;
  * matches the canonical form first and resolves to registry `foo` of organization `acme` —
  * silently serving a different registry than the legacy URL meant. A wrong answer is worse
  * than an error, so the upgrade stops and names the pairs instead.
+ *
+ * `groups.legacy_slug` freezes the pre-upgrade one-segment address, and it is added HERE
+ * rather than in a migration of its own for one reason: this is the last moment at which
+ * the value being frozen is provably unique across the whole instance. Until the
+ * dropUnique(['slug']) at the bottom of up(), `groups_slug_unique` is still live, so every
+ * registry's slug is globally distinct *by database constraint* — not by inference. A
+ * later migration could only assume that nothing wrote a duplicate in between, which is
+ * true within one `migrate` run and false the moment a run is interrupted and the instance
+ * serves traffic before the rest of it goes through. Freezing the address next to the
+ * constraint that guarantees it keeps the two from drifting apart.
+ *
+ * The collision refusal above is the other half of the guarantee: it also proves no frozen
+ * legacy address equals an organization slug, so no legacy address can ever be shadowed by
+ * the canonical two-segment route.
+ *
+ * That is what makes the legacy redirect safe once slugs are only per-organization unique.
+ * A registry created *after* this migration gets `legacy_slug = NULL` and can therefore
+ * never capture the old address of an incumbent that happens to share its slug; renaming a
+ * registry clears the column (App\Models\Group::booted()), preserving the decision that a
+ * renamed slug gets no alias. See App\Services\Registry\LegacySlugRedirector.
+ *
+ * This migration has never shipped in a release — it is introduced on the same branch as
+ * the column — so amending it is legitimate; a released one would have had to stay frozen.
  */
 return new class extends Migration
 {
@@ -38,6 +61,18 @@ return new class extends Migration
                 ."wrong registry. Rename one side of each pair, then run the migration again.\n\n".$list
             );
         }
+
+        // Order matters: the column is filled while `groups_slug_unique` still stands, so
+        // the unique index on `legacy_slug` cannot fail and the frozen addresses cannot
+        // collide. Doing this after the swap below would make the same statement an
+        // assumption instead of a fact (see the class docblock).
+        Schema::table('groups', function (Blueprint $table) {
+            // Nullable and unique: NULL is "has no legacy address" and Postgres does not
+            // treat NULLs as equal, so any number of post-upgrade registries coexist.
+            $table->string('legacy_slug')->nullable()->unique();
+        });
+
+        DB::table('groups')->update(['legacy_slug' => DB::raw('slug')]);
 
         Schema::table('groups', function (Blueprint $table) {
             $table->dropUnique(['slug']);
@@ -63,6 +98,11 @@ return new class extends Migration
         Schema::table('groups', function (Blueprint $table) {
             $table->dropUnique(['organization_id', 'slug']);
             $table->unique(['slug']);
+            // The frozen addresses go with the scoping that made them necessary: with
+            // instance-wide uniqueness restored, a bare slug identifies one registry again
+            // and there is nothing left for a separate legacy address to disambiguate.
+            // Dropping the column takes its unique index with it.
+            $table->dropColumn('legacy_slug');
         });
     }
 };

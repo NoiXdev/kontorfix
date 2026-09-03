@@ -38,13 +38,21 @@ it('refuses to scope the slugs while one names both an organization and a regist
         ->and($message)->toContain($group->id);
 });
 
-it('swaps the instance-wide slug index for a per-organization one', function () {
-    // RefreshDatabase has already applied the migration, so put the schema back to its
-    // pre-migration state — one global unique(slug) — and let up() do the swap for real.
+/** Puts `groups` back to its pre-migration shape so up() can do the real work. */
+function restorePreMigrationGroupsSchema(): void
+{
     Schema::table('groups', function (Blueprint $table) {
         $table->dropUnique(['organization_id', 'slug']);
         $table->unique(['slug']);
+        $table->dropColumn('legacy_slug');
     });
+}
+
+it('swaps the instance-wide slug index for a per-organization one', function () {
+    // RefreshDatabase has already applied the migration, so put the schema back to its
+    // pre-migration state — one global unique(slug), no frozen addresses — and let up() do
+    // the swap for real.
+    restorePreMigrationGroupsSchema();
 
     $first = Group::factory()->create(['slug' => 'packages']);
 
@@ -61,6 +69,31 @@ it('swaps the instance-wide slug index for a per-organization one', function () 
     // last: a unique violation aborts the surrounding Postgres transaction, so nothing can
     // query afterwards.
     expect(fn () => Group::factory()->for($first->organization)->create(['slug' => 'packages']))
+        ->toThrow(UniqueConstraintViolationException::class);
+});
+
+it('freezes each existing registry legacy address and gives later ones none', function () {
+    // The whole reason the freeze is safe lives in this ordering: up() fills `legacy_slug`
+    // while `groups_slug_unique` still stands, so the frozen values are unique by database
+    // constraint. Pinned here rather than inferred from the redirect tests, because it is
+    // the migration — not the application — that is the only writer of this column.
+    restorePreMigrationGroupsSchema();
+
+    $incumbent = Group::factory()->create(['slug' => 'packages']);
+
+    runScopeGroupSlugMigration()->up();
+
+    expect($incumbent->fresh()->legacy_slug)->toBe('packages');
+
+    // A registry created after the upgrade gets no legacy address, even when it takes the
+    // same slug in another organization — so it cannot capture the incumbent's old URL.
+    $newcomer = Group::factory()->create(['slug' => 'packages']);
+
+    expect($newcomer->fresh()->legacy_slug)->toBeNull();
+
+    // Two rows can never share one frozen address. Asserted last: the violation aborts the
+    // surrounding transaction.
+    expect(fn () => Group::query()->whereKey($newcomer->id)->update(['legacy_slug' => 'packages']))
         ->toThrow(UniqueConstraintViolationException::class);
 });
 

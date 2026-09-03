@@ -35,7 +35,9 @@ it('serves a registry at the organization-scoped url', function () {
 });
 
 it('redirects the bare slug url to the organization-scoped one', function () {
-    $group = Group::factory()->create(['slug' => 'packages', 'public' => true]);
+    // preUpgrade(): only a registry that existed at migration time carries a frozen
+    // `legacy_slug`, and that column — never the live slug — is what the redirect matches.
+    $group = Group::factory()->preUpgrade()->create(['slug' => 'packages', 'public' => true]);
     $org = $group->organization;
 
     // The legacy form is now a 301, not a 200 and not a 404 — see LegacySlugRedirectTest

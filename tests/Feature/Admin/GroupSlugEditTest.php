@@ -84,7 +84,9 @@ it('refuses a slug an organization already answers to', function () {
 it('serves the registry under its new url and no longer under the old one', function () {
     $org = Organization::factory()->create();
     $admin = adminOf($org);
-    $group = Group::factory()->for($org)->create(['slug' => 'old', 'public' => true]);
+    // preUpgrade(): this registry predates the organization-scoped-slug upgrade, so it also
+    // still answers the one-segment /r/old/… address. The rename has to retire both.
+    $group = Group::factory()->for($org)->preUpgrade()->create(['slug' => 'old', 'public' => true]);
 
     $this->actingAs($admin)->put(route('admin.groups.update', $group), [
         'name' => $group->name, 'slug' => 'neu', 'public' => true, 'portal_enabled' => true,
@@ -92,6 +94,12 @@ it('serves the registry under its new url and no longer under the old one', func
 
     $this->get(registryPath($group->fresh()).'/packages.json')->assertOk();
     $this->get("/r/{$org->slug}/old/packages.json")->assertNotFound();
+
+    // The frozen legacy address goes with the slug the operator gave up — no alias survives
+    // a rename, and the released name stays free for another tenant. See
+    // App\Models\Group::booted() and LegacySlugRedirectTest.
+    expect($group->fresh()->legacy_slug)->toBeNull();
+    $this->get('/r/old/packages.json')->assertNotFound();
 });
 
 it('hands the console the registry url instead of letting it assemble one', function () {

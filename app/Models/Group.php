@@ -17,6 +17,29 @@ class Group extends Model
     /** @use HasFactory<GroupFactory> */
     use HasFactory, HasUuids, LogsActivity;
 
+    /**
+     * A rename gives up the registry's frozen legacy address.
+     *
+     * `legacy_slug` is the one-segment /r/{slug} URL this registry answered before the
+     * instance was upgraded to organization-scoped slugs; it was frozen at migration time
+     * (2026_09_03_100000) and is never written by the application. Keeping it across a
+     * rename would hand the registry a permanent alias, which is exactly the opposite of
+     * the documented decision that changing a slug moves the address with no alias left
+     * behind — and it would keep a name the operator has given up reserved instance-wide
+     * against every other tenant.
+     *
+     * Lives on the model rather than in the two update paths (console and JSON API): the
+     * column is an invariant of the row, not a concern of whoever happens to write it.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (self $group): void {
+            if ($group->isDirty('slug')) {
+                $group->legacy_slug = null;
+            }
+        });
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
