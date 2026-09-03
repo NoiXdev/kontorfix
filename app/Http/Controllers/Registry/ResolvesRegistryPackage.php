@@ -147,22 +147,47 @@ trait ResolvesRegistryPackage
     }
 
     /**
-     * Whether this organization hosts the name — the dependency-confusion guard, which
-     * suppresses the upstream fallthrough so a privately hosted name is never resolved
-     * from packagist/npmjs.
+     * Whether the name is hosted here — the dependency-confusion guard, which suppresses
+     * the upstream fallthrough so a locally hosted name is never resolved from
+     * packagist/npmjs.
      *
-     * Scoped to the addressed organization, because the name is. Another organization's
-     * `acme/tools` is not this organization's, and letting it suppress the fallthrough
-     * would let one tenant shadow another tenant's upstream dependency — which is the
-     * confusion this guard exists to prevent, pointed the wrong way. Within its own
-     * namespace every organization is still fully protected, and that is the only
-     * namespace its clients resolve against.
+     * Two ways to host a name, and the two halves are deliberately scoped differently:
+     *
+     * 1. The addressed **organization** owns it. No assignment is asked about, and that is
+     *    the point: a private package attached to no registry at all still must not have
+     *    its name sent upstream. Scoped to that organization, because the name is — another
+     *    organization's `acme/tools` is not this one's, and letting it suppress the
+     *    fallthrough would let one tenant shadow another tenant's upstream dependency, which
+     *    is this guard pointed the wrong way. Within its own namespace every organization is
+     *    still fully protected, and that is the only namespace its clients resolve against.
+     * 2. A **shared** package of that name is assigned to *this registry* (spec §4). Without
+     *    this half, a customer resolving a shared name would be sent to Packagist or npmjs —
+     *    precisely the confusion this guard exists to prevent, introduced by the feature
+     *    meant to serve them. A shared package is owned by the operator organization
+     *    (spec §1), so clause 1 never covers it in a customer's registry.
+     *
+     * The assignment in clause 2 is not decoration: an unassigned shared package is hosted
+     * by the instance but not *here*, and suppressing the fallthrough for it would blank out
+     * a legitimate upstream dependency for every registry the operator did not hand it to —
+     * a name the customer never agreed to receive locally. Sharing grants eligibility, not
+     * access, on this path as on every other. `assignedPackages()` rather than `packages()`,
+     * so a lapsed assignment counts as no assignment: what this registry no longer serves it
+     * no longer hosts, and this guard must not disagree with findLocal() about that.
+     *
+     * Wider than findLocal()'s served set by exactly clause 1, and never narrower: every row
+     * clause 2 admits is one findLocal() already returns, so this half only ever answers in
+     * states resolution declined. That is what a guard is for — it is the second line, and
+     * it must state the rule itself rather than inherit whatever shape resolution has today.
      */
     protected function packageExistsLocally(PackageType $type, string $fullName, Group $group): bool
     {
         return Package::where('type', $type)
             ->where('name', $fullName)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere(fn ($q2) => $q2
+                    ->where('packages.shared', true)
+                    ->whereIn('packages.id', $group->assignedPackages()->select('packages.id'))))
             ->exists();
     }
 }

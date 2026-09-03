@@ -284,13 +284,28 @@ class PypiController extends Controller
     }
 
     /**
-     * The Python half of the dependency-confusion guard, scoped to the addressed
-     * organization for the reasons given on ResolvesRegistryPackage::packageExistsLocally().
+     * The Python half of the dependency-confusion guard: the addressed organization owns
+     * the name, or a shared package of that name is assigned to this registry. Both halves
+     * and their different scopes are argued on
+     * ResolvesRegistryPackage::packageExistsLocally(); this is the same predicate, filtered
+     * in PHP because PEP 503 normalisation happens outside SQL.
+     *
+     * NOT pythonPackagesOfGroup(), and the resemblance is the trap. That method answers
+     * "what is assigned to *this registry*"; this one answers "is the name hosted", and the
+     * organization half must stay assignment-free — a private project attached to no
+     * registry still must not have its name asked about at pypi.org. Reusing that method
+     * here would drop the organization half's unassigned rows and leak those names upstream;
+     * reusing this one there would serve projects no operator assigned. Two questions, two
+     * predicates, and only the shared half of this one is registry-scoped.
      */
     private function pythonExistsLocally(string $normalized, Group $group): bool
     {
         return Package::where('type', PackageType::Python)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere(fn ($q2) => $q2
+                    ->where('packages.shared', true)
+                    ->whereIn('packages.id', $group->assignedPackages()->select('packages.id'))))
             ->get()
             ->contains(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
     }
