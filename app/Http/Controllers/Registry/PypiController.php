@@ -234,7 +234,15 @@ class PypiController extends Controller
     }
 
     /**
-     * Python packages assigned to the group (unfiltered by access — callers refine).
+     * The Python projects this registry serves (unfiltered by group access — callers refine).
+     *
+     * assignedPackages(), not packages(): an assignment past its `available_until` serves
+     * nothing, and this method is the *only* statement of that for upload(), which never
+     * reaches canAccessPackage(). The read paths were already filtered — both re-ask through
+     * canAccessPackage(), which reads the same relation — so the behaviour that changes here
+     * is upload()'s, which now refuses a publish into a lapsed assignment. That is what npm
+     * already did (packageBelongsToGroup() reads the same relation), so the two publish paths
+     * no longer disagree about whether an expired row counts.
      *
      * Own-organization, or shared, for the same reason findLocal() is: the pivot row records
      * assignment, and canAccessPackage() checks assignment and group access — neither compares
@@ -257,21 +265,21 @@ class PypiController extends Controller
      * the only statement of the rule — and upload() narrows it back to own-organization
      * itself, because sharing hands out reads and never writes.
      *
-     * Ordered own-organization-first for the reason given on
+     * Ordered own-organization-first, then by id, for the reasons given on
      * ResolvesRegistryPackage::findLocal(): simpleProject() takes the first match by
-     * normalised name, and spec §5 says the customer's own project wins over a shared one of
-     * that name.
+     * normalised name, spec §5 says the customer's own project wins over a shared one of that
+     * name, and where the spec settles nothing the answer should at least be reproducible.
      *
      * @return Collection<int, Package>
      */
     private function pythonPackagesOfGroup(Group $group): Collection
     {
-        return $group->packages()
+        return $group->assignedPackages()
             ->where('type', PackageType::Python)
             ->where(fn ($q) => $q
                 ->where('packages.organization_id', $group->organization_id)
                 ->orWhere('packages.shared', true))
-            ->orderByRaw('(packages.organization_id = ?) desc', [$group->organization_id])
+            ->orderByRaw('(packages.organization_id = ?) desc, packages.id', [$group->organization_id])
             ->get();
     }
 

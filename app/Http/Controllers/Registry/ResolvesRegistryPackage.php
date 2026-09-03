@@ -120,26 +120,30 @@ trait ResolvesRegistryPackage
         //
         // Two rows can now match: a customer's own package and a shared one of the same
         // name. Spec §5 settles which wins — the customer's own, never shadowed by something
-        // the operator added — and the order says so rather than leaving `first()` to
-        // whichever row the database happens to hand back first.
-        // App\Services\Package\SharedAssignment refuses every assignment that would produce
-        // the pair, so on a healthy instance this order decides nothing; it is stated
-        // because a resolution that is only right while the data is clean is not a
-        // resolution, and a direct database change or a data migration can still produce
-        // the pair the application refuses.
-        $package = Package::where('type', $type)
+        // the operator added — and the order says so rather than leaving the choice to
+        // whichever row the database happens to hand back first. `packages.id` is a second,
+        // semantically empty term: two shared packages of one name owned by two different
+        // operator organizations are a pair spec §5 states no rule for, and inventing a
+        // winner is not this method's job — but returning a *reproducible* one is.
+        //
+        // The access check is part of choosing the candidate, not a verdict passed on one
+        // already chosen. Ordering first and checking afterwards would answer a request for
+        // an assigned shared package with a 404 whenever the customer merely *owns* the same
+        // name somewhere else: the own row sorts first, fails the assignment check, and the
+        // shared row the operator did assign is never looked at. SharedAssignment permits
+        // that state deliberately and correctly — it compares against what this registry
+        // serves, and a package assigned to some other registry is not in it — so this is
+        // reachable through the product, unlike the collision the order above settles.
+        // App\Http\Controllers\Registry\PypiController::simpleProject() has always had the
+        // check inside the predicate; this is the same shape.
+        return Package::where('type', $type)
             ->where('name', $fullName)
             ->where(fn ($q) => $q
                 ->where('packages.organization_id', $group->organization_id)
                 ->orWhere('packages.shared', true))
-            ->orderByRaw('(packages.organization_id = ?) desc', [$group->organization_id])
-            ->first();
-
-        if (! $package || ! $this->access()->canAccessPackage($token, $group, $package)) {
-            return null;
-        }
-
-        return $package;
+            ->orderByRaw('(packages.organization_id = ?) desc, packages.id', [$group->organization_id])
+            ->get()
+            ->first(fn (Package $p): bool => $this->access()->canAccessPackage($token, $group, $p));
     }
 
     /**

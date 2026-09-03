@@ -101,9 +101,10 @@ class Group extends Model
      * time-limited, and an expired row serves nothing.
      *
      * The one statement of that predicate. RegistryAccessService decides what a registry
-     * serves with it, and App\Services\Package\SharedAssignment decides whether a name is
-     * already taken with it — two questions that must never be able to disagree about
-     * whether a given row counts.
+     * serves with it, App\Services\Package\SharedAssignment decides whether a name is
+     * already taken with it, and App\Http\Controllers\Registry\PypiController decides
+     * through it which project a twine upload may target — questions that must never be able
+     * to disagree about whether a given row counts.
      *
      * PREMISE, and it is load-bearing: nothing in the application writes `available_until`.
      * The column is created by a migration, declared on the pivot, and read here; no
@@ -120,6 +121,12 @@ class Group extends Model
      * that changes no pivot membership at all, and so passes no guard today. Extending an
      * assignment is an assignment: it has to ask SharedAssignment whether the name is free,
      * or the invariant holds on three write paths and not the fourth.
+     *
+     * That editor moves a fourth write besides those three: PypiController::upload() resolves
+     * its target project through this relation and through nothing else — it never reaches
+     * canAccessPackage() — so an `available_until` pushed back into the future reopens a
+     * publish path, not only a read path. npm's equivalent runs through
+     * RegistryAccessService::packageBelongsToGroup() and therefore through this relation too.
      *
      * @return BelongsToMany<Package, $this, GroupPackage>
      */

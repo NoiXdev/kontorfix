@@ -121,6 +121,55 @@ it('refuses a twine upload into a shared package', function () {
     ])->assertNotFound();
 });
 
+it('allows the operator to publish into its own shared project from an operator registry', function () {
+    Storage::fake('artifacts');
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $group = Group::factory()->for($operator)->create(['public' => true]);
+    $pkg = Package::factory()->for($operator)->create([
+        'type' => PackageType::Python, 'name' => 'shared-lib', 'shared' => true,
+    ]);
+    $group->packages()->attach($pkg);
+    $bytes = 'fake-sdist-content';
+
+    // Bounds the refusal above from the other side. `! $p->shared` would satisfy that test
+    // just as well as the ownership comparison does, and would take the operator's own shared
+    // project away from the operator: marking a package shared would silently make it
+    // unpublishable from the registry that owns it. The rule is ownership, not the flag.
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
+        ':action' => 'file_upload',
+        'name' => 'shared-lib',
+        'version' => '1.0.0',
+        'filetype' => 'sdist',
+        'sha256_digest' => hash('sha256', $bytes),
+        'content' => UploadedFile::fake()->createWithContent('shared_lib-1.0.0.tar.gz', $bytes),
+    ])->assertOk();
+
+    expect($pkg->fresh()->pythonDists()->count())->toBe(1);
+});
+
+it('refuses a twine upload into a project whose assignment has lapsed', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->create(['public' => true]);
+    $own = Package::factory()->inOrgOf($group)->create([
+        'type' => PackageType::Python, 'name' => 'own-lib',
+    ]);
+    // upload() resolves its target through the assignment relation and through nothing else —
+    // it never reaches canAccessPackage() — so this relation is the only thing that can make
+    // a lapsed assignment refuse a publish. npm has always refused it, through
+    // packageBelongsToGroup(); the two publish paths must not disagree.
+    $group->packages()->attach($own, ['available_until' => now()->subDay()]);
+    $bytes = 'fake-sdist-content';
+
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
+        ':action' => 'file_upload',
+        'name' => 'own-lib',
+        'version' => '1.0.0',
+        'filetype' => 'sdist',
+        'sha256_digest' => hash('sha256', $bytes),
+        'content' => UploadedFile::fake()->createWithContent('own_lib-1.0.0.tar.gz', $bytes),
+    ])->assertNotFound();
+});
+
 it('refuses an npm publish into a shared package', function () {
     $group = Group::factory()->create(['public' => true]);
     sharedPackageIn($group, PackageType::Npm, 'shared-lib');
@@ -140,6 +189,32 @@ it('refuses an npm publish into a shared package', function () {
 // hands back, and "usually the right one" is not an answer. The shared package is created
 // and attached FIRST in each of these, so an unordered query would tend to return it.
 
+it('serves a shared package when the customer owns that name but has not assigned it here', function () {
+    $group = Group::factory()->create(['public' => true]);
+    $shared = sharedPackageIn($group);
+    PackageVersion::factory()->for($shared)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
+
+    // The customer owns the same name and keeps it in a different registry of their own.
+    // SharedAssignment permits this and is right to: it refuses a collision within one
+    // registry, and this registry serves only the shared package. So unlike the pair below,
+    // this state is reachable through the product with no database surgery at all.
+    //
+    // The own row sorts first — it is the customer's own organization — but it is not
+    // assigned here. Choosing the candidate before asking about assignment would therefore
+    // answer with the own row, fail the assignment check, and 404 a package the operator
+    // explicitly assigned, on every Composer and npm read path at once.
+    $elsewhere = Group::factory()->create(['organization_id' => $group->organization_id, 'public' => true]);
+    $own = Package::factory()->inOrgOf($group)->create([
+        'type' => PackageType::Composer, 'name' => 'acme/shared',
+    ]);
+    PackageVersion::factory()->for($own)->create(['version' => '9.9.9.0', 'version_pretty' => 'v9.9.9']);
+    $elsewhere->packages()->attach($own);
+
+    $this->get(registryPath($group).'/p2/acme/shared.json')
+        ->assertOk()
+        ->assertJsonPath('packages.acme/shared.0.version', 'v1.0.0');
+});
+
 it('serves the customer own composer package over a shared one of the same name', function () {
     $group = Group::factory()->create(['public' => true]);
     $shared = sharedPackageIn($group);
@@ -154,6 +229,12 @@ it('serves the customer own composer package over a shared one of the same name'
     $this->get(registryPath($group).'/p2/acme/shared.json')
         ->assertOk()
         ->assertJsonPath('packages.acme/shared.0.version', 'v9.9.9');
+
+    // Composer reads `available-packages` as the set of names this registry hosts, and two
+    // assigned rows of one name must still be one entry.
+    $this->get(registryPath($group).'/packages.json')
+        ->assertOk()
+        ->assertJsonPath('available-packages', ['acme/shared']);
 });
 
 it('serves the customer own python project over a shared one of the same name', function () {
@@ -175,4 +256,8 @@ it('serves the customer own python project over a shared one of the same name', 
         ->assertOk()
         ->assertSee('shared_lib-9.9.9.tar.gz')
         ->assertDontSee('shared_lib-1.0.0.tar.gz');
+
+    // And the root index names it once, not once per assigned row.
+    $index = $this->get(registryPath($group).'/simple')->assertOk()->getContent();
+    expect(substr_count((string) $index, '>shared-lib</a>'))->toBe(1);
 });
