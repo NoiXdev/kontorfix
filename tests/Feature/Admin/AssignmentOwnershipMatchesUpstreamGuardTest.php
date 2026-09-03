@@ -5,13 +5,15 @@
  *
  * `Admin\GroupController::assignedPackagePayload()` sends that flag, and the German
  * availability copy turns on it and nothing else: where it is false the operator is told
- * "Entfernen Sie die Zuweisung, um den Namen freizugeben", and where it is true they are
- * told the opposite — that detaching frees nothing and only deleting the package does.
+ * "Entfernen Sie die Zuweisung, um den Namen freizugeben", and where it is true they are told
+ * the opposite — that detaching frees nothing, and that the name comes free only once no
+ * package of the organization carries it any more.
  *
  * The flag is therefore a SECOND STATEMENT of clause 1 of
  * `ResolvesRegistryPackage::packageExistsLocally()` and of
- * `PypiController::pythonExistsLocally()`, which suppress the upstream for any name this
- * registry's organization owns, with no assignment involved. The field is type-agnostic, so
+ * `PypiController::pythonExistsLocally()`, which suppress the upstream whenever this
+ * registry's organization carries A PACKAGE of that `(type, name)` — not necessarily the row
+ * being described, and with no assignment involved. The field is type-agnostic, so
  * both resolvers are pinned here — PyPI matches PEP 503-normalised names and the other two
  * match verbatim, which is a second way the two statements can drift apart. Two statements of one
  * rule, correct the day they are written, is the shape that has cost this branch the most —
@@ -23,7 +25,7 @@
  * So the coupling is asserted rather than described. For each case that matters, the
  * biconditional:
  *
- *     the console says the organization owns the name
+ *     the console says the organization carries a package of this (type, name)
  *       ⟺ detaching the assignment leaves the upstream still suppressed
  *
  * Both halves are checked against the real predicate, before and after the detach, so a

@@ -7,6 +7,7 @@ import {
     expiryConsequence,
     formatDay,
     immediateWithdrawalNote,
+    type NameHolding,
 } from './packageAssignment';
 
 /*
@@ -82,15 +83,49 @@ describe('availabilityLabel', () => {
  * shared wording would pass the exact copy this round removed.
  */
 
-/** Owned by the registry's own organization: detaching does not release the name. */
-const OWN = true;
-/** Shared, owned elsewhere: the assignment is the only thing holding the name. */
-const SHARED_ELSEWHERE = false;
+/** The organization already holds this name through one of its own packages: detaching does
+ *  not release it. Composer, so the type-naming half of the sentence is exercised too. */
+const OWN: NameHolding = { ownedByRegistryOrg: true, type: 'composer', typeLabel: 'Composer' };
+/** Shared and held elsewhere: the assignment is the only thing holding the name. */
+const SHARED_ELSEWHERE: NameHolding = { ownedByRegistryOrg: false, type: 'composer', typeLabel: 'Composer' };
+/** The ecosystem whose resolver matches PEP 503-normalised names. */
+const OWN_PYTHON: NameHolding = { ownedByRegistryOrg: true, type: 'python', typeLabel: 'Python' };
 
 describe('availabilityNote', () => {
     it('has nothing to add for an open-ended assignment', () => {
         expect(availabilityNote({ state: 'permanent', day: null }, OWN)).toBeNull();
         expect(availabilityNote({ state: 'permanent', day: null }, SHARED_ELSEWHERE)).toBeNull();
+    });
+
+    it('uses one word for one concept', () => {
+        // "belegt" and "reserviert" for the same state, two sentences apart, is the drift
+        // this module keeps being corrected for, at the vocabulary level. The elision that
+        // was fixed alongside it is grammar and is left to review; this one is a decision.
+        for (const holding of [OWN, OWN_PYTHON]) {
+            expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, holding)).toContain('belegt');
+            expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, holding)).not.toContain('reserviert');
+        }
+    });
+
+    it('names the ecosystem the name is held in', () => {
+        // The rule is per (type, name): an npm package of this name does not hold a Composer
+        // name. Told only "ein Paket dieser Organisation", the operator has no way to find
+        // the row that is holding it.
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).toContain('Composer-Paket');
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN_PYTHON)).toContain('Python-Paket');
+    });
+
+    it('warns for Python that the spelling of the holding name may differ', () => {
+        // The case the existential fix exists for: the holder is `Shared_Lib` and the
+        // operator is looking at `shared-lib`. Without this they search, find nothing under
+        // the name in front of them, and conclude the message is wrong.
+        const python = availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN_PYTHON);
+
+        expect(python).toContain('Groß-/Kleinschreibung');
+        expect(python).toContain('Shared_Lib und shared-lib sind derselbe Name');
+
+        // Not said where it is not true: Composer and npm resolve the stored name verbatim.
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).not.toContain('Groß-/Kleinschreibung');
     });
 
     it('never claims the organization owns the NAME, only a package of that name', () => {
@@ -106,16 +141,19 @@ describe('availabilityNote', () => {
         // "Verlängern Sie die Zuweisung, um wieder auszuliefern" reads as the operator doing
         // the delivering; the German infinitive clause takes the main clause's subject.
         expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).not.toContain('um wieder auszuliefern');
-        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).toContain('um die Auslieferung fortzusetzen');
+        // …and it resumes something stopped, so `wieder aufnehmen`, not `fortsetzen`, which
+        // continues something still running. This note only ever renders on a lapsed row.
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).toContain('um die Auslieferung wieder aufzunehmen');
+        expect(availabilityNote({ state: 'lapsed', day: '31.12.2026' }, OWN)).not.toContain('fortzusetzen');
     });
 
     it('says the same thing about delivery in both cases', () => {
         // The half that does not depend on ownership: the registry stops serving and the
         // request is not passed upstream. Losing it for one of the two would leave that
         // operator with no explanation for the 404 at all.
-        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+        for (const holding of [OWN, SHARED_ELSEWHERE]) {
             for (const state of ['limited', 'lapsed'] as const) {
-                const note = availabilityNote({ state, day: '31.12.2026' }, owned);
+                const note = availabilityNote({ state, day: '31.12.2026' }, holding);
 
                 expect(note).toContain('31.12.2026');
                 expect(note).toContain('404');
@@ -133,8 +171,9 @@ describe('availabilityNote', () => {
     });
 
     it('tells the operator for an own package that detaching would NOT release the name', () => {
-        // The destructive instruction this round removed: for a package the organization
-        // owns, removing the assignment frees nothing and only deleting the package does.
+        // The destructive instruction this round removed: where the organization already
+        // carries a package of this name, removing the assignment frees nothing, and the
+        // name comes free only once no package of that organization carries it.
         for (const state of ['limited', 'lapsed'] as const) {
             const note = availabilityNote({ state, day: '31.12.2026' }, OWN);
 
@@ -143,8 +182,8 @@ describe('availabilityNote', () => {
             // What the rule actually is: the organization holds the name through A PACKAGE
             // of that name, which need not be this row — so the release condition is stated
             // over the packages, not over this assignment.
-            expect(note).toContain('durch ein Paket dieser Organisation belegt');
-            expect(note).toContain('kein Paket dieser Organisation diesen Namen mehr trägt');
+            expect(note).toContain('durch ein Composer-Paket dieser Organisation belegt');
+            expect(note).toContain('kein Composer-Paket dieser Organisation diesen Namen mehr trägt');
         }
     });
 
@@ -152,9 +191,9 @@ describe('availabilityNote', () => {
         // The registry's upstream URL is configurable and has its own tab on this page, so
         // naming Packagist as the destination would be wrong as often as it was right.
         // expiryConsequence() names it once, explicitly as an example.
-        for (const owned of [OWN, SHARED_ELSEWHERE]) {
+        for (const holding of [OWN, SHARED_ELSEWHERE]) {
             for (const state of ['limited', 'lapsed'] as const) {
-                expect(availabilityNote({ state, day: '31.12.2026' }, owned)).not.toContain('Packagist');
+                expect(availabilityNote({ state, day: '31.12.2026' }, holding)).not.toContain('Packagist');
             }
         }
     });
@@ -162,10 +201,18 @@ describe('availabilityNote', () => {
 
 describe('expiryConsequence', () => {
     it('says the date does not reopen the upstream, in both cases', () => {
-        for (const owned of [OWN, SHARED_ELSEWHERE]) {
-            expect(expiryConsequence(owned)).toContain('404');
-            expect(expiryConsequence(owned)).toContain('nicht an den Upstream');
+        for (const holding of [OWN, SHARED_ELSEWHERE]) {
+            expect(expiryConsequence(holding)).toContain('404');
+            expect(expiryConsequence(holding)).toContain('nicht an den Upstream');
         }
+    });
+
+    it('carries the ecosystem and the Python spelling warning too', () => {
+        // Same sentence, same two facts — the editor's note is where an operator reads this
+        // BEFORE acting, so losing either half here is worse than losing it in the row note.
+        expect(expiryConsequence(OWN_PYTHON)).toContain('Python-Paket');
+        expect(expiryConsequence(OWN_PYTHON)).toContain('Shared_Lib und shared-lib sind derselbe Name');
+        expect(expiryConsequence(OWN)).toContain('Composer-Paket');
     });
 
     it('says what an empty date field means', () => {
@@ -203,15 +250,15 @@ describe('immediateWithdrawalNote', () => {
         // In this console "Freigabe" is the `shared` marking itself
         // (Admin\PackageController::shared, admin/system/Index.vue). This note renders on
         // every row, and most of them were never shared, so the word would be simply false.
-        for (const owned of [OWN, SHARED_ELSEWHERE]) {
-            expect(immediateWithdrawalNote(owned)).not.toContain('Freigabe');
+        for (const holding of [OWN, SHARED_ELSEWHERE]) {
+            expect(immediateWithdrawalNote(holding)).not.toContain('Freigabe');
         }
     });
 
     it('says delivery stops at once and the name still does not reach the upstream', () => {
-        for (const owned of [OWN, SHARED_ELSEWHERE]) {
-            expect(immediateWithdrawalNote(owned)).toContain('sofort');
-            expect(immediateWithdrawalNote(owned)).toContain('nicht an den Upstream');
+        for (const holding of [OWN, SHARED_ELSEWHERE]) {
+            expect(immediateWithdrawalNote(holding)).toContain('sofort');
+            expect(immediateWithdrawalNote(holding)).toContain('nicht an den Upstream');
         }
     });
 

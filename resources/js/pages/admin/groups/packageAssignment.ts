@@ -27,10 +27,12 @@
  *
  * HOW IT ENDS depends on which clause holds, and the copy below turns on exactly that.
  * Under clause 2 detaching releases the name; under clause 1 it does not — the organization
- * owns the name whether or not any assignment exists, and only deleting the package frees
- * it. Both notes render for every row of the registry's package table, own packages
- * included, so a single "remove the assignment to release the name" would be a destructive
- * instruction that does not work on the majority of rows.
+ * holds the name for as long as ANY of its packages carries it, whether or not that package
+ * is the row being described and whether or not it is assigned anywhere. The name comes free
+ * only when no package of the organization carries it any more. Both notes render for every
+ * row of the registry's package table, own packages included, so a single "remove the
+ * assignment to release the name" would be a destructive instruction that does not work on
+ * the majority of rows.
  *
  * So an operator setting a date has to be told it is not "afterwards it falls away", and an
  * operator looking at a lapsed row has to be told what their customer is seeing right now
@@ -57,15 +59,20 @@ export interface AssignedPackage {
      */
     in_force: boolean;
     /**
-     * Whether this registry's organization owns the package.
+     * Whether this registry's organization holds a package under this row's `(type, name)`.
      *
-     * Mirrors clause 1 of `ResolvesRegistryPackage::packageExistsLocally()`, which
-     * suppresses the upstream for any name the organization owns — with no assignment
-     * involved. It decides one thing here, and it is the one thing an operator can act on
-     * wrongly: whether DETACHING would release the name.
+     * An EXISTENCE question, not a property of this row: `packageExistsLocally()` clause 1
+     * and `PypiController::pythonExistsLocally()` suppress the upstream when the organization
+     * carries *a* package of that name, which need not be this one and need not be assigned
+     * anywhere. The two readings diverge in a state this branch permits — an in-force own row
+     * beside a lapsed shared row of one name — and it is the lapsed row that renders the
+     * "abgelaufen" note.
      *
-     * `shared` cannot stand in for it. A shared package assigned to a registry of the
-     * operator organization is owned by that organization too, so both clauses hold and
+     * It decides one thing here, and it is the one thing an operator can act on wrongly:
+     * whether DETACHING would release the name.
+     *
+     * `shared` cannot stand in for it either. A shared package assigned to a registry of the
+     * operator organization is carried by that organization too, so both clauses hold and
      * detaching releases nothing.
      */
     owned_by_registry_org: boolean;
@@ -117,11 +124,13 @@ export function availabilityLabel(availability: Availability): string {
  *
  * Every text below splits at one question and only one: WOULD DETACHING RELEASE THE NAME?
  *
- * For a package this registry's organization owns, no. `packageExistsLocally()` suppresses
- * the upstream on ownership alone (clause 1), so the name stays claimed whether or not the
- * assignment exists, and only deleting the package releases it. For a shared package owned
- * elsewhere, yes: the suppression rests entirely on the assignment (clause 2), so removing
- * it is exactly the operator's release path.
+ * Where the registry's organization carries a package of that name, no. Clause 1 of
+ * `packageExistsLocally()` — and of `PypiController::pythonExistsLocally()` — suppresses the
+ * upstream on that existence alone, with no assignment involved, so the name stays held
+ * whether or not this assignment exists and comes free only when no package of the
+ * organization carries it any more. For a shared package carried elsewhere, yes: the
+ * suppression rests entirely on the assignment (clause 2), so removing it is exactly the
+ * operator's release path.
  *
  * The half that is the same in both cases — the registry stops serving, builds get a 404,
  * the request is not passed to the upstream — is stated once, here.
@@ -142,15 +151,57 @@ export function availabilityLabel(availability: Availability): string {
 /** True in both cases, and the part an operator most needs to stop being surprised by. */
 const NOT_FORWARDED = 'Anfragen werden nicht an den Upstream weitergereicht, sondern enden mit 404';
 
+/**
+ * What the release sentence needs to know about the row it is describing.
+ *
+ * `typeLabel` is passed in rather than mapped here: the console names ecosystems from the
+ * `PackageType` enum, through `useRegistryTypes().label()`, and a table in this file would be
+ * a second statement of exactly the kind this module keeps getting corrected for.
+ */
+export interface NameHolding {
+    /** The payload's `owned_by_registry_org` — see {@see AssignedPackage}. */
+    ownedByRegistryOrg: boolean;
+    /** The row's package type, as the payload sends it. */
+    type: string;
+    /** That type's label, e.g. `Composer`. */
+    typeLabel: string;
+}
+
 /** How the name is released, in each of the two cases. Never both. */
 const RELEASED_BY_DETACHING = 'Entfernen Sie die Zuweisung, um den Namen freizugeben.';
-const HELD_BY_OWNERSHIP =
-    'Der Name ist durch ein Paket dieser Organisation belegt und bleibt unabhängig von der Zuweisung ' +
-    'reserviert — das Entfernen der Zuweisung gibt ihn nicht frei, sondern erst, wenn kein Paket dieser ' +
-    'Organisation diesen Namen mehr trägt.';
 
-function releaseSentence(ownedByRegistryOrg: boolean): string {
-    return ownedByRegistryOrg ? HELD_BY_OWNERSHIP : RELEASED_BY_DETACHING;
+/**
+ * Which ecosystem matches names PEP 503-normalised. Stated here because the sentence below
+ * has to warn about it; the normalisation itself lives in `App\Services\Python\PythonName`
+ * and is applied by `PypiController::pythonExistsLocally()`.
+ */
+const NORMALISED_NAME_TYPE = 'python';
+
+/**
+ * The type is named because the rule is per `(type, name)`: an npm package of this name does
+ * not hold a Composer name, and an operator told only "ein Paket dieser Organisation" has no
+ * way to find the row that is holding it.
+ *
+ * For Python the spelling is named too. That is the case this whole correction exists for —
+ * an operator searching for `shared-lib` finds only `Shared_Lib`, and without this sentence
+ * concludes the message is simply wrong.
+ */
+function heldByOrganization(holding: NameHolding): string {
+    const matching =
+        holding.type === NORMALISED_NAME_TYPE
+            ? ' Groß-/Kleinschreibung sowie die Trennzeichen -, _ und . werden dabei nicht unterschieden: ' +
+              'Shared_Lib und shared-lib sind derselbe Name.'
+            : '';
+
+    return (
+        `Der Name ist durch ein ${holding.typeLabel}-Paket dieser Organisation belegt und bleibt es ` +
+        `unabhängig von der Zuweisung; das Entfernen der Zuweisung gibt ihn nicht frei. Frei wird er ` +
+        `erst, wenn kein ${holding.typeLabel}-Paket dieser Organisation diesen Namen mehr trägt.${matching}`
+    );
+}
+
+function releaseSentence(holding: NameHolding): string {
+    return holding.ownedByRegistryOrg ? heldByOrganization(holding) : RELEASED_BY_DETACHING;
 }
 
 /**
@@ -161,7 +212,7 @@ function releaseSentence(ownedByRegistryOrg: boolean): string {
  * it ("why is the build failing when the package is right there in the list?"), so it names
  * the 404 and what actually ends it.
  */
-export function availabilityNote(availability: Availability, ownedByRegistryOrg: boolean): string | null {
+export function availabilityNote(availability: Availability, holding: NameHolding): string | null {
     switch (availability.state) {
         case 'permanent':
             return null;
@@ -169,15 +220,15 @@ export function availabilityNote(availability: Availability, ownedByRegistryOrg:
             return (
                 `Diese Registry liefert das Paket bis einschließlich ${availability.day} aus. ` +
                 `Danach nicht mehr — der Name bleibt aber weiterhin belegt: ${NOT_FORWARDED}. ` +
-                releaseSentence(ownedByRegistryOrg)
+                releaseSentence(holding)
             );
         case 'lapsed':
             return (
                 `Am ${availability.day} abgelaufen: Diese Registry liefert das Paket nicht mehr aus. ` +
                 `Builds, die es anfordern, erhalten einen 404 — die Registry reicht den Namen weiterhin ` +
                 `nicht an den Upstream weiter. Verlängern Sie die Zuweisung, um die Auslieferung ` +
-                `fortzusetzen. ` +
-                releaseSentence(ownedByRegistryOrg)
+                `wieder aufzunehmen. ` +
+                releaseSentence(holding)
             );
     }
 }
@@ -189,12 +240,12 @@ export function availabilityNote(availability: Availability, ownedByRegistryOrg:
  * bis 31.12." reads as "afterwards it falls away", and that is the one reading this feature
  * does not implement.
  */
-export function expiryConsequence(ownedByRegistryOrg: boolean): string {
+export function expiryConsequence(holding: NameHolding): string {
     return (
         `Nach diesem Tag liefert die Registry das Paket nicht mehr aus. Der Name bleibt dabei belegt: ` +
         `Anfragen werden nicht an den Upstream (z. B. Packagist) weitergereicht, sondern enden mit 404. ` +
         `Das ist Absicht: Es verhindert, dass ein fremdes Paket still an die Stelle des bisherigen tritt. ` +
-        `${releaseSentence(ownedByRegistryOrg)} Ohne Datum bleibt die Zuweisung unbefristet.`
+        `${releaseSentence(holding)} Ohne Datum bleibt die Zuweisung unbefristet.`
     );
 }
 
@@ -226,10 +277,10 @@ export function endsImmediately(day: string, today: string): boolean {
  * (an own package), the contrast is stated the other way round rather than dropped: the
  * operator has to know that no assignment change frees the name.
  */
-export function immediateWithdrawalNote(ownedByRegistryOrg: boolean): string {
+export function immediateWithdrawalNote(holding: NameHolding): string {
     return (
         `Dieses Datum liegt in der Vergangenheit: Die Registry stellt die Auslieferung sofort ein. Der Name ` +
         `bleibt weiterhin belegt und wird nicht an den Upstream weitergereicht — das ist der sichere Weg, ` +
-        `die Auslieferung zu beenden. ${releaseSentence(ownedByRegistryOrg)}`
+        `die Auslieferung zu beenden. ${releaseSentence(holding)}`
     );
 }

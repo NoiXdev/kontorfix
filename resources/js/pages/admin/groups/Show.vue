@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { cn } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
@@ -25,6 +26,7 @@ import {
     expiryConsequence,
     immediateWithdrawalNote,
     type AssignedPackage,
+    type NameHolding,
 } from './packageAssignment';
 
 interface GroupInfo {
@@ -284,11 +286,22 @@ function hasBlockRow(pkg: PackageRow): boolean {
 }
 
 /**
- * This row's consequence note. The ownership flag decides whether detaching would release
- * the name, which is the one thing in the text an operator can act on wrongly.
+ * What the copy needs about this row: whether the organization already holds the name — the
+ * one thing in the text an operator can act on wrongly — and how to name the ecosystem, which
+ * the rule is per. The label comes from the PackageType enum through the shared composable,
+ * so the console names ecosystems in one place.
  */
+// The PackageType enum's own labels, shared to the frontend via Inertia. Not a table here:
+// the console names ecosystems in one place.
+const { label: registryTypeLabel } = useRegistryTypes();
+
+function holdingFor(pkg: PackageRow): NameHolding {
+    return { ownedByRegistryOrg: pkg.owned_by_registry_org, type: pkg.type, typeLabel: registryTypeLabel(pkg.type) };
+}
+
+/** This row's consequence note. */
 function noteFor(pkg: PackageRow): string | null {
-    return availabilityNote(availabilityOf(pkg), pkg.owned_by_registry_org);
+    return availabilityNote(availabilityOf(pkg), holdingFor(pkg));
 }
 
 // The guard that refuses a name collision (App\Services\Package\SharedAssignment) keys its
@@ -607,10 +620,10 @@ async function copyToken() {
                                                          way to say "stop delivering now, keep the name blocked". -->
                                                     <Input :id="`available-until-${pkg.id}`" v-model="editedUntil" type="date" class="max-w-xs" />
                                                     <p class="max-w-2xl text-xs text-muted-foreground">
-                                                        {{ expiryConsequence(pkg.owned_by_registry_org) }}
+                                                        {{ expiryConsequence(holdingFor(pkg)) }}
                                                     </p>
                                                     <p v-if="withdrawsImmediately" class="max-w-2xl text-xs text-copper-hi">
-                                                        {{ immediateWithdrawalNote(pkg.owned_by_registry_org) }}
+                                                        {{ immediateWithdrawalNote(holdingFor(pkg)) }}
                                                     </p>
                                                     <InputError :message="assignmentErrors.available_until" />
                                                     <InputError :message="assignmentErrors.collision" />
