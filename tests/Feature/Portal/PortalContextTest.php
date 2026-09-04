@@ -62,3 +62,32 @@ it('redirects the old portal path to the home organization', function () {
 it('defaults an organization to having a portal', function () {
     expect(Organization::factory()->create()->portal_enabled)->toBeTrue();
 });
+
+it('switches a customer portal off from the console when the switch is left unchecked', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    // An unchecked switch posts no field at all, so "off" arrives at the server as an
+    // absent key — the case prepareForValidation() exists to turn into an explicit false.
+    $this->actingAs(superAdmin())->put(route('admin.organizations.update', $org->id), [
+        'name' => $org->name,
+        'slug' => $org->slug,
+        'notification_cadence' => 'hourly',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($org->fresh()->portal_enabled)->toBeFalse();
+});
+
+it('switches a customer portal back on from the console', function () {
+    // Asserted in both directions: a save that hard-coded either answer would satisfy the
+    // case above, and the operator has to be able to undo the switch as well as set it.
+    $org = Organization::factory()->create(['slug' => 'acme', 'portal_enabled' => false]);
+
+    $this->actingAs(superAdmin())->put(route('admin.organizations.update', $org->id), [
+        'name' => $org->name,
+        'slug' => $org->slug,
+        'notification_cadence' => 'hourly',
+        'portal_enabled' => true,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($org->fresh()->portal_enabled)->toBeTrue();
+});
