@@ -247,11 +247,14 @@ class PypiController extends Controller
      * Own-organization, or shared, for the same reason findLocal() is: the pivot row records
      * assignment, and canAccessPackage() checks assignment and group access — neither compares
      * the package's organization to the registry's. A cross-organization pivot row would
-     * therefore be served here. The enforcement migration now refuses to complete while a
-     * *non-shared* such row exists, so that half should never match anything; it is stated
-     * anyway, because this is the only ecosystem where ownership was left implied by the
-     * access check rather than written into the query, and an invariant that only one of
-     * three read paths spells out is one edit from being lost.
+     * therefore be served here, and the enforcement migration does not rule that out: it refuses
+     * on ANY cross-organization row, shared or not, but it runs once — before `packages.shared`
+     * exists — so it constrains the data at that one moment and not what is written afterwards
+     * (argued in full on RegistryAccessService::availablePackages(), together with what a
+     * rollback past the column's migration then does). The non-shared half is held by the write
+     * paths, and stated here as well, because this is the only ecosystem where ownership was
+     * left implied by the access check rather than written into the query, and an invariant that
+     * only one of three read paths spells out is one edit from being lost.
      *
      * A shared package is the cross-organization row that is legitimate: owned by the
      * operator organization (spec §1) and deliberately offered to others. Without this

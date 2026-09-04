@@ -121,9 +121,18 @@ class RegistryAccessService
      * tenant (spec §1) and is deliberately offered to others. The pivot row is still what
      * grants access — an unassigned shared package appears in no registry.
      *
-     * The enforcement migration now refuses to complete while a *non-shared* cross-organization
-     * row exists, so that half should never match anything; it is stated anyway, because an
-     * invariant that only the read paths spell out one by one is one edit from being lost.
+     * The enforcement migration is not what holds the non-shared half. It refuses on ANY
+     * cross-organization row, shared or not — it has no `shared` clause and exempts nothing —
+     * and it runs once, before `packages.shared` exists, so it constrains the data at that one
+     * moment and says nothing about rows written afterwards. Every shared assignment this method
+     * exists to serve is such a row. So the non-shared half is held by the write paths alone
+     * (GuardsPackageAttachment), and stated here as well, because an invariant that only the read
+     * paths spell out one by one is one edit from being lost.
+     *
+     * The operational consequence is an operator's rather than this method's: rolling the schema
+     * back past 2026_09_03_120000_add_shared_to_packages.php drops the column while the shared
+     * assignments stay behind, so re-running the enforcement migration from there aborts and names
+     * every one of them as a violation. Recorded in docs/development.md, "Shared packages".
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */
