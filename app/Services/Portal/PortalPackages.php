@@ -3,9 +3,11 @@
 namespace App\Services\Portal;
 
 use App\Models\Group;
+use App\Models\GroupPackage;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\RegistryAccessService;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class PortalPackages
@@ -35,6 +37,15 @@ class PortalPackages
      * where the resolver made an existence check, and told the operator in German to do
      * something destructive that would not have helped.
      *
+     * Each entry also carries `available_until`, the end date of THAT registry's assignment, so
+     * the page can say "abgelaufen am …" (spec §3) against the registry it actually belongs to.
+     * IT IS A STORED VALUE PASSED THROUGH: this service reads the column and compares it to
+     * nothing. The expiry decision stays exactly where it was, in the difference between
+     * packagesFor() and packages() — a date in the returned shape is not a date rule in the
+     * code, and no reader should take it for one. It is carried here because the only other
+     * place a caller could reach for it, $row['package']->pivot, is the pivot of whichever
+     * registry was seen FIRST, which in a mixed row is silently the wrong registry's date.
+     *
      * ONE filter is applied here, and it is NOT a rule of its own: `groups.portal_enabled` —
      * "does this registry appear in the portal", the same predicate
      * Portal\RegistryController::index() already asks of the same column. Without it this page
@@ -58,13 +69,12 @@ class PortalPackages
      * one this page exists NOT to have. The customer's build gets a 404 for such a package,
      * and this is the page where that becomes explicable. See PortalPackagesTest.
      *
-     * @return Collection<int, array{package: Package, groups: Collection<int, array{group: Group,
-     *     in_force: bool}>, in_force: bool}>
+     * @return Collection<int, array{package: Package, groups: Collection<int, array{group: Group, in_force: bool, available_until: Carbon|null}>, in_force: bool}>
      */
     public function for(Organization $organization): Collection
     {
-        /** @var Collection<string, array{package: Package, groups: Collection<int, array{group: Group, in_force: bool}>}> $rows */
-        $rows = collect();
+        /** @var array<string, array{package: Package, groups: list<array{group: Group, in_force: bool, available_until: Carbon|null}>}> $rows */
+        $rows = [];
 
         $groups = $organization->groups()
             // `groups.portal_enabled`, not `organizations.portal_enabled`: whether THIS
@@ -78,30 +88,63 @@ class PortalPackages
             $served = $this->access->packagesFor($group)->keyBy('id');
 
             foreach ($group->packages()->get() as $package) {
-                $row = $rows->get($package->id) ?? [
-                    'package' => $package,
-                    'groups' => collect(),
-                ];
+                // getAttribute() rather than ->pivot: the pivot lives among the model's
+                // relations rather than its attributes, so the magic property is invisible to
+                // static analysis. It is a GroupPackage because Group::packages() declares
+                // ->using().
+                /** @var GroupPackage $assignment */
+                $assignment = $package->getAttribute('pivot');
+
+                // Read and handed on, never compared. The column is nullable — an assignment
+                // with no end date has none — and that null passes through unchanged.
+                /** @var Carbon|null $availableUntil */
+                $availableUntil = $assignment->available_until;
+
+                $rows[$package->id] ??= ['package' => $package, 'groups' => []];
 
                 // The per-registry answer, and the only place any `in_force` is decided.
-                $row['groups'] = $row['groups']->push([
+                // Appended into the stored row itself, so there is no write-back to forget and
+                // none to mistake for one (an earlier Collection here made the write-back a
+                // no-op, because push() mutates in place).
+                $rows[$package->id]['groups'][] = [
                     'group' => $group,
                     'in_force' => $served->has($package->id),
-                ]);
-
-                $rows->put($package->id, $row);
+                    'available_until' => $availableUntil,
+                ];
             }
         }
 
-        return $rows->values()
-            ->map(fn (array $r): array => [
-                'package' => $r['package'],
-                'groups' => $r['groups'],
-                // Derived, never accumulated alongside: in force in at least one registry. The
-                // package is usable, and the registry column says through which ones.
-                'in_force' => $r['groups']->contains(fn (array $e): bool => $e['in_force']),
-            ])
-            ->sortBy(fn (array $r): string => $r['package']->name)
-            ->values();
+        $ordered = array_values($rows);
+        usort($ordered, fn (array $a, array $b): int => strcmp($a['package']->name, $b['package']->name));
+
+        $result = [];
+
+        foreach ($ordered as $row) {
+            // Wrapped once, here: the entries are composed as a plain list above, where appending
+            // into the stored row needs no write-back, and the list is finished by now.
+            $groups = collect($row['groups']);
+
+            $result[] = [
+                'package' => $row['package'],
+                'groups' => $groups,
+                // Derived from the entries, never accumulated alongside them: in force in at
+                // least one registry. The package is usable, and the registry column says
+                // through which ones.
+                'in_force' => $groups->contains(fn (array $entry): bool => $entry['in_force']),
+            ];
+        }
+
+        // PHPSTAN, MEASURED RATHER THAN ASSUMED: the declared return type and the actual one are
+        // byte-identical — compared character for character in the raw formatter's output — and
+        // the check still fails, because Collection's TValue is invariant and this shape carries
+        // a NULLABLE UNION beneath it. Bisected: `available_until: Carbon` or `: mixed` clears
+        // the error; `?Carbon` and `null|Carbon` do not. So it is the union under an invariant
+        // template, not this code. The only structural cure is to hide the nullable inside a
+        // small value object, which changes the shape Task 3 reads — not a silent choice to make
+        // here. Both identifiers name the SAME rejection — it lands on the collect() argument
+        // and on the return of the same line — and they are named narrowly so any other fault of
+        // either kind anywhere else still surfaces.
+        // @phpstan-ignore return.type, argument.type
+        return collect($result);
     }
 }

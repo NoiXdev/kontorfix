@@ -14,6 +14,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Portal\PortalPackages;
+use Illuminate\Support\Carbon;
 
 it('lists a package the organization owns', function () {
     $org = Organization::factory()->create();
@@ -108,6 +109,51 @@ it('lists that same package once the registry switch is on', function () {
         ->toBe(['acme/hidden']);
 });
 
+it('names only the portal-visible registry of a package that sits in both', function () {
+    // The mixed case for the portal switch, and the one the hidden-only case cannot stand in
+    // for: here the package IS listed, so a filter that merely drops rows left without any
+    // visible registry passes that test and still names the hidden one here — and Task 3
+    // renders it as exactly the link GroupPolicy::view() answers with 403.
+    $org = Organization::factory()->create();
+    $visible = Group::factory()->for($org)->create(['name' => 'A sichtbar']);
+    $hidden = Group::factory()->for($org)->create(['name' => 'B versteckt', 'portal_enabled' => false]);
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    $visible->packages()->attach($package->id);
+    $hidden->packages()->attach($package->id);
+
+    $row = app(PortalPackages::class)->for($org)->first();
+
+    expect($row['groups']->pluck('group.id')->all())->toBe([$visible->id]);
+});
+
+it('reports each registry own availability date, independently', function () {
+    // Spec §3 wants "abgelaufen am …" with the date. The date has to come from the entry: the
+    // only other place a caller could reach, $row['package']->pivot, is the pivot of whichever
+    // registry was seen first — here registry A, whose date is not B's.
+    //
+    // This service still compares no dates. It reads the stored column and hands it on; which
+    // assignment is in force remains the difference between packagesFor() and packages().
+    $org = Organization::factory()->create();
+    $a = Group::factory()->for($org)->create(['name' => 'A']);
+    $b = Group::factory()->for($org)->create(['name' => 'B']);
+    $c = Group::factory()->for($org)->create(['name' => 'C']);
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    $a->packages()->attach($package->id, ['available_until' => now()->addDays(30)]);
+    $b->packages()->attach($package->id, ['available_until' => now()->subDay()]);
+    $c->packages()->attach($package->id);
+
+    $row = app(PortalPackages::class)->for($org)->first();
+
+    expect($row['groups']->pluck('available_until')->map(fn (?Carbon $d): ?string => $d?->toDateString())->all())
+        ->toBe([
+            now()->addDays(30)->toDateString(),
+            now()->subDay()->toDateString(),
+            // An assignment with no end date carries none — the null passes through unchanged.
+            null,
+        ])
+        ->and($row['groups']->pluck('in_force')->all())->toBe([true, false, true]);
+});
+
 it('keeps a package in force while any one registry still serves it', function () {
     // NOT in the brief, and it has to be: `in_force` accumulates across registries, and no
     // case in the brief's set can tell an accumulating `||` from a plain last-wins
@@ -167,7 +213,7 @@ it('orders the rows by package name, not by the registry they came from', functi
         ->toBe(['alpha/two', 'zeta/one']);
 });
 
-it('names every registry that serves the package', function () {
+it('names every portal-visible registry the package is assigned to', function () {
     $org = Organization::factory()->create();
     $a = Group::factory()->for($org)->create(['name' => 'A']);
     $b = Group::factory()->for($org)->create(['name' => 'B']);
