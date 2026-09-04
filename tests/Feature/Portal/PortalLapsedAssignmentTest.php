@@ -49,14 +49,17 @@ beforeEach(function () {
     $this->group->packages()->attach($this->lapsed, ['available_until' => now()->subDay()]);
 });
 
-it('counts only the assignments the registry still serves', function () {
+it('counts what the registry serves and what it will list, separately', function () {
+    // Two pivot rows, one of them lapsed. The card's number is the customer's shortest answer
+    // to "what is in here" and must not count what the registry 404s — but the registry page
+    // now LISTS the lapsed row, marked, so one number would put "1 Paket" above two rows.
+    // Both travel, and the card says which is which (registryPackageCount).
     $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registries')
             ->has('registries', 1)
-            // Two pivot rows, one of them lapsed. The number beside the registry is the
-            // customer's shortest answer to "what is in here", and it counted both.
-            ->where('registries.0.packages_count', 1));
+            ->where('registries.0.served_count', 1)
+            ->where('registries.0.assigned_count', 2));
 });
 
 it('lists a lapsed assignment alongside the live one, marked', function () {
@@ -133,5 +136,7 @@ it('serves an assignment again once its availability is pushed back into the fut
 
     $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries")
         ->assertOk()
-        ->assertInertia(fn ($p) => $p->where('registries.0.packages_count', 2));
+        // Both numbers agree again: nothing is lapsed, so the card is back to a plain count.
+        ->assertInertia(fn ($p) => $p->where('registries.0.served_count', 2)
+            ->where('registries.0.assigned_count', 2));
 });

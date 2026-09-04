@@ -4,13 +4,21 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { Package } from 'lucide-vue-next';
+import { registryPackageCount } from './portalPackages';
 
 interface RegistryRow {
     id: string;
     name: string;
     slug: string;
     url: string;
-    packages_count: number;
+    /** What this registry actually delivers — RegistryAccessService's answer. */
+    served_count: number;
+    /**
+     * How many assignments the registry page will list. It lists lapsed ones too, marked, so
+     * this is the larger number whenever something has lapsed and the card has to say which
+     * of the two it is showing.
+     */
+    assigned_count: number;
 }
 
 const props = defineProps<{
@@ -47,7 +55,10 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: `/c/${props.
                             <p class="font-mono text-sm break-all text-muted-foreground">{{ registry.url }}</p>
                             <p class="flex items-center gap-2 text-sm text-muted-foreground">
                                 <Package class="size-4" />
-                                {{ registry.packages_count }} {{ registry.packages_count === 1 ? 'Paket' : 'Pakete' }}
+                                <!-- The sentence lives in the tested module, not here: it is a
+                                     factual claim about what this registry delivers, and it was
+                                     the German on this page that nothing could check. -->
+                                {{ registryPackageCount(registry.served_count, registry.assigned_count) }}
                             </p>
                         </CardContent>
                     </Card>

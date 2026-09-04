@@ -9,7 +9,7 @@ import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
-import { lapsedNote } from './portalPackages';
+import { registryLapsedNote } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -44,9 +44,12 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     install: string;
-    // Whether this registry still serves the assignment. This page used to answer 404 for a
-    // lapsed one — the customer arrived here because their build failed and was shown
-    // nothing at all. It is served now, and the install command is replaced by the reason.
+    // REGISTRY-LOCAL: whether THIS registry still serves the assignment — this page is
+    // addressed by one registry and says nothing about the others. Decided by
+    // RegistryAccessService (expiry AND own-or-shared), the predicate the registry endpoints
+    // answer by. The page used to 404 for a lapsed one, so the customer arrived here because
+    // their build failed and was shown nothing at all; it is served now, and the install
+    // command is replaced by the reason.
     in_force: boolean;
     // The organization the URL addresses — the first segment of every portal link here.
     orgSlug: string;
@@ -147,10 +150,11 @@ function depCount(deps: Record<string, string>): number {
                 <!-- The command REPLACES nothing else on the page: the readme, the versions and
                      the dependency tree stay, because they are what the customer came to check
                      against. Only the one element that would not work is withheld — a snippet
-                     that answers 404 is worse than none, and the sentence in its place is the
-                     same one the portal's package list gives, from the tested module. -->
+                     that answers 404 is worse than none. The single-registry sentence, from
+                     the tested module: this page knows only the registry it is addressed by,
+                     and the landing page's note claims none of them serve it. -->
                 <div v-else class="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
-                    {{ lapsedNote() }}
+                    {{ registryLapsedNote() }}
                 </div>
             </section>
 

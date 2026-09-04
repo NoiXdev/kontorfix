@@ -2,6 +2,7 @@
 import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,8 +14,7 @@ import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
-import { badgesFor, noteFor, SHARED_BADGE_TITLE, type PortalPackageRow } from './portalPackages';
+import { badgesFor, registryLapsedNote, SHARED_BADGE_TITLE } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -31,12 +31,26 @@ interface Snippets {
     twine: string;
 }
 
-interface PackageRow extends PortalPackageRow {
+interface PackageRow {
     id: string;
     name: string;
     type: string;
     description: string | null;
     latest_version: string | null;
+    /** The package is owned by the operator organization and shared into this registry. */
+    shared: boolean;
+    /**
+     * REGISTRY-LOCAL: whether THIS registry still serves the package — not whether the
+     * customer can get it at all. Deliberately NOT the `in_force` of `PortalPackageRow`,
+     * whose contract is "served by at least one of this customer's registries"; the two
+     * differ exactly on a package that lapsed here and still runs next door, which is the
+     * case the portal's copy has to keep straight (see portalPackages.ts, TWO ANSWERS). This
+     * interface used to extend that one and inherited the wrong contract in silence.
+     *
+     * Decided by RegistryAccessService — expiry AND own-or-shared, the predicate the registry
+     * endpoints themselves answer by.
+     */
+    in_force: boolean;
 }
 
 interface TokenRow {
@@ -186,17 +200,14 @@ function destroyToken(id: string) {
 }
 
 /**
- * The one note this row carries here, through the module portal/Packages.vue uses — not a
- * second variant of the same sentences.
+ * The note a row carries here: the single-registry sentence, or nothing.
  *
- * `registries: []` is what this page factually has: it renders ONE registry, and `noteFor`'s
- * partial-lapse branch is a statement about a package that some of a customer's registries
- * still serve and others do not, which needs the set this page does not carry. With an empty
- * set that branch yields null, so an in-force row gets no note and a lapsed one gets
- * `lapsedNote()` — the two cases this page can actually distinguish.
+ * NOT `noteFor()`. That function chooses between two notes that both speak about the
+ * customer's registries as a set — which this page does not have, and whose `in_force` is
+ * registry-local. `registryLapsedNote()` is the sentence for exactly this shape.
  */
 function noteForRow(pkg: PackageRow): string | null {
-    return noteFor({ ...pkg, registries: [] });
+    return pkg.in_force ? null : registryLapsedNote();
 }
 
 const breadcrumbs: BreadcrumbItem[] = [

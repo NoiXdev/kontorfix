@@ -196,13 +196,21 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     /**
      * Whether this account acts FOR THE OPERATOR rather than for a customer.
      *
-     * THE ONE STATEMENT OF THAT QUESTION. It had two, and they disagreed: the portal gate
-     * (ResolvePortalContext::mayOpen) asked this, while GroupPolicy::view() asked the much
-     * narrower `role === Admin && organization?->is_operator`. An operator-organization
-     * maintainer, and anyone holding an operator role through a membership, were therefore
-     * admitted to a customer's portal and then answered 403 on every registry inside it —
-     * a portal with pages its own gate refuses. Spec decision 4 (an operator sees what the
-     * customer sees) is not met while the two can differ, so they are now one method.
+     * THE ONE STATEMENT OF THAT QUESTION FOR THE PORTAL. It had two, and they disagreed: the
+     * portal gate (ResolvePortalContext::mayOpen) asked this, while GroupPolicy::view() asked
+     * the much narrower `role === Admin && organization?->is_operator`. An operator-
+     * organization maintainer, and anyone holding an operator role through a membership, were
+     * therefore admitted to a customer's portal and then answered 403 on every registry
+     * inside it — a portal with pages its own gate refuses. Spec decision 4 (an operator sees
+     * what the customer sees) is not met while the two can differ, so both now call this.
+     *
+     * TWO CHARACTER-IDENTICAL COPIES OF THE NARROW VERSION SURVIVE OUTSIDE THE PORTAL:
+     * RegistryTokenPolicy::delete() and the `viewApiDocs` gate in AppServiceProvider. Both
+     * are dead code for the same reason the third one was — the condition IS isSuperAdmin()'s
+     * grandfather clause, and Gate::before answers for that population before either runs —
+     * but replacing them is a decision about token deletion and about who may read the
+     * management API reference, not about the portal, so they are named here rather than
+     * quietly widened by this change.
      *
      * A super-admin first and on its own terms, not as a shortcut past the scan below: the
      * scan can only answer yes if an `is_operator` row exists, and the `is_super_admin` flag

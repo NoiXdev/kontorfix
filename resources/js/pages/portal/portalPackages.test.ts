@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { badgesFor, lapsedNote, noteFor, partlyLapsedNote, registryMarker, SHARED_BADGE_TITLE } from './portalPackages';
+import {
+    badgesFor,
+    lapsedNote,
+    noteFor,
+    partlyLapsedNote,
+    registryLapsedNote,
+    registryMarker,
+    registryPackageCount,
+    SHARED_BADGE_TITLE,
+} from './portalPackages';
 
 describe('badgesFor', () => {
     it('marks a shared package', () => {
@@ -39,6 +48,64 @@ describe('lapsedNote', () => {
         // Only the operator can restore the assignment; an instruction the reader cannot
         // follow is worse than none.
         expect(lapsedNote()).not.toContain('Entfernen Sie');
+    });
+});
+
+describe('registryLapsedNote', () => {
+    it('says what the customer sees in their build', () => {
+        expect(registryLapsedNote()).toContain('404');
+    });
+
+    it('speaks only about the registry the reader is looking at', () => {
+        // The whole reason this function exists. `lapsedNote()` claims "von keiner Ihrer
+        // Registries", which the two single-registry pages cannot know: their `in_force` is
+        // registry-local, so the package may well still be served next door. toBe, not a pair
+        // of not.toContain — those are case-sensitive, and "Registries"/"registries" would slip
+        // straight through one while putting the false claim back.
+        expect(registryLapsedNote()).toBe(
+            'Diese Registry liefert das Paket nicht mehr aus. Builds, die hier auflösen, erhalten ' +
+                'einen 404. Wenden Sie sich an den Betreiber, wenn Sie das Paket weiter benötigen.',
+        );
+    });
+
+    it('is not the note the landing page uses', () => {
+        // The pages import one or the other by name, and a refactor that pointed both at one
+        // sentence would put the customer-wide claim back on a registry page with nothing
+        // failing. Asserted as a difference rather than by re-spelling either text.
+        expect(registryLapsedNote()).not.toBe(lapsedNote());
+    });
+
+    it('does not tell the customer to remove anything themselves', () => {
+        // Only the operator can extend an assignment, so an instruction the reader cannot
+        // follow would be worse than none — the same rule lapsedNote() follows.
+        expect(registryLapsedNote()).toContain('Betreiber');
+    });
+});
+
+describe('registryPackageCount', () => {
+    it('gives a plain count where the registry serves everything assigned to it', () => {
+        expect(registryPackageCount(3, 3)).toBe('3 Pakete');
+    });
+
+    it('says Paket in the singular', () => {
+        expect(registryPackageCount(1, 1)).toBe('1 Paket');
+    });
+
+    it('names both numbers where something has lapsed', () => {
+        // The case the card used to hide: one number above a page listing two rows. Asserted
+        // whole — the interesting half of this function is the German, not the arithmetic.
+        expect(registryPackageCount(1, 2)).toBe('1 von 2 Paketen ausgeliefert');
+    });
+
+    it('says the same thing when the registry serves none of them', () => {
+        // Zero is not a special case, and writing one would be the only way to get "0 Pakete"
+        // onto a card above two lapsed rows.
+        expect(registryPackageCount(0, 2)).toBe('0 von 2 Paketen ausgeliefert');
+    });
+
+    it('gives an empty registry the plain count', () => {
+        // served === assigned === 0 takes the first branch, where the plural is right.
+        expect(registryPackageCount(0, 0)).toBe('0 Pakete');
     });
 });
 
@@ -146,23 +213,6 @@ describe('noteFor', () => {
         expect(noteFor({ shared: false, in_force: true, registries: [{ name: 'ci', in_force: true }] })).toBeNull();
     });
 
-    /*
-     * portal/Registry.vue renders exactly ONE registry, so it has no registry set to pass and
-     * calls this with an empty one. Both branches of that call are pinned here because there is
-     * no component runner on this frontend: the page's premise — that an empty set yields the
-     * fully lapsed note for a lapsed row and nothing for a live one — is only checkable here,
-     * and a drill on the page could never expose it.
-     */
-    it('gives a lapsed row the fully lapsed note when the caller has no registry set', () => {
-        expect(noteFor({ shared: false, in_force: false, registries: [] })).toBe(lapsedNote());
-    });
-
-    it('leaves an in-force row without a note when the caller has no registry set', () => {
-        // partlyLapsedNote() is a statement about SOME of a customer's registries; with none
-        // named there is no such statement, and inventing one would put a red 404 warning on
-        // a package that installs.
-        expect(noteFor({ shared: false, in_force: true, registries: [] })).toBeNull();
-    });
 });
 
 describe('SHARED_BADGE_TITLE', () => {

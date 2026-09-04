@@ -9,6 +9,22 @@ class GroupPolicy
 {
     public function view(User $user, Group $group): bool
     {
+        // Collection-only groups (portal disabled) are a container for packages that get
+        // composed into other registries — they are not themselves a portal-visible registry.
+        //
+        // AHEAD OF THE OPERATOR BRANCH, and that ordering is the point. The operator branch
+        // used to sit first, which was harmless only because it was unreachable: its old
+        // condition was character-for-character User::isSuperAdmin()'s second clause, and a
+        // super-admin never gets here at all — AppServiceProvider's Gate::before answers
+        // first. Widening it to every operator account made the branch live, and an operator
+        // stepping past this check would see a registry the portal deliberately hides from
+        // the customer whose portal they are looking at. Spec decision 4 says an operator
+        // sees exactly what the customer sees, and index() and PortalPackages both filter on
+        // this same column, so no legitimate operator path wants a hidden group.
+        if (! $group->portal_enabled) {
+            return false;
+        }
+
         // The same question ResolvePortalContext asks before it opens a customer portal at
         // all, asked through the same method. This policy is reached only from the portal
         // controllers (Portal\RegistryController and Portal\TokenController are its only
@@ -30,11 +46,7 @@ class GroupPolicy
         // either. Same shape as RegistryAccessService::canAccessGroup().
         $groupOrganizationId = $group->getAttribute('organization_id');
 
-        // Collection-only groups (portal disabled) are a container for packages that
-        // get composed into other registries — they are not themselves a portal-visible
-        // registry, so members must not reach them through the portal.
-        return $group->portal_enabled
-            && $groupOrganizationId !== null
+        return $groupOrganizationId !== null
             && $user->belongsToOrganization($groupOrganizationId);
     }
 }

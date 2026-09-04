@@ -135,6 +135,40 @@ export function lapsedNote(): string {
 }
 
 /**
+ * What a lapsed assignment means ON A PAGE THAT SHOWS ONE REGISTRY — `portal/Registry.vue` and
+ * `portal/Package.vue`, both of which are addressed by a single registry and hold a
+ * REGISTRY-LOCAL `in_force`.
+ *
+ * A third sentence rather than reuse of `lapsedNote()`, which those two pages first borrowed.
+ * That note opens "von keiner Ihrer Registries" — a claim about ALL of the customer's
+ * registries — and only the landing page can make it, because only there is `in_force`
+ * derived across every registry (see the TWO ANSWERS paragraph at the top of this module). On
+ * a registry page the same words are measurably false the moment a second registry still
+ * serves the package, which is precisely the mixed case `partlyLapsedNote()` exists for. It
+ * also ends "Die betroffenen Registries sind oben markiert", pointing at per-registry markers
+ * neither of these two pages renders.
+ *
+ * So this one speaks only about the registry the reader is looking at: "Diese Registry",
+ * "Builds, die hier auflösen". It makes no claim about the others, because the page it renders
+ * on knows nothing about them — and a note that says less is the only honest option when the
+ * caller's flag answers a narrower question.
+ *
+ * Like `lapsedNote()` it names the 404, because that is the symptom the customer arrives with,
+ * and it points at the operator rather than at anything the reader could do: only the operator
+ * can extend an assignment.
+ *
+ * Neither "Freigabe" nor "Upstream" appears, and neither may. In this console "Freigabe" IS the
+ * `shared` marking and never an assignment, and "Upstream" is the operator's word for the
+ * public index — both are taken, and a lapsed assignment is neither.
+ */
+export function registryLapsedNote(): string {
+    return (
+        'Diese Registry liefert das Paket nicht mehr aus. Builds, die hier auflösen, erhalten ' +
+        'einen 404. Wenden Sie sich an den Betreiber, wenn Sie das Paket weiter benötigen.'
+    );
+}
+
+/**
  * The consequence for a package that is still usable but has stopped being served by SOME of
  * the customer's registries — null where there is no such case.
  *
@@ -195,6 +229,34 @@ export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalReg
  */
 export function noteFor(row: PortalPackageRow & { registries: PortalRegistryName[] }): string | null {
     return row.in_force ? partlyLapsedNote(row) : lapsedNote();
+}
+
+/**
+ * What the number on a registry card says.
+ *
+ * TWO NUMBERS, one sentence. `served` is what the registry actually delivers; `assigned` is
+ * how many rows the registry page lists, and that page now lists lapsed assignments instead of
+ * hiding them. They were one number, which meant a card reading "1 Paket" led to a page with
+ * two rows on it — the customer counting the difference and finding no explanation is the same
+ * unexplained-discrepancy defect the `abgelaufen` marker exists to close, one page earlier.
+ *
+ * Where nothing has lapsed the two agree and the sentence stays the plain count, because a
+ * ratio on the ordinary case is noise, and noise is what makes the interesting form easy to
+ * miss. Where they differ, the card says which of the two the number is.
+ *
+ * "ausgeliefert" and not "aktiv" or "verfügbar": it is the word `registryLapsedNote()` and
+ * `lapsedNote()` both use for what a registry does with a package, and the customer meets the
+ * long form of this sentence on the very page those notes render on.
+ */
+export function registryPackageCount(served: number, assigned: number): string {
+    if (served === assigned) {
+        return `${served} ${served === 1 ? 'Paket' : 'Pakete'}`;
+    }
+
+    // "von N Paketen" is plural throughout: `assigned` exceeds `served` here, so it is at
+    // least 2 whatever `served` is, and the noun agrees with it rather than with the leading
+    // number. `1 von 2 Paketen ausgeliefert` is the common shape and reads correctly.
+    return `${served} von ${assigned} Paketen ausgeliefert`;
 }
 
 /**
