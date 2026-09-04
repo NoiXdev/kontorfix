@@ -128,6 +128,32 @@ it('does not offer the publish ability to a plain member', function () {
         ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', false));
 });
 
+it('does not offer an operator account the publish ability in a customer portal', function () {
+    // administers() answers Admin EVERYWHERE for a super-admin, so the publish flag was true
+    // here while `may_mint_tokens` was false — two flags disagreeing about one account. That
+    // was harmless only while the publish flag was read inside the hidden form, which is a
+    // fact about the template rather than a rule the code holds. The conjunction holds it.
+    Organization::factory()->create(['slug' => 'acme']);
+
+    // The publish flag FIRST: it is the subject here, and asserting the mint flag ahead of it
+    // would abort the test on the mutation this case exists to catch before it could speak.
+    $this->actingAs(superAdmin())->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', false)
+            ->where('portal.may_mint_tokens', false));
+});
+
+it('offers an operator admin the publish ability inside their own portal', function () {
+    // The half of the conjunction that must NOT be lost: this account is a member of the
+    // organization it is looking at and administers it, so both flags are true and dropping
+    // the membership clause has to leave this case green. Without it, "require membership"
+    // is indistinguishable from "refuse operator accounts everywhere".
+    $super = superAdmin();
+
+    $this->actingAs($super)->get('/c/'.$super->organization->slug)
+        ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', true)
+            ->where('portal.may_mint_tokens', true));
+});
+
 it('does not offer the publish ability to an admin of elsewhere who is only a member here', function () {
     // The population the page used to get wrong. `auth.can.console` is TRUE for this
     // account — it administers its home organization — and the page read that flag, so it

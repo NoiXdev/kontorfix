@@ -140,9 +140,19 @@ class HandleInertiaRequests extends Middleware
                 ->values()->all(),
             'viewing_as_operator' => ! $isMember,
             'may_mint_tokens' => $isMember,
-            // Whether the "Veröffentlichen" ability may be offered, from administers() —
-            // the SAME method RegistryTokenPolicy::create() asks for exactly this ability,
-            // rather than a second spelling of the rule.
+            // Whether the "Veröffentlichen" ability may be offered — the CONJUNCTION of the
+            // two clauses RegistryTokenPolicy::create() applies, in its order: membership
+            // first, then administers() for the Publish ability specifically. `$isMember` is
+            // reused rather than respelled, and administers() is the policy's own method, so
+            // this is one statement of each clause and not a third copy of either.
+            //
+            // The membership half is not redundant. administers() answers Admin EVERYWHERE
+            // for a super-admin, so without it this flag was true for an operator account
+            // standing in a customer's portal — where `may_mint_tokens` is false and the two
+            // flags therefore disagreed. That was harmless only for as long as the publish
+            // flag stayed inside the hidden form, which is a guarantee about where a future
+            // template puts it rather than one the code makes. Now it cannot disagree: a
+            // viewer who may not mint at all may not mint a publish token either.
             //
             // The page used to gate this on `auth.can.console`, which means "administers
             // SOME organization". The policy means "administers THIS one", so an admin of A
@@ -150,7 +160,7 @@ class HandleInertiaRequests extends Middleware
             // — the shown-and-then-refused shape this whole task exists to remove, one level
             // further down. Scoped to the addressed organization, that population is offered
             // "Lesen" alone, which is all it may mint there.
-            'may_publish_tokens' => $user->administers($organization->id),
+            'may_publish_tokens' => $isMember && $user->administers($organization->id),
         ];
     }
 }

@@ -53,9 +53,11 @@ export interface PortalContext {
     /** Membership — the same question TokenController::store() answers before it mints. */
     may_mint_tokens: boolean;
     /**
-     * Whether the publish ability may be offered for THIS organization —
-     * `User::administers($id)`, the method RegistryTokenPolicy::create() calls. Not
-     * `auth.can.console`, which is true for an admin of any organization at all.
+     * Whether the publish ability may be offered for THIS organization: membership AND
+     * `User::administers($id)`, the two clauses RegistryTokenPolicy::create() applies. Not
+     * `auth.can.console`, which is true for an admin of any organization at all. Never true
+     * where `may_mint_tokens` is false — the conjunction is what makes that hold for a
+     * super-admin, whom administers() answers Admin for everywhere.
      */
     may_publish_tokens: boolean;
 }
