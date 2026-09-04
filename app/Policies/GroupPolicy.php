@@ -22,12 +22,17 @@ class GroupPolicy
         // sees exactly what the customer sees, and index() and PortalPackages both filter on
         // this same column, so no legitimate operator path wants a hidden group.
         //
-        // NO LONGER REACHED BY ANY CALLER, and deliberately kept anyway. All three portal
-        // paths — RegistryController::show(), showPackage() and TokenController::store() —
-        // now state `abort_unless($group->portal_enabled, 404)` before they authorize, which
-        // is where a surface property belongs. Deleting this clause therefore reddens no
-        // test; that is a fact about the callers, not evidence that the clause is wrong, and
-        // the reasoning above still applies the moment a fourth caller appears.
+        // NO LONGER REACHED THROUGH ANY ROUTE. All three portal paths —
+        // RegistryController::show(), showPackage() and TokenController::store() — state
+        // `abort_unless($group->portal_enabled, 404)` before they authorize, because
+        // ENFORCEMENT of a surface property belongs in the controller, ahead of
+        // authorization, where every population gets one answer. That is Task 4's ruling and
+        // it is about where the rule is enforced, not about whether this policy may also
+        // state it.
+        //
+        // Kept, and pinned directly: GroupPolicyTest's 'refuses to view a group the portal
+        // does not show' calls this method rather than a route, so deleting the clause
+        // reddens a named test. That test is what keeps it, not this comment.
         if (! $group->portal_enabled) {
             return false;
         }
