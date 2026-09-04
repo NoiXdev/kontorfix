@@ -4,11 +4,11 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Group;
-use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Services\Package\PackageDependencies;
+use App\Services\Portal\PortalContext;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\RegistryAccessService;
@@ -34,7 +34,7 @@ class RegistryController extends Controller
 
     public function index(Request $request): Response
     {
-        $organization = $this->portalOrganization($request);
+        $organization = PortalContext::get($request);
 
         // The organization the URL addresses, not every organization the viewer belongs to.
         // Merging their memberships was the only answer available while the portal had a
@@ -80,7 +80,7 @@ class RegistryController extends Controller
 
     public function show(Request $request, Group $group): Response
     {
-        $organization = $this->portalOrganization($request);
+        $organization = PortalContext::get($request);
         // `groups.portal_enabled` — whether this registry appears in the portal at all, the
         // same predicate index() and PortalPackages ask of the same column.
         //
@@ -185,7 +185,7 @@ class RegistryController extends Controller
 
     public function showPackage(Request $request, Group $group, Package $package): Response
     {
-        $organization = $this->portalOrganization($request);
+        $organization = PortalContext::get($request);
         // Refuses a registry the portal does not show, before the policy and for the same
         // reason show() gives: the answer must not depend on who is asking.
         abort_unless($group->portal_enabled, 404);
@@ -241,19 +241,5 @@ class RegistryController extends Controller
             // answers 404 is worse than saying nothing.
             'in_force' => $inForce,
         ]);
-    }
-
-    /**
-     * The organization the URL addresses, put on the request by ResolvePortalContext.
-     * Every portal page needs its slug: it is the first segment of every portal URL the
-     * page builds, so it travels to the client as a prop rather than being re-derived
-     * there from window.location.
-     */
-    private function portalOrganization(Request $request): Organization
-    {
-        /** @var Organization $organization */
-        $organization = $request->attributes->get('portalOrganization');
-
-        return $organization;
     }
 }

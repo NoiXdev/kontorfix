@@ -6,10 +6,9 @@ use App\Enums\TokenAbility;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Portal\StorePortalTokenRequest;
 use App\Models\Group;
-use App\Models\Organization;
 use App\Models\RegistryToken;
+use App\Services\Portal\PortalContext;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Http\Request;
 
 class TokenController extends Controller
 {
@@ -20,7 +19,7 @@ class TokenController extends Controller
         // organization. The home-org fallback predates /c/{orgSlug}: with an address in the
         // URL it minted a token for the wrong organization whenever a member of two
         // organizations submitted no group.
-        $organization = $this->portalOrganization($request);
+        $organization = PortalContext::get($request);
 
         // Minting requires membership, not visibility. ResolvePortalContext deliberately lets
         // an operator account open any customer portal so that support sees what the customer
@@ -94,14 +93,5 @@ class TokenController extends Controller
         $token->delete();
 
         return back()->with('success', 'Token widerrufen.');
-    }
-
-    /** The organization the address names, put on the request by ResolvePortalContext. */
-    private function portalOrganization(Request $request): Organization
-    {
-        /** @var Organization $organization */
-        $organization = $request->attributes->get('portalOrganization');
-
-        return $organization;
     }
 }

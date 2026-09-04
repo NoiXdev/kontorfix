@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
@@ -79,6 +80,8 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
+            <PortalHeader />
+
             <h1 class="text-xl font-semibold">Pakete</h1>
 
             <DataTable :columns="columns" :state="table" empty-message="Noch keine Pakete verfügbar." search-placeholder="Name suchen…">

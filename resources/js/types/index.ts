@@ -30,6 +30,30 @@ export interface OrgScope {
     canSelectAll: boolean;
 }
 
+/** One organization the portal switcher can navigate to, and the one it is showing. */
+export interface SwitchableOrganization {
+    name: string;
+    slug: string;
+}
+
+/**
+ * The customer portal's header context, shared by HandleInertiaRequests on every request
+ * that addresses a portal and null on every request that does not.
+ */
+export interface PortalContext {
+    organization: SwitchableOrganization;
+    /** The viewer's OWN memberships whose portal is switched on — never a broader set. */
+    switchable: SwitchableOrganization[];
+    /**
+     * The viewer is standing in a portal they are not a member of, which is the operator
+     * branch of ResolvePortalContext and no other. Exactly `!may_mint_tokens`: one question
+     * asked once on the server, so do not re-derive either of them here.
+     */
+    viewing_as_operator: boolean;
+    /** Membership — the same question TokenController::store() answers before it mints. */
+    may_mint_tokens: boolean;
+}
+
 export interface BreadcrumbItem {
     title: string;
     href: string;
@@ -57,6 +81,7 @@ export interface SharedData {
     registrationEnabled?: boolean;
     appVersion?: string;
     scope?: OrgScope | null;
+    portal?: PortalContext | null;
     registryTypeMeta?: RegistryTypeMeta[];
     notificationEventMeta?: NotificationEventMeta[];
     ziggy: {

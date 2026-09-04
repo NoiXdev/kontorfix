@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Portal\PortalContext;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,7 +23,7 @@ class ResolvePortalContext
         abort_unless($organization->portal_enabled, 404);
         abort_unless($this->mayOpen($request->user(), $organization), 404);
 
-        $request->attributes->set('portalOrganization', $organization);
+        PortalContext::put($request, $organization);
 
         // Controller actions do not take {orgSlug}. Without this, Laravel's positional
         // controller dispatch shifts every later route parameter — the same reason

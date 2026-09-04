@@ -91,6 +91,35 @@ it('redirects the old portal path to the home organization', function () {
     $this->actingAs($user)->get('/portal')->assertRedirect('/c/acme');
 });
 
+it('shows a member of an organization whose portal is off a page instead of a dead redirect', function () {
+    // The dead end the "404, never 403" rule leaves behind, and the operator creates it by
+    // using the feature: /dashboard sends a plain member to /portal, /portal redirected them
+    // to /c/{slug}, and the gate answered 404 there. Nothing this account can reach.
+    //
+    // No disclosure question here, unlike at the gate: the viewer is a member and already
+    // knows the organization exists. So it is told, rather than sent to a 404.
+    $org = Organization::factory()->create(['slug' => 'acme', 'name' => 'Acme GmbH', 'portal_enabled' => false]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/portal')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/PortalDisabled')
+            ->where('organization', 'Acme GmbH'));
+});
+
+it('sends a member of an organization whose portal is off from the dashboard to that same page', function () {
+    // Its own test rather than a second assertion above: the dashboard reaches this through
+    // DashboardController delegating to PackageController::home(), which is a different call
+    // path, and a failure on the /portal assertion would hide whether this one still works.
+    $org = Organization::factory()->create(['slug' => 'acme', 'name' => 'Acme GmbH', 'portal_enabled' => false]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/PortalDisabled')
+            ->where('organization', 'Acme GmbH'));
+});
+
 it('defaults an organization to having a portal', function () {
     expect(Organization::factory()->create()->portal_enabled)->toBeTrue();
 });

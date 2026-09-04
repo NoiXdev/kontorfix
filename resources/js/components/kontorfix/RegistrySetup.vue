@@ -34,7 +34,17 @@ const props = defineProps<{
     personalTokens?: PersonalToken[];
     // Which ecosystems to show setup steps for. Omitted → all.
     types?: string[];
+    // Whether to offer minting at all. Omitted → yes, which is the console's case: every
+    // caller there is already an admin or maintainer of the organization. The portal passes
+    // the shared `portal.may_mint_tokens`, so an operator standing in a customer's portal is
+    // not offered a form the server would then refuse — the same reason portal/Registry.vue
+    // hides its own token form, and this is the portal's SECOND way to the same POST.
+    mayMint?: boolean;
 }>();
+
+// `!== false` rather than `?? true`: an omitted prop arrives as undefined, and the console
+// omits it.
+const mayMint = computed(() => props.mayMint !== false);
 
 const PLACEHOLDER = '<dein-token>';
 
@@ -142,7 +152,7 @@ function selectSession(value: string) {
                             <option v-for="t in personalTokens" :key="t.id" value="" disabled>{{ t.name }} · {{ t.ability }}</option>
                         </optgroup>
                     </select>
-                    <Button variant="outline" size="sm" type="button" @click="showCreate = !showCreate">
+                    <Button v-if="mayMint" variant="outline" size="sm" type="button" @click="showCreate = !showCreate">
                         <Plus class="size-4" />
                         Token erstellen
                     </Button>
@@ -153,7 +163,7 @@ function selectSession(value: string) {
                 </p>
             </div>
 
-            <form v-if="showCreate" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end" @submit.prevent="createAndInsert">
+            <form v-if="mayMint && showCreate" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end" @submit.prevent="createAndInsert">
                 <div class="grid gap-1.5">
                     <Label for="setup_token_name">Name</Label>
                     <Input id="setup_token_name" v-model="form.name" placeholder="ci-token" autocomplete="off" />

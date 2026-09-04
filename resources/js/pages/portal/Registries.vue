@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -36,6 +37,8 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: `/c/${props.
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
+            <PortalHeader />
+
             <div class="flex items-center justify-between">
                 <h1 class="text-xl font-semibold">Registries</h1>
             </div>

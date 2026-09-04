@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
-use App\Models\Organization;
+use App\Services\Portal\PortalContext;
 use App\Services\Portal\PortalPackages;
 use App\Services\Portal\PortalRegistryAssignment;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -38,8 +38,7 @@ class PackageController extends Controller
      */
     public function index(Request $request): Response
     {
-        /** @var Organization $organization */
-        $organization = $request->attributes->get('portalOrganization');
+        $organization = PortalContext::get($request);
 
         $rows = $this->packages->for($organization);
 
@@ -105,6 +104,23 @@ class PackageController extends Controller
         // 200 with nothing in it.
         if ($organization === null) {
             return Inertia::render('portal/NoOrganization');
+        }
+
+        // The dead end the portal switch leaves behind. ResolvePortalContext answers 404 for
+        // an organization whose portal is off — deliberately, and uniformly with the slug it
+        // will not confirm — so redirecting into /c/{slug} sends a plain member to a 404 and
+        // /dashboard sends them here first. That account then has no reachable page at all.
+        //
+        // A SIBLING PAGE rather than a second variant of portal/NoOrganization: the two say
+        // different things (that page's name is a false statement about an account that HAS
+        // an organization), and a variant prop would let both cases satisfy one
+        // `component()` assertion, so a test could no longer tell which branch it hit.
+        //
+        // Naming the organization is safe here in a way it is not at the gate: the viewer is
+        // a member and already knows it exists. The uniform 404 protects slugs from being
+        // guessed by strangers, and this account is not one.
+        if (! $organization->portal_enabled) {
+            return Inertia::render('portal/PortalDisabled', ['organization' => $organization->name]);
         }
 
         return redirect()->route('portal.packages.index', $organization->slug);

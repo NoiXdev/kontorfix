@@ -4,8 +4,10 @@ namespace App\Http\Middleware;
 
 use App\Enums\NotificationEvent;
 use App\Enums\PackageType;
+use App\Models\Organization;
 use App\Models\SystemSetting;
 use App\Models\User;
+use App\Services\Portal\PortalContext;
 use App\Services\Scope\OrgScope;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
@@ -70,6 +72,11 @@ class HandleInertiaRequests extends Middleware
             // The sidebar organization scope switch. Null when not applicable (logged out
             // or a single-org admin with nothing to switch between).
             'scope' => fn () => $user instanceof User ? app(OrgScope::class)->share() : null,
+            // The customer portal's header: which organization the URL addresses, where the
+            // viewer may switch to, and the two flags the header and the token form read.
+            // Null on every request that addresses no portal, which is most of them — the
+            // header is a shared prop, so its absence is what keeps it off the console.
+            'portal' => fn () => $this->portal($request, $user),
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'plainTextToken' => fn () => $request->session()->get('plainTextToken'),
@@ -78,5 +85,57 @@ class HandleInertiaRequests extends Middleware
                 'incomingWebhookUrl' => fn () => $request->session()->get('incomingWebhookUrl'),
             ],
         ]);
+    }
+
+    /**
+     * The portal header's props, or null on a request that addresses no portal.
+     *
+     * @return array{organization: array{name: string, slug: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool}|null
+     */
+    private function portal(Request $request, ?User $user): ?array
+    {
+        $organization = PortalContext::find($request);
+
+        if ($organization === null || ! $user instanceof User) {
+            return null;
+        }
+
+        // ONE STATEMENT of the membership question, because the two flags below are that
+        // question and its inverse rather than two rules. `may_mint_tokens` has to be the
+        // same answer TokenController::store() gives — it asks exactly this `in_array`
+        // against exactly this list — or the form is offered to someone the controller then
+        // refuses, which is the shown-and-then-refused shape this codebase replaced with
+        // hiding on the admin registry page. `viewing_as_operator` is the same question
+        // negated: a viewer standing in a portal they are not a member of is there on
+        // ResolvePortalContext's operator branch and on no other. Written once so that a
+        // later change to what "membership" means cannot be made to only one of them.
+        //
+        // NOT administersOperatorOrganization(): that is the OPERATOR question, and the two
+        // are different. An operator-organization account looking at its OWN portal is a
+        // member of it, mints there like anybody else, and must not be told it is looking at
+        // somebody else's portal.
+        $accessible = $user->accessibleOrganizationIds();
+        $isMember = in_array($organization->id, $accessible, true);
+
+        return [
+            'organization' => ['name' => $organization->name, 'slug' => $organization->slug],
+            // Built from the viewer's OWN memberships, never a broader set: feeding this the
+            // customer directory would make that directory a by-product of navigation, and
+            // an operator account's accessible set is its own organizations — not every
+            // customer portal it is allowed to open.
+            //
+            // Filtered on `portal_enabled` because this is navigation and
+            // ResolvePortalContext answers 404 for an organization whose portal is off: an
+            // unfiltered entry is a link the viewer can see and cannot follow. The addressed
+            // organization always survives the filter (the middleware has already required
+            // it), so the switcher's current value is never one of the rows it dropped.
+            'switchable' => Organization::whereIn('id', $accessible)
+                ->where('portal_enabled', true)
+                ->orderBy('name')->get(['name', 'slug'])
+                ->map(fn (Organization $o): array => ['name' => $o->name, 'slug' => $o->slug])
+                ->values()->all(),
+            'viewing_as_operator' => ! $isMember,
+            'may_mint_tokens' => $isMember,
+        ];
     }
 }

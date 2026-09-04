@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -95,6 +96,8 @@ function depCount(deps: Record<string, string>): number {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
+            <PortalHeader />
+
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>

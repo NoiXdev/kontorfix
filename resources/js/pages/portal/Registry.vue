@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -108,6 +109,10 @@ const packageTable = useTableState<PackageRow>({
 
 const page = usePage<SharedData>();
 const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
+
+// Both token forms on this page POST to portal.tokens.store, so both read the one flag.
+// `?? false` for the null case: no addressed organization means no portal token to mint.
+const mayMint = computed(() => page.props.portal?.may_mint_tokens ?? false);
 
 // Publish tokens are organization write credentials and are admin/maintainer-only on the
 // server (RegistryTokenPolicy::create). Do not offer the option to plain members.
@@ -221,6 +226,8 @@ const breadcrumbs: BreadcrumbItem[] = [
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
+            <PortalHeader />
+
             <div>
                 <h1 class="text-xl font-semibold">{{ props.registry.name }}</h1>
                 <p class="mt-1 font-mono text-sm break-all text-muted-foreground">{{ props.registry.url }}</p>
@@ -241,6 +248,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                         :store-route-params="props.orgSlug"
                         :store-payload="{ group_id: props.registry.id }"
                         :personal-tokens="props.tokens"
+                        :may-mint="mayMint"
                     />
                 </TabsContent>
 
@@ -330,7 +338,13 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </div>
                     </div>
 
+                    <!-- Hidden rather than shown and then refused: TokenController::store()
+                         requires MEMBERSHIP of the addressed organization, which an operator
+                         account looking at a customer's portal does not have. `may_mint_tokens`
+                         is that same question, answered once on the server — see
+                         HandleInertiaRequests::portal(). -->
                     <form
+                        v-if="mayMint"
                         class="mb-4 grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end dark:border-sidebar-border"
                         @submit.prevent="submitToken"
                     >
