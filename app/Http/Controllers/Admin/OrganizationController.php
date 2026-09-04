@@ -12,6 +12,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
+use App\Services\Portal\PortalUrl;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
@@ -39,7 +40,7 @@ class OrganizationController extends Controller
         ]);
     }
 
-    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url): Response
+    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url, PortalUrl $portal): Response
     {
         return Inertia::render('admin/organizations/Show', [
             'organization' => [
@@ -59,6 +60,12 @@ class OrganizationController extends Controller
             // confirmation dialog substitutes the organization segment for its "before" and
             // "after" preview, and must never assemble a /r/... path of its own.
             'registryUrlTemplate' => $url->template(),
+            // The portal's address form, with the organization slug left open, substituted
+            // by the same dialog and never assembled on the page. The slug moves the portal
+            // as well as the registries, and the two consequences are not the same one: an
+            // old /r/ address answers with a redirect (groups.legacy_slug), while the portal
+            // has none by design — spec §6 — so a saved /c/ link simply stops working.
+            'portalPathTemplate' => $portal->template(),
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).
             'registryTypes' => [

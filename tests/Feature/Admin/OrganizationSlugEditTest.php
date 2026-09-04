@@ -2,6 +2,7 @@
 
 use App\Models\Group;
 use App\Models\Organization;
+use App\Services\Portal\PortalUrl;
 use App\Services\Registry\RegistryUrl;
 
 it('changes an organization slug and with it every registry url it owns', function () {
@@ -80,4 +81,28 @@ it('hands the console the bare url pattern and the affected registry count', fun
         ->assertInertia(fn ($page) => $page
             ->where('registryUrlTemplate', app(RegistryUrl::class)->template())
             ->where('organization.registries_count', 2));
+});
+
+/**
+ * The organization slug is the first segment of the customer portal's address as well, and
+ * that consequence is NOT the registry one restated: an old /r/... address keeps answering
+ * through the frozen `legacy_slug`, while the portal has no redirect at all by design (spec
+ * §6), so a saved /c/... link stops working the moment the slug changes. The confirmation
+ * therefore has to name it, and this pins the payload the dialog substitutes into.
+ *
+ * Two assertions, because either alone would prove nothing. The expect() pins the address
+ * FORM against the route the application actually answers on, so a change to the /c/ prefix
+ * reddens a test rather than quietly rewording a dialog. The assertInertia() pins the WIRING
+ * the way the registry pattern above is pinned — stated against PortalUrl rather than a
+ * literal, so the payload and the form cannot be made to disagree by editing one of them.
+ */
+it('hands the console the portal address form the slug change moves', function () {
+    $org = Organization::factory()->create(['slug' => 'kunde']);
+
+    expect(app(PortalUrl::class)->template())->toBe('/c/{organization}')
+        ->and(app(PortalUrl::class)->pathFor($org->slug))->toBe('/c/kunde');
+
+    $this->actingAs(superAdmin())->get(route('admin.organizations.show', $org))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('portalPathTemplate', app(PortalUrl::class)->template()));
 });

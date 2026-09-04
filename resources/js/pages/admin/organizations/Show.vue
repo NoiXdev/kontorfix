@@ -66,6 +66,10 @@ const props = defineProps<{
     // show the /r/... pattern before and after without ever assembling a path itself; see
     // oldPathPattern/newPathPattern below.
     registryUrlTemplate: string;
+    // The portal's address form with the organization slug left open, in the same shape and
+    // for the same reason: the slug also moves /c/{slug}, and this page substitutes rather
+    // than assembling that path itself. See oldPortalPath/newPortalPath below.
+    portalPathTemplate: string;
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
     users: UserRow[];
@@ -120,6 +124,15 @@ const newPathPattern = computed(() =>
     props.registryUrlTemplate.replace('{organization}', settingsForm.slug || '…').replace('{registry}', '…'),
 );
 
+// The organization slug is also the first segment of the customer portal's address, so a
+// rename moves that too. Stated separately from the registry patterns above because the
+// CONSEQUENCE differs: an old /r/... address keeps answering through the frozen legacy slug,
+// while the portal deliberately has no such redirect — a saved /c/... link stops working
+// outright. Substituted out of the server's template for the same reason the /r/ patterns
+// are, so this page never assembles a portal path of its own.
+const oldPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', props.organization.slug));
+const newPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', settingsForm.slug || '…'));
+
 // Named so the confirmation states the exact count instead of a vague "some registries".
 const registryImpact = computed(() => {
     const n = props.organization.registries_count;
@@ -155,7 +168,9 @@ function saveSettings() {
                         ? 'Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit. '
                         : '') +
                     'Bestehende Client-Konfigurationen, die auf die alten /r/-Adressen zeigen (composer.json, .npmrc, pip.conf, ' +
-                    'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.',
+                    'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.\n\n' +
+                    `Die Portal-Adresse dieser Organisation ändert sich von ${oldPortalPath.value} auf ${newPortalPath.value}. ` +
+                    'Gespeicherte Links funktionieren danach nicht mehr — anders als bei den /r/-Adressen gibt es dafür keine Weiterleitung.',
             ),
     });
 }
@@ -290,7 +305,9 @@ function detachMember(userId: string) {
                                 Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit.
                             </template>
                             Bestehende Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt
-                            sind.
+                            sind. Die Portal-Adresse ändert sich von <code>{{ oldPortalPath }}</code> auf <code>{{ newPortalPath }}</code
+                            >. Gespeicherte Links funktionieren danach nicht mehr — anders als bei den /r/-Adressen gibt es dafür keine
+                            Weiterleitung.
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
                             Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch
