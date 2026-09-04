@@ -36,12 +36,23 @@ export interface SwitchableOrganization {
     slug: string;
 }
 
+/** Where each of the portal's two areas lives, as HandleInertiaRequests shares it. */
+export interface PortalAreaPaths {
+    packages: string;
+    registries: string;
+}
+
 /**
  * The customer portal's header context, shared by HandleInertiaRequests on every request
  * that addresses a portal and null on every request that does not.
  */
 export interface PortalContext {
     organization: SwitchableOrganization;
+    /**
+     * The portal's two areas (spec §3), as paths the server built from the routes. The header
+     * renders the navigation from these rather than assembling `/c/…` itself.
+     */
+    areas: PortalAreaPaths;
     /** The viewer's OWN memberships whose portal is switched on — never a broader set. */
     switchable: SwitchableOrganization[];
     /**

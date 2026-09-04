@@ -1,11 +1,11 @@
 /**
- * The portal header's two decisions, kept out of the template so they can be measured.
+ * The portal header's decisions, kept out of the template so they can be measured.
  *
  * The same reason portalPackages.ts exists: the sentence a customer reads is a factual
  * claim, and German inside a `<template>` is the part of this codebase nothing can check.
  */
 
-import { type SwitchableOrganization } from '@/types';
+import { type PortalAreaPaths, type SwitchableOrganization } from '@/types';
 
 /**
  * The banner an operator account sees while standing in a customer's portal.
@@ -59,4 +59,52 @@ export function switcherOptions(switchable: SwitchableOrganization[], current: S
  */
 export function offersSwitcher(options: SwitcherOption[]): boolean {
     return options.length > 1;
+}
+
+/** One entry of the portal's area navigation. */
+export interface PortalAreaLink {
+    label: string;
+    href: string;
+    /** The area the viewer is currently in — exactly one entry carries it. */
+    current: boolean;
+}
+
+/**
+ * The portal's area navigation: the package list and the registries, in that order.
+ *
+ * SPEC §3 CALLS REGISTRIES "THE SECOND AREA", and for most of this branch it was an area with
+ * no way in. Task 1 made `/c/{org}/registries` the landing page and pointed the sidebar there;
+ * task 3 moved the landing page to the package list and repointed both sidebar entries at
+ * `portal.packages.index`; nothing then linked the registries. The customer with an empty
+ * package list — a registry handed over before anything is assigned to it — could not reach
+ * the Composer, npm and pip snippets or the token form from the interface at all, and that is
+ * the exact moment the portal exists for.
+ *
+ * IN THE HEADER rather than on the package list, because an area is not a row on another
+ * area's page. The sidebar cannot hold it: it renders application-wide with no organization in
+ * hand, which is why both of its portal entries point at `portal.home` and resolve the viewer's
+ * own. The header is mounted by all four portal pages, so the entry point survives whatever the
+ * landing page becomes next.
+ *
+ * The hrefs are the server's (`portal.areas`), never assembled here — see the comment on that
+ * prop. The LABELS are German and therefore live in this module rather than in the template:
+ * they are the words the customer navigates by, and German inside a `<template>` is the part of
+ * this codebase nothing can check. They are the two headings the pages already carry, so the
+ * navigation and the page a viewer lands on name the same thing.
+ *
+ * `current` is derived from the path alone. The query string is dropped because the package
+ * list carries its own search and filter keys (`pkg_search`, `pkg_type`), and a navigation that
+ * stopped marking itself the moment the customer typed in the search box would be worse than
+ * one that never marked itself. Registries wins on a PREFIX, so the registry detail and the
+ * package detail below it — both addressed under `/registries/…` — stay in the area they belong
+ * to; everything else is the package list, which is what `/c/{org}` is.
+ */
+export function portalAreaLinks(areas: PortalAreaPaths, currentUrl: string): PortalAreaLink[] {
+    const path = currentUrl.split('?')[0].split('#')[0].replace(/\/+$/, '');
+    const inRegistries = path === areas.registries || path.startsWith(`${areas.registries}/`);
+
+    return [
+        { label: 'Pakete', href: areas.packages, current: !inRegistries },
+        { label: 'Registries', href: areas.registries, current: inRegistries },
+    ];
 }

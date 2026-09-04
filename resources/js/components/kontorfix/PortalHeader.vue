@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { type SharedData } from '@/types';
-import { router, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { offersSwitcher, operatorBannerNote, switcherOptions } from './portalHeader';
+import { offersSwitcher, operatorBannerNote, portalAreaLinks, switcherOptions } from './portalHeader';
 
 const page = usePage<SharedData>();
 
@@ -17,6 +17,12 @@ const portal = computed(() => page.props.portal ?? null);
 // switcher is a question about the rows it would hold, so it must be asked of the same
 // list the control renders.
 const options = computed(() => (portal.value === null ? [] : switcherOptions(portal.value.switchable, portal.value.organization)));
+
+// The portal's two areas. This is the ONLY link into the registries from anywhere in the
+// interface — see the module — so it is unconditional: not derived from whether the customer
+// has registries, and not rendered per row on the package list, because a customer with an
+// empty package list is precisely the one who needs the setup snippets.
+const areas = computed(() => (portal.value === null ? [] : portalAreaLinks(portal.value.areas, page.url)));
 
 function visit(slug: string) {
     if (portal.value === null || slug === portal.value.organization.slug) {
@@ -36,6 +42,19 @@ function visit(slug: string) {
         <div v-if="portal.viewing_as_operator" class="rounded-lg border border-copper/40 bg-copper/10 px-4 py-3 text-sm text-copper-hi">
             {{ operatorBannerNote(portal.organization.name) }}
         </div>
+
+        <nav class="flex items-center gap-1 border-b border-sidebar-border/70 dark:border-sidebar-border" aria-label="Portalbereiche">
+            <Link
+                v-for="area in areas"
+                :key="area.href"
+                :href="area.href"
+                class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors"
+                :class="area.current ? 'border-verdigris text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'"
+                :aria-current="area.current ? 'page' : undefined"
+            >
+                {{ area.label }}
+            </Link>
+        </nav>
 
         <SearchableSelect
             v-if="offersSwitcher(options)"

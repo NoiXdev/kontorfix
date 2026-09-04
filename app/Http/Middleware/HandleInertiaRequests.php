@@ -90,7 +90,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * The portal header's props, or null on a request that addresses no portal.
      *
-     * @return array{organization: array{name: string, slug: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool, may_publish_tokens: bool}|null
+     * @return array{organization: array{name: string, slug: string}, areas: array{packages: string, registries: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool, may_publish_tokens: bool}|null
      */
     private function portal(Request $request, ?User $user): ?array
     {
@@ -123,6 +123,30 @@ class HandleInertiaRequests extends Middleware
 
         return [
             'organization' => ['name' => $organization->name, 'slug' => $organization->slug],
+            // THE PORTAL'S TWO AREAS, spec Â§3: the package list the customer lands on, and the
+            // registries with the setup snippets and the token form behind them. Shared rather
+            // than assembled in the header, and asserted server-side, because the registries area
+            // spent this branch with no link into it at all: task 1 made it the landing page,
+            // task 3 moved the landing page to the package list and repointed both sidebar
+            // entries, and nothing then pointed anywhere at `portal.registries.index`. An
+            // organization whose package list is still empty â a registry handed over before
+            // anything is assigned to it, which is the moment the portal exists for â could not
+            // reach the snippets that tell it how to configure Composer at all.
+            //
+            // In the SHARED prop and not in the landing page's own payload: the sidebar is the
+            // only other portal-wide surface and it has no organization in hand (both its entries
+            // point at `portal.home` for that reason), so the header is where a portal-wide
+            // navigation can live. Every portal page mounts it, so the entry point does not
+            // depend on what the landing page happens to be next.
+            //
+            // Paths, not slugs the header would assemble: `/c/` is declared once, as the prefix
+            // in routes/web.php, and a second spelling of it in the browser is a form that can
+            // drift from the address the application answers on while every test still passes â
+            // the reason PortalUrl gives for deriving its own template from the route.
+            'areas' => [
+                'packages' => route('portal.packages.index', $organization->slug, absolute: false),
+                'registries' => route('portal.registries.index', $organization->slug, absolute: false),
+            ],
             // Built from the viewer's OWN memberships, never a broader set: feeding this the
             // customer directory would make that directory a by-product of navigation, and
             // an operator account's accessible set is its own organizations — not every

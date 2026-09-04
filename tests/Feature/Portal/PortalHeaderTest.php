@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Group;
 use App\Models\Organization;
 use App\Models\User;
 
@@ -61,6 +62,58 @@ it('offers the token form to a member', function () {
 
     $this->actingAs($user)->get('/c/acme')
         ->assertInertia(fn ($page) => $page->where('portal.may_mint_tokens', true));
+});
+
+it('carries the address of both portal areas on the landing page', function () {
+    // THE ENTRY POINT INTO THE REGISTRIES AREA. Task 1 made `/c/{org}/registries` the landing
+    // page and pointed the sidebar there; task 3 moved the landing page to the package list and
+    // repointed both sidebar entries at `portal.packages.index`; nothing then linked the
+    // registries at all, and `route('portal.registries.index')` had zero call sites in
+    // resources/js. The setup snippets and the token form were unreachable from the interface
+    // for a customer whose package list is empty — the moment the portal exists for.
+    //
+    // Asserted on the LANDING PAGE and against the whole `areas` map, so a later move of the
+    // landing page cannot orphan the second area again without a red test. `toBe`-equivalent
+    // rather than `has()`: a count says nothing about which address survived, and the two
+    // differ by one segment.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->component('portal/Packages')
+            ->where('portal.areas', ['packages' => '/c/acme', 'registries' => '/c/acme/registries']));
+});
+
+it('addresses the areas of the organization in the url, not a fixed one', function () {
+    // The interpolation's absent case, split from the assertion above rather than added to it:
+    // that one is equally satisfied by two literals with "acme" typed into them, which would
+    // send every other customer into a stranger's portal — and a failure there would abort
+    // before this could speak.
+    $org = Organization::factory()->create(['slug' => 'beispiel-ag']);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/beispiel-ag')
+        ->assertInertia(fn ($page) => $page
+            ->where('portal.areas', ['packages' => '/c/beispiel-ag', 'registries' => '/c/beispiel-ag/registries']));
+});
+
+it('opens the registries area at the address the empty landing page hands out', function () {
+    // The regression in full, walked rather than described: a registry created and handed over
+    // with nothing assigned to it yet. The landing page has no rows, so no per-row link could
+    // ever have led anywhere — and the address the header offers has to answer with the page
+    // holding the Composer, npm and pip snippets. An `areas` map pinned to a route that stopped
+    // resolving would pass the two assertions above and fail here.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    Group::factory()->for($org)->create();
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/Packages')->has('packages', 0));
+
+    $this->actingAs($user)->get('/c/acme/registries')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/Registries')->has('registries', 1));
 });
 
 it('does not offer an operator the customer list as a switcher', function () {
