@@ -136,3 +136,26 @@ it('names the newest version of the package', function () {
     $this->actingAs($user)->get('/c/acme')
         ->assertInertia(fn ($page) => $page->where('packages.0.latest_version', 'v2.1.0'));
 });
+
+it('still names the version of a package no registry serves any more', function () {
+    // The version is a property of the PACKAGE, not of the assignment, and this page keeps
+    // rows the per-registry surfaces drop. A customer reading why their build fails needs to
+    // see which release they had, beside the note saying it is no longer delivered.
+    //
+    // portal/Registry.vue withholds exactly this, and the difference is the row: there the
+    // lapsed assignment is not listed at all (PortalLapsedAssignmentTest), so nothing on that
+    // page could explain a version it showed. Here the row is present and explained, so
+    // blanking the version would remove information without removing the offer — and
+    // `$row['in_force'] ? … : null` is the edit that does it while passing every other test.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $group = Group::factory()->for($org)->create();
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    PackageVersion::factory()->for($package)->create(['version' => '3.0.0.0', 'version_pretty' => 'v3.0.0']);
+    $group->packages()->attach($package->id, ['available_until' => now()->subDay()]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page
+            ->where('packages.0.in_force', false)
+            ->where('packages.0.latest_version', 'v3.0.0'));
+});
