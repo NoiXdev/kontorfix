@@ -290,10 +290,10 @@ const breadcrumbs: BreadcrumbItem[] = [
                                 <tr :class="noteForRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'">
                                     <td class="px-4 py-3 font-mono">
                                         <div class="flex items-center gap-2">
-                                            <!-- The name of a lapsed assignment stays LINKED here,
-                                                 unlike on portal/Packages.vue: the detail page now
-                                                 serves it with the explanation instead of 404ing,
-                                                 so this is no longer a dead end. -->
+                                            <!-- The name of a lapsed assignment stays LINKED, as it
+                                                 does on portal/Packages.vue: the detail page serves
+                                                 it with the explanation instead of 404ing, so this
+                                                 is no longer a dead end on either page. -->
                                             <Link
                                                 :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])"
                                                 class="hover:underline"

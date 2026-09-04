@@ -123,14 +123,14 @@ class HandleInertiaRequests extends Middleware
 
         return [
             'organization' => ['name' => $organization->name, 'slug' => $organization->slug],
-            // THE PORTAL'S TWO AREAS, spec Â§3: the package list the customer lands on, and the
+            // THE PORTAL'S TWO AREAS, spec §3: the package list the customer lands on, and the
             // registries with the setup snippets and the token form behind them. Shared rather
             // than assembled in the header, and asserted server-side, because the registries area
             // spent this branch with no link into it at all: task 1 made it the landing page,
             // task 3 moved the landing page to the package list and repointed both sidebar
             // entries, and nothing then pointed anywhere at `portal.registries.index`. An
-            // organization whose package list is still empty â a registry handed over before
-            // anything is assigned to it, which is the moment the portal exists for â could not
+            // organization whose package list is still empty — a registry handed over before
+            // anything is assigned to it, which is the moment the portal exists for — could not
             // reach the snippets that tell it how to configure Composer at all.
             //
             // In the SHARED prop and not in the landing page's own payload: the sidebar is the
@@ -141,7 +141,7 @@ class HandleInertiaRequests extends Middleware
             //
             // Paths, not slugs the header would assemble: `/c/` is declared once, as the prefix
             // in routes/web.php, and a second spelling of it in the browser is a form that can
-            // drift from the address the application answers on while every test still passes â
+            // drift from the address the application answers on while every test still passes —
             // the reason PortalUrl gives for deriving its own template from the route.
             'areas' => [
                 'packages' => route('portal.packages.index', $organization->slug, absolute: false),
