@@ -101,6 +101,14 @@ class PortalPackages
                 /** @var Carbon|null $availableUntil */
                 $availableUntil = $assignment->available_until;
 
+                // The pivot is read and then DROPPED, because the model outlives this iteration:
+                // the row keeps the first registry's Package instance, so leaving the relation
+                // loaded would let a caller reach $row['package']->pivot->available_until and get
+                // a real date belonging to the wrong registry. Unset, that mistake is a null
+                // instead of a plausible wrong answer, and the per-registry date on the entry is
+                // the only way to ask. Nothing in the returned shape needs the relation.
+                $package->unsetRelation('pivot');
+
                 $rows[$package->id] ??= ['package' => $package, 'groups' => []];
 
                 // The per-registry answer, and the only place any `in_force` is decided.

@@ -154,6 +154,26 @@ it('reports each registry own availability date, independently', function () {
         ->and($row['groups']->pluck('in_force')->all())->toBe([true, false, true]);
 });
 
+it('hands out no pivot on the package model, because it would be one registry answer', function () {
+    // The row keeps the Package instance of whichever registry came first, so a caller reaching
+    // for $row['package']->pivot->available_until would get a real date belonging to the wrong
+    // registry — plausible, and wrong. Dropped here, in the service that creates the hazard, so
+    // the mistake fails obviously instead of answering.
+    $org = Organization::factory()->create();
+    $a = Group::factory()->for($org)->create(['name' => 'A']);
+    $b = Group::factory()->for($org)->create(['name' => 'B']);
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    $a->packages()->attach($package->id, ['available_until' => now()->addDays(30)]);
+    $b->packages()->attach($package->id, ['available_until' => now()->subDay()]);
+
+    $row = app(PortalPackages::class)->for($org)->first();
+
+    expect($row['package']->relationLoaded('pivot'))->toBeFalse()
+        // …and the per-registry dates are still there, on the entries, where they belong.
+        ->and($row['groups']->pluck('available_until')->map(fn (?Carbon $d): ?string => $d?->toDateString())->all())
+        ->toBe([now()->addDays(30)->toDateString(), now()->subDay()->toDateString()]);
+});
+
 it('keeps a package in force while any one registry still serves it', function () {
     // NOT in the brief, and it has to be: `in_force` accumulates across registries, and no
     // case in the brief's set can tell an accumulating `||` from a plain last-wins
