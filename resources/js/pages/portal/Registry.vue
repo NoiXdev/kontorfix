@@ -13,6 +13,8 @@ import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
+import { badgesFor, noteFor, SHARED_BADGE_TITLE, type PortalPackageRow } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -29,7 +31,7 @@ interface Snippets {
     twine: string;
 }
 
-interface PackageRow {
+interface PackageRow extends PortalPackageRow {
     id: string;
     name: string;
     type: string;
@@ -183,6 +185,20 @@ function destroyToken(id: string) {
     });
 }
 
+/**
+ * The one note this row carries here, through the module portal/Packages.vue uses — not a
+ * second variant of the same sentences.
+ *
+ * `registries: []` is what this page factually has: it renders ONE registry, and `noteFor`'s
+ * partial-lapse branch is a statement about a package that some of a customer's registries
+ * still serve and others do not, which needs the set this page does not carry. With an empty
+ * set that branch yields null, so an in-force row gets no note and a lapsed one gets
+ * `lapsedNote()` — the two cases this page can actually distinguish.
+ */
+function noteForRow(pkg: PackageRow): string | null {
+    return noteFor({ ...pkg, registries: [] });
+}
+
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
     { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
@@ -235,20 +251,50 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </template>
 
                         <template #default="{ rows }">
-                            <tr
-                                v-for="pkg in rows"
-                                :key="pkg.id"
-                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                            >
-                                <td class="px-4 py-3 font-mono">
-                                    <Link :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])" class="hover:underline">
-                                        {{ pkg.name }}
-                                    </Link>
-                                </td>
-                                <td class="px-4 py-3">{{ pkg.type }}</td>
-                                <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
-                                <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
-                            </tr>
+                            <template v-for="pkg in rows" :key="pkg.id">
+                                <!-- The separator belongs to the LAST row of this package's block,
+                                     so the main row gives it up whenever the note follows it —
+                                     the same rule portal/Packages.vue and admin/groups/Show.vue
+                                     follow: an outage warning below a separator reads as belonging
+                                     to the next package. -->
+                                <tr :class="noteForRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'">
+                                    <td class="px-4 py-3 font-mono">
+                                        <div class="flex items-center gap-2">
+                                            <!-- The name of a lapsed assignment stays LINKED here,
+                                                 unlike on portal/Packages.vue: the detail page now
+                                                 serves it with the explanation instead of 404ing,
+                                                 so this is no longer a dead end. -->
+                                            <Link
+                                                :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])"
+                                                class="hover:underline"
+                                            >
+                                                {{ pkg.name }}
+                                            </Link>
+                                            <!-- One decision, in the tested module: which markers
+                                                 this row carries and in what order. -->
+                                            <template v-for="badge in badgesFor(pkg)" :key="badge">
+                                                <SharedBadge v-if="badge === 'geteilt'" :title="SHARED_BADGE_TITLE" />
+                                                <!-- v-else-if, not v-else: a catch-all would render
+                                                     any badge added later in destructive red, which
+                                                     is the wrong default for a marker that is not a
+                                                     fault. -->
+                                                <span
+                                                    v-else-if="badge === 'abgelaufen'"
+                                                    class="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-sans text-xs font-medium text-destructive"
+                                                >
+                                                    {{ badge }}
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3">{{ pkg.type }}</td>
+                                    <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
+                                    <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
+                                </tr>
+                                <tr v-if="noteForRow(pkg)" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                    <td colspan="4" class="px-4 pb-3 text-xs text-destructive">{{ noteForRow(pkg) }}</td>
+                                </tr>
+                            </template>
                         </template>
                     </DataTable>
                 </TabsContent>

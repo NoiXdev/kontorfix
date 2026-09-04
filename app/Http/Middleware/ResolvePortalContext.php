@@ -42,25 +42,10 @@ class ResolvePortalContext
             return true;
         }
 
-        // A super-admin first and on its own terms. Not merely a shortcut past the scan
-        // below: that scan can only say yes if an `is_operator` row exists, and a super-admin
-        // is not conditional on one — without this clause an instance with no operator
-        // organization would 404 its own super-admin on every customer portal.
-        if ($user->isSuperAdmin()) {
-            return true;
-        }
-
-        // Otherwise: an operator account may look at any customer portal, and "operator
-        // account" is wider than "super-admin". administeredOrganizationIds() returns every
-        // organization the user is *admin or maintainer* of, by home role or by an
-        // organization membership's pivot role — so an operator-org maintainer, and a
-        // maintainer who only holds that role through a membership, may open any customer
-        // portal too. That is deliberate (they administer the operator organization), but it
-        // is not readable from the helper's name, so: admin or maintainer of the operator
-        // organization, however that role is held, plus every super-admin.
-        $administered = $user->administeredOrganizationIds();
-
-        return Organization::query()->where('is_operator', true)->pluck('id')
-            ->contains(fn (string $id): bool => in_array($id, $administered, true));
+        // Otherwise: an operator account may look at any customer portal. The rule lives on
+        // User because GroupPolicy::view() has to answer it identically — it used to ask a
+        // narrower version, which let these accounts through this gate and then refused them
+        // every registry page behind it.
+        return $user->administersOperatorOrganization();
     }
 }

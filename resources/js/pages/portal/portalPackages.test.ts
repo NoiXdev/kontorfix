@@ -145,6 +145,24 @@ describe('noteFor', () => {
     it('leaves a package every registry still serves without a note', () => {
         expect(noteFor({ shared: false, in_force: true, registries: [{ name: 'ci', in_force: true }] })).toBeNull();
     });
+
+    /*
+     * portal/Registry.vue renders exactly ONE registry, so it has no registry set to pass and
+     * calls this with an empty one. Both branches of that call are pinned here because there is
+     * no component runner on this frontend: the page's premise — that an empty set yields the
+     * fully lapsed note for a lapsed row and nothing for a live one — is only checkable here,
+     * and a drill on the page could never expose it.
+     */
+    it('gives a lapsed row the fully lapsed note when the caller has no registry set', () => {
+        expect(noteFor({ shared: false, in_force: false, registries: [] })).toBe(lapsedNote());
+    });
+
+    it('leaves an in-force row without a note when the caller has no registry set', () => {
+        // partlyLapsedNote() is a statement about SOME of a customer's registries; with none
+        // named there is no such statement, and inventing one would put a red 404 warning on
+        // a package that installs.
+        expect(noteFor({ shared: false, in_force: true, registries: [] })).toBeNull();
+    });
 });
 
 describe('SHARED_BADGE_TITLE', () => {

@@ -9,6 +9,7 @@ import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import { lapsedNote } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -43,6 +44,10 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     install: string;
+    // Whether this registry still serves the assignment. This page used to answer 404 for a
+    // lapsed one — the customer arrived here because their build failed and was shown
+    // nothing at all. It is served now, and the install command is replaced by the reason.
+    in_force: boolean;
     // The organization the URL addresses — the first segment of every portal link here.
     orgSlug: string;
 }>();
@@ -129,7 +134,7 @@ function depCount(deps: Record<string, string>): number {
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Installation</h2>
-                <div class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                <div v-if="props.in_force" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                     <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                         <h3 class="font-medium">Paket installieren</h3>
                         <Button variant="outline" size="sm" @click="copyInstall">
@@ -138,6 +143,14 @@ function depCount(deps: Record<string, string>): number {
                         </Button>
                     </div>
                     <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ props.install }}</pre>
+                </div>
+                <!-- The command REPLACES nothing else on the page: the readme, the versions and
+                     the dependency tree stay, because they are what the customer came to check
+                     against. Only the one element that would not work is withheld — a snippet
+                     that answers 404 is worse than none, and the sentence in its place is the
+                     same one the portal's package list gives, from the tested module. -->
+                <div v-else class="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                    {{ lapsedNote() }}
                 </div>
             </section>
 

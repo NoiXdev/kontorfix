@@ -2,7 +2,6 @@
 
 namespace App\Policies;
 
-use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\User;
 
@@ -10,7 +9,12 @@ class GroupPolicy
 {
     public function view(User $user, Group $group): bool
     {
-        if ($this->operatorAdmin($user)) {
+        // The same question ResolvePortalContext asks before it opens a customer portal at
+        // all, asked through the same method. This policy is reached only from the portal
+        // controllers (Portal\RegistryController and Portal\TokenController are its only
+        // callers), so the two answering differently meant exactly one thing: an account
+        // admitted to /c/{customer} and then answered 403 on every page inside it.
+        if ($user->administersOperatorOrganization()) {
             return true;
         }
 
@@ -32,10 +36,5 @@ class GroupPolicy
         return $group->portal_enabled
             && $groupOrganizationId !== null
             && $user->belongsToOrganization($groupOrganizationId);
-    }
-
-    private function operatorAdmin(User $user): bool
-    {
-        return $user->role === UserRole::Admin && (bool) $user->organization?->is_operator;
     }
 }

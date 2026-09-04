@@ -26,9 +26,18 @@ class RegistryController extends Controller
 
     public function index(Request $request): Response
     {
-        // Show registries from every organization the user belongs to (home org plus
-        // any additional memberships), not just their home org.
-        $groups = Group::whereIn('organization_id', $request->user()->accessibleOrganizationIds())
+        $organization = $this->portalOrganization($request);
+
+        // The organization the URL addresses, not every organization the viewer belongs to.
+        // Merging their memberships was the only answer available while the portal had a
+        // single address (/portal); with /c/{orgSlug} it made the address a lie — a viewer
+        // with two memberships saw the same merged list under both slugs, and an operator
+        // looking at a customer's portal saw their own registries listed inside it. The
+        // other organization's registries did not disappear: they live at its own slug.
+        $groups = $organization->groups()
+            // groups.portal_enabled: whether this registry appears in the portal. The
+            // organization-level switch that decides whether there is a portal at all is a
+            // different question, and ResolvePortalContext already answered it.
             ->where('portal_enabled', true)
             // `organization` too: RegistryUrl::path() reads its slug, and this is a loop.
             ->with(['domains', 'organization'])
@@ -43,7 +52,7 @@ class RegistryController extends Controller
             ->get();
 
         return Inertia::render('portal/Registries', [
-            'orgSlug' => $this->portalOrganization($request)->slug,
+            'orgSlug' => $organization->slug,
             'registries' => $groups->map(fn (Group $g) => [
                 'id' => $g->id,
                 'name' => $g->name,
@@ -67,10 +76,20 @@ class RegistryController extends Controller
         // pre-filter here, so there is no bare q/type param that could silently and
         // invisibly narrow the list with no way to see or reset it from the UI.
         //
-        // assignedPackages(): see index(). The portal must list what the registry serves —
-        // a lapsed assignment appeared here with its latest version and no marker of any
-        // kind, and this page has no "abgelaufen" badge to explain one.
-        $packages = $group->assignedPackages()
+        // Every assignment, each saying whether the registry still serves it — the shape
+        // Admin\GroupController::assignedPackagePayload() sends, so the operator and the
+        // customer read one answer. Hiding a lapsed row was the previous answer, taken while
+        // the portal had no way to describe one; a customer whose build 404s then arrived at
+        // a page that did not list the package at all, which reads as "never there" rather
+        // than as "it lapsed". The row is shown and marked instead.
+        //
+        // `in_force` comes from assignedPackages() — the single statement of the expiry
+        // predicate, the one RegistryAccessService serves by — and NOT from comparing
+        // `available_until` here. A second statement of it could disagree with the registry,
+        // and the console disagreeing with the registry is the defect the flag exists for.
+        $inForce = $group->assignedPackages()->pluck('packages.id')->flip();
+
+        $packages = $group->packages()
             ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
             ->orderBy('packages.name')
             ->get();
@@ -90,6 +109,11 @@ class RegistryController extends Controller
                 'type' => $p->type->value,
                 'description' => $p->description,
                 'latest_version' => $p->versions->first()?->version_pretty,
+                // The two flags portalPackages.ts turns into row markers, under the names it
+                // reads them by — the page renders the same badges as portal/Packages.vue
+                // through the same module rather than a second copy of the rule.
+                'shared' => $p->shared,
+                'in_force' => $inForce->has($p->id),
             ]),
             'tokens' => $group->tokens()->where('user_id', $request->user()->id)->latest()->get()->map(fn (RegistryToken $t) => [
                 'id' => $t->id,
@@ -107,10 +131,15 @@ class RegistryController extends Controller
     public function showPackage(Request $request, Group $group, Package $package): Response
     {
         $this->authorize('view', $group);
-        // assignedPackages(): the detail page served the readme, the version list and the
-        // dependency tree for an assignment that had lapsed, while the registry answered 404
-        // for the same package. 404 here is the same answer the registry gives.
-        abort_unless($group->assignedPackages()->whereKey($package->id)->exists(), 404);
+        // packages(), not assignedPackages(): the question here is whether this registry has
+        // this assignment AT ALL. A package assigned to no registry still 404s — that is a
+        // guessed URL, and the customer has nothing to be told about it. A lapsed one is a
+        // different case: the customer's build is failing on exactly this package, and the
+        // page they reach for the explanation used to answer 404 as well, which explains
+        // nothing. It is served, with `in_force` false, and says why.
+        abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
+
+        $inForce = $group->assignedPackages()->whereKey($package->id)->exists();
 
         $package->load('versions');
         $package->setRelation('versions', VersionOrder::sort($package->versions));
@@ -144,6 +173,10 @@ class RegistryController extends Controller
                 'dependencies' => $this->dependencies->for($package->type, $v->metadata ?? []),
             ]),
             'install' => $install,
+            // Whether this registry still serves the package. The page replaces the install
+            // snippet with the explanation when it does not — offering a command that
+            // answers 404 is worse than saying nothing.
+            'in_force' => $inForce,
         ]);
     }
 

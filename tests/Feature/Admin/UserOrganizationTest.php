@@ -117,20 +117,30 @@ it('attaches a member with a per-organization role from the organization view', 
         ->and($fresh->roleIn($org->id))->toBe(UserRole::Admin);
 });
 
-it('shows registries of additional organizations in the portal', function () {
+it('reaches the registries of an additional organization at that organizations own portal', function () {
+    // This used to assert the merge: /c/{home}/registries listed BOTH organizations'
+    // registries, which was the only answer available while the portal had one address.
+    // /c/{orgSlug} names an organization, so the page shows that organization's registries
+    // and the additional membership is reached at its own slug. Asserted from both addresses
+    // — the membership must still grant reach, and a scoping fix that quietly dropped extra
+    // memberships would pass the first half alone.
     $home = Organization::factory()->create();
     $other = Organization::factory()->create();
     $user = User::factory()->for($home)->create(['role' => UserRole::Member]);
     $user->organizations()->attach($other->id);
 
-    $homeGroup = Group::factory()->for($home)->create(['name' => 'Home Reg']);
-    $otherGroup = Group::factory()->for($other)->create(['name' => 'Other Reg']);
+    Group::factory()->for($home)->create(['name' => 'Home Reg']);
+    Group::factory()->for($other)->create(['name' => 'Other Reg']);
 
     $this->actingAs($user)->get("/c/{$home->slug}/registries")
         ->assertInertia(fn ($page) => $page
-            ->has('registries', 2)
-            ->where('registries.0.name', 'Home Reg')
-            ->where('registries.1.name', 'Other Reg'));
+            ->has('registries', 1)
+            ->where('registries.0.name', 'Home Reg'));
+
+    $this->actingAs($user)->get("/c/{$other->slug}/registries")
+        ->assertInertia(fn ($page) => $page
+            ->has('registries', 1)
+            ->where('registries.0.name', 'Other Reg'));
 });
 
 it('hides portal-disabled groups from the portal listing and blocks direct access', function () {
