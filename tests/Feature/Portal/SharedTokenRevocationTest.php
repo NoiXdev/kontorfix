@@ -56,22 +56,35 @@ it('allows an admin of the owning org who is only a member at home', function ()
  * The policy's non-member clause, called DIRECTLY — the way GroupPolicyTest pins
  * `portal_enabled` for the same reason, and stated here rather than left to a route.
  *
- * No route reaches it any more. A caller who belongs to neither organization is refused at
- * the owning organization's address by ResolvePortalContext (404, uniform with a slug that
- * does not exist) and at their own organization's address by the controller's binding (403,
- * PortalTokenIsolationTest). That is a fact about today's callers and not evidence the
- * clause is wrong: "never an organization the user is not a member of" is a true statement
- * about this policy at its own level, and it is the last line if a fourth caller appears.
+ * No route reaches it any more. Such a caller is refused at the owning organization's address
+ * by ResolvePortalContext (404, uniform with a slug that does not exist) and at their own
+ * organization's address by the controller's binding (403, PortalTokenIsolationTest). That is a
+ * fact about today's callers and not evidence the clause is wrong: "never an organization the
+ * user is not a member of" is a true statement about this policy at its own level, and it is
+ * the last line if a fourth caller appears.
  *
- * This case used to reach it through the caller's home portal while the token belonged
- * elsewhere. It went on passing after the binding landed — with the binding answering, not
- * the policy — which is exactly the shape where the more defended layer becomes invisible.
+ * A PERSONAL token whose owner has left, not the org-shared one this file otherwise uses. The
+ * shared case cannot measure this clause at all: the branch below it asks administers(), which
+ * a non-member fails anyway, so deleting the clause leaves that assertion green. The owner
+ * branch is `$token->user_id === $user->id`, which a departed owner still satisfies — so this
+ * is the one shape where the clause is the line that answers.
+ *
+ * The state is real and the application produces it: detaching a member leaves their personal
+ * tokens in place and only stops them RESOLVING (TokenDeprovisioningTest). The row is still
+ * there, and this says who may delete it.
  */
-it('refuses a caller who belongs to the owning organization not at all', function () {
-    $actor = User::factory()->for($this->home)->create(['role' => UserRole::Admin]);
-    $shared = RegistryToken::factory()->for($this->other)->create(['user_id' => null]);
+it('refuses the owner of a personal token once they are out of the organization', function () {
+    $actor = User::factory()->for($this->home)->create(['role' => UserRole::Member]);
+    $actor->organizations()->attach($this->other, ['role' => UserRole::Member->value]);
+    [$personal] = RegistryToken::issue($this->other, 'personal', null, owner: $actor);
 
-    expect((new RegistryTokenPolicy)->delete($actor, $shared))->toBeFalse();
+    // While the membership stands, the owner branch answers yes — without this the assertion
+    // below is equally satisfied by a policy that refuses every personal token there is.
+    expect((new RegistryTokenPolicy)->delete($actor, $personal))->toBeTrue();
+
+    $actor->organizations()->detach($this->other->id);
+
+    expect((new RegistryTokenPolicy)->delete($actor->fresh(), $personal))->toBeFalse();
 });
 
 it('does not confirm the owning organization to a caller who is not in it', function () {
