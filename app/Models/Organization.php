@@ -30,7 +30,7 @@ class Organization extends Model
      * /c/{slug} is 404. It is NOT `groups.portal_enabled`, which answers "does this registry
      * appear in that portal" and leaves the registry's /r/... endpoints untouched. The two
      * compose and neither is derived from the other: turning every registry off still leaves
-     * an open portal showing the package list.
+     * an open portal showing an empty package list.
      */
     protected $fillable = ['name', 'slug', 'is_operator', 'portal_enabled', 'enabled_registry_types', 'notification_cadence', 'last_digest_sent_at'];
 
