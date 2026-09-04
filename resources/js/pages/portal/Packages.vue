@@ -8,7 +8,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { badgesFor, lapsedNote, registryMarker, type PortalRegistryEntry } from './portalPackages';
+import { badgesFor, noteFor, registryMarker, type PortalRegistryEntry } from './portalPackages';
 
 interface RegistryEntry extends PortalRegistryEntry {
     id: string;
@@ -22,6 +22,10 @@ interface PackageRow {
     type: string;
     description: string | null;
     shared: boolean;
+    // The newest version this package has, whatever registry it came from — the package's
+    // own latest release, not a per-registry answer. `portal/Registry.vue` shows the same
+    // field inside one registry.
+    latest_version: string | null;
     // Usable at all — in force in at least one of the registries below. NOT the same
     // question as an entry's own `in_force`; see `portalPackages.ts`.
     in_force: boolean;
@@ -46,6 +50,7 @@ const typeFilterOptions = computed(() => typeOptions([...new Set(props.packages.
 const columns: ColumnDef<PackageRow>[] = [
     { key: 'name', label: 'Name' },
     { key: 'type', label: 'Typ' },
+    { key: 'latest_version', label: 'Letzte Version' },
     { key: 'description', label: 'Beschreibung' },
     { key: 'registries', label: 'Registries', sortable: false },
 ];
@@ -94,7 +99,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                              belonging to the next package — the same rule admin/groups/Show.vue
                              follows, and for the same reason: an outage warning attributed to the
                              wrong package is worse than none. -->
-                        <tr :class="pkg.in_force ? 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border' : ''">
+                        <tr :class="noteFor(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'">
                             <td class="px-4 py-3 font-mono">
                                 <div class="flex items-center gap-2">
                                     <span class="font-medium">{{ pkg.name }}</span>
@@ -103,9 +108,20 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                          component the whole console uses, so the customer sees the
                                          marker their operator sees. -->
                                     <template v-for="badge in badgesFor(pkg)" :key="badge">
-                                        <SharedBadge v-if="badge === 'geteilt'" />
+                                        <!-- The badge is the console's, the tooltip is not: what a
+                                             shared package means to its operator is what they may do
+                                             with it, and what it means here is that it is not the
+                                             customer's own. -->
+                                        <SharedBadge
+                                            v-if="badge === 'geteilt'"
+                                            title="Vom Betreiber bereitgestellt und Ihrer Organisation freigegeben."
+                                        />
+                                        <!-- v-else-if, not v-else: a catch-all would render any badge
+                                             added later in destructive red, which is the wrong default
+                                             for a marker that is not a fault. An unhandled value
+                                             renders nothing, and nothing is visible. -->
                                         <span
-                                            v-else
+                                            v-else-if="badge === 'abgelaufen'"
                                             class="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-sans text-xs font-medium text-destructive"
                                         >
                                             {{ badge }}
@@ -114,6 +130,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                 </div>
                             </td>
                             <td class="px-4 py-3">{{ typeLabel(pkg.type) }}</td>
+                            <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
                             <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
                             <td class="px-4 py-3">
                                 <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -139,15 +156,19 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                         <span v-else>{{ reg.name }}</span>
                                         <span v-if="registryMarker(reg)" class="text-xs text-destructive">({{ registryMarker(reg) }})</span>
                                     </span>
-                                    <span v-if="pkg.registries.length === 0" class="text-muted-foreground">—</span>
                                 </div>
                             </td>
                         </tr>
-                        <!-- Shown only where the package is served by none of them — where the row
-                             itself has lapsed. A package still live in another registry is usable,
-                             and the marker beside the lapsed link is what that case needs. -->
-                        <tr v-if="!pkg.in_force" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
-                            <td colspan="4" class="px-4 pb-3 text-xs text-destructive">{{ lapsedNote() }}</td>
+                        <!-- One note row for both cases, because a package can be unusable OR merely
+                             lapsed in some of the customer's registries, and the second used to say
+                             nothing at all: the customer whose build resolves against exactly that
+                             registry was the one person told only a date in brackets. `noteFor` picks
+                             which sentence; red only where nothing serves the package any more, since
+                             a partially lapsed package still installs everywhere else. -->
+                        <tr v-if="noteFor(pkg)" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                            <td colspan="5" class="px-4 pb-3 text-xs" :class="pkg.in_force ? 'text-copper-hi' : 'text-destructive'">
+                                {{ noteFor(pkg) }}
+                            </td>
                         </tr>
                     </template>
                 </template>

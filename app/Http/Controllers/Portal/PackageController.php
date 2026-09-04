@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Organization;
 use App\Services\Portal\PortalPackages;
 use App\Services\Portal\PortalRegistryAssignment;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -40,15 +41,31 @@ class PackageController extends Controller
         /** @var Organization $organization */
         $organization = $request->attributes->get('portalOrganization');
 
+        $rows = $this->packages->for($organization);
+
+        // One query for every row's versions instead of one per row. The service answers with
+        // MODELS rather than a query — it composes its set from several registries — so the
+        // eager load belongs here, and an Eloquent collection is what carries it.
+        //
+        // No ordering closure: Package::versions() is declared `->orderByDesc('released_at')`,
+        // so first() is the newest release wherever the relation is loaded. Repeating the order
+        // here (as RegistryController::show() does) would be a second statement of it, and the
+        // one that silently stops matching when the relation's own order changes.
+        (new EloquentCollection($rows->pluck('package')->all()))->load('versions');
+
         return Inertia::render('portal/Packages', [
             // The addressed organization, not the viewer's own: an operator looking at a
             // customer's portal must navigate inside that customer's portal.
             'orgSlug' => $organization->slug,
-            'packages' => $this->packages->for($organization)->map(fn (array $row): array => [
+            'packages' => $rows->map(fn (array $row): array => [
                 'id' => $row['package']->id,
                 'name' => $row['package']->name,
                 'type' => $row['package']->type->value,
                 'description' => $row['package']->description,
+                // The package's own newest release, not a per-registry answer: a registry
+                // serves the versions the package has, and spec §3 asks the landing page for
+                // the current one beside the type.
+                'latest_version' => $row['package']->versions->first()?->version_pretty,
                 // Owned by the operator organization and shared into this customer's
                 // registries — the `geteilt` badge.
                 'shared' => $row['package']->shared,

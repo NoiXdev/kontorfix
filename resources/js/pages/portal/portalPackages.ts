@@ -48,6 +48,26 @@ export interface PortalRegistryEntry {
     available_until: string | null;
 }
 
+/** What the partial-lapse note needs of an entry: which registry, and whether it still serves. */
+export interface PortalRegistryName {
+    name: string;
+    in_force: boolean;
+}
+
+/**
+ * A German enumeration: `A`, `A und B`, `A, B und C`.
+ *
+ * Not `Intl.ListFormat`: it is locale-driven and this sentence is German whatever locale the
+ * reader's browser reports, and it would put a serial comma nowhere German wants one.
+ */
+function joinNames(names: string[]): string {
+    if (names.length < 2) {
+        return names.join('');
+    }
+
+    return `${names.slice(0, -1).join(', ')} und ${names[names.length - 1]}`;
+}
+
 /**
  * The row's markers, in render order: what the package IS first, then what is wrong with it.
  *
@@ -76,6 +96,10 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
  * at the operator rather than at anything the reader could do — only the operator can extend
  * an assignment, so an instruction the customer cannot follow would be worse than none.
  *
+ * "keiner Ihrer Registries", not "die Registry": this note renders only where the package is
+ * served by NONE of them, which can be several, and it points at the per-registry markers
+ * for which ones and until when rather than naming a single date it does not have.
+ *
  * The console's operator-facing note (`availabilityNote`) also explains that the name stays
  * blocked and is not passed to the upstream. That is deliberately absent here: it is an
  * answer to "why does my own fallback not take over", a question about the operator's
@@ -83,10 +107,54 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
  */
 export function lapsedNote(): string {
     return (
-        'Diese Zuweisung ist abgelaufen: Die Registry liefert das Paket nicht mehr aus, ' +
-        'Builds erhalten dafür einen 404. Wenden Sie sich an den Betreiber, wenn Sie es ' +
-        'weiter benötigen.'
+        'Dieses Paket wird von keiner Ihrer Registries mehr ausgeliefert: Builds erhalten ' +
+        'dafür einen 404. Die betroffenen Registries sind oben mit dem Ablaufdatum markiert. ' +
+        'Wenden Sie sich an den Betreiber, wenn Sie das Paket weiter benötigen.'
     );
+}
+
+/**
+ * The consequence for a package that is still usable but has stopped being served by SOME of
+ * the customer's registries — null where there is no such case.
+ *
+ * This is the row spec §3 exists for and the one every earlier shape got wrong. The package is
+ * in force, so it carries no `abgelaufen` badge and no `lapsedNote()`; before this, the whole
+ * of what the customer was told was a parenthesised date beside one registry name. The person
+ * whose build resolves against exactly that registry — the one person for whom something is
+ * broken — was the one person given no consequence at all.
+ *
+ * The registries are NAMED rather than counted. "Eine Ihrer Registries liefert dieses Paket
+ * nicht mehr aus" is true and useless: the reader has to map it back to the entry that is
+ * marked, and a customer with several registries cannot tell whether the one their CI uses is
+ * among them. The name is the only part of the sentence they can act on.
+ */
+export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalRegistryName[] }): string | null {
+    // A row that is in force nowhere is `lapsedNote()`'s case, not this one. Stated here and
+    // not in the template so that the two notes cannot both render, and cannot both be
+    // suppressed, by a condition written twice.
+    if (!row.in_force) {
+        return null;
+    }
+
+    const lapsed = row.registries.filter((registry) => !registry.in_force).map((registry) => registry.name);
+
+    if (lapsed.length === 0) {
+        return null;
+    }
+
+    return (
+        `In ${joinNames(lapsed)} wird dieses Paket nicht mehr ausgeliefert: Builds gegen diese ` +
+        'Registries erhalten einen 404. Über die übrigen Registries ist es weiterhin verfügbar.'
+    );
+}
+
+/**
+ * The one note this row carries, or null. The page asks this once — for the text and for the
+ * separator that belongs to whichever row is last in the block — so the choice between the two
+ * notes is made here rather than twice in a template.
+ */
+export function noteFor(row: PortalPackageRow & { registries: PortalRegistryName[] }): string | null {
+    return row.in_force ? partlyLapsedNote(row) : lapsedNote();
 }
 
 /**
@@ -96,11 +164,15 @@ export function lapsedNote(): string {
  * registry that answers 404, and because a row that is in force elsewhere carries no badge of
  * its own to warn them.
  *
- * A lapsed entry need not have a date: `in_force` is the server's answer from
+ * A lapsed entry need not have a date. `in_force` is the server's answer from
  * `RegistryAccessService`, which withholds a package both past its `available_until` AND when
- * it is neither owned by the registry's organization nor shared any more. The second case has
- * no date at all, and the registry answers 404 in exactly the same way, so it is marked in
- * exactly the same way — just without a day.
+ * it is neither owned by the registry's organization nor shared any more; the second case has
+ * no date at all. The console cannot reach that state — `Admin\PackageController::shared()`
+ * refuses to clear the flag while any foreign assignment exists, expired ones included — so it
+ * arrives only from outside it: a package moved between organizations, a migration, a hand-run
+ * UPDATE. The registry answers 404 there in exactly the same way, so the branch stays and marks
+ * it in exactly the same way, just without a day. A `null` rendering nothing would leave that
+ * link unmarked, which is the one outcome this marker exists to prevent.
  *
  * `formatDay` from the console's assignment module rather than a second formatter: the day
  * form (`31.12.2026`, string surgery so no timezone can shift it) is stated once for the whole

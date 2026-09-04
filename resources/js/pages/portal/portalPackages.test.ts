@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { badgesFor, lapsedNote, registryMarker } from './portalPackages';
+import { badgesFor, lapsedNote, noteFor, partlyLapsedNote, registryMarker } from './portalPackages';
 
 describe('badgesFor', () => {
     it('marks a shared package', () => {
-        expect(badgesFor({ shared: true, in_force: true })).toContain('geteilt');
+        expect(badgesFor({ shared: true, in_force: true })).toEqual(['geteilt']);
     });
 
     it('marks a lapsed assignment', () => {
-        expect(badgesFor({ shared: true, in_force: false })).toContain('abgelaufen');
+        // toEqual, not toContain: it pins the order the page renders in — what the package IS
+        // before what is wrong with it — and refuses a stray third badge.
+        expect(badgesFor({ shared: true, in_force: false })).toEqual(['geteilt', 'abgelaufen']);
     });
 
     it('gives an own, in-force package no badge', () => {
@@ -46,5 +48,71 @@ describe('registryMarker', () => {
         // other than expiry — a shared package whose sharing was withdrawn, say. The
         // registry answers 404 all the same, so the link is marked all the same.
         expect(registryMarker({ in_force: false, available_until: null })).toBe('abgelaufen');
+    });
+});
+
+describe('partlyLapsedNote', () => {
+    // The row this task exists for. It is in force, so it carries no badge and no lapsedNote(),
+    // and without this sentence the customer whose build resolves against the lapsed registry —
+    // the only person for whom anything is broken — is told nothing but a date in brackets.
+    const live = { name: 'ci', in_force: true };
+    const lapsed = { name: 'legacy', in_force: false };
+
+    it('names the registry that stopped serving it and not the one that still does', () => {
+        const note = partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] });
+
+        expect(note).toContain('legacy');
+        expect(note).not.toContain('ci');
+    });
+
+    it('states the consequence the customer arrives with', () => {
+        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain('404');
+    });
+
+    it('says the package is still available through the others', () => {
+        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain('weiterhin verfügbar');
+    });
+
+    it('enumerates several lapsed registries in German', () => {
+        const note = partlyLapsedNote({
+            shared: false,
+            in_force: true,
+            registries: [live, lapsed, { name: 'archive', in_force: false }],
+        });
+
+        expect(note).toContain('In legacy und archive');
+    });
+
+    it('says nothing where every registry still serves the package', () => {
+        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live] })).toBeNull();
+    });
+
+    it('says nothing for a package no registry serves any more', () => {
+        // That row is lapsedNote()'s, and "über die übrigen Registries weiterhin verfügbar"
+        // would be a false promise on it.
+        expect(partlyLapsedNote({ shared: false, in_force: false, registries: [lapsed] })).toBeNull();
+    });
+});
+
+describe('noteFor', () => {
+    it('gives a package no registry serves any more the fully lapsed note', () => {
+        expect(noteFor({ shared: false, in_force: false, registries: [{ name: 'ci', in_force: false }] })).toBe(lapsedNote());
+    });
+
+    it('gives a package one registry stopped serving the partial note', () => {
+        const row = {
+            shared: false,
+            in_force: true,
+            registries: [
+                { name: 'ci', in_force: true },
+                { name: 'legacy', in_force: false },
+            ],
+        };
+
+        expect(noteFor(row)).toBe(partlyLapsedNote(row));
+    });
+
+    it('leaves a package every registry still serves without a note', () => {
+        expect(noteFor({ shared: false, in_force: true, registries: [{ name: 'ci', in_force: true }] })).toBeNull();
     });
 });

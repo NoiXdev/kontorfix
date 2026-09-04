@@ -12,6 +12,7 @@
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PackageVersion;
 use App\Models\User;
 
 it('shows an own package and a lapsed shared one, the second marked', function () {
@@ -59,7 +60,13 @@ it('marks the registry that stopped serving a package the customer still has els
             ->where('packages.0.registries.0.name', 'aa-live')
             ->where('packages.0.registries.0.in_force', true)
             ->where('packages.0.registries.1.name', 'zz-lapsed')
-            ->where('packages.0.registries.1.in_force', false));
+            ->where('packages.0.registries.1.in_force', false)
+            // The DAY, on the entry that lapsed. Every other assertion of `available_until`
+            // in this file is on an in-force entry, and that one-sidedness is what let
+            // `$entry->in_force ? $entry->available_until?->toDateString() : null` pass the
+            // whole suite — silently degrading every marker from "abgelaufen am 31.08.2026"
+            // to a bare "abgelaufen", which is exactly the half spec §3 asks for.
+            ->where('packages.0.registries.1.available_until', now()->subDay()->toDateString()));
 });
 
 it('sends each registry its own end date, not the one it was listed beside', function () {
@@ -85,15 +92,31 @@ it('leaves the registries of a package out when the portal hides them', function
     // PAGE never renders a link the customer cannot follow. Every registry in the payload is
     // linked, and GroupPolicy::view() answers 403 for a registry the portal hides.
     $org = Organization::factory()->create(['slug' => 'acme']);
-    Group::factory()->for($org)->create(['name' => 'hidden', 'portal_enabled' => false]);
+    $hidden = Group::factory()->for($org)->create(['name' => 'hidden', 'portal_enabled' => false]);
     $visible = Group::factory()->for($org)->create(['name' => 'visible']);
     $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
     $visible->packages()->attach($package->id);
-    Group::where('name', 'hidden')->first()->packages()->attach($package->id);
+    $hidden->packages()->attach($package->id);
     $user = User::factory()->create(['organization_id' => $org->id]);
 
     $this->actingAs($user)->get('/c/acme')
         ->assertInertia(fn ($page) => $page
             ->count('packages.0.registries', 1)
             ->where('packages.0.registries.0.name', 'visible'));
+});
+
+it('names the newest version of the package', function () {
+    // Spec §3 asks the landing page for the current version beside the type. Two releases,
+    // the older one created LAST, so a payload that simply took the first row of the relation
+    // in insertion order would answer `v1.0.0` — the ordering is part of the claim.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $group = Group::factory()->for($org)->create();
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    PackageVersion::factory()->for($package)->create(['version' => '2.1.0.0', 'version_pretty' => 'v2.1.0', 'released_at' => now()]);
+    PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'released_at' => now()->subYear()]);
+    $group->packages()->attach($package->id);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('packages.0.latest_version', 'v2.1.0'));
 });
