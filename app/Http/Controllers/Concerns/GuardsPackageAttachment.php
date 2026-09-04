@@ -178,6 +178,13 @@ trait GuardsPackageAttachment
      * cross-organization row survives, expired or not, and deliberately unlike
      * SharedAssignment, which asks what a registry SERVES.
      *
+     * Not a stylistic choice and not left to review: swapping this for assignedPackages()
+     * would make a LAPSED shared assignment invisible on both sides of the comparison, so
+     * dropping one would read as no change at all — and detaching is the one act that
+     * releases the name back to the upstream. Pinned by the two "lapsed shared assignment"
+     * tests in tests/Feature/Admin/SharedAssignmentAuthorityTest.php, which were added
+     * because that mutation survived the first time it was run.
+     *
      * @return list<string>
      */
     protected function currentAssignmentIds(Group $group): array
@@ -195,6 +202,19 @@ trait GuardsPackageAttachment
      *
      * Ordered by id so two calls are comparable, and returned as ids rather than as a count
      * or a boolean so the comparison can be an identity one.
+     *
+     * THE `shared` CLAUSE CANNOT BE PINNED ON ITS OWN, and that is a property of the ownership
+     * invariant rather than a gap. Replacing `true` with `false` makes this method answer `[]`
+     * for every real row, which reddens exactly the union of "delete the set comparison" and
+     * "delete the availability guard" (mutations N1, N6 and N8 of the task-6b report) — it
+     * disables both callers rather than changing what either refuses. Telling the two apart
+     * would need an existing assignment of a NON-shared package owned outside the caller's
+     * administration, and no such row is reachable: v0.8.0 lets a package be assigned only to
+     * registries of its own organization, un-sharing is refused while any cross-organization
+     * assignment survives, and anyone who administers a registry administers the organization
+     * that owns its non-shared packages. The clause is kept anyway — without it this method
+     * would silently widen both guards into a second statement of the ownership rule, which is
+     * neither what their names say nor what spec §4 asks of them.
      *
      * @param  array<int, string>  $packageIds
      * @param  array<int, string>  $administeredOrgIds

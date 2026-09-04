@@ -486,3 +486,47 @@ it('refuses re-dating even the shared package this customer admin may re-submit'
 
     expect(assignmentOf($this->registry, $this->shared)?->available_until)->toBeNull();
 });
+
+// ---------------------------------------------------------------------------------------
+// A LAPSED shared assignment is still the operator's. The "before" set is read from
+// packages(), not assignedPackages(): if it were read from what the registry SERVES, a
+// lapsed row would be invisible on both sides of the comparison and dropping it would look
+// like no change at all. That is the worst version of this hole rather than the mildest —
+// per spec §4 as amended, a lapsed assignment stops delivery but keeps the name suppressed
+// against the upstream, and DETACHING is the one act that releases it. A customer admin who
+// could detach a lapsed row could therefore reopen a private name to the public index for
+// their own builds, which is precisely the substitution the whole feature exists to prevent.
+// ---------------------------------------------------------------------------------------
+
+it('refuses a customer admin detaching a lapsed shared assignment', function () {
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => now()->subDay()]);
+
+    $this->actingAs($this->customerAdmin)
+        ->delete(route('admin.groups.packages.destroy', [$this->registry, $this->shared]))
+        ->assertForbidden();
+
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeTrue();
+});
+
+it('refuses a customer admin dropping a lapsed shared assignment through the api', function () {
+    $this->registry->packages()->attach($this->own->id);
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => now()->subDay()]);
+
+    $this->withToken(authorityKeyFor($this->customerAdmin))
+        ->putJson("/api/v1/groups/{$this->registry->id}/packages", ['package_ids' => [$this->own->id]])
+        ->assertForbidden();
+
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeTrue();
+});
+
+it('lets someone who administers the owning organization detach a lapsed shared assignment', function () {
+    // The other direction, so the rule above is about the caller and not about lapsed rows
+    // being frozen: withdrawing a share for good is exactly what the operator does here.
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(operatorStaff($this->customer, $this->operator))
+        ->delete(route('admin.groups.packages.destroy', [$this->registry, $this->shared]))
+        ->assertRedirect();
+
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeFalse();
+});
