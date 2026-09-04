@@ -31,6 +31,7 @@ interface VersionRow {
 const props = defineProps<{
     registry: Registry;
     package: {
+        id: string;
         type: 'composer' | 'npm';
         name: string;
         description: string | null;
@@ -51,7 +52,9 @@ const isAbandoned = computed(() => props.package.abandoned_at !== null);
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
     { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
-    { title: props.package.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}/packages` },
+    // The package's own address. `.../packages` was never a route — it was a fiction that
+    // 404s — and this crumb pointing at the page it labels is the standard shape anyway.
+    { title: props.package.name, href: route('portal.registries.package', [props.orgSlug, props.registry.id, props.package.id]) },
 ];
 
 // Version selector: defaults to the newest version (props.versions[0], guaranteed by VersionOrder::sort()).

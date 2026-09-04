@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
+use App\Http\Controllers\Portal\PackageController as PortalPackageController;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Package;
@@ -24,11 +25,12 @@ class DashboardController extends Controller
 
     public function index(Request $request): Response|RedirectResponse
     {
-        // Anyone without console access (plain members) belongs in the portal. The portal
-        // is addressed by organization now, and the one a plain member belongs in is their
-        // own home organization — the same resolution GET /portal performs.
+        // Anyone without console access (plain members) belongs in the portal. Which portal
+        // that is — their own organization, or the "not assigned yet" page for an account
+        // that has none — is GET /portal's question, answered there and only there rather
+        // than re-derived here from a `->organization` that is allowed to be null.
         if (! $request->user()->canAdministerConsole()) {
-            return redirect()->route('portal.packages.index', $request->user()->organization->slug);
+            return app(PortalPackageController::class)->home($request);
         }
 
         $scope = app(OrgScope::class);

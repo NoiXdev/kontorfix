@@ -9,7 +9,6 @@ use App\Http\Controllers\SetupController;
 use App\Http\Middleware\ConfirmPasswordOnEmailChange;
 use App\Http\Middleware\EnsureSetupIncomplete;
 use App\Http\Middleware\EnsureSetupTokenPresented;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -185,11 +184,11 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::delete('robots/{user}', [Admin\RobotController::class, 'destroy'])->name('robots.destroy');
 });
 
-Route::middleware(['auth', 'verified'])->get('/portal', function (Request $request) {
-    // The old address is not a second way in; it points at the signed-in user's own
-    // portal. Every user has a home organization, so this always resolves.
-    return redirect()->route('portal.packages.index', $request->user()->organization->slug);
-});
+// The old address is not a second way in; it resolves the signed-in user's own portal and
+// hands off to the gate below. Named, so that the surfaces with no organization in hand
+// (the sidebar, the dashboard) can point at it without assembling a path.
+Route::middleware(['auth', 'verified'])
+    ->get('/portal', [PackageController::class, 'home'])->name('portal.home');
 
 Route::middleware(['auth', 'verified', 'portal.context'])
     ->prefix('/c/{orgSlug}')->where(['orgSlug' => '[a-z0-9-]+'])

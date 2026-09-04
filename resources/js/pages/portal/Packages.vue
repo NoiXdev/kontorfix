@@ -12,10 +12,13 @@ interface PackageRow {
 // real component. The list itself, with its badges and its lapsed-assignment note,
 // arrives with the portal package set.
 const props = defineProps<{
+    // The organization the URL addresses, not the viewer's own — an operator looking at a
+    // customer's portal has to keep navigating inside that customer's portal.
+    orgSlug: string;
     packages: PackageRow[];
 }>();
 
-const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: '/portal' }];
+const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.packages.index', props.orgSlug) }];
 </script>
 
 <template>

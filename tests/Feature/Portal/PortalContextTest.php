@@ -1,7 +1,10 @@
 <?php
 
+use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\Package;
+use App\Models\PackageVersion;
 use App\Models\User;
 
 it('opens the portal for a member of the organization', function () {
@@ -39,17 +42,35 @@ it('keeps serving the registries of an organization whose portal is off', functi
     $org = Organization::factory()->create(['slug' => 'acme', 'portal_enabled' => false]);
     // `public` so the assertion is about the portal switch and nothing else: a private
     // registry answers 401 to an anonymous request whatever the organization's portal does.
-    Group::factory()->for($org)->create(['slug' => 'main', 'public' => true]);
+    $group = Group::factory()->for($org)->create(['slug' => 'main', 'public' => true]);
+    $npm = Package::factory()->inOrgOf($group)->create(['name' => 'acme-widget', 'type' => PackageType::Npm]);
+    PackageVersion::factory()->for($npm)->create();
+    $group->packages()->attach($npm);
 
-    // The registry endpoints are a different surface; a disabled portal breaks no build.
+    // The registry endpoints are a different surface; a disabled portal breaks no build —
+    // and "no build" means all three ecosystems, not only the one that happens to have a
+    // root document. A guard placed one layer too low would break exactly one of these.
     $this->get('/r/acme/main/packages.json')->assertOk();
+    $this->get('/r/acme/main/acme-widget')->assertOk();
+    $this->get('/r/acme/main/simple')->assertOk();
 });
 
 it('lets an operator account open a customer portal', function () {
-    $customer = Organization::factory()->create(['slug' => 'acme']);
-    Organization::factory()->create(['is_operator' => true]);
+    // superAdmin() brings the operator organization with it; a second one would put the
+    // instance in a state SetupController never produces.
+    Organization::factory()->create(['slug' => 'acme']);
 
     $this->actingAs(superAdmin())->get('/c/acme')->assertOk();
+});
+
+it('answers 404 to an admin of one customer looking at another customer portal', function () {
+    // The non-member case above uses a plain member. Privilege inside one's own
+    // organization is not reach into somebody else's, and an org admin is the account that
+    // would most plausibly be let through by an over-broad rule.
+    Organization::factory()->create(['slug' => 'acme']);
+    $other = Organization::factory()->create();
+
+    $this->actingAs(adminOf($other))->get('/c/acme')->assertNotFound();
 });
 
 it('redirects the old portal path to the home organization', function () {
@@ -90,4 +111,23 @@ it('switches a customer portal back on from the console', function () {
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     expect($org->fresh()->portal_enabled)->toBeTrue();
+});
+
+it('shows an account with no home organization a page instead of a fatal', function () {
+    // users.organization_id is nullable and RegisteredUserController::store() creates a
+    // self-registered account without one, which then lands on /dashboard. Reading ->slug
+    // off that null was a 500 on the first page such an account ever sees.
+    $user = User::factory()->create(['organization_id' => null]);
+
+    $this->actingAs($user)->get('/portal')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/NoOrganization'));
+});
+
+it('sends an account with no home organization from the dashboard to that same page', function () {
+    $user = User::factory()->create(['organization_id' => null]);
+
+    $this->actingAs($user)->get('/dashboard')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/NoOrganization'));
 });

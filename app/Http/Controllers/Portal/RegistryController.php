@@ -126,6 +126,9 @@ class RegistryController extends Controller
                 'url' => $this->url->base($group),
             ],
             'package' => [
+                // The page's breadcrumb links to the package's own address, so it needs the
+                // id the URL is built from.
+                'id' => $package->id,
                 'type' => $package->type->value,
                 'name' => $package->name,
                 'description' => $package->description,
