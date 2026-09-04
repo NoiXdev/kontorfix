@@ -15,8 +15,8 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
+use App\Services\Package\PackageNameKey;
 use App\Services\Package\SharedAssignment;
-use App\Services\Python\PythonName;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
@@ -215,7 +215,7 @@ class GroupController extends Controller
                         ? $pivot->available_until?->toDateString()
                         : null,
                     'in_force' => in_array($p->id, $inForce, true),
-                    'owned_by_registry_org' => in_array(self::upstreamNameKey($p->type, $p->name), $ownedNames, true),
+                    'owned_by_registry_org' => in_array(PackageNameKey::for($p->type, $p->name), $ownedNames, true),
                     'manageable' => ! $p->shared || in_array($p->organization_id, $administeredOrgIds, true),
                 ];
             })
@@ -256,7 +256,7 @@ class GroupController extends Controller
                 ->whereIn('type', $resolvedVerbatim->map(fn (Package $p): string => $p->type->value)->unique()->all())
                 ->whereIn('name', $resolvedVerbatim->map(fn (Package $p): string => $p->name)->unique()->all())
                 ->get(['type', 'name'])
-                ->map(fn (Package $p): string => self::upstreamNameKey($p->type, $p->name))
+                ->map(fn (Package $p): string => PackageNameKey::for($p->type, $p->name))
                 ->all();
         }
 
@@ -264,21 +264,11 @@ class GroupController extends Controller
             $held = array_merge($held, Package::where('organization_id', $group->organization_id)
                 ->where('type', PackageType::Python)
                 ->get(['type', 'name'])
-                ->map(fn (Package $p): string => self::upstreamNameKey($p->type, $p->name))
+                ->map(fn (Package $p): string => PackageNameKey::for($p->type, $p->name))
                 ->all());
         }
 
         return array_values(array_unique($held));
-    }
-
-    /**
-     * The identity a resolver actually compares on: the type, plus the name in the form that
-     * resolver matches. Python is PEP 503-normalised through the same helper PypiController
-     * uses, so the two cannot disagree about which strings are one name.
-     */
-    private static function upstreamNameKey(PackageType $type, string $name): string
-    {
-        return $type->value.' '.($type === PackageType::Python ? PythonName::normalize($name) : $name);
     }
 
     /**

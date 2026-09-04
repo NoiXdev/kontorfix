@@ -156,14 +156,26 @@ class SharedAssignment
             return;
         }
 
+        $claimed = PackageNameKey::for($type, $name);
+
         // assignedPackages(), for the same reason as above: an expired shared assignment
         // serves nothing, so it holds no name.
+        //
+        // The name is matched in PHP rather than by a `where`, through the same key
+        // {@see refuseShadowing} groups on: a Python name is resolved PEP 503-normalised, so
+        // a shared `shared-lib` holds the name an own `Shared_Lib` is being created under
+        // while the stored strings never match, and no SQL predicate states that. SQL still
+        // narrows to the shared rows of this type, which is every filter it can express;
+        // what it hands back is bounded by the registries this one package is being attached
+        // to.
         $holders = Group::whereIn('id', $groupIds)
-            ->whereHas('assignedPackages', fn ($q) => $q
+            ->with(['assignedPackages' => fn ($q) => $q
                 ->where('packages.shared', true)
-                ->where('packages.type', $type)
-                ->where('packages.name', $name))
+                ->where('packages.type', $type)])
             ->orderBy('name')
+            ->get()
+            ->filter(fn (Group $g): bool => $g->assignedPackages
+                ->contains(fn (Package $p): bool => PackageNameKey::for($p->type, $p->name) === $claimed))
             ->pluck('name');
 
         if ($holders->isEmpty()) {
@@ -210,7 +222,13 @@ class SharedAssignment
         /** @var array<string, array<int, string>> $namesByMessage */
         $namesByMessage = [];
 
-        foreach ($resulting->groupBy(fn (Package $p) => "{$p->type->value} {$p->name}") as $name => $sameName) {
+        // Grouped by the key the RESOLVER matches on, not by the stored string: two Python
+        // packages named `Shared_Lib` and `shared-lib` are one project to pip, so comparing
+        // the strings verbatim accepted the collision and left the shared package silently
+        // shadowed. The key is therefore also what the message names — for Python it is the
+        // normalised form, which is the name the conflict actually exists under and may be
+        // neither of the two spellings stored.
+        foreach ($resulting->groupBy(fn (Package $p) => PackageNameKey::for($p->type, $p->name)) as $name => $sameName) {
             $shared = $sameName->where('shared', true);
             $own = $sameName->where('shared', false);
 
