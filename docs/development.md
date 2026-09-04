@@ -855,11 +855,17 @@ portal, so the sidebar and the dashboard can point at it without knowing which c
 pointing at.
 
 **Every organization has a portal from the moment it is created.** `organizations.portal_enabled`
-defaults to on, and the switch sits on the organization page in the console beside the name and
-the slug.
+defaults to on. The switch is on the organization page in the console, in the same settings form as
+the name, the slug and the failure digest, below the digest field.
 
 **Who may open a portal**: members of the organization — any role, a plain Member included — and
 operator accounts, so that support can see what a customer sees.
+
+**Switching a portal off closes it to the operator too.** The organization switch is checked
+before anyone's identity is, so a super-admin opening `/c/{slug}` gets the same 404 the customer
+does. That is a real support consequence and worth knowing before you use the switch: whoever turns
+a customer's portal off can no longer look in to see what that customer sees, and has to turn it
+back on to do so.
 
 **Everybody else gets a 404, and so does everything else that fails.** A slug that belongs to no
 organization, a portal that is switched off and a viewer who may not open this one all produce the
@@ -888,9 +894,11 @@ versus operator-organization admin" would be describing a distinction that does 
 Neither is derived from the other, and **turning every registry off is not the same as turning the
 portal off**. A portal with no visible registries still opens — the customer reaches it and finds
 an empty package list — while a portal that is off is a 404 with nothing behind it. To take the
-portal away from a customer, use the organization switch. The registry switch is for a registry
-that is only a package collection, composed into other registries of the same organization rather
-than handed to anybody; the console badges such a registry "Sammlung".
+portal away from a customer, use the organization switch. The registry switch is for a registry the
+operator keeps as a package collection rather than handing it to anybody — its packages are then
+assigned, one at a time, to the registries that are handed over. Nothing composes them
+automatically; the switch only decides whether the collection itself shows up as a registry. The
+console badges one "Sammlung".
 
 **Neither switch ever touches a build.** `/r/…` is out of reach of both: an organization whose
 portal is off keeps serving Composer, npm and pip exactly as before, and so does a registry hidden
@@ -910,9 +918,10 @@ narrower than the customer's, and it is narrower on purpose: opening a customer'
 them must not double as a way of issuing oneself credentials for their registry. Everything else
 an operator sees there is the customer's own content, and never a rosier version of it — a package
 the customer cannot resolve is not shown as available, and a lapsed assignment is not shown as
-live. The organization switcher in the portal header lists an operator's **own** memberships only;
-it is navigation, not a customer directory, and a directory arrived at by browsing is a directory
-nobody decided to publish.
+live. The organization switcher in the portal header lists an operator's **own** memberships, plus
+the customer whose portal is currently open as a disabled row that names where they are — and
+nothing else. It is navigation, not a customer directory, and a directory arrived at by browsing is
+a directory nobody decided to publish.
 
 **A member's own minting is unchanged by any of this**: the portal issues exactly the credential
 `settings/tokens` issues, behind the same password confirmation, scoped to the organization the
@@ -924,12 +933,22 @@ refused.
 **A lapsed assignment stays visible to the customer, marked, with the consequence spelled out.**
 When `group_package.available_until` has passed, the registry stops serving the package and builds
 get a 404 for it (the shared-packages section above explains why the name also stays blocked
-against the public index). The customer's portal does not quietly drop the package at that moment
-— it keeps the row, badges it `abgelaufen am …` with the date of *that registry's* assignment, and
-says in so many words that builds receive a 404 and that only the operator can extend it. The
-package's own page in the portal stays reachable for the same reason and replaces its install
-snippet with that explanation: the customer arrives there *because* their build is failing, and a
-404 on the page that would explain the 404 explains nothing.
+against the public index). The customer's portal does not quietly drop the package at that moment.
+It keeps the row and marks it in two places, which say different things:
+
+- **On the row**, a bare `abgelaufen` badge — no date. It means "no registry of yours serves this
+  any more", which is a statement about a set and has no single date to carry.
+- **At each registry link**, `abgelaufen am …` with *that* registry's date, or a bare `abgelaufen`
+  where the assignment has no end date at all. An assignment can stop being served without ever
+  having had a date — a package that is no longer shared is one — so the date is not promised, and
+  copy that promised it would be false on exactly the rows the reader is being pointed at.
+
+The text beside the row tells the customer that builds receive a 404 and that they should contact
+the operator if they still need the package. It does not tell them what the operator would have to
+do; extending an assignment is not something the customer can ask for by name from that page. The
+package's own page in the portal stays reachable for the same reason the row does and replaces its
+install snippet with that explanation: the customer arrives there *because* their build is failing,
+and a 404 on the page that would explain the 404 explains nothing.
 
 The same care applies where a package has lapsed in one registry but not another. The package is
 still usable, carries no expiry badge, and the marker sits at the link to the registry that
@@ -947,13 +966,17 @@ dashboard alike — saying which of the two situations it is in and that an oper
 Naming the organization on the first of those pages is safe in a way it is not at the gate: the
 reader is a member and already knows it exists.
 
-**Changing an organization's slug moves its portal address, and nothing redirects.** The registry
-addresses survive a slug change through the frozen legacy slug described in the next section; the
-portal has no such thing, by decision — machines are configured against registry URLs and nobody
-updates those quickly, while a portal is opened by a person, and a permanent second address costs
-more than a stale bookmark. The console's slug confirmation therefore names the old and the new
-`/c/…` address alongside the registry pattern, and says that saved links stop working. Tell the
-customer, or send them the new link.
+**Changing an organization's slug breaks the portal address and the registry addresses alike, and
+nothing redirects either of them.** The frozen legacy slug described in the next section does not
+help here: it freezes the **one-segment** pre-upgrade address `/r/{registry}` and there is no
+organization-level equivalent, so `/r/{old-org}/{registry}` answers 404 after a rename exactly as
+`/c/{old-slug}` does. What differs is **who has to act**. The `/r/` addresses live in
+`composer.json`, `.npmrc`, `pip.conf` and CI variables — machines, with a maintainer who
+reconfigures them deliberately and can be told to. The portal address lives in somebody's bookmarks
+and in whatever mail it was first sent in, and nobody has that list; a permanent second address was
+judged to cost more than the stale bookmarks do. The console's slug confirmation names both
+addresses, before and after, and says that neither old one keeps answering. Tell the customer, or
+send them the new link.
 
 ### Organization-scoped registry slugs
 

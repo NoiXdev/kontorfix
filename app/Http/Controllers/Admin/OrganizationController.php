@@ -62,9 +62,12 @@ class OrganizationController extends Controller
             'registryUrlTemplate' => $url->template(),
             // The portal's address form, with the organization slug left open, substituted
             // by the same dialog and never assembled on the page. The slug moves the portal
-            // as well as the registries, and the two consequences are not the same one: an
-            // old /r/ address answers with a redirect (groups.legacy_slug), while the portal
-            // has none by design — spec §6 — so a saved /c/ link simply stops working.
+            // as well as the registries, and NEITHER old address keeps answering:
+            // `groups.legacy_slug` freezes only the one-segment pre-upgrade address
+            // /r/{registry}, so there is no organization-level redirect for the /r/ URLs
+            // either (OrganizationSlugEditTest's first case asserts the 404). The dialog
+            // names both because both have to be reconfigured — the /r/ ones by whoever
+            // maintains the clients, the /c/ one by whoever holds the link.
             'portalPathTemplate' => $portal->template(),
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).

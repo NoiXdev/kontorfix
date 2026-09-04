@@ -71,11 +71,12 @@ const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }
  *
  * IT IS A CONTRACT, NOT COPY, and that is why it is not a string to reword in passing.
  * `SetupSnippetBuilder` emits this exact literal into composer's auth.json, .npmrc,
- * pip.conf, .netrc and twine's config, and three cases in SetupSnippetBuilderTest assert it
- * there. Changing it on this side alone would redden NOTHING: the substitution below would
- * simply stop matching, and the customer would copy a snippet still carrying the
- * placeholder after minting a token — into their own .npmrc. A rewording is a coordinated
- * change to the builder, this constant and those assertions at once.
+ * pip.conf, .netrc and twine's config, and SetupSnippetBuilderTest asserts it there three
+ * times across two cases. Changing it on this side alone would redden NOTHING: the
+ * substitution below would simply stop matching, and the customer would copy a snippet
+ * still carrying the placeholder after minting a token — into their own .npmrc. A
+ * rewording is a coordinated change to the builder, this constant and those assertions at
+ * once.
  *
  * It is also not a sentence addressed to the reader. It is angle-bracketed metasyntax
  * inside a config file, the same shape as the `<slug>` and `<organisation>` placeholders

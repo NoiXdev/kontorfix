@@ -125,11 +125,16 @@ const newPathPattern = computed(() =>
 );
 
 // The organization slug is also the first segment of the customer portal's address, so a
-// rename moves that too. Stated separately from the registry patterns above because the
-// CONSEQUENCE differs: an old /r/... address keeps answering through the frozen legacy slug,
-// while the portal deliberately has no such redirect — a saved /c/... link stops working
-// outright. Substituted out of the server's template for the same reason the /r/ patterns
-// are, so this page never assembles a portal path of its own.
+// rename moves that too, and NOT as a milder version of the registry consequence. BOTH
+// addresses break: `groups.legacy_slug` freezes only the one-segment PRE-UPGRADE address
+// /r/{registry}, so an organization rename leaves /r/{old-org}/{registry} answering 404 —
+// OrganizationSlugEditTest's first case asserts exactly that. What differs is WHO is
+// affected: the /r/ addresses are held by machines the operator reconfigures deliberately,
+// the portal address by people whose bookmarks nobody collects. Offering the portal's
+// missing redirect as a CONTRAST with /r/ would be false, and this page's own neighbouring
+// sentence — that existing client configurations stop working until they are changed —
+// already says so. Substituted out of the server's template for the same reason the /r/
+// patterns are, so this page never assembles a portal path of its own.
 const oldPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', props.organization.slug));
 const newPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', settingsForm.slug || '…'));
 
@@ -169,8 +174,9 @@ function saveSettings() {
                         : '') +
                     'Bestehende Client-Konfigurationen, die auf die alten /r/-Adressen zeigen (composer.json, .npmrc, pip.conf, ' +
                     'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.\n\n' +
-                    `Die Portal-Adresse dieser Organisation ändert sich von ${oldPortalPath.value} auf ${newPortalPath.value}. ` +
-                    'Gespeicherte Links funktionieren danach nicht mehr — anders als bei den /r/-Adressen gibt es dafür keine Weiterleitung.',
+                    `Auch die Portal-Adresse dieser Organisation ändert sich, von ${oldPortalPath.value} auf ${newPortalPath.value}. ` +
+                    'Gespeicherte Links müssen ebenfalls ersetzt werden.\n\n' +
+                    'Weiterleitungen von den alten Adressen gibt es in keinem der beiden Fälle.',
             ),
     });
 }
@@ -305,9 +311,10 @@ function detachMember(userId: string) {
                                 Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit.
                             </template>
                             Bestehende Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt
-                            sind. Die Portal-Adresse ändert sich von <code>{{ oldPortalPath }}</code> auf <code>{{ newPortalPath }}</code
-                            >. Gespeicherte Links funktionieren danach nicht mehr — anders als bei den /r/-Adressen gibt es dafür keine
-                            Weiterleitung.
+                            sind. Auch die Portal-Adresse ändert sich, von <code>{{ oldPortalPath }}</code> auf
+                            <code>{{ newPortalPath }}</code
+                            >: Gespeicherte Links müssen ebenfalls ersetzt werden. Weiterleitungen von den alten Adressen gibt es in keinem der
+                            beiden Fälle.
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
                             Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch

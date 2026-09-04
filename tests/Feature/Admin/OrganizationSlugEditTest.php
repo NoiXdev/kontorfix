@@ -84,11 +84,13 @@ it('hands the console the bare url pattern and the affected registry count', fun
 });
 
 /**
- * The organization slug is the first segment of the customer portal's address as well, and
- * that consequence is NOT the registry one restated: an old /r/... address keeps answering
- * through the frozen `legacy_slug`, while the portal has no redirect at all by design (spec
- * §6), so a saved /c/... link stops working the moment the slug changes. The confirmation
- * therefore has to name it, and this pins the payload the dialog substitutes into.
+ * The organization slug is the first segment of the customer portal's address as well, so a
+ * rename breaks a saved /c/... link. It breaks the /r/... addresses too — the first case in
+ * this file asserts that /r/{old-org}/... answers 404, because `groups.legacy_slug` freezes
+ * only the ONE-SEGMENT pre-upgrade address and there is no organization-level equivalent.
+ * The portal is therefore not the milder case and must not be described as one; it is the
+ * case where the people holding the link are the ones nobody has a list of. The
+ * confirmation has to name the address, and this pins the payload it substitutes into.
  *
  * Two assertions, because either alone would prove nothing. The expect() pins the address
  * FORM against the route the application actually answers on, so a change to the /c/ prefix
