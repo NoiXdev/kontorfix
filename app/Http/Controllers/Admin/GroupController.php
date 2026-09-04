@@ -196,10 +196,18 @@ class GroupController extends Controller
             ->get(['packages.id', 'name', 'type', 'sync_status', 'shared', 'packages.organization_id']);
 
         $ownedNames = $this->namesHeldByOrganization($group, $rows);
-        $administeredOrgIds = $this->administeredOrganizationIds();
+
+        // The same shortcut GuardsPackageAttachment's two guards take, for the same reason
+        // and with the same meaning: a caller who administers every organization gets `true`
+        // for every row anyway, because administeredOrganizationIds() would return every
+        // organization id in the table and the in_array() below could not answer anything
+        // else. Asking first only avoids materialising that list — paid by exactly the
+        // accounts that do most of the assigning — and it is a shortcut, not an exemption.
+        $administersAll = $this->administersEveryOrganization();
+        $administeredOrgIds = $administersAll ? [] : $this->administeredOrganizationIds();
 
         return $rows
-            ->map(function (Package $p) use ($inForce, $ownedNames, $administeredOrgIds): array {
+            ->map(function (Package $p) use ($inForce, $ownedNames, $administersAll, $administeredOrgIds): array {
                 // The pivot row this package was loaded through. Read via getRelation()
                 // rather than `$p->pivot`, which is set dynamically by the belongsToMany
                 // and so is invisible to static analysis on a plain Package.
@@ -216,7 +224,9 @@ class GroupController extends Controller
                         : null,
                     'in_force' => in_array($p->id, $inForce, true),
                     'owned_by_registry_org' => in_array(PackageNameKey::for($p->type, $p->name), $ownedNames, true),
-                    'manageable' => ! $p->shared || in_array($p->organization_id, $administeredOrgIds, true),
+                    'manageable' => ! $p->shared
+                        || $administersAll
+                        || in_array($p->organization_id, $administeredOrgIds, true),
                 ];
             })
             ->all();
