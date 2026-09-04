@@ -94,10 +94,15 @@ class RegistryController extends Controller
         //
         // 404, not 403: a registry the portal does not show is one the portal does not have.
         //
-        // GroupPolicy::view() keeps its own portal_enabled clause. It is not redundant with
-        // this line — TokenController::store() authorizes 'view' on a group WITHOUT passing
-        // through either of these actions, so the policy is the only thing standing between a
-        // hidden registry and a token minted for it.
+        // GroupPolicy::view() keeps its own portal_enabled clause, but it is no longer the
+        // last line on any path and this comment used to say that it was. TokenController::
+        // store() authorizes 'view' on a group without passing through either of these
+        // actions, and it used to leave the question to the policy — which made minting the
+        // one surface where a super-admin, waved past the policy, could reach a hidden
+        // registry. It states the rule itself now, so all three call sites ask it here,
+        // ahead of authorize(), and no route reaches the policy's clause at all. The clause
+        // stays because it is true at the policy's own level of abstraction, and it is kept
+        // honest by GroupPolicyTest calling view() directly rather than by any route.
         abort_unless($group->portal_enabled, 404);
         $this->authorize('view', $group);
         // The address has to BIND. GroupPolicy::view() asks only whether the viewer belongs

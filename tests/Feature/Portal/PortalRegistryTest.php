@@ -366,8 +366,8 @@ it('counts an un-shared package as assigned but not as served', function () {
  * policy for a super-admin, so the policy's copy never runs for them. "Does this registry
  * appear in the portal" is a property of the SURFACE, not of the viewer: a hidden registry is
  * absent for everybody, and an answer that changes with who asks is the wrong answer whichever
- * way it goes. Both controller actions state it BEFORE authorize(), so a member, an operator
- * maintainer and a super-admin all get the same 404.
+ * way it goes. All three actions that authorize 'view' state it BEFORE authorize(), so a
+ * member, an operator maintainer and a super-admin all get the same 404.
  *
  * A super-admin is the population that reaches the guard through no other refusal, so it is
  * the one asserted here; the member case lives in Admin\UserOrganizationTest and the operator

@@ -95,7 +95,7 @@ it('refuses a group from another organization', function () {
  * The mutation that drops both guards has to be able to name both.
  */
 it('refuses an operator account minting a token in a customer portal', function () {
-    $customer = Organization::factory()->create(['slug' => 'acme']);
+    Organization::factory()->create(['slug' => 'acme']);
 
     // superAdmin() brings its own is_operator organization as its home — that home, with
     // `role === Admin`, is what makes it a super-admin (isSuperAdmin()'s grandfather clause).
@@ -109,14 +109,14 @@ it('refuses an operator account minting a token in a customer portal', function 
         ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
         ->assertStatus(403);
 
-    // Not merely "no token for the customer": no token at all. The old code would have
-    // minted one against the operator's OWN organization and answered 302.
+    // No token AT ALL, which is the stronger of the two questions and implies the weaker one
+    // ("none for the customer"). The old code answered 302 and minted one against the
+    // operator's OWN organization, so a per-organization count would have passed.
     expect(RegistryToken::count())->toBe(0);
-    expect(RegistryToken::where('organization_id', $customer->id)->count())->toBe(0);
 });
 
 it('refuses a pivot-admin of the operator organization minting in a customer portal', function () {
-    $customer = Organization::factory()->create(['slug' => 'acme']);
+    Organization::factory()->create(['slug' => 'acme']);
     $operatorOrg = Organization::factory()->create(['is_operator' => true]);
 
     // The second operator shape: admin of the operator organization through the pivot, home
@@ -138,7 +138,6 @@ it('refuses a pivot-admin of the operator organization minting in a customer por
         ->assertStatus(403);
 
     expect(RegistryToken::count())->toBe(0);
-    expect(RegistryToken::where('organization_id', $customer->id)->count())->toBe(0);
 });
 
 it('still lets a member of the organization mint a token', function () {
