@@ -27,6 +27,23 @@ class PortalPackages
      * where the resolver made an existence check, and told the operator in German to do
      * something destructive that would not have helped.
      *
+     * ONE filter is applied here, and it is NOT a rule of its own: `groups.portal_enabled` —
+     * "does this registry appear in the portal", the same predicate
+     * Portal\RegistryController::index() already asks of the same column. Without it this page
+     * would name a registry the portal deliberately hides and render a link into it, and
+     * GroupPolicy::view() would answer 403 to a link the portal itself produced. The admin
+     * registry page already replaced exactly that shape — row actions the caller may not use
+     * are hidden rather than shown and then refused — and on the customer-facing page it is
+     * worse, because a customer cannot know why.
+     *
+     * The consequence is intended, not incidental: A PACKAGE REACHABLE ONLY THROUGH HIDDEN
+     * REGISTRIES DOES NOT APPEAR IN THE PORTAL AT ALL. That is what the switch means. It
+     * governs the portal surface and never the registry endpoints, so the customer can still
+     * resolve such a package through /r/… with a token.
+     *
+     * Nothing about EXPIRY moves into that filter. Expiry remains the difference between
+     * packagesFor() and packages(), and there is still no date comparison anywhere here.
+     *
      * Group::packages() and not Group::assignedPackages() for the inner loop, equally
      * deliberately: reading the filtered relation here would drop a lapsed assignment from
      * the list entirely, which is the shape the per-registry portal surfaces have and the
@@ -40,7 +57,15 @@ class PortalPackages
         /** @var Collection<string, array{package: Package, groups: Collection<int, Group>, in_force: bool}> $rows */
         $rows = collect();
 
-        foreach ($organization->groups()->orderBy('name')->get() as $group) {
+        $groups = $organization->groups()
+            // `groups.portal_enabled`, not `organizations.portal_enabled`: whether THIS
+            // REGISTRY appears in the portal. Whether the organization has a portal at all was
+            // already answered upstream by ResolvePortalContext.
+            ->where('portal_enabled', true)
+            ->orderBy('name')
+            ->get();
+
+        foreach ($groups as $group) {
             $served = $this->access->packagesFor($group)->keyBy('id');
 
             foreach ($group->packages()->get() as $package) {

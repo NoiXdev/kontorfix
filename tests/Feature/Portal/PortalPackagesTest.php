@@ -84,6 +84,30 @@ it('does not list a package another organization has in its own registry', funct
     expect(app(PortalPackages::class)->for($org))->toBeEmpty();
 });
 
+it('does not list a package that only a registry hidden from the portal carries', function () {
+    // `groups.portal_enabled` means "does this registry appear in the portal". A registry
+    // with the switch off is a collection-only container, GroupPolicy::view() refuses it, and
+    // naming its package here would put a link on the page that answers 403. That the package
+    // then has no portal row at all is the meaning of the switch, not a side effect — it stays
+    // resolvable through /r/… with a token.
+    $org = Organization::factory()->create();
+    $hidden = Group::factory()->for($org)->create(['name' => 'Sammlung', 'portal_enabled' => false]);
+    $hidden->packages()->attach(Package::factory()->for($org)->create(['name' => 'acme/hidden'])->id);
+
+    expect(app(PortalPackages::class)->for($org))->toBeEmpty();
+});
+
+it('lists that same package once the registry switch is on', function () {
+    // The other direction, because a service that listed nothing at all would satisfy the case
+    // above. Same fixture, one column different.
+    $org = Organization::factory()->create();
+    $shown = Group::factory()->for($org)->create(['name' => 'Sammlung', 'portal_enabled' => true]);
+    $shown->packages()->attach(Package::factory()->for($org)->create(['name' => 'acme/hidden'])->id);
+
+    expect(app(PortalPackages::class)->for($org)->pluck('package.name')->all())
+        ->toBe(['acme/hidden']);
+});
+
 it('keeps a package in force while any one registry still serves it', function () {
     // NOT in the brief, and it has to be: `in_force` accumulates across registries, and no
     // case in the brief's set can tell an accumulating `||` from a plain last-wins
