@@ -63,6 +63,17 @@ it('lets an operator account open a customer portal', function () {
     $this->actingAs(superAdmin())->get('/c/acme')->assertOk();
 });
 
+it('lets a super-admin in on an instance that has no operator organization', function () {
+    // The operator-organization scan below the super-admin clause can only answer yes if an
+    // `is_operator` row exists. SetupController always creates one, but nothing in the rule
+    // depends on it: the flag is what makes this account a super-admin. Without the clause
+    // in front, such an instance 404s its own super-admin on every customer portal.
+    Organization::factory()->create(['slug' => 'acme']);
+    $super = User::factory()->for(Organization::factory()->create())->create(['is_super_admin' => true]);
+
+    $this->actingAs($super)->get('/c/acme')->assertOk();
+});
+
 it('answers 404 to an admin of one customer looking at another customer portal', function () {
     // The non-member case above uses a plain member. Privilege inside one's own
     // organization is not reach into somebody else's, and an org admin is the account that
