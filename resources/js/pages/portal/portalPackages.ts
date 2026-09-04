@@ -158,10 +158,13 @@ export function lapsedNote(): string {
  * form that covers both. `In der Registry legacy und archive` would be the same defect one word
  * later, so the article and the noun are chosen with the list and everything after them is not.
  *
- * `Über Ihre anderen Registries ist das Paket weiterhin verfügbar` is a guarantee, not a hope:
- * `in_force` is DERIVED from these same entries, and the entries are already filtered to the
- * portal-visible registries the page renders. A row that reaches this function therefore has at
- * least one rendered registry that still serves the package.
+ * The closing clause is number-free too, and had to become so: "Über Ihre anderen Registries"
+ * is plural over a remainder that is exactly one whenever a customer has two registries and one
+ * of them has lapsed — the common shape. "nur nicht mehr dort" counts nothing on either side.
+ *
+ * It is a guarantee, not a hope: `in_force` is DERIVED from these same entries, and the entries
+ * are already filtered to the portal-visible registries the page renders. A row that reaches
+ * this function therefore has at least one rendered registry that still serves the package.
  */
 export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalRegistryName[] }): string | null {
     // A row that is in force nowhere is `lapsedNote()`'s case, not this one. Stated here and
@@ -181,7 +184,7 @@ export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalReg
 
     return (
         `${where} wird dieses Paket nicht mehr ausgeliefert. Builds, die dort auflösen, ` +
-        'erhalten einen 404. Über Ihre anderen Registries ist das Paket weiterhin verfügbar.'
+        'erhalten einen 404. Das Paket wird weiterhin ausgeliefert, nur nicht mehr dort.'
     );
 }
 

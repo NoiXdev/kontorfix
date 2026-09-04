@@ -22,10 +22,17 @@ describe('lapsedNote', () => {
         expect(lapsedNote()).toContain('404');
     });
 
-    it('does not promise a date beside every marker', () => {
-        // `registryMarker` renders a bare `abgelaufen` where `available_until` is null, so
-        // "mit dem Ablaufdatum markiert" is false for at least one marker on a mixed row.
-        expect(lapsedNote()).not.toContain('Ablaufdatum');
+    it('points at the markers without promising a date beside each of them', () => {
+        // Asserted WHOLE. `not.toContain('Ablaufdatum')` alone let two mutations through the
+        // suite: deleting the pointer sentence outright, and rewriting it as "mit dem Datum
+        // markiert", which restores the same false promise in other words. `registryMarker`
+        // renders a bare `abgelaufen` wherever `available_until` is null, so any promise of a
+        // day is false for at least one marker on a mixed row.
+        expect(lapsedNote()).toBe(
+            'Dieses Paket wird von keiner Ihrer Registries mehr ausgeliefert: Builds erhalten dafür einen 404. ' +
+                'Die betroffenen Registries sind oben markiert. Wenden Sie sich an den Betreiber, wenn Sie das ' +
+                'Paket weiter benötigen.',
+        );
     });
 
     it('does not tell the customer to remove anything themselves', () => {
@@ -77,7 +84,7 @@ describe('partlyLapsedNote', () => {
         // one. Asserted whole, because a plural anywhere in the sentence is the defect.
         expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toBe(
             'In der Registry legacy wird dieses Paket nicht mehr ausgeliefert. Builds, die dort ' +
-                'auflösen, erhalten einen 404. Über Ihre anderen Registries ist das Paket weiterhin verfügbar.',
+                'auflösen, erhalten einen 404. Das Paket wird weiterhin ausgeliefert, nur nicht mehr dort.',
         );
     });
 
@@ -85,8 +92,13 @@ describe('partlyLapsedNote', () => {
         expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain('404');
     });
 
-    it('says the package is still available through the others', () => {
-        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain('weiterhin verfügbar');
+    it('says the package is still delivered, without counting what is left', () => {
+        // "Über Ihre anderen Registries" was plural over a remainder that is exactly one
+        // whenever a customer has two registries and one of them has lapsed — the common
+        // shape, and the same defect this sentence was rewritten to remove.
+        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain(
+            'Das Paket wird weiterhin ausgeliefert, nur nicht mehr dort.',
+        );
     });
 
     it('enumerates several lapsed registries in German', () => {
@@ -145,7 +157,11 @@ describe('SHARED_BADGE_TITLE', () => {
         // a recipient, and what brings the package into this portal is a registry assignment.
         // This console keeps "Freigabe" for the `shared` marking itself and never for an
         // assignment, which packageAssignment.ts depends on.
-        expect(SHARED_BADGE_TITLE).not.toContain('freigegeben');
-        expect(SHARED_BADGE_TITLE).not.toContain('Organisation');
+        //
+        // toBe, not a pair of not.toContain: those are case-sensitive, and SharedBadge's own
+        // default tooltip opens with "Freigegeben:" — so "Freigegeben: vom Betreiber für Sie
+        // bereitgestellt." passed every negative assertion while putting the claim straight
+        // back. On a constant the exact form costs nothing.
+        expect(SHARED_BADGE_TITLE).toBe('Vom Betreiber bereitgestellt.');
     });
 });
