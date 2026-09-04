@@ -86,25 +86,47 @@ it('refuses a group from another organization', function () {
     expect(RegistryToken::count())->toBe(0);
 });
 
+/*
+ * The two operator shapes, in two tests rather than one.
+ *
+ * They are refused by different code, and a second assertion placed after the first in a
+ * single test can never redden on its own — Pest stops at the first failure, so the shape
+ * that is refused twice over would be permanently masked by the shape that is refused once.
+ * The mutation that drops both guards has to be able to name both.
+ */
 it('refuses an operator account minting a token in a customer portal', function () {
     $customer = Organization::factory()->create(['slug' => 'acme']);
-    $operatorOrg = Organization::factory()->create(['is_operator' => true]);
 
+    // superAdmin() brings its own is_operator organization as its home — that home, with
+    // `role === Admin`, is what makes it a super-admin (isSuperAdmin()'s grandfather clause).
     // Viewing and minting are different questions. If looking in to help also issued
     // credentials, support access would be a way to obtain a customer's registry token.
+    //
+    // This shape is refused by store() and by NOTHING else: Gate::before answers true before
+    // RegistryTokenPolicy::create is consulted, so the guard in the controller is the single
+    // thread it hangs from.
     $this->actingAs(superAdmin())
         ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
         ->assertStatus(403);
 
-    // BOTH operator shapes, because they are refused by different code. The super-admin above
-    // walks past RegistryTokenPolicy::create through Gate::before, which is why store() has
-    // to state membership itself. This one — admin of the operator organization through the
-    // pivot, home in an ordinary organization — never trips isSuperAdmin()'s grandfather
-    // clause (that needs `role === Admin` in an operator HOME organization), so the policy
-    // would refuse it too. It still reaches the portal: administersOperatorOrganization()
-    // reads the pivot roles, so ResolvePortalContext lets it in and the refusal has to happen
-    // here. Nothing pinned this shape, and a change to the policy would have let it through
-    // in silence.
+    // Not merely "no token for the customer": no token at all. The old code would have
+    // minted one against the operator's OWN organization and answered 302.
+    expect(RegistryToken::count())->toBe(0);
+    expect(RegistryToken::where('organization_id', $customer->id)->count())->toBe(0);
+});
+
+it('refuses a pivot-admin of the operator organization minting in a customer portal', function () {
+    $customer = Organization::factory()->create(['slug' => 'acme']);
+    $operatorOrg = Organization::factory()->create(['is_operator' => true]);
+
+    // The second operator shape: admin of the operator organization through the pivot, home
+    // in an ordinary one. It never trips isSuperAdmin()'s grandfather clause (that needs
+    // `role === Admin` in an operator HOME organization), so Gate::before does not fire and
+    // RegistryTokenPolicy::create refuses it as well — belt and braces where the super-admin
+    // above has one thread. It does reach the portal: administersOperatorOrganization() reads
+    // the pivot roles, so ResolvePortalContext admits it and the refusal has to happen in
+    // store(). Nothing pinned this shape, so a change to either guard alone would have been
+    // invisible from here.
     $pivotAdmin = User::factory()->create([
         'organization_id' => Organization::factory()->create()->id,
         'role' => 'member',
@@ -115,8 +137,6 @@ it('refuses an operator account minting a token in a customer portal', function 
         ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
         ->assertStatus(403);
 
-    // Not merely "no token for the customer": no token at all. The old code would have
-    // minted one against the operator's OWN organization and answered 302.
     expect(RegistryToken::count())->toBe(0);
     expect(RegistryToken::where('organization_id', $customer->id)->count())->toBe(0);
 });

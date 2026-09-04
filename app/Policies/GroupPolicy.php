@@ -21,6 +21,13 @@ class GroupPolicy
         // the customer whose portal they are looking at. Spec decision 4 says an operator
         // sees exactly what the customer sees, and index() and PortalPackages both filter on
         // this same column, so no legitimate operator path wants a hidden group.
+        //
+        // NO LONGER REACHED BY ANY CALLER, and deliberately kept anyway. All three portal
+        // paths — RegistryController::show(), showPackage() and TokenController::store() —
+        // now state `abort_unless($group->portal_enabled, 404)` before they authorize, which
+        // is where a surface property belongs. Deleting this clause therefore reddens no
+        // test; that is a fact about the callers, not evidence that the clause is wrong, and
+        // the reasoning above still applies the moment a fourth caller appears.
         if (! $group->portal_enabled) {
             return false;
         }
