@@ -547,10 +547,17 @@ async function copyToken() {
                                             "
                                         >
                                             <td class="px-4 py-3 font-mono">
+                                                <!-- Same rule as the row actions below, for the same reason: an
+                                                     operator who may not manage this assignment is not permitted on
+                                                     the package page either, so a link there answers 403. Offering
+                                                     it and refusing it is the defect the hidden actions avoid; the
+                                                     name is still shown, because they are entitled to know what
+                                                     their registry carries — only not to open it. -->
                                                 <div class="flex items-center gap-2">
-                                                    <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
+                                                    <Link v-if="pkg.manageable" :href="route('admin.packages.show', pkg.id)" class="hover:underline">
                                                         {{ pkg.name }}
                                                     </Link>
+                                                    <span v-else>{{ pkg.name }}</span>
                                                     <SharedBadge v-if="pkg.shared" />
                                                 </div>
                                             </td>
