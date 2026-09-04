@@ -377,6 +377,27 @@ it('tells the console that someone administering the owner may manage a shared a
         ->assertInertia(fn ($page) => $page->where('packages.0.manageable', true)->etc());
 });
 
+it('tells the console that a super admin may manage a shared assignment', function () {
+    // The two cases above are both decided by comparing the package's owner against the
+    // caller's administered organizations. A super-admin does not reach that comparison: the
+    // payload takes the same administersEveryOrganization() shortcut the two guards take, so
+    // its `administeredOrganizationIds()` — every organization there is — is never built.
+    //
+    // That makes this the one caller for whom the shortcut, and not the comparison, is what
+    // answers, so it is the one caller a mutation of the shortcut can break silently. Without
+    // this case the console would hide both row actions and the package link from exactly the
+    // account that does most of the assigning, and every other test would stay green.
+    $this->registry->packages()->attach($this->shared->id);
+
+    $this->actingAs(superAdmin())
+        ->get(route('admin.groups.show', $this->registry))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('packages.0.shared', true)
+            ->where('packages.0.manageable', true)
+            ->etc());
+});
+
 // ---------------------------------------------------------------------------------------
 // The three cases of the set rule, on both surfaces. The middle one is the whole point: a
 // write that leaves the shared assignments as they were is not an assignment being made, so
