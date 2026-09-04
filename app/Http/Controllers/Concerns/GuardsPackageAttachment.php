@@ -63,6 +63,18 @@ use Illuminate\Support\Facades\Auth;
  * the exception is granted against, and a rule asking a different question would have to be
  * kept in step with the sharing gate by hand.
  *
+ * ONE WRITE OF `group_package` DELIBERATELY ASKS NEITHER, and it looks like a hole until the
+ * question is stated precisely: Admin\GroupController::destroy() deletes a registry, and the
+ * foreign key cascades away its pivot rows — so a customer admin who may not detach a single
+ * shared assignment may drop all of them at once. That is safe, and not merely tolerated.
+ * Question 2 is "who decides which customers receive this shared package", and a registry that
+ * no longer exists receives nothing and serves nobody: there is no client left to be cut off,
+ * and no name left suppressed against an upstream that anyone can still address. Deleting the
+ * registry the assignment lives in is not a way to take the assignment away from someone —
+ * it is the same act, one level up, and it is already guarded as such by
+ * assertAdministersGroup(). A guard here would only refuse the customer their own registry
+ * because the operator had put something in it.
+ *
  * Neither question is the whole of the shared decision: a shared package may also not shadow
  * a customer's own package of the same name. That refusal lives in
  * App\Services\Package\SharedAssignment, is orthogonal to both, and must be asked separately

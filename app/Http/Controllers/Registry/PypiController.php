@@ -93,6 +93,13 @@ class PypiController extends Controller
 
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
+        // NOT de-duplicated here, unlike ComposerController::root(): with both a customer's
+        // own project and a shared one of that name assigned, this pool carries two rows that
+        // normalise to one PEP 503 name — but PythonSimpleIndexBuilder::rootHtml() takes
+        // `unique()` over the names it is given, and Composer's list has no such builder. A
+        // second `unique()` here would be a line no mutation could redden. The property is
+        // pinned end-to-end by the last case in
+        // tests/Feature/Registry/SharedPackageResolutionTest.php.
         $names = $this->pythonPackagesOfGroup($group)
             ->filter(fn (Package $p): bool => $this->access->canAccessPackage($token, $group, $p))
             ->map(fn (Package $p): string => PythonName::normalize($p->name))
