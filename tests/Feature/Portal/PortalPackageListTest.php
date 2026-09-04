@@ -106,7 +106,7 @@ it('sends each registry its own end date, not the one it was listed beside', fun
 it('leaves the registries of a package out when the portal hides them', function () {
     // Not a repeat of PortalPackagesTest's own coverage of the filter: this asserts that the
     // PAGE never renders a link the customer cannot follow. Every registry in the payload is
-    // linked, and GroupPolicy::view() answers 403 for a registry the portal hides.
+    // linked, and RegistryController answers 404 for a registry the portal hides.
     $org = Organization::factory()->create(['slug' => 'acme']);
     $hidden = Group::factory()->for($org)->create(['name' => 'hidden', 'portal_enabled' => false]);
     $visible = Group::factory()->for($org)->create(['name' => 'visible']);

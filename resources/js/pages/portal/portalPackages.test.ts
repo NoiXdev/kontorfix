@@ -77,8 +77,12 @@ describe('registryLapsedNote', () => {
 
     it('does not tell the customer to remove anything themselves', () => {
         // Only the operator can extend an assignment, so an instruction the reader cannot
-        // follow would be worse than none — the same rule lapsedNote() follows.
-        expect(registryLapsedNote()).toContain('Betreiber');
+        // follow would be worse than none — the same rule lapsedNote() follows, asserted the
+        // same way. This case was copied from that block and briefly kept the name while
+        // carrying a PRESENCE assertion (`toContain('Betreiber')`), which the name does not
+        // claim and which the whole-string `toBe` two cases above already covers. A negative
+        // documents the trap and never pins it; the `toBe` is what pins the text.
+        expect(registryLapsedNote()).not.toContain('Entfernen Sie');
     });
 });
 

@@ -151,7 +151,13 @@ it('hides portal-disabled groups from the portal listing and blocks direct acces
     $this->actingAs($user)->get("/c/{$org->slug}/registries")
         ->assertInertia(fn ($page) => $page->has('registries', 0));
 
-    $this->actingAs($user)->get("/c/{$org->slug}/registries/{$collection->id}")->assertForbidden();
+    // 404, and it used to be 403. The refusal moved: GroupPolicy::view() answered first, and
+    // a policy is the wrong home for "does this registry appear in the portal" — that is a
+    // property of the surface, not of the viewer, and a policy can be bypassed for a viewer
+    // (Gate::before, for super-admins) while the surface property cannot change with who
+    // asks. RegistryController states it before authorize() now, so every population gets one
+    // answer. Inverted rather than dropped: the rule is unchanged, only the code that says it.
+    $this->actingAs($user)->get("/c/{$org->slug}/registries/{$collection->id}")->assertNotFound();
 });
 
 it('lets a member create a token for a registry of an additional organization', function () {

@@ -214,20 +214,19 @@ it('shows an operator the addressed customers registries and not an empty portal
 });
 
 it('refuses an operator a registry the portal hides from the customer', function () {
-    // Decision 4 is "an operator sees exactly what the customer sees", and the operator branch
-    // in GroupPolicy::view() returns before the portal_enabled check. That was harmless while
-    // the branch was dead code; widening it to every operator account made it live, so the
-    // switch moved ahead of it. Without that move this answers 200 and shows a collection-only
-    // group the customer's own portal refuses.
+    // Decision 4 is "an operator sees exactly what the customer sees", and this is the same
+    // 404 the customer gets — the point of stating the switch in the controller ahead of the
+    // policy. It was 403 for one round, from GroupPolicy::view(), which made one surface
+    // property answer differently depending on who asked.
     $org = Organization::factory()->create(['slug' => 'acme']);
     $hidden = Group::factory()->for($org)->create(['portal_enabled' => false]);
 
-    $this->actingAs(operatorMaintainer())->get("/c/acme/registries/{$hidden->id}")->assertForbidden();
+    $this->actingAs(operatorMaintainer())->get("/c/acme/registries/{$hidden->id}")->assertNotFound();
 });
 
 it('still lets an operator open a registry the portal shows the customer', function () {
     // The present half: the switch gates the operator exactly as it gates the customer, and a
-    // policy that simply refused every operator would satisfy the case above.
+    // guard that refused every operator would satisfy the case above.
     $org = Organization::factory()->create(['slug' => 'acme']);
     $shown = Group::factory()->for($org)->create(['portal_enabled' => true]);
 
@@ -359,18 +358,23 @@ it('counts an un-shared package as assigned but not as served', function () {
 });
 
 /*
- * `portal_enabled` on the registry, for the one population a policy cannot answer for.
+ * `portal_enabled` on the registry: ONE answer, for every population.
  *
- * GroupPolicy::view() refuses a hidden registry, but AppServiceProvider's Gate::before
- * short-circuits every policy for a super-admin, so that copy of the check never runs for
- * them. The fix is not to weaken a repo-wide authorization bypass: "does this registry appear
- * in the portal" is a property of the SURFACE, not of the viewer, which is exactly why a
- * policy is the wrong home for it. Both controller actions state it themselves, where every
- * caller passes.
+ * GroupPolicy::view() also refuses a hidden registry, but a policy is the wrong home for this
+ * question and the bypass proves it — AppServiceProvider's Gate::before short-circuits every
+ * policy for a super-admin, so the policy's copy never runs for them. "Does this registry
+ * appear in the portal" is a property of the SURFACE, not of the viewer: a hidden registry is
+ * absent for everybody, and an answer that changes with who asks is the wrong answer whichever
+ * way it goes. Both controller actions state it BEFORE authorize(), so a member, an operator
+ * maintainer and a super-admin all get the same 404.
  *
- * The two guards therefore refuse different people by different mechanisms, and both are
- * pinned below: 404 from the controller for a super-admin, 403 from the policy for an
- * operator maintainer (above). Removing the controller line must redden only the first pair.
+ * A super-admin is the population that reaches the guard through no other refusal, so it is
+ * the one asserted here; the member case lives in Admin\UserOrganizationTest and the operator
+ * case above, both now 404 as well.
+ *
+ * The policy's clause STAYS, and is not redundant: TokenController::store() authorizes 'view'
+ * on a group without passing through either action here, so the policy is the only thing
+ * between a hidden registry and a token minted for it. Pinned at the end of this file.
  */
 it('refuses a super-admin a registry the portal does not show', function () {
     $org = Organization::factory()->create(['slug' => 'acme']);
@@ -408,4 +412,40 @@ it('still serves a super-admin the package page of a registry the portal does sh
 
     $this->actingAs(superAdmin())->get("/c/acme/registries/{$shown->id}/packages/{$pkg->id}")
         ->assertOk();
+});
+
+/*
+ * The policy's own `portal_enabled` clause, on the surface where it is still the only guard.
+ *
+ * RegistryController states the rule for its two read actions, but TokenController::store()
+ * reaches GroupPolicy::view() directly. Deleting the clause as "now redundant" would leave a
+ * customer able to mint a registry token for a collection-only group — a credential for a
+ * registry the portal will not even show them.
+ */
+it('refuses a token for a registry the portal does not show', function () {
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $hidden = Group::factory()->for($org)->create(['portal_enabled' => false]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->post('/c/acme/tokens', ['name' => 'ci', 'group_id' => $hidden->id])
+        ->assertForbidden();
+
+    expect($hidden->tokens()->count())->toBe(0);
+});
+
+it('still mints a token for a registry the portal does show', function () {
+    // The present half. `group_id` is also validated org-scoped in the FormRequest, so a
+    // refusal alone proves nothing about which rule refused; this one has to pass.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $shown = Group::factory()->for($org)->create(['portal_enabled' => true]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->post('/c/acme/tokens', ['name' => 'ci', 'group_id' => $shown->id])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($shown->tokens()->count())->toBe(1);
 });
