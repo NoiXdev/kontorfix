@@ -65,6 +65,19 @@ const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }
         : [{ value: 'read', label: 'Lesen' }],
 );
 
+/**
+ * The token stand-in the server writes into every snippet, so that substituting a freshly
+ * minted token is a plain string replace.
+ *
+ * IT IS A CONTRACT, NOT COPY. `SetupSnippetBuilder` emits this exact literal into
+ * composer's auth.json, .npmrc, pip.conf, .netrc and twine's config, and three cases in
+ * SetupSnippetBuilderTest assert it there. Changing it on this side alone would not redden
+ * anything — the substitution would simply stop matching, and the customer would copy a
+ * snippet still carrying the placeholder after minting a token. So it keeps its `du`
+ * spelling while the sentences around it moved to `Sie`: it is a fill-in-the-blank marker
+ * inside a config file rather than a sentence addressed to the reader, and rewording it is
+ * a coordinated change to the builder, this constant and those assertions at once.
+ */
 const PLACEHOLDER = '<dein-token>';
 
 const sessionTokens = ref<{ name: string; value: string }[]>([]);
@@ -181,7 +194,7 @@ function selectSession(value: string) {
                      button above it is hidden. -->
                 <p v-if="mayMint" class="text-xs text-muted-foreground">
                     Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
-                    — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
+                    — erstellen Sie ein neues, um es direkt in die Snippets zu übernehmen.
                 </p>
             </div>
 
