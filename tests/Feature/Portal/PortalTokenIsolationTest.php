@@ -47,6 +47,33 @@ it('allows an admin to revoke an org-shared token without owner', function () {
     expect(RegistryToken::find($shared->id))->toBeNull();
 });
 
+it('refuses to revoke a token of another organization through this portals address', function () {
+    // The URL's coherence rule, the one store() got and destroy() did not. The caller is an
+    // admin of BOTH organizations, so nothing here is about permission — RegistryTokenPolicy
+    // says yes, and the same account revokes the same token one line further down through the
+    // address that names its owner. What is refused is the address: /c/{orgA} acting on a token
+    // of orgB makes the segment mean nothing.
+    $a = Organization::factory()->create();
+    $b = Organization::factory()->create();
+    $admin = User::factory()->for($a)->create(['role' => UserRole::Admin]);
+    $admin->organizations()->attach($b->id, ['role' => 'admin']);
+    $tokenOfB = RegistryToken::factory()->for($b)->create(['user_id' => null]);
+
+    // The refusal, and what did NOT happen: a 403 that had already deleted the row would be no
+    // refusal at all, and the status alone cannot tell the two apart.
+    $this->actingAs($admin)->delete(route('portal.tokens.destroy', [$a->slug, $tokenOfB->id]))
+        ->assertForbidden();
+    expect(RegistryToken::find($tokenOfB->id))->not->toBeNull();
+
+    // The SAME caller and the SAME token through the address that names its organization. The
+    // refusal above is otherwise indistinguishable from a policy that simply says no, and this
+    // is what makes it a statement about the URL.
+    $this->actingAs($admin)->from("/c/{$b->slug}/registries")
+        ->delete(route('portal.tokens.destroy', [$b->slug, $tokenOfB->id]))
+        ->assertRedirect();
+    expect(RegistryToken::find($tokenOfB->id))->toBeNull();
+});
+
 it('only lists the current members own tokens on the portal registry page', function () {
     $org = Organization::factory()->create();
     $a = User::factory()->for($org)->create(['role' => UserRole::Member]);

@@ -9,6 +9,7 @@ use App\Models\Group;
 use App\Models\RegistryToken;
 use App\Services\Portal\PortalContext;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 
 class TokenController extends Controller
 {
@@ -89,8 +90,42 @@ class TokenController extends Controller
         return back()->with('plainTextToken', $plain)->with('success', "Token {$token->name} erstellt.");
     }
 
-    public function destroy(RegistryToken $token): RedirectResponse
+    /**
+     * Bound to the addressed organization the way store() binds its submitted group, and for
+     * the same reason: /c/{orgSlug} names an organization, and a route that acts on a token
+     * belonging to a different one makes that segment mean nothing. Before this,
+     * DELETE /c/{orgA}/tokens/{token-of-orgB} succeeded for anybody RegistryTokenPolicy
+     * already allows.
+     *
+     * No privilege is gained or lost by it. The policy is untouched, and every caller refused
+     * here was already able to revoke the same token through its own organization's portal or
+     * through the console — this is the URL's coherence rule, not an authorization rule.
+     *
+     * BEFORE authorize(), exactly where store() puts the group's binding check. The question
+     * is a property of the address rather than of the viewer, and AppServiceProvider's
+     * Gate::before waves a super-admin past the policy entirely — asked afterwards it would be
+     * the one population for whom the URL still meant nothing. Asked first, everybody gets the
+     * same answer. And ahead of the delete in any case: a refusal that still removed the row
+     * is not a refusal.
+     *
+     * 403 rather than 404, matching store()'s cross-organization group: the token exists and
+     * the caller may well be entitled to it, just not through this address. The uniform-404
+     * rule protects organization SLUGS from being guessed, and the slug in this URL has
+     * already been resolved by ResolvePortalContext before this runs.
+     *
+     * NO membership guard, deliberately, and that is the one thing store() has that this does
+     * not. Spec §4 requires membership for MINTING — "looking in to help" must not double as a
+     * way of issuing oneself credentials — and revocation is the opposite act: it takes a
+     * credential away. Requiring membership here would only stop an operator from revoking a
+     * customer's leaked token from the surface they are already looking at, which no decision
+     * in the spec asks for.
+     */
+    public function destroy(Request $request, RegistryToken $token): RedirectResponse
     {
+        $organization = PortalContext::get($request);
+
+        abort_unless($token->organization_id === $organization->id, 403);
+
         $this->authorize('delete', $token);
         $token->delete();
 

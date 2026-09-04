@@ -37,6 +37,14 @@ class RegistryTokenPolicy
         }
 
         // Never an organization the user is not a member of.
+        //
+        // NO LONGER REACHED THROUGH ANY ROUTE, and kept anyway. Portal\TokenController::destroy()
+        // binds the token to the organization the URL names, so such a caller is refused at the
+        // owning organization's address by ResolvePortalContext (404) and at their own by that
+        // binding (403), and settings/tokens never consults this policy at all. Pinned directly
+        // instead: SharedTokenRevocationTest's 'refuses a caller who belongs to the owning
+        // organization not at all' calls this method rather than a route, so deleting the clause
+        // reddens a named test. That test is what keeps it, not this comment.
         if (! $user->belongsToOrganization($token->organization_id)) {
             return false;
         }
