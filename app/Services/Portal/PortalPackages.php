@@ -37,7 +37,8 @@ class PortalPackages
      * where the resolver made an existence check, and told the operator in German to do
      * something destructive that would not have helped.
      *
-     * Each entry also carries `available_until`, the end date of THAT registry's assignment, so
+     * Each entry is a PortalRegistryAssignment, which also carries `available_until` — the end
+     * date of THAT registry's assignment, so
      * the page can say "abgelaufen am …" (spec §3) against the registry it actually belongs to.
      * IT IS A STORED VALUE PASSED THROUGH: this service reads the column and compares it to
      * nothing. The expiry decision stays exactly where it was, in the difference between
@@ -69,11 +70,11 @@ class PortalPackages
      * one this page exists NOT to have. The customer's build gets a 404 for such a package,
      * and this is the page where that becomes explicable. See PortalPackagesTest.
      *
-     * @return Collection<int, array{package: Package, groups: Collection<int, array{group: Group, in_force: bool, available_until: Carbon|null}>, in_force: bool}>
+     * @return Collection<int, array{package: Package, groups: Collection<int, PortalRegistryAssignment>, in_force: bool}>
      */
     public function for(Organization $organization): Collection
     {
-        /** @var array<string, array{package: Package, groups: list<array{group: Group, in_force: bool, available_until: Carbon|null}>}> $rows */
+        /** @var array<string, array{package: Package, groups: list<PortalRegistryAssignment>}> $rows */
         $rows = [];
 
         $groups = $organization->groups()
@@ -106,11 +107,11 @@ class PortalPackages
                 // Appended into the stored row itself, so there is no write-back to forget and
                 // none to mistake for one (an earlier Collection here made the write-back a
                 // no-op, because push() mutates in place).
-                $rows[$package->id]['groups'][] = [
-                    'group' => $group,
-                    'in_force' => $served->has($package->id),
-                    'available_until' => $availableUntil,
-                ];
+                $rows[$package->id]['groups'][] = new PortalRegistryAssignment(
+                    group: $group,
+                    in_force: $served->has($package->id),
+                    available_until: $availableUntil,
+                );
             }
         }
 
@@ -130,21 +131,10 @@ class PortalPackages
                 // Derived from the entries, never accumulated alongside them: in force in at
                 // least one registry. The package is usable, and the registry column says
                 // through which ones.
-                'in_force' => $groups->contains(fn (array $entry): bool => $entry['in_force']),
+                'in_force' => $groups->contains(fn (PortalRegistryAssignment $entry): bool => $entry->in_force),
             ];
         }
 
-        // PHPSTAN, MEASURED RATHER THAN ASSUMED: the declared return type and the actual one are
-        // byte-identical — compared character for character in the raw formatter's output — and
-        // the check still fails, because Collection's TValue is invariant and this shape carries
-        // a NULLABLE UNION beneath it. Bisected: `available_until: Carbon` or `: mixed` clears
-        // the error; `?Carbon` and `null|Carbon` do not. So it is the union under an invariant
-        // template, not this code. The only structural cure is to hide the nullable inside a
-        // small value object, which changes the shape Task 3 reads — not a silent choice to make
-        // here. Both identifiers name the SAME rejection — it lands on the collect() argument
-        // and on the return of the same line — and they are named narrowly so any other fault of
-        // either kind anywhere else still surfaces.
-        // @phpstan-ignore return.type, argument.type
         return collect($result);
     }
 }
