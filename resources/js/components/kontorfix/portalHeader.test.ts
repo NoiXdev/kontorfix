@@ -119,6 +119,15 @@ describe('portalAreaLinks', () => {
         expect(portalAreaLinks(AREAS, '/c/acme?pkg_search=tools&pkg_type=composer').map((a) => a.current)).toEqual([true, false]);
     });
 
+    it('still marks the registries area when its address carries a query', () => {
+        // The case that MEASURES the truncation. On the package list and on any detail page
+        // below /registries/ the answer is the same either way — the first has nothing to match
+        // and the second keeps its trailing slash before the `?` — so this exact shape is the
+        // only one where reading the raw URL flips the marking, onto Pakete, on a page that is
+        // the registries list.
+        expect(portalAreaLinks(AREAS, '/c/acme/registries?ref=mail').map((a) => a.current)).toEqual([false, true]);
+    });
+
     it('carries a different organization through', () => {
         // The interpolation's absent case: the assertions above are equally satisfied by two
         // literals with `acme` typed into them, which would send every other customer into a

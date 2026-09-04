@@ -92,15 +92,19 @@ export interface PortalAreaLink {
  * this codebase nothing can check. They are the two headings the pages already carry, so the
  * navigation and the page a viewer lands on name the same thing.
  *
- * `current` is derived from the path alone. The query string is dropped because the package
- * list carries its own search and filter keys (`pkg_search`, `pkg_type`), and a navigation that
- * stopped marking itself the moment the customer typed in the search box would be worse than
- * one that never marked itself. Registries wins on a PREFIX, so the registry detail and the
- * package detail below it — both addressed under `/registries/…` — stay in the area they belong
- * to; everything else is the package list, which is what `/c/{org}` is.
+ * `current` is derived from the PATH alone, with everything from the first `?` or `#` cut off
+ * in one statement. Both of the portal's list pages write their table state into the query
+ * (`pkg_search`, `pkg_type`), so a navigation that read the whole URL would stop marking itself
+ * the moment the customer typed in a search box — worse than one that never marked itself.
+ *
+ * Registries wins on a PREFIX, so the registry detail and the package detail below it — both
+ * addressed under `/registries/…` — stay in the area they belong to; everything else is the
+ * package list, which is what `/c/{org}` is. The prefix is also what leaves the truncation
+ * measurable in exactly one shape, `/c/{org}/registries?…`: the package list has nothing to
+ * match either way, and a detail URL keeps its `/` before the query.
  */
 export function portalAreaLinks(areas: PortalAreaPaths, currentUrl: string): PortalAreaLink[] {
-    const path = currentUrl.split('?')[0].split('#')[0].replace(/\/+$/, '');
+    const path = currentUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
     const inRegistries = path === areas.registries || path.startsWith(`${areas.registries}/`);
 
     return [
