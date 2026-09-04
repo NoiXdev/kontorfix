@@ -59,10 +59,16 @@ it('ties a token to the organization whose portal it was minted in', function ()
     $user = User::factory()->create(['organization_id' => $home->id, 'role' => 'admin']);
     $user->organizations()->attach($other->id, ['role' => 'admin']);
 
-    $this->actingAs($user)->post('/c/other/tokens', ['name' => 'CI', 'ability' => 'read']);
+    // Asserted on the response first: without this a 4xx would surface as a TypeError on a
+    // null row rather than as a named failure, and the reader would be told nothing.
+    $this->actingAs($user)->post('/c/other/tokens', ['name' => 'CI', 'ability' => 'read'])
+        ->assertRedirect()->assertSessionHasNoErrors();
 
     // The old code fell back to the user's HOME organization when no group was submitted.
-    expect(RegistryToken::latest()->first()->organization_id)->toBe($other->id);
+    // sole(), not latest()->first(): it asserts that exactly one row was written, and it does
+    // not lean on `created_at`, whose second granularity cannot order two tokens minted in
+    // the same request cycle.
+    expect(RegistryToken::sole()->organization_id)->toBe($other->id);
 });
 
 it('refuses a group from another organization', function () {
@@ -82,11 +88,30 @@ it('refuses a group from another organization', function () {
 
 it('refuses an operator account minting a token in a customer portal', function () {
     $customer = Organization::factory()->create(['slug' => 'acme']);
-    Organization::factory()->create(['is_operator' => true]);
+    $operatorOrg = Organization::factory()->create(['is_operator' => true]);
 
     // Viewing and minting are different questions. If looking in to help also issued
     // credentials, support access would be a way to obtain a customer's registry token.
     $this->actingAs(superAdmin())
+        ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
+        ->assertStatus(403);
+
+    // BOTH operator shapes, because they are refused by different code. The super-admin above
+    // walks past RegistryTokenPolicy::create through Gate::before, which is why store() has
+    // to state membership itself. This one — admin of the operator organization through the
+    // pivot, home in an ordinary organization — never trips isSuperAdmin()'s grandfather
+    // clause (that needs `role === Admin` in an operator HOME organization), so the policy
+    // would refuse it too. It still reaches the portal: administersOperatorOrganization()
+    // reads the pivot roles, so ResolvePortalContext lets it in and the refusal has to happen
+    // here. Nothing pinned this shape, and a change to the policy would have let it through
+    // in silence.
+    $pivotAdmin = User::factory()->create([
+        'organization_id' => Organization::factory()->create()->id,
+        'role' => 'member',
+    ]);
+    $pivotAdmin->organizations()->attach($operatorOrg->id, ['role' => 'admin']);
+
+    $this->actingAs($pivotAdmin)
         ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
         ->assertStatus(403);
 
@@ -100,7 +125,17 @@ it('still lets a member of the organization mint a token', function () {
     $org = Organization::factory()->create(['slug' => 'acme']);
     $user = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
 
+    // assertRedirect() alone cannot fail while the response is not 4xx: a validation error is
+    // a redirect, and so is a run that writes no token at all. The two refusals above assert
+    // that nothing was written; this is their mirror and has to assert that something was —
+    // and which organization it was written for, since the refusals cannot tell a correct
+    // acceptance from an acceptance for the wrong organization.
     $this->actingAs($user)
         ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
-        ->assertRedirect();
+        ->assertRedirect()
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('plainTextToken');
+
+    expect(RegistryToken::count())->toBe(1)
+        ->and(RegistryToken::sole()->organization_id)->toBe($org->id);
 });

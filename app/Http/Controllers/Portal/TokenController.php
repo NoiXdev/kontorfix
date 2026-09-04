@@ -44,11 +44,23 @@ class TokenController extends Controller
             ? Group::findOrFail($request->validated('group_id'))
             : null;
 
-        // Defense-in-depth: in addition to the org-scoped rule in the FormRequest, also
-        // enforce via policy here that the target registry belongs to the own org. This is
-        // the only caller that reaches GroupPolicy::view() without a portal_enabled check of
-        // its own, so the policy's own clause is load-bearing here and nowhere else.
         if ($group !== null) {
+            // Stated here, BEFORE the policy, exactly as RegistryController states it for its
+            // two read actions — and for the same reason, which this surface used to get
+            // wrong. "Does this registry appear in the portal" is a property of the surface,
+            // not of the viewer, and a policy cannot hold that: Gate::before short-circuits
+            // GroupPolicy::view() for a super-admin, so its portal_enabled clause is never
+            // read for them. Leaving it to the policy meant a super-admin could mint a token
+            // for a collection-only group in their own organization's portal while every
+            // other population got a refusal. 404, matching the read actions: a registry the
+            // portal does not show is one the portal does not have, whoever is asking.
+            //
+            // The policy keeps its own clause. It is no longer the last line on any path, but
+            // it still orders that check ahead of the policy's operator branch — see the
+            // comment on GroupPolicy::view(), which is about the inside of the policy.
+            abort_unless($group->portal_enabled, 404);
+            // Defense-in-depth: in addition to the org-scoped rule in the FormRequest, also
+            // enforce via policy here that the target registry belongs to the own org.
             $this->authorize('view', $group);
             // The URL names the organization; a group from a different one would make it mean
             // nothing, even where the user happens to belong to both. The FormRequest rule

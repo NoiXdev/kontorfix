@@ -24,6 +24,7 @@ use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\RegistryToken;
 use App\Models\User;
 
 it('lists only the addressed organization registries', function () {
@@ -372,9 +373,11 @@ it('counts an un-shared package as assigned but not as served', function () {
  * the one asserted here; the member case lives in Admin\UserOrganizationTest and the operator
  * case above, both now 404 as well.
  *
- * The policy's clause STAYS, and is not redundant: TokenController::store() authorizes 'view'
- * on a group without passing through either action here, so the policy is the only thing
- * between a hidden registry and a token minted for it. Pinned at the end of this file.
+ * TokenController::store() now states the rule too, and it is the third and last portal path
+ * that reaches GroupPolicy::view(). It used to leave the question to the policy, which made
+ * this surface the one exception to the paragraph above: a super-admin skipped the policy
+ * through Gate::before and could mint a token for a hidden registry in their own
+ * organization's portal. Pinned at the end of this file, for both populations.
  */
 it('refuses a super-admin a registry the portal does not show', function () {
     $org = Organization::factory()->create(['slug' => 'acme']);
@@ -415,12 +418,14 @@ it('still serves a super-admin the package page of a registry the portal does sh
 });
 
 /*
- * The policy's own `portal_enabled` clause, on the surface where it is still the only guard.
+ * Minting, the third path to GroupPolicy::view() — and the one that used to answer this
+ * question differently depending on who asked.
  *
- * RegistryController states the rule for its two read actions, but TokenController::store()
- * reaches GroupPolicy::view() directly. Deleting the clause as "now redundant" would leave a
- * customer able to mint a registry token for a collection-only group — a credential for a
- * registry the portal will not even show them.
+ * A credential for a registry the portal will not even show is the thing being refused, and
+ * it must be refused identically for a member and for a super-admin. It was not: the policy
+ * alone carried the rule here, and Gate::before means a super-admin never reaches it.
+ * store() states `portal_enabled` before authorize() now, like the read actions above, so
+ * both populations get 404 — see the pair below.
  */
 it('refuses a token for a registry the portal does not show', function () {
     $this->withSession(['auth.password_confirmed_at' => time()]);
@@ -429,10 +434,49 @@ it('refuses a token for a registry the portal does not show', function () {
     $hidden = Group::factory()->for($org)->create(['portal_enabled' => false]);
     $user = User::factory()->create(['organization_id' => $org->id]);
 
+    // 404, and it used to be 403 — the same move the registry page made in Task 4 and for
+    // the same reason. The rule is unchanged; the code that says it moved out of the policy
+    // and in front of it, and a surface property cannot answer 403 to one population and 404
+    // to another.
     $this->actingAs($user)->post('/c/acme/tokens', ['name' => 'ci', 'group_id' => $hidden->id])
-        ->assertForbidden();
+        ->assertNotFound();
 
     expect($hidden->tokens()->count())->toBe(0);
+});
+
+it('refuses a super-admin a token for a registry the portal does not show', function () {
+    // In their OWN organization's portal: the membership guard in store() keeps a super-admin
+    // out of a customer's portal entirely, so this is the only place the bypass was reachable
+    // — and it was reachable. Gate::before answers true before GroupPolicy::view() runs, so
+    // the policy's portal_enabled clause never executed for this caller and the token was
+    // minted. There is no security consequence (a super-admin may do anything in their own
+    // organization); the defect is that one surface answered a surface question differently
+    // for one population.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
+    $admin = superAdmin();
+    $hidden = Group::factory()->for($admin->organization)->create(['portal_enabled' => false]);
+
+    $this->actingAs($admin)
+        ->post("/c/{$admin->organization->slug}/tokens", ['name' => 'ci', 'group_id' => $hidden->id])
+        ->assertNotFound();
+
+    expect(RegistryToken::count())->toBe(0);
+});
+
+it('still mints a super-admin a token for a registry the portal does show', function () {
+    // The present half for the same population. A guard that refused every super-admin, or
+    // that read the wrong column, would satisfy the case above on its own.
+    $this->withSession(['auth.password_confirmed_at' => time()]);
+
+    $admin = superAdmin();
+    $shown = Group::factory()->for($admin->organization)->create(['portal_enabled' => true]);
+
+    $this->actingAs($admin)
+        ->post("/c/{$admin->organization->slug}/tokens", ['name' => 'ci', 'group_id' => $shown->id])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($shown->tokens()->count())->toBe(1);
 });
 
 it('still mints a token for a registry the portal does show', function () {
