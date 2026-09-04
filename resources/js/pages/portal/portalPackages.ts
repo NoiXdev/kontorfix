@@ -113,9 +113,19 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
  * at the operator rather than at anything the reader could do — only the operator can extend
  * an assignment, so an instruction the customer cannot follow would be worse than none.
  *
- * "keiner Ihrer Registries", not "die Registry": this note renders only where the package is
- * served by NONE of them, which can be several, and it points at the per-registry markers for
- * which ones rather than naming a single date it does not have.
+ * "keiner der HIER GEZEIGTEN Registries", not "keiner Ihrer Registries" and not "die Registry".
+ * Not "die Registry" because this note renders only where the package is served by none of
+ * them, which can be several, and it points at the per-registry markers for which ones rather
+ * than naming a single date it does not have.
+ *
+ * And not "Ihrer", because the row's `in_force` is derived only from the entries `PortalPackages`
+ * kept, and those are filtered to `groups.portal_enabled = true`. A package assigned to a
+ * portal-visible registry whose assignment has lapsed AND to a hidden registry that still serves
+ * it is in force nowhere the customer can see and served perfectly well through `/r/…` — the
+ * "delivered but not advertised" shape docs/development.md names as a supported one. The
+ * unqualified sentence told that customer their package was gone while their build was resolving
+ * it, which is this page's own defect — a portal disagreeing with the registry — pointed the
+ * other way.
  *
  * "oben markiert", NOT "mit dem Ablaufdatum markiert". `registryMarker` renders a bare
  * `abgelaufen` with no day whenever `available_until` is null, so on a mixed set the promise
@@ -128,9 +138,9 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
  */
 export function lapsedNote(): string {
     return (
-        'Dieses Paket wird von keiner Ihrer Registries mehr ausgeliefert: Builds erhalten ' +
-        'dafür einen 404. Die betroffenen Registries sind oben markiert. Wenden Sie sich an ' +
-        'den Betreiber, wenn Sie das Paket weiter benötigen.'
+        'Dieses Paket wird von keiner der hier gezeigten Registries mehr ausgeliefert: Builds ' +
+        'erhalten dafür einen 404. Die betroffenen Registries sind oben markiert. Wenden Sie ' +
+        'sich an den Betreiber, wenn Sie das Paket weiter benötigen.'
     );
 }
 
@@ -140,9 +150,9 @@ export function lapsedNote(): string {
  * REGISTRY-LOCAL `in_force`.
  *
  * A third sentence rather than reuse of `lapsedNote()`, which those two pages first borrowed.
- * That note opens "von keiner Ihrer Registries" — a claim about ALL of the customer's
- * registries — and only the landing page can make it, because only there is `in_force`
- * derived across every registry (see the TWO ANSWERS paragraph at the top of this module). On
+ * That note opens "von keiner der hier gezeigten Registries" — a claim about every registry the
+ * landing page lists — and only the landing page can make it, because only there is `in_force`
+ * derived across all of them (see the TWO ANSWERS paragraph at the top of this module). On
  * a registry page the same words are measurably false the moment a second registry still
  * serves the package, which is precisely the mixed case `partlyLapsedNote()` exists for. It
  * also ends "Die betroffenen Registries sind oben markiert", pointing at per-registry markers

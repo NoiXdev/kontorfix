@@ -38,10 +38,23 @@ describe('lapsedNote', () => {
         // renders a bare `abgelaufen` wherever `available_until` is null, so any promise of a
         // day is false for at least one marker on a mixed row.
         expect(lapsedNote()).toBe(
-            'Dieses Paket wird von keiner Ihrer Registries mehr ausgeliefert: Builds erhalten dafür einen 404. ' +
-                'Die betroffenen Registries sind oben markiert. Wenden Sie sich an den Betreiber, wenn Sie das ' +
-                'Paket weiter benötigen.',
+            'Dieses Paket wird von keiner der hier gezeigten Registries mehr ausgeliefert: Builds erhalten dafür ' +
+                'einen 404. Die betroffenen Registries sind oben markiert. Wenden Sie sich an den Betreiber, wenn ' +
+                'Sie das Paket weiter benötigen.',
         );
+    });
+
+    it('claims nothing about registries this page does not show', () => {
+        // The overclaim this sentence used to make. The row's `in_force` is derived only from
+        // the entries PortalPackages kept, and those are filtered to portal-visible registries
+        // — so a package lapsed in the visible one and live in a HIDDEN one, the "delivered but
+        // not advertised" shape docs/development.md supports, was told it is served by nothing
+        // while `/r/…` was serving it.
+        //
+        // A negative beside the whole-string assertion above and never instead of it: this one
+        // documents the trap, and `not.toContain` is case-sensitive, so "keiner ihrer" would
+        // walk straight past it. The `toBe` is what pins the wording.
+        expect(lapsedNote()).not.toContain('keiner Ihrer Registries');
     });
 
     it('does not tell the customer to remove anything themselves', () => {
@@ -57,9 +70,10 @@ describe('registryLapsedNote', () => {
     });
 
     it('speaks only about the registry the reader is looking at', () => {
-        // The whole reason this function exists. `lapsedNote()` claims "von keiner Ihrer
-        // Registries", which the two single-registry pages cannot know: their `in_force` is
-        // registry-local, so the package may well still be served next door. toBe, not a pair
+        // The whole reason this function exists. `lapsedNote()` claims "von keiner der hier
+        // gezeigten Registries", which the two single-registry pages cannot know: their
+        // `in_force` is registry-local, so the package may well still be served next door,
+        // and neither page shows the set that claim is about. toBe, not a pair
         // of not.toContain — those are case-sensitive, and "Registries"/"registries" would slip
         // straight through one while putting the false claim back.
         expect(registryLapsedNote()).toBe(
