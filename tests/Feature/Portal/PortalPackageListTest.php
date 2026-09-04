@@ -28,6 +28,11 @@ it('shows an own package and a lapsed shared one, the second marked', function (
         ->assertInertia(fn ($page) => $page
             ->component('portal/Packages')
             ->where('packages.0.name', 'acme/own')
+            // The customer's OWN package is not marked `geteilt`. Asserted because the
+            // positive case alone cannot distinguish the flag from a constant: sending
+            // `true` for every row left this whole directory green while the portal told a
+            // customer that each of their own packages was shared with them.
+            ->where('packages.0.shared', false)
             ->where('packages.0.in_force', true)
             ->where('packages.1.name', 'acme/shared')
             ->where('packages.1.shared', true)
