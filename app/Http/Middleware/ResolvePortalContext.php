@@ -39,7 +39,13 @@ class ResolvePortalContext
             return false;
         }
 
-        if (in_array($organization->id, $user->accessibleOrganizationIds(), true)) {
+        // belongsToOrganization(), the ONE statement of the membership question — the same
+        // one HandleInertiaRequests::portal() and TokenController::store() ask, and the one
+        // RegistryTokenPolicy and GroupPolicy already asked. This was the third inline
+        // spelling of it, and the gate is where the portal's whole membership invariant
+        // starts, so leaving it inline made the invariant rest on comments elsewhere
+        // pointing at it.
+        if ($user->belongsToOrganization($organization->id)) {
             return true;
         }
 

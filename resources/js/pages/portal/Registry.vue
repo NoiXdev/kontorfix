@@ -113,6 +113,9 @@ const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
 // Both token forms on this page POST to portal.tokens.store, so both read the one flag.
 // `?? false` for the null case: no addressed organization means no portal token to mint.
 const mayMint = computed(() => page.props.portal?.may_mint_tokens ?? false);
+// One reading of the publish flag for both of this page's token forms — the tokens tab's
+// ability picker below, and the Einrichtung tab's, which RegistrySetup renders.
+const mayPublish = computed(() => page.props.portal?.may_publish_tokens ?? false);
 
 // Publish tokens are organization write credentials and are admin/maintainer-only on the
 // server (RegistryTokenPolicy::create). Do not offer the option to plain members.
@@ -128,7 +131,7 @@ const mayMint = computed(() => page.props.portal?.may_mint_tokens ?? false);
 // `tokenForm.ability` is actually typed as) rather than the widened `string` a plain object
 // literal would infer — `SearchableSelect`'s `v-model` needs the two to line up exactly.
 const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
-    page.props.portal?.may_publish_tokens
+    mayPublish.value
         ? [
               { value: 'read', label: 'Lesen' },
               { value: 'publish', label: 'Veröffentlichen' },
@@ -256,6 +259,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                         :store-payload="{ group_id: props.registry.id }"
                         :personal-tokens="props.tokens"
                         :may-mint="mayMint"
+                        :may-publish="mayPublish"
                     />
                 </TabsContent>
 

@@ -9,7 +9,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
-import { offersMinting } from './registrySetup';
+import { offersMinting, offersPublishing } from './registrySetup';
 
 interface Snippets {
     composer: string;
@@ -41,9 +41,29 @@ const props = defineProps<{
     // not offered a form the server would then refuse — the same reason portal/Registry.vue
     // hides its own token form, and this is the portal's SECOND way to the same POST.
     mayMint?: boolean;
+    // Whether to offer the publish ability. Omitted → yes, the console's case again: an
+    // admin or maintainer of the organization, which is exactly whom
+    // RegistryTokenPolicy::create() allows Publish. The portal passes
+    // `portal.may_publish_tokens`, so a plain member is offered "Lesen" alone rather than a
+    // choice the server answers 403 to — the refusal PublishTokenEscalationTest already
+    // pins.
+    mayPublish?: boolean;
 }>();
 
 const mayMint = computed(() => offersMinting(props.mayMint));
+
+// The explicit return type keeps `value` as the literal union `form.ability` is typed as,
+// rather than the widened `string` a plain object literal infers — SearchableSelect's
+// `v-model` needs the two to line up exactly. Same shape as portal/Registry.vue's own
+// options list, which gates on the same prop.
+const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
+    offersPublishing(props.mayPublish)
+        ? [
+              { value: 'read', label: 'Lesen' },
+              { value: 'publish', label: 'Veröffentlichen' },
+          ]
+        : [{ value: 'read', label: 'Lesen' }],
+);
 
 const PLACEHOLDER = '<dein-token>';
 
@@ -177,10 +197,7 @@ function selectSession(value: string) {
                         id="setup_token_ability"
                         v-model="form.ability"
                         class="min-w-40"
-                        :options="[
-                            { value: 'read', label: 'Lesen' },
-                            { value: 'publish', label: 'Veröffentlichen' },
-                        ]"
+                        :options="abilityOptions"
                     />
                 </div>
                 <Button type="submit" :disabled="form.processing || !form.name">Erstellen &amp; einsetzen</Button>
