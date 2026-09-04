@@ -86,6 +86,21 @@ it('keeps a package in force while any one registry still serves it', function (
         ->and($row['groups'])->toHaveCount(2);
 });
 
+it('orders the rows by package name, not by the registry they came from', function () {
+    // NOT in the brief either, and the interface promises it: "ordered by package name".
+    // The registries are named so that the rows arrive in the opposite order — A first —
+    // which makes the promise the only thing that can produce the expected sequence, and
+    // makes dropping the sort redden deterministically rather than by UUID luck.
+    $org = Organization::factory()->create();
+    $a = Group::factory()->for($org)->create(['name' => 'A']);
+    $b = Group::factory()->for($org)->create(['name' => 'B']);
+    $a->packages()->attach(Package::factory()->for($org)->create(['name' => 'zeta/one'])->id);
+    $b->packages()->attach(Package::factory()->for($org)->create(['name' => 'alpha/two'])->id);
+
+    expect(app(PortalPackages::class)->for($org)->pluck('package.name')->all())
+        ->toBe(['alpha/two', 'zeta/one']);
+});
+
 it('names every registry that serves the package', function () {
     $org = Organization::factory()->create();
     $a = Group::factory()->for($org)->create(['name' => 'A']);
