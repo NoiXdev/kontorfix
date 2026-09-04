@@ -576,7 +576,11 @@ async function copyToken() {
                                             <td class="px-4 py-3">
                                                 <!-- Hidden rather than disabled for an assignment this operator may not
                                                      manage: both actions answer 403, and the registry's own admin is not
-                                                     the one who decides whether their customer keeps a shared package. -->
+                                                     the one who decides whether their customer keeps a shared package.
+                                                     The label names the OWNING organization, not the operator: the guard
+                                                     asks about the package's `organization_id`, and only the sharing gate
+                                                     asks about `is_operator`. Identical today, but a label promising
+                                                     something the rule does not check is how copy starts drifting. -->
                                                 <div v-if="pkg.manageable" class="flex items-center gap-1">
                                                     <Button
                                                         variant="ghost"
@@ -595,7 +599,7 @@ async function copyToken() {
                                                         <Trash2 class="size-4 text-destructive" />
                                                     </Button>
                                                 </div>
-                                                <span v-else class="text-xs text-muted-foreground">Vom Betreiber verwaltet</span>
+                                                <span v-else class="text-xs text-muted-foreground">Von der Eigentümer-Organisation verwaltet</span>
                                             </td>
                                         </tr>
                                         <!-- What this assignment currently means for the customer. Shown without

@@ -125,11 +125,31 @@ trait GuardsPackageAttachment
      * Both sides come back ordered by id and deduplicated by the database, so `!==` is a set
      * comparison and a submission that names a package twice cannot fake a difference.
      *
+     * THE PERMITTED RE-SUBMISSION RESTS ON A FRAMEWORK PROPERTY NOTHING ELSE STATES. Letting a
+     * caller name a shared package the registry already carries is only harmless because
+     * `sync()` and `syncWithoutDetaching()`, GIVEN A FLAT LIST OF IDS, insert the missing rows
+     * and delete the extra ones and write no columns on the rows that already exist. Handed
+     * pivot attributes instead — `sync([$id => ['available_until' => …]])` — they update every
+     * named row, and this method would go on saying "the set is unchanged" while the write
+     * re-dated an assignment: the second half of spec §4 circumvented through the first, by a
+     * caller the first half deliberately permits.
+     *
+     * That is not hypothetical. `group_package` already carries an unused `version_constraint`
+     * column, so the fuse is in the schema and only the endpoints are missing. Before any
+     * write path here accepts pivot attributes, {@see assertMayEditSharedAssignment} has to be
+     * asked for every named row as well. Pinned by the two "does not rewrite the availability
+     * of a re-submitted shared assignment" tests, which fail the moment a caller starts
+     * passing attributes.
+     *
      * @param  array<int, string>  $currentPackageIds  what the registry carries now
      * @param  array<int, string>  $resultingPackageIds  what it would carry after the write
      */
     protected function assertSharedAssignmentsUnchanged(array $currentPackageIds, array $resultingPackageIds): void
     {
+        if ($this->administersEveryOrganization()) {
+            return;
+        }
+
         $administeredOrgIds = $this->administeredOrganizationIds();
 
         abort_if(
@@ -155,6 +175,10 @@ trait GuardsPackageAttachment
      */
     protected function assertMayEditSharedAssignment(Package $package): void
     {
+        if ($this->administersEveryOrganization()) {
+            return;
+        }
+
         abort_if(
             $this->unmanageableSharedPackageIds(
                 [(string) $package->getKey()],
@@ -212,7 +236,9 @@ trait GuardsPackageAttachment
      * administration, and no such row is reachable: v0.8.0 lets a package be assigned only to
      * registries of its own organization, un-sharing is refused while any cross-organization
      * assignment survives, and anyone who administers a registry administers the organization
-     * that owns its non-shared packages. The clause is kept anyway — without it this method
+     * that owns its non-shared packages. On the submitted side the unreachability also depends
+     * on {@see assertPackagesReachableIn} running FIRST at every call site — it is what refuses
+     * a foreign non-shared package before this helper ever sees the id. The clause is kept anyway — without it this method
      * would silently widen both guards into a second statement of the ownership rule, which is
      * neither what their names say nor what spec §4 asks of them.
      *
@@ -234,6 +260,26 @@ trait GuardsPackageAttachment
             ->map(fn (mixed $id): string => (string) $id)
             ->values()
             ->all();
+    }
+
+    /**
+     * Whether the caller administers every organization there is — a super-admin, including
+     * the operator-organization admin User::isSuperAdmin() grandfathers in.
+     *
+     * A SHORTCUT, NOT AN EXEMPTION, and the distinction matters because question 1 has no
+     * organization-spanning exemption and must not appear to grow one. Such a caller's
+     * `administeredOrganizationIds()` is every organization id in the table, so
+     * {@see unmanageableSharedPackageIds} would answer `[]` for any input and both guards
+     * would pass anyway. Returning early only saves the work: one `Organization::pluck()` plus
+     * two `packages` queries on every guarded write, with an `IN` list that grows with the
+     * number of tenants — paid by exactly the accounts that do most of the assigning. Deleting
+     * it must redden nothing, which is asserted rather than assumed (mutation P4).
+     */
+    private function administersEveryOrganization(): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User && $user->isSuperAdmin();
     }
 
     /**

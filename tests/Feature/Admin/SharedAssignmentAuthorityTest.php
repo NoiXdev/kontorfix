@@ -530,3 +530,47 @@ it('lets someone who administers the owning organization detach a lapsed shared 
 
     expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeFalse();
 });
+
+// ---------------------------------------------------------------------------------------
+// The permitted re-submission must stay a NO-OP on the pivot row, not merely on membership.
+//
+// A customer admin is allowed to name a shared package their registry already carries,
+// because the set is unchanged and nothing is being assigned. That is only harmless while
+// `sync()` and `syncWithoutDetaching()` are handed a FLAT LIST OF IDS: given one they insert
+// the missing rows and delete the extra ones and touch no columns on the rest. Handed pivot
+// attributes instead they update every named row — and `assertSharedAssignmentsUnchanged()`
+// would still see an unchanged set while the write re-dated a shared assignment, which is the
+// second half of spec §4 reached through the first, by the one caller the first half permits.
+//
+// `group_package.version_constraint` already exists and is unused, so the fuse is in the
+// schema and only the endpoint is missing. These two fail the moment a write path starts
+// passing attributes, on whichever surface does it first.
+// ---------------------------------------------------------------------------------------
+
+it('does not rewrite the availability of a re-submitted shared assignment', function () {
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => now()->addYear()]);
+    $until = assignmentOf($this->registry, $this->shared)?->available_until?->toDateTimeString();
+
+    $this->actingAs($this->customerAdmin)
+        ->post(route('admin.groups.packages.store', $this->registry), [
+            'package_ids' => [$this->shared->id, $this->own->id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    // Accepted, and the operator's date is exactly where the operator left it.
+    expect(assignmentOf($this->registry, $this->shared)?->available_until?->toDateTimeString())->toBe($until);
+});
+
+it('does not rewrite the availability of a re-submitted shared assignment through the api', function () {
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => now()->addYear()]);
+    $until = assignmentOf($this->registry, $this->shared)?->available_until?->toDateTimeString();
+
+    $this->withToken(authorityKeyFor($this->customerAdmin))
+        ->putJson("/api/v1/groups/{$this->registry->id}/packages", [
+            'package_ids' => [$this->shared->id, $this->own->id],
+        ])
+        ->assertOk();
+
+    expect(assignmentOf($this->registry, $this->shared)?->available_until?->toDateTimeString())->toBe($until);
+});
