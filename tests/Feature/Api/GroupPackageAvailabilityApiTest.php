@@ -38,8 +38,16 @@ beforeEach(function () {
     $this->live = Package::factory()->inOrgOf($this->group)->create(['name' => 'acme/live']);
     $this->lapsed = Package::factory()->inOrgOf($this->group)->create(['name' => 'zzz/lapsed']);
 
+    // Captured, not recomputed in each assertion. Query bindings truncate a timestamp to
+    // `Y-m-d H:i:s`, so the stored value is the floor of THIS `now()`; a second assertion
+    // calling `now()->subDay()` again reads a different floor the moment the request crosses
+    // a second boundary, and the test goes red for no reason. Nothing freezes time in the
+    // suite, so the captured value is the only stable thing to compare against — the same
+    // pattern PackageAbandonmentApiTest uses.
+    $this->lapsedUntil = now()->subDay();
+
     $this->group->packages()->attach($this->live);
-    $this->group->packages()->attach($this->lapsed, ['available_until' => now()->subDay()]);
+    $this->group->packages()->attach($this->lapsed, ['available_until' => $this->lapsedUntil]);
 });
 
 it('says of each assignment whether the registry still serves it', function () {
@@ -51,7 +59,7 @@ it('says of each assignment whether the registry still serves it', function () {
         ->assertJsonPath('data.0.available_until', null)
         ->assertJsonPath('data.1.name', 'zzz/lapsed')
         ->assertJsonPath('data.1.in_force', false)
-        ->assertJsonPath('data.1.available_until', now()->subDay()->toIso8601String());
+        ->assertJsonPath('data.1.available_until', $this->lapsedUntil->toIso8601String());
 });
 
 it('keeps listing a lapsed assignment, so a client cannot detach one by echoing the list back', function () {
@@ -72,14 +80,16 @@ it('keeps listing a lapsed assignment, so a client cannot detach one by echoing 
 });
 
 it('marks an assignment in force again once its availability moves into the future', function () {
+    $extended = now()->addDay();
+
     $this->group->packages()->updateExistingPivot($this->lapsed->id, [
-        'available_until' => now()->addDay(),
+        'available_until' => $extended,
     ]);
 
     $this->withToken($this->plain)->getJson("/api/v1/groups/{$this->group->id}/packages")
         ->assertOk()
         ->assertJsonPath('data.1.in_force', true)
-        ->assertJsonPath('data.1.available_until', now()->addDay()->toIso8601String());
+        ->assertJsonPath('data.1.available_until', $extended->toIso8601String());
 });
 
 it('marks the assignments it returns from a write, not only from a read', function () {
@@ -91,7 +101,7 @@ it('marks the assignments it returns from a write, not only from a read', functi
         ->assertOk()
         ->assertJsonPath('data.0.in_force', true)
         ->assertJsonPath('data.1.in_force', false)
-        ->assertJsonPath('data.1.available_until', now()->subDay()->toIso8601String());
+        ->assertJsonPath('data.1.available_until', $this->lapsedUntil->toIso8601String());
 });
 
 it('leaves the assignment fields off a package that is not being read through a registry', function () {
