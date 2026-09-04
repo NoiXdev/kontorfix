@@ -55,6 +55,27 @@ it('keeps serving the registries of an organization whose portal is off', functi
     $this->get('/r/acme/main/simple')->assertOk();
 });
 
+/**
+ * The other switch, the same guarantee. `groups.portal_enabled` decides whether a registry
+ * appears in the portal and nothing else — a registry hidden from the portal keeps serving
+ * every ecosystem exactly as before, so hiding a collection-only registry cannot break a
+ * build that resolves against it. The sibling above says the same for the organization-level
+ * switch; documented in docs/development.md, and until now true only by the absence of a
+ * check rather than by anything that would redden if one were added.
+ */
+it('keeps serving a registry that is hidden from the portal', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    // `public` for the same reason as above: the assertion is about the portal switch alone.
+    $group = Group::factory()->for($org)->create(['slug' => 'main', 'public' => true, 'portal_enabled' => false]);
+    $npm = Package::factory()->inOrgOf($group)->create(['name' => 'acme-widget', 'type' => PackageType::Npm]);
+    PackageVersion::factory()->for($npm)->create();
+    $group->packages()->attach($npm);
+
+    $this->get('/r/acme/main/packages.json')->assertOk();
+    $this->get('/r/acme/main/acme-widget')->assertOk();
+    $this->get('/r/acme/main/simple')->assertOk();
+});
+
 it('lets an operator account open a customer portal', function () {
     // superAdmin() brings the operator organization with it; a second one would put the
     // instance in a state SetupController never produces.

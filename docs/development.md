@@ -845,6 +845,116 @@ cross-organization rows it legitimises stay behind, so running the enforcement m
 there aborts and names every shared assignment as a violation. Detach the shared assignments before
 rolling back that far, or roll forward again.
 
+### The customer portal
+
+A customer's portal is at **`/c/{orgSlug}`**. The organization is part of the address, so the URL
+can be handed to that customer and means the same thing whoever opens it — which the old `/portal`
+could not: what it showed depended on who was signed in. `/portal` is no longer an address of its
+own. It resolves the signed-in account's **home** organization and forwards to that organization's
+portal, so the sidebar and the dashboard can point at it without knowing which customer they are
+pointing at.
+
+**Every organization has a portal from the moment it is created.** `organizations.portal_enabled`
+defaults to on, and the switch sits on the organization page in the console beside the name and
+the slug.
+
+**Who may open a portal**: members of the organization — any role, a plain Member included — and
+operator accounts, so that support can see what a customer sees.
+
+**Everybody else gets a 404, and so does everything else that fails.** A slug that belongs to no
+organization, a portal that is switched off and a viewer who may not open this one all produce the
+same response. That uniformity is the point rather than an accident of implementation: a 403 on
+`/c/some-customer` would confirm that customer exists, and the portal would otherwise be the
+surface on which customer names get guessed one response code at a time. An admin of one customer
+looking at another customer's portal is in the "everybody else" group and sees the same 404 a
+stranger does.
+
+**"Operator account" is wider than "super-admin"**, deliberately. It means the global super-admin
+flag, **or** Admin *or Maintainer* of the operator organization, held either as the
+home-organization role or through an `organization_user` membership. All four shapes count. Note
+also that this application already treats an **Admin whose home organization is the operator
+organization as a super-admin** (the same grandfather clause the shared-packages section above
+turns on): the tiers are not what their names suggest, so a rule written around "super-admin
+versus operator-organization admin" would be describing a distinction that does not exist here.
+
+**Two switches, at two levels, answering two different questions.** Both are called
+`portal_enabled` and they are not the same setting:
+
+| Column | The question it answers | Off means |
+|---|---|---|
+| `organizations.portal_enabled` | Does this customer have a portal at all? | `/c/{slug}` answers 404 |
+| `groups.portal_enabled` | Does this registry appear in that portal? | The registry is absent from the portal; `/r/…` is untouched |
+
+Neither is derived from the other, and **turning every registry off is not the same as turning the
+portal off**. A portal with no visible registries still opens — the customer reaches it and finds
+an empty package list — while a portal that is off is a 404 with nothing behind it. To take the
+portal away from a customer, use the organization switch. The registry switch is for a registry
+that is only a package collection, composed into other registries of the same organization rather
+than handed to anybody; the console badges such a registry "Sammlung".
+
+**Neither switch ever touches a build.** `/r/…` is out of reach of both: an organization whose
+portal is off keeps serving Composer, npm and pip exactly as before, and so does a registry hidden
+from the portal. Switching a portal off is a decision about a web page and never about delivery.
+
+**A package that only hidden registries carry does not appear in the portal at all** — not as a
+row without a link, not greyed out: absent. That is what the registry switch means rather than a
+side effect of it, and it is the only consistent answer, because a row linking into a hidden
+registry would lead to a page the portal itself refuses. The customer can still install that
+package: it resolves through `/r/…` with a token like any other. So a package the operator wants
+delivered but not advertised is exactly a package in a hidden registry.
+
+**An operator may look, but may not mint.** Inside a customer's portal an operator account gets a
+banner naming whose portal it is, and no token form — not on the token tab and not on the setup
+tab, which is a second route to the same action. This is the one place the operator's view is
+narrower than the customer's, and it is narrower on purpose: opening a customer's portal to help
+them must not double as a way of issuing oneself credentials for their registry. Everything else
+an operator sees there is the customer's own content, and never a rosier version of it — a package
+the customer cannot resolve is not shown as available, and a lapsed assignment is not shown as
+live. The organization switcher in the portal header lists an operator's **own** memberships only;
+it is navigation, not a customer directory, and a directory arrived at by browsing is a directory
+nobody decided to publish.
+
+**A member's own minting is unchanged by any of this**: the portal issues exactly the credential
+`settings/tokens` issues, behind the same password confirmation, scoped to the organization the
+URL names. A plain member may mint a read token; the publish ability is offered only to an admin
+or maintainer **of that organization**, so an admin of one customer standing in another's portal —
+where they are only a member — is offered "Lesen" alone rather than a choice that would be
+refused.
+
+**A lapsed assignment stays visible to the customer, marked, with the consequence spelled out.**
+When `group_package.available_until` has passed, the registry stops serving the package and builds
+get a 404 for it (the shared-packages section above explains why the name also stays blocked
+against the public index). The customer's portal does not quietly drop the package at that moment
+— it keeps the row, badges it `abgelaufen am …` with the date of *that registry's* assignment, and
+says in so many words that builds receive a 404 and that only the operator can extend it. The
+package's own page in the portal stays reachable for the same reason and replaces its install
+snippet with that explanation: the customer arrives there *because* their build is failing, and a
+404 on the page that would explain the 404 explains nothing.
+
+The same care applies where a package has lapsed in one registry but not another. The package is
+still usable, carries no expiry badge, and the marker sits at the link to the registry that
+stopped serving it — the person whose CI happens to resolve against that one registry is the only
+person for whom something is broken, and they are the person the page has to reach. A registry
+card whose served and assigned counts differ says so ("1 von 2 Paketen ausgeliefert") rather than
+printing a count that disagrees with the page it leads to.
+
+**The dead ends have pages, not redirects.** Two accounts cannot be sent to a portal at all: a
+member of an organization whose portal is switched off, and an account with no organization at all
+(a self-registered account starts that way). Both reach `/portal` from the dashboard as a matter of
+course, and the first would land on the same 404 a stranger gets while the second had nothing to
+build an address from. Each gets a short page instead — reached from `/portal` and from the
+dashboard alike — saying which of the two situations it is in and that an operator has to act.
+Naming the organization on the first of those pages is safe in a way it is not at the gate: the
+reader is a member and already knows it exists.
+
+**Changing an organization's slug moves its portal address, and nothing redirects.** The registry
+addresses survive a slug change through the frozen legacy slug described in the next section; the
+portal has no such thing, by decision — machines are configured against registry URLs and nobody
+updates those quickly, while a portal is opened by a person, and a permanent second address costs
+more than a stale bookmark. The console's slug confirmation therefore names the old and the new
+`/c/…` address alongside the registry pattern, and says that saved links stop working. Tell the
+customer, or send them the new link.
+
 ### Organization-scoped registry slugs
 
 The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is
