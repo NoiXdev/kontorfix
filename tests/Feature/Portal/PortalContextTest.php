@@ -95,18 +95,38 @@ it('defaults an organization to having a portal', function () {
     expect(Organization::factory()->create()->portal_enabled)->toBeTrue();
 });
 
-it('switches a customer portal off from the console when the switch is left unchecked', function () {
+it('switches a customer portal off from the console', function () {
     $org = Organization::factory()->create(['slug' => 'acme']);
 
-    // An unchecked switch posts no field at all, so "off" arrives at the server as an
-    // absent key — the case prepareForValidation() exists to turn into an explicit false.
+    // The payload the console actually sends: Inertia's useForm serialises every field it
+    // holds, so an unchecked switch arrives as a present `false` rather than as an absent
+    // key. The absent key is a different intention entirely — see the case below.
     $this->actingAs(superAdmin())->put(route('admin.organizations.update', $org->id), [
         'name' => $org->name,
         'slug' => $org->slug,
         'notification_cadence' => 'hourly',
+        'portal_enabled' => false,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
     expect($org->fresh()->portal_enabled)->toBeFalse();
+});
+
+it('leaves the portal switch alone when the request does not mention it', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    // Not the console's payload — a request that never names the switch. "Off" and "not
+    // mentioned" used to be the same thing here, so renaming a customer disabled their
+    // portal as a side effect. (`notification_cadence` is `required`, so even a minimal
+    // update carries it; the switch is the only field whose absence is interesting.)
+    $this->actingAs(superAdmin())->put(route('admin.organizations.update', $org->id), [
+        'name' => 'Umbenannt',
+        'slug' => $org->slug,
+        'notification_cadence' => 'hourly',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($org->fresh())
+        ->name->toBe('Umbenannt')
+        ->portal_enabled->toBeTrue();
 });
 
 it('switches a customer portal back on from the console', function () {

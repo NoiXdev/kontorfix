@@ -14,13 +14,22 @@ class UpdateOrganizationRequest extends FormRequest
     }
 
     /**
-     * An unchecked switch posts no field at all, so the absent case has to be spelled as
-     * an explicit `false` before validation runs — otherwise `boolean` would never see it
-     * and switching the portal off would silently save nothing.
+     * An unchecked switch posts no field at all, so a request that *carries* the switch has
+     * its absent case spelled as an explicit `false` before validation runs — otherwise
+     * `boolean` would never see it and switching the portal off would save nothing.
+     *
+     * Conditional on `has()`, not unconditional, because "the form sent an unchecked switch"
+     * and "the request never mentioned the switch" are different intentions and only the
+     * console can tell them apart by always sending every field. An unconditional merge made
+     * them identical, so a partial PUT naming only `name` disabled a customer's portal as a
+     * side effect. Paired with `sometimes` on the rule: absent now means leave it alone.
+     * StoreGroupRequest does the same thing for the create path, where absent means `true`.
      */
     protected function prepareForValidation(): void
     {
-        $this->merge(['portal_enabled' => $this->boolean('portal_enabled')]);
+        if ($this->has('portal_enabled')) {
+            $this->merge(['portal_enabled' => $this->boolean('portal_enabled')]);
+        }
     }
 
     /**
@@ -51,7 +60,10 @@ class UpdateOrganizationRequest extends FormRequest
             // rule, so dropping this line evicts the switch from the update entirely and the
             // column silently keeps whatever it had — switching a portal off would save
             // nothing. PortalContextTest's two console round-trip cases are what says so.
-            'portal_enabled' => ['boolean'],
+            //
+            // `sometimes` is what makes an omitted switch mean "leave it alone" rather than
+            // "off"; it only bites because prepareForValidation() above merges conditionally.
+            'portal_enabled' => ['sometimes', 'boolean'],
         ];
     }
 }
