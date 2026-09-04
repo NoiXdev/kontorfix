@@ -121,6 +121,46 @@ it('leaves the registries of a package out when the portal hides them', function
             ->where('packages.0.registries.0.name', 'visible'));
 });
 
+it('offers a lapsed registry entry as a link the customer can actually follow', function () {
+    // The landing page renders EVERY registry entry as a link, lapsed ones included, which
+    // portal/Registry.vue has done since the detail page started serving a lapsed assignment
+    // instead of 404ing it. This page went on rendering the lapsed name as plain text on a
+    // comment that task had already falsified, so the two portal pages disagreed about whether
+    // one package in one registry is clickable — and the page the customer LANDS on was the one
+    // withholding the way to the page written to explain their failing build.
+    //
+    // Asserted as the walk rather than as a claim about the template: there is no component
+    // runner on this frontend, so what can be pinned is that the address the row is built from
+    // answers, and answers with the explanation. Restoring showPackage()'s 404 for a lapsed
+    // assignment turns the link back into the dead end the old comment described, and reddens
+    // here as well as in PortalLapsedAssignmentTest.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $live = Group::factory()->for($org)->create(['name' => 'aa-live']);
+    $lapsed = Group::factory()->for($org)->create(['name' => 'zz-lapsed']);
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    $live->packages()->attach($package->id);
+    $lapsed->packages()->attach($package->id, ['available_until' => now()->subDay()]);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    // Both entries are in the payload, and the second is the one the page marks.
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page
+            ->where('packages.0.registries.1.name', 'zz-lapsed')
+            ->where('packages.0.registries.1.in_force', false));
+
+    // And the address that entry is built from is served, marked, rather than 404ing.
+    $this->actingAs($user)->get(route('portal.registries.package', ['acme', $lapsed->id, $package->id]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/Package')->where('in_force', false));
+
+    // The in-force entry beside it, so the assertion above cannot be read as "every package
+    // detail page answers 200 whatever its state" — which is also what a payload that reported
+    // `in_force` as a constant false would look like.
+    $this->actingAs($user)->get(route('portal.registries.package', ['acme', $live->id, $package->id]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('in_force', true));
+});
+
 it('names the newest version of the package', function () {
     // Spec §3 asks the landing page for the current version beside the type. Two releases,
     // the older one created LAST, so a payload that simply took the first row of the relation

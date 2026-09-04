@@ -140,21 +140,20 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                          this is then the only place the customer learns that the
                                          other registry stopped serving it.
 
-                                         The name of a lapsed one is shown but NOT linked, the rule
+                                         A lapsed entry stays LINKED, like the one on
+                                         portal/Registry.vue. It was not, on the rule
                                          admin/groups/Show.vue states for a row action its caller may
-                                         not use: RegistryController::showPackage() answers 404 for an
-                                         assignment that has lapsed, so linking it would offer the
-                                         customer a dead end and then walk them into it. They are
-                                         still told which registry it was. -->
+                                         not use — but the premise of that rule went away:
+                                         RegistryController::showPackage() no longer answers 404 for a
+                                         lapsed assignment, it SERVES it with `in_force: false` and
+                                         the explanation (PortalLapsedAssignmentTest). So the link is
+                                         no longer a dead end; it is the way to the one page written
+                                         to tell this customer why their build fails, and the page
+                                         they land on is the one page that must not withhold it. -->
                                     <span v-for="reg in pkg.registries" :key="reg.id" class="inline-flex items-center gap-1">
-                                        <Link
-                                            v-if="reg.in_force"
-                                            :href="route('portal.registries.package', [props.orgSlug, reg.id, pkg.id])"
-                                            class="hover:underline"
-                                        >
+                                        <Link :href="route('portal.registries.package', [props.orgSlug, reg.id, pkg.id])" class="hover:underline">
                                             {{ reg.name }}
                                         </Link>
-                                        <span v-else>{{ reg.name }}</span>
                                         <span v-if="registryMarker(reg)" class="text-xs text-destructive">({{ registryMarker(reg) }})</span>
                                     </span>
                                 </div>
