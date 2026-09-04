@@ -12,10 +12,28 @@
  * `own OR shared` for everyone, so any customer admin could help themselves to any shared
  * package of the instance.
  *
- * The rule, one sentence, over the package rather than over the direction of the write:
+ * The rule, in two sentences, because spec §4's sentence has two halves and only the first
+ * is about which packages a registry carries:
  *
- *   assigning a shared package, detaching one, and editing such an assignment's
- *   availability all require administering the organization that OWNS the package.
+ *   1. the shared assignments a caller may not manage must be the SAME before and after
+ *      the write; and
+ *   2. editing such an assignment's availability requires administering the owner.
+ *
+ * The first is stated over the RESULTING SET rather than over the operation, the same shape
+ * SharedAssignment uses and for the same reason: a rule phrased as "does this write add a
+ * shared package" has a direction and forgets the reverse — a `sync()` that DROPS one adds
+ * nothing and satisfies it. A set comparison covers attach, detach, replace and swap at once,
+ * and it says exactly what the spec says and nothing more: a write that leaves the shared
+ * assignments as they were neither attaches nor edits anything, so it is not refused. That
+ * matters for the API's PUT, whose submission is the whole post-state — under a rule stated
+ * over the submission, a customer admin could neither name the shared package (an attach) nor
+ * omit it (a detach), and the endpoint was unusable to them.
+ *
+ * The second cannot be derived from the first and is not left to hold by accident:
+ * `available_until` is a column on the pivot row, so re-dating leaves the resulting SET
+ * identical and passes that comparison untouched. It is asked by its own guard, and the test
+ * "it refuses re-dating even the shared package this customer admin may re-submit" below
+ * pins the distinction in one place.
  *
  * A customer's own packages are untouched by it, and every case below is asserted in both
  * directions for that reason: a guard that refused everything would satisfy the refusals
@@ -57,6 +75,10 @@ beforeEach(function () {
         ->create(['type' => 'composer', 'name' => 'betrieb/geteilt', 'shared' => true]);
     $this->own = Package::factory()->for($this->customer)
         ->create(['type' => 'composer', 'name' => 'kunde/eigen']);
+    // A second shared package, so "the set changed" can be told apart from "the set grew or
+    // shrank": swapping one for the other leaves the count alone.
+    $this->otherShared = Package::factory()->for($this->operator)
+        ->create(['type' => 'composer', 'name' => 'betrieb/zweit', 'shared' => true]);
 });
 
 /**
@@ -353,4 +375,114 @@ it('tells the console that someone administering the owner may manage a shared a
         ->get(route('admin.groups.show', $this->registry))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('packages.0.manageable', true)->etc());
+});
+
+// ---------------------------------------------------------------------------------------
+// The three cases of the set rule, on both surfaces. The middle one is the whole point: a
+// write that leaves the shared assignments as they were is not an assignment being made, so
+// refusing it would enforce something spec §4 does not ask for — and, on the API's `sync()`,
+// would leave the customer no way to send a package list at all.
+// ---------------------------------------------------------------------------------------
+
+it('lets a customer admin submit the shared package their registry already carries', function () {
+    // UNCHANGED. The submission names the shared package, which a rule stated over the
+    // submission would refuse; the resulting shared set is `{shared}` either way, so nothing
+    // is being assigned and nothing is refused. The own package is added as it always was.
+    $this->registry->packages()->attach($this->shared->id);
+
+    $this->actingAs($this->customerAdmin)
+        ->post(route('admin.groups.packages.store', $this->registry), [
+            'package_ids' => [$this->shared->id, $this->own->id],
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeTrue()
+        ->and($this->registry->packages()->whereKey($this->own->id)->exists())->toBeTrue();
+});
+
+it('refuses a customer admin adding a second shared package beside the one they carry', function () {
+    // GROWN, with a shared package already present — so the refusal cannot come from "any
+    // shared package in the submission" and has to come from the comparison.
+    $this->registry->packages()->attach($this->shared->id);
+
+    $this->actingAs($this->customerAdmin)
+        ->post(route('admin.groups.packages.store', $this->registry), [
+            'package_ids' => [$this->shared->id, $this->otherShared->id],
+        ])
+        ->assertForbidden();
+
+    expect($this->registry->packages()->whereKey($this->otherShared->id)->exists())->toBeFalse();
+});
+
+it('lets a customer admin re-send the shared package their registry already carries through the api', function () {
+    // UNCHANGED, on the surface it matters for: `sync()` makes the submission the whole
+    // post-state, so this is the only way a customer admin can manage their own list at all
+    // once the operator has placed a shared package in their registry.
+    $this->registry->packages()->attach([$this->shared->id, $this->own->id]);
+    $other = Package::factory()->for($this->customer)->create(['type' => 'composer', 'name' => 'kunde/zweit']);
+
+    $this->withToken(authorityKeyFor($this->customerAdmin))
+        ->putJson("/api/v1/groups/{$this->registry->id}/packages", [
+            'package_ids' => [$this->shared->id, $other->id],
+        ])
+        ->assertOk();
+
+    // Their own list changed exactly as asked; the shared assignment is untouched.
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeTrue()
+        ->and($this->registry->packages()->whereKey($other->id)->exists())->toBeTrue()
+        ->and($this->registry->packages()->whereKey($this->own->id)->exists())->toBeFalse();
+});
+
+it('refuses a customer admin swapping one shared package for another through the api', function () {
+    // CHANGED WITHOUT GROWING OR SHRINKING. One in, one out: the count is identical on both
+    // sides, so only an identity comparison refuses this. It is also the write that would let
+    // a customer trade the package the operator gave them for one meant for someone else.
+    $this->registry->packages()->attach($this->shared->id);
+
+    $this->withToken(authorityKeyFor($this->customerAdmin))
+        ->putJson("/api/v1/groups/{$this->registry->id}/packages", [
+            'package_ids' => [$this->otherShared->id],
+        ])
+        ->assertForbidden();
+
+    expect($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeTrue()
+        ->and($this->registry->packages()->whereKey($this->otherShared->id)->exists())->toBeFalse();
+});
+
+it('lets someone who administers the owning organization swap one shared package for another', function () {
+    // The same write, allowed for the operator — so the refusal above is about the caller and
+    // not about swaps being forbidden in general.
+    $this->registry->packages()->attach($this->shared->id);
+
+    $this->withToken(authorityKeyFor(operatorStaff($this->customer, $this->operator)))
+        ->putJson("/api/v1/groups/{$this->registry->id}/packages", [
+            'package_ids' => [$this->otherShared->id],
+        ])
+        ->assertOk();
+
+    expect($this->registry->packages()->whereKey($this->otherShared->id)->exists())->toBeTrue()
+        ->and($this->registry->packages()->whereKey($this->shared->id)->exists())->toBeFalse();
+});
+
+it('refuses re-dating even the shared package this customer admin may re-submit', function () {
+    // The distinction between the two halves of the rule, in one place. The SAME actor and
+    // the SAME package: submitting it leaves the assignment set identical and is accepted,
+    // while re-dating it changes the row and is refused. A single set comparison cannot tell
+    // these apart — `available_until` is not in the set — so if the availability guard were
+    // ever dropped on the assumption that the set rule covers it, this fails.
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => null]);
+
+    $this->actingAs($this->customerAdmin)
+        ->post(route('admin.groups.packages.store', $this->registry), ['package_ids' => [$this->shared->id]])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($this->customerAdmin)
+        ->put(route('admin.groups.packages.update', [$this->registry, $this->shared]), [
+            'available_until' => '2027-12-31',
+        ])
+        ->assertForbidden();
+
+    expect(assignmentOf($this->registry, $this->shared)?->available_until)->toBeNull();
 });

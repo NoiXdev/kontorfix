@@ -76,27 +76,36 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
-     * Constrains a Package query to what may be *assigned* to a registry in the active
-     * scope, which since the shared-packages feature is wider than what the scope owns:
-     * own packages, OR shared ones whose owning organization this caller administers.
+     * Constrains a Package query to what a submission may *introduce* into a registry in the
+     * active scope, which since the shared-packages feature is wider than what the scope
+     * owns: own packages, OR shared ones whose owning organization this caller administers.
      *
      * Deliberately not the same question as {@see scopePackageQuery}, which stays the
      * listing/ownership scope — a shared package of the operator organization is not the
      * customer's to see in their package directory, edit or delete; it is only theirs to
-     * receive. This one exists so the assignment picker offers exactly the set
-     * {@see GuardsPackageAttachment::assertPackagesReachableIn()} will accept: a picker
-     * offering less hides the feature, one offering more produces a 403 on submit.
+     * receive. This one exists so the assignment picker offers exactly what the guards will
+     * accept as a NEW assignment: a picker offering less hides the feature, one offering more
+     * produces a 403 on submit.
      *
-     * That guard, not this method, is the security boundary. This is a listing filter, and
-     * the two are kept in step by the tests deriving both from the same sentence — and by
-     * both reading the caller's administered organizations from the one accessor,
+     * It mirrors a conjunction rather than a single method, because adding an assignment is
+     * where this application's two independent rules meet — the row must be allowed to exist
+     * ({@see GuardsPackageAttachment::assertPackagesReachableIn()}: own, or shared) and the
+     * caller must be allowed to create it ({@see GuardsPackageAttachment::assertSharedAssignmentsUnchanged()}:
+     * adding an unmanageable shared package changes the set and is refused). The picker only
+     * ever offers packages that are not yet assigned in the eyes of the operator using it, so
+     * "may be introduced" is the right set for it; the second guard is deliberately wider,
+     * since re-submitting an already assigned shared package introduces nothing.
+     *
+     * Those guards, not this method, are the security boundary. This is a listing filter, and
+     * they are kept in step by the tests deriving both from the same sentence — and by both
+     * reading the caller's administered organizations from the one accessor,
      * {@see GuardsPackageAttachment::administeredOrganizationIds()}.
      *
-     * The second clause is what makes spec §4's two gates two. Before the ownership half
-     * was added here, the picker offered every shared package to every organization admin,
-     * which is how a customer came to be able to help themselves to a package the operator
-     * had never assigned them. It is also a disclosure fix in its own right: the names of
-     * the packages the operator shares with other customers are not a customer's to search.
+     * The second clause is what makes spec §4's two gates two. Before it was added here, the
+     * picker offered every shared package to every organization admin, which is how a customer
+     * came to be able to help themselves to a package the operator had never assigned them. It
+     * is also a disclosure fix in its own right: the names of the packages the operator shares
+     * with other customers are not a customer's to search.
      *
      * The `spansAllOrganizations()` branch needs no shared clause: a scope that sees every
      * organization already sees every shared package, since a shared package is owned by
@@ -140,9 +149,13 @@ trait ScopesToAdministeredOrgs
 
     /**
      * Aborts 403 unless every submitted package is owned by the organization it is being
-     * attached into, or is a shared package of an organization the caller administers. A
-     * package owned elsewhere is refused, otherwise attaching it would hand the caller
-     * write access to it via assertCanTouchPackage().
+     * attached into, or is shared. A package owned elsewhere is refused, otherwise attaching
+     * it would hand the caller write access to it via assertCanTouchPackage().
+     *
+     * WHO may hand out a shared package is a separate question, asked by
+     * {@see GuardsPackageAttachment::assertSharedAssignmentsUnchanged()} over the registry's
+     * resulting assignment set — it cannot be answered here, because this method sees the
+     * submission and not what the registry already carries.
      *
      * Checked against the target organization specifically, not the caller's broader
      * scope: an admin who administers several organizations must not be able to move a

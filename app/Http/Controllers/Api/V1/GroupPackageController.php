@@ -35,28 +35,20 @@ class GroupPackageController extends Controller
 
         $this->assertCanAttachPackages($submitted, $group->organization_id);
 
-        // sync() replaces the assignment wholesale, so this endpoint expresses a DETACH by
-        // omission: every assignment the submission leaves out is dropped by this write.
-        // A shared assignment dropped that way is exactly the write spec §4 reserves to the
-        // owning organization's administrators, and it passes the attach guard above
-        // untouched — that guard only ever sees what was submitted. So the dropped set is
-        // named explicitly and asked the same question.
+        // sync() replaces the assignment wholesale, so the submission IS the post-state — and
+        // therefore this endpoint expresses a DETACH BY OMISSION: an assignment the caller
+        // leaves out is dropped by this write. Nothing about that reaches the attach guard
+        // above, which only ever sees what WAS submitted.
         //
-        // The two halves together make this endpoint unusable, by design, for a customer
-        // admin whose registry carries a shared package: submitting it is an attach they
-        // may not make, omitting it is a detach they may not make. That is the honest
-        // consequence of `sync()` semantics under a two-gate rule — the alternative,
-        // silently preserving the row and reporting success, would tell the caller their
-        // PUT was applied when it was not. The console is unaffected: it adds with
-        // syncWithoutDetaching() and detaches one row at a time.
-        $this->assertMayManageSharedAssignments(
-            $group->packages()->pluck('packages.id')
-                ->map(fn (mixed $id): string => (string) $id)
-                ->diff($submitted)->values()->all()
-        );
+        // Both directions are one comparison here rather than two rules, which is what keeps
+        // the endpoint usable: a customer admin who re-sends the shared package alongside
+        // their own leaves the shared assignments exactly as they were and is not refused,
+        // while adding one, dropping one or swapping one for another is.
+        $this->assertSharedAssignmentsUnchanged($this->currentAssignmentIds($group), $submitted);
 
-        // The submission IS the post-state: a PUT that swaps an own package for the shared
-        // one of the same name detaches the own row in the same write and shadows nothing.
+        // The same post-state, asked the orthogonal shadowing question: a PUT that swaps an
+        // own package for the shared one of the same name detaches the own row in the same
+        // write and shadows nothing.
         $sharedAssignment->assertReplacementAssignable($submitted);
 
         $group->packages()->sync($submitted);

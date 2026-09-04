@@ -166,13 +166,15 @@ class GroupController extends Controller
      * asserted rather than only described, in
      * tests/Feature/Admin/AssignmentOwnershipMatchesUpstreamGuardTest.php.
      *
-     * `manageable` is the console's copy of the answer
-     * {@see GuardsPackageAttachment::assertMayManageSharedAssignments()} gives for this row:
-     * whether this operator may detach it or re-date its availability. Since spec §4 became
-     * enforced, a customer admin may do neither to a SHARED assignment — that decision is
-     * the operator's, per customer — and the two row actions would otherwise sit there and
-     * answer 403, which is the same defect as a picker offering what the guard refuses, on
-     * the other side of the page.
+     * `manageable` is the console's copy of the answer both halves of spec §4 give for this
+     * row: whether this operator may detach it (which would shrink the registry's shared
+     * assignments, refused by
+     * {@see GuardsPackageAttachment::assertSharedAssignmentsUnchanged()}) or re-date it
+     * (refused by {@see GuardsPackageAttachment::assertMayEditSharedAssignment()}). The two
+     * guards are separate but their answer for one row is the same question — is this a
+     * shared package owned outside what the caller administers — so the flag is one boolean.
+     * Without it the two row actions would sit there and answer 403, which is the same defect
+     * as a picker offering what the guard refuses, on the other side of the page.
      *
      * Stated per row, from the package's owning organization, rather than as one flag for
      * the page: the guard asks per package, and a page-level flag would be a second, weaker
@@ -310,6 +312,11 @@ class GroupController extends Controller
         $packageIds = $request->validated('package_ids', []);
         $this->assertCanAttachPackages($packageIds, $organizationId);
 
+        // …and a shared package only arrives here if the caller may hand it out. The registry
+        // does not exist yet, so it carries nothing and its post-state is the submission:
+        // every shared package in it is one this write ADDS.
+        $this->assertSharedAssignmentsUnchanged([], $packageIds);
+
         // …and the registry must not end up serving a shared package under a name one of
         // its own carries. sync() on a registry that does not exist yet leaves exactly the
         // submission behind, so that is the whole post-state. Asked before the insert, so a
@@ -355,9 +362,16 @@ class GroupController extends Controller
         ]);
 
         $this->assertCanAttachPackages($data['package_ids'], $group->organization_id);
-        // syncWithoutDetaching() keeps what is already assigned, so the post-state is
-        // that plus the submission — in either direction: a shared package arriving over
-        // an own one, or an own one arriving over a shared package already assigned.
+
+        // syncWithoutDetaching() keeps what is already assigned, so the post-state is that
+        // plus the submission. Re-submitting a shared package the registry already carries
+        // therefore changes nothing and is not refused — it is not an assignment being made.
+        $assigned = $this->currentAssignmentIds($group);
+        $this->assertSharedAssignmentsUnchanged($assigned, array_merge($assigned, $data['package_ids']));
+
+        // The same post-state, asked the orthogonal shadowing question — in either direction:
+        // a shared package arriving over an own one, or an own one arriving over a shared
+        // package already assigned.
         $sharedAssignment->assertAssignable($group, $data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.
@@ -416,10 +430,17 @@ class GroupController extends Controller
 
         // Re-dating a SHARED assignment is a change to how long this customer receives the
         // operator's package, which spec §4 reserves to whoever administers the owning
-        // organization. Asked after the 404 so a request naming a package this registry
-        // does not carry still answers "no such assignment" rather than leaking, by the
-        // choice of status code, whether the package is shared.
-        $this->assertMayManageSharedAssignments([$package->id]);
+        // organization.
+        //
+        // Asked HERE rather than left to assertSharedAssignmentsUnchanged(), which cannot see
+        // this write at all: `available_until` is a column on the pivot row, so the set of
+        // assigned package ids is identical before and after and that comparison correctly
+        // finds nothing to refuse. The two halves of spec §4's sentence need two predicates.
+        //
+        // After the 404, so a request naming a package this registry does not carry still
+        // answers "no such assignment" rather than leaking, by the choice of status code,
+        // whether the package is shared.
+        $this->assertMayEditSharedAssignment($package);
 
         $data = $request->validate([
             // A day, not an instant: the operator picks a date and the label says
@@ -455,7 +476,14 @@ class GroupController extends Controller
     public function detachPackage(Group $group, Package $package): RedirectResponse
     {
         $this->assertAdministersGroup($group);
-        $this->assertMayManageSharedAssignments([$package->id]);
+
+        // detach() leaves the current assignment minus this package. A package the registry
+        // does not carry leaves the set alone and is the no-op it has always been.
+        $assigned = $this->currentAssignmentIds($group);
+        $this->assertSharedAssignmentsUnchanged(
+            $assigned,
+            array_values(array_diff($assigned, [(string) $package->id])),
+        );
 
         $group->packages()->detach($package->id);
 
