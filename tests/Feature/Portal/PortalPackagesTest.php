@@ -129,6 +129,29 @@ it('keeps a package in force while any one registry still serves it', function (
         ->and($row['groups'])->toHaveCount(2);
 });
 
+it('marks the lapsed registry on the entry, not the whole package', function () {
+    // The mixed case, asserted at BOTH levels from one fixture. The row-level flag is derived
+    // from the entries rather than accumulated beside them, so it cannot claim something the
+    // entries deny: without the per-registry answer the landing page would show no marker and
+    // still link to the registry that 404s the customer's build.
+    $org = Organization::factory()->create();
+    $live = Group::factory()->for($org)->create(['name' => 'A live']);
+    $lapsed = Group::factory()->for($org)->create(['name' => 'B lapsed']);
+    $package = Package::factory()->for($org)->create(['name' => 'acme/tools']);
+    $live->packages()->attach($package->id);
+    $lapsed->packages()->attach($package->id, ['available_until' => now()->subDay()]);
+
+    $row = app(PortalPackages::class)->for($org)->first();
+
+    // Registries are ordered by name, so the sequence is deterministic.
+    expect($row['groups']->pluck('group.id')->all())->toBe([$live->id, $lapsed->id])
+        // The entries DISAGREE with each other — that is the whole point of moving the flag
+        // onto them.
+        ->and($row['groups']->pluck('in_force')->all())->toBe([true, false])
+        // …and the row still reads in force, because one registry serves it.
+        ->and($row['in_force'])->toBeTrue();
+});
+
 it('orders the rows by package name, not by the registry they came from', function () {
     // NOT in the brief either, and the interface promises it: "ordered by package name".
     // The registries are named so that the rows arrive in the opposite order — A first —
@@ -154,6 +177,6 @@ it('names every registry that serves the package', function () {
 
     $row = app(PortalPackages::class)->for($org)->first();
 
-    expect($row['groups']->pluck('id')->sort()->values()->all())
+    expect($row['groups']->pluck('group.id')->sort()->values()->all())
         ->toBe(collect([$a->id, $b->id])->sort()->values()->all());
 });

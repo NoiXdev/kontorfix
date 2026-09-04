@@ -13,8 +13,16 @@ class PortalPackages
     public function __construct(private readonly RegistryAccessService $access) {}
 
     /**
-     * Every package available to this organization, its own and those shared with it,
-     * with the registries that carry it and whether the assignment is still in force.
+     * Every package available to this organization, its own and those shared with it, with the
+     * registries that carry it and whether the assignment is still in force IN EACH OF THEM.
+     *
+     * `in_force` exists twice in the returned shape and is written ONCE. Each entry of `groups`
+     * carries the answer for that registry, and the row-level flag is DERIVED from the entries
+     * — in force in at least one of them. Accumulating the row flag separately in the loop is
+     * the shape this deliberately avoids: two computations of one rule can disagree, and here
+     * they disagree exactly in the case that matters, a package live in one registry and lapsed
+     * in another. A row that read "in force" while offering an unmarked link to the registry
+     * that 404s the customer's build is this task's own defect one level down.
      *
      * This states NO rule of its own, and that is deliberate. What a registry serves is
      * RegistryAccessService::packagesFor() — the public face of its private
@@ -50,11 +58,12 @@ class PortalPackages
      * one this page exists NOT to have. The customer's build gets a 404 for such a package,
      * and this is the page where that becomes explicable. See PortalPackagesTest.
      *
-     * @return Collection<int, array{package: Package, groups: Collection<int, Group>, in_force: bool}>
+     * @return Collection<int, array{package: Package, groups: Collection<int, array{group: Group,
+     *     in_force: bool}>, in_force: bool}>
      */
     public function for(Organization $organization): Collection
     {
-        /** @var Collection<string, array{package: Package, groups: Collection<int, Group>, in_force: bool}> $rows */
+        /** @var Collection<string, array{package: Package, groups: Collection<int, array{group: Group, in_force: bool}>}> $rows */
         $rows = collect();
 
         $groups = $organization->groups()
@@ -72,19 +81,27 @@ class PortalPackages
                 $row = $rows->get($package->id) ?? [
                     'package' => $package,
                     'groups' => collect(),
-                    'in_force' => false,
                 ];
 
-                $row['groups'] = $row['groups']->push($group);
-                // In force anywhere is in force for the list: the package is usable, and
-                // the registry column says through which registry. Accumulating, not
-                // last-wins — the registries need not agree.
-                $row['in_force'] = $row['in_force'] || $served->has($package->id);
+                // The per-registry answer, and the only place any `in_force` is decided.
+                $row['groups'] = $row['groups']->push([
+                    'group' => $group,
+                    'in_force' => $served->has($package->id),
+                ]);
 
                 $rows->put($package->id, $row);
             }
         }
 
-        return $rows->values()->sortBy(fn (array $r): string => $r['package']->name)->values();
+        return $rows->values()
+            ->map(fn (array $r): array => [
+                'package' => $r['package'],
+                'groups' => $r['groups'],
+                // Derived, never accumulated alongside: in force in at least one registry. The
+                // package is usable, and the registry column says through which ones.
+                'in_force' => $r['groups']->contains(fn (array $e): bool => $e['in_force']),
+            ])
+            ->sortBy(fn (array $r): string => $r['package']->name)
+            ->values();
     }
 }
