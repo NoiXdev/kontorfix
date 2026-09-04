@@ -94,6 +94,23 @@ class RegistryController extends Controller
         // have. It is also the answer PortalIsolationTest and RegistryPortalTest already
         // expect for a foreign registry.
         abort_unless($group->organization_id === $organization->id, 403);
+        // `groups.portal_enabled` — whether this registry appears in the portal at all, the
+        // same predicate index() and PortalPackages ask of the same column.
+        //
+        // HERE AND NOT ONLY IN THE POLICY, because a policy is the wrong home for it and the
+        // repo says so: AppServiceProvider's Gate::before short-circuits every policy for a
+        // super-admin, so GroupPolicy::view() never runs for that population and its copy of
+        // this check never fires. That is correct for an AUTHORIZATION question — which this
+        // is not. It is a property of the surface, not of the viewer: the registry is one the
+        // portal does not show, to anybody. Stated in the controller it runs for every caller,
+        // needs no change to a repo-wide bypass, and sits beside the other statement of what
+        // this portal shows.
+        //
+        // 404, not the policy's 403: a registry the portal does not have is absent, not
+        // forbidden. The policy still answers 403 for the viewer populations it refuses
+        // first — the two guards refuse different people by different mechanisms, and the
+        // tests pin both.
+        abort_unless($group->portal_enabled, 404);
         $group->load(['domains', 'organization']);
 
         // Load versions descending by released_at and pick the newest one in PHP —
@@ -164,8 +181,10 @@ class RegistryController extends Controller
     {
         $organization = $this->portalOrganization($request);
         $this->authorize('view', $group);
-        // Binds the address to the registry — see show(), which carries the reasoning.
+        // Binds the address to the registry, and refuses a registry the portal does not
+        // show — see show(), which carries the reasoning for both.
         abort_unless($group->organization_id === $organization->id, 403);
+        abort_unless($group->portal_enabled, 404);
         // packages(), not assignedPackages(): the question here is whether this registry has
         // this assignment AT ALL. A package assigned to no registry still 404s — that is a
         // guessed URL, and the customer has nothing to be told about it. A lapsed one is a

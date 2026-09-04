@@ -357,3 +357,55 @@ it('counts an un-shared package as assigned but not as served', function () {
         ->assertInertia(fn ($page) => $page->where('registries.0.served_count', 0)
             ->where('registries.0.assigned_count', 1));
 });
+
+/*
+ * `portal_enabled` on the registry, for the one population a policy cannot answer for.
+ *
+ * GroupPolicy::view() refuses a hidden registry, but AppServiceProvider's Gate::before
+ * short-circuits every policy for a super-admin, so that copy of the check never runs for
+ * them. The fix is not to weaken a repo-wide authorization bypass: "does this registry appear
+ * in the portal" is a property of the SURFACE, not of the viewer, which is exactly why a
+ * policy is the wrong home for it. Both controller actions state it themselves, where every
+ * caller passes.
+ *
+ * The two guards therefore refuse different people by different mechanisms, and both are
+ * pinned below: 404 from the controller for a super-admin, 403 from the policy for an
+ * operator maintainer (above). Removing the controller line must redden only the first pair.
+ */
+it('refuses a super-admin a registry the portal does not show', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $hidden = Group::factory()->for($org)->create(['portal_enabled' => false]);
+
+    $this->actingAs(superAdmin())->get("/c/acme/registries/{$hidden->id}")->assertNotFound();
+});
+
+it('still serves a super-admin a registry the portal does show', function () {
+    // The present half. A guard that refused every super-admin, or that read the wrong
+    // column, would satisfy the case above on its own.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $shown = Group::factory()->for($org)->create(['portal_enabled' => true]);
+
+    $this->actingAs(superAdmin())->get("/c/acme/registries/{$shown->id}")->assertOk();
+});
+
+it('refuses a super-admin the package page of a registry the portal does not show', function () {
+    // Stated in showPackage() as well as show(): the detail page is reachable by its own URL,
+    // and a guard on the list page alone leaves the package behind a hidden registry readable.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $hidden = Group::factory()->for($org)->create(['portal_enabled' => false]);
+    $pkg = Package::factory()->inOrgOf($hidden)->create(['name' => 'acme/hidden']);
+    $hidden->packages()->attach($pkg->id);
+
+    $this->actingAs(superAdmin())->get("/c/acme/registries/{$hidden->id}/packages/{$pkg->id}")
+        ->assertNotFound();
+});
+
+it('still serves a super-admin the package page of a registry the portal does show', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $shown = Group::factory()->for($org)->create(['portal_enabled' => true]);
+    $pkg = Package::factory()->inOrgOf($shown)->create(['name' => 'acme/shown']);
+    $shown->packages()->attach($pkg->id);
+
+    $this->actingAs(superAdmin())->get("/c/acme/registries/{$shown->id}/packages/{$pkg->id}")
+        ->assertOk();
+});
