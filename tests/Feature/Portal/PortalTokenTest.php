@@ -52,3 +52,55 @@ it('revokes only own personal tokens', function () {
         ->delete("/c/{$this->orgA->slug}/tokens/{$own->id}")->assertRedirect("/c/{$this->orgA->slug}/registries");
     expect(RegistryToken::find($own->id))->toBeNull();
 });
+
+it('ties a token to the organization whose portal it was minted in', function () {
+    $home = Organization::factory()->create(['slug' => 'home']);
+    $other = Organization::factory()->create(['slug' => 'other']);
+    $user = User::factory()->create(['organization_id' => $home->id, 'role' => 'admin']);
+    $user->organizations()->attach($other->id, ['role' => 'admin']);
+
+    $this->actingAs($user)->post('/c/other/tokens', ['name' => 'CI', 'ability' => 'read']);
+
+    // The old code fell back to the user's HOME organization when no group was submitted.
+    expect(RegistryToken::latest()->first()->organization_id)->toBe($other->id);
+});
+
+it('refuses a group from another organization', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $other = Organization::factory()->create();
+    $group = Group::factory()->for($other)->create();
+    $user = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+    $user->organizations()->attach($other->id, ['role' => 'admin']);
+
+    $this->actingAs($user)
+        ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read', 'group_id' => $group->id])
+        ->assertStatus(403);
+
+    // The status alone would not distinguish a refusal from a refusal that still wrote.
+    expect(RegistryToken::count())->toBe(0);
+});
+
+it('refuses an operator account minting a token in a customer portal', function () {
+    $customer = Organization::factory()->create(['slug' => 'acme']);
+    Organization::factory()->create(['is_operator' => true]);
+
+    // Viewing and minting are different questions. If looking in to help also issued
+    // credentials, support access would be a way to obtain a customer's registry token.
+    $this->actingAs(superAdmin())
+        ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
+        ->assertStatus(403);
+
+    // Not merely "no token for the customer": no token at all. The old code would have
+    // minted one against the operator's OWN organization and answered 302.
+    expect(RegistryToken::count())->toBe(0);
+    expect(RegistryToken::where('organization_id', $customer->id)->count())->toBe(0);
+});
+
+it('still lets a member of the organization mint a token', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+
+    $this->actingAs($user)
+        ->post('/c/acme/tokens', ['name' => 'CI', 'ability' => 'read'])
+        ->assertRedirect();
+});

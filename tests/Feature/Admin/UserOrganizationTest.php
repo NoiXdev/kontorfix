@@ -170,7 +170,16 @@ it('lets a member create a token for a registry of an additional organization', 
     $user->organizations()->attach($other->id);
     $group = Group::factory()->for($other)->create();
 
-    $this->actingAs($user)->post("/c/{$home->slug}/tokens", [
+    // At the OTHER organization's address, and that is the whole change. The reach into an
+    // additional organization is unchanged; what moved is where it is exercised. This used
+    // to post to the HOME address and mint against `$other` anyway, which is the behaviour
+    // the single-address portal (/portal) had no way to avoid: with no organization in the
+    // URL, the submitted group was the only thing that could name one. With /c/{orgSlug} the
+    // address names it, and a token minted under one organization's address against another
+    // organization's registry makes that address mean nothing. PortalTokenTest's
+    // 'refuses a group from another organization' pins the refusal; this pins that the reach
+    // itself survives at the right door.
+    $this->actingAs($user)->post("/c/{$other->slug}/tokens", [
         'name' => 'ci', 'group_id' => $group->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
