@@ -152,17 +152,7 @@ class OrganizationController extends Controller
 
     public function update(UpdateOrganizationRequest $request, Organization $organization): RedirectResponse
     {
-        $organization->update([
-            ...$request->validated(),
-            // Redundant today and deliberately so: UpdateOrganizationRequest's
-            // prepareForValidation() already merges the absent-switch case as an explicit
-            // `false`, so `validated()` carries it either way — removing this line changes
-            // no test. It stands because this is the one field on the form whose absence is
-            // a meaningful value rather than "leave it alone", and dropping its `boolean`
-            // rule (which would quietly evict it from `validated()`) must not be able to
-            // turn a portal back on behind the operator's back.
-            'portal_enabled' => $request->boolean('portal_enabled'),
-        ]);
+        $organization->update($request->validated());
 
         return back()->with('success', "Kunde {$organization->name} aktualisiert.");
     }

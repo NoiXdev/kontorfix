@@ -46,6 +46,11 @@ class UpdateOrganizationRequest extends FormRequest
             'notification_cadence' => ['required', Rule::in(['hourly', 'daily', 'off'])],
             // Whether this customer has a portal at all — off makes /c/{slug} a 404. Not
             // `groups.portal_enabled`, which only hides one registry inside that portal.
+            //
+            // Load-bearing beyond validation: `validated()` returns only fields that carry a
+            // rule, so dropping this line evicts the switch from the update entirely and the
+            // column silently keeps whatever it had — switching a portal off would save
+            // nothing. PortalContextTest's two console round-trip cases are what says so.
             'portal_enabled' => ['boolean'],
         ];
     }
