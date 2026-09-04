@@ -65,6 +65,25 @@ it('does not list a package of another organization', function () {
     expect(app(PortalPackages::class)->for($org))->toBeEmpty();
 });
 
+it('does not list a package another organization has in its own registry', function () {
+    // NOT in the brief, and the brief's neighbouring case cannot stand in for it: there the
+    // other organization's package is attached to nothing, so its absence is explained by
+    // having no assignment at all and says nothing about the organization scoping. Deleting
+    // that scoping outright — every registry on the instance instead of this one's — left
+    // the whole brief set green while the service listed every tenant's packages. Attaching
+    // the foreign package to its own registry is what makes the boundary observable.
+    $org = Organization::factory()->create();
+    Group::factory()->for($org)->create();
+
+    $other = Organization::factory()->create();
+    $otherGroup = Group::factory()->for($other)->create();
+    $otherGroup->packages()->attach(
+        Package::factory()->for($other)->create(['name' => 'other/thing'])->id
+    );
+
+    expect(app(PortalPackages::class)->for($org))->toBeEmpty();
+});
+
 it('keeps a package in force while any one registry still serves it', function () {
     // NOT in the brief, and it has to be: `in_force` accumulates across registries, and no
     // case in the brief's set can tell an accumulating `||` from a plain last-wins
