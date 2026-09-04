@@ -22,8 +22,10 @@ class UpdateOrganizationRequest extends FormRequest
      * and "the request never mentioned the switch" are different intentions and only the
      * console can tell them apart by always sending every field. An unconditional merge made
      * them identical, so a partial PUT naming only `name` disabled a customer's portal as a
-     * side effect. Paired with `sometimes` on the rule: absent now means leave it alone.
-     * StoreGroupRequest does the same thing for the create path, where absent means `true`.
+     * side effect. This `has()` check is the whole mechanism — `sometimes` on the rule below
+     * says the same thing to a reader but changes no outcome, since `boolean` already passes
+     * an absent field. StoreGroupRequest makes the mirror choice for the create path, where
+     * an absent switch means `true` rather than "leave alone".
      */
     protected function prepareForValidation(): void
     {
@@ -61,8 +63,11 @@ class UpdateOrganizationRequest extends FormRequest
             // column silently keeps whatever it had — switching a portal off would save
             // nothing. PortalContextTest's two console round-trip cases are what says so.
             //
-            // `sometimes` is what makes an omitted switch mean "leave it alone" rather than
-            // "off"; it only bites because prepareForValidation() above merges conditionally.
+            // `sometimes` states that an omitted switch is legal rather than defaulted, but
+            // it is documentation, not mechanism: removing it reddens nothing, because
+            // `boolean` already passes an absent field and `validated()` already omits one.
+            // What actually makes an omitted switch mean "leave it alone" is the conditional
+            // merge above — mutate that back to unconditional and the leave-alone case reddens.
             'portal_enabled' => ['sometimes', 'boolean'],
         ];
     }
