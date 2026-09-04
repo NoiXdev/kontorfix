@@ -8,12 +8,13 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { badgesFor, noteFor, registryMarker, type PortalRegistryEntry } from './portalPackages';
+import { badgesFor, noteFor, registryMarker, SHARED_BADGE_TITLE, type PortalRegistryEntry } from './portalPackages';
 
 interface RegistryEntry extends PortalRegistryEntry {
+    // The id, not the slug: every portal registry URL is built from the id
+    // (`portal.registries.package`), so the slug would be a field nothing reads.
     id: string;
     name: string;
-    slug: string;
 }
 
 interface PackageRow {
@@ -109,13 +110,10 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                          marker their operator sees. -->
                                     <template v-for="badge in badgesFor(pkg)" :key="badge">
                                         <!-- The badge is the console's, the tooltip is not: what a
-                                             shared package means to its operator is what they may do
-                                             with it, and what it means here is that it is not the
-                                             customer's own. -->
-                                        <SharedBadge
-                                            v-if="badge === 'geteilt'"
-                                            title="Vom Betreiber bereitgestellt und Ihrer Organisation freigegeben."
-                                        />
+                                             shared package means to its operator is a capability the
+                                             customer does not have. The text lives in the module, so
+                                             that it is a string something can test. -->
+                                        <SharedBadge v-if="badge === 'geteilt'" :title="SHARED_BADGE_TITLE" />
                                         <!-- v-else-if, not v-else: a catch-all would render any badge
                                              added later in destructive red, which is the wrong default
                                              for a marker that is not a fault. An unhandled value

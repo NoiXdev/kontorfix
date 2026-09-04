@@ -9,6 +9,7 @@
  * package: the row's `in_force` and each registry entry's own.
  */
 
+use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -20,7 +21,14 @@ it('shows an own package and a lapsed shared one, the second marked', function (
     $org = Organization::factory()->create(['slug' => 'acme']);
     $group = Group::factory()->for($org)->create();
     $own = Package::factory()->for($org)->create(['name' => 'acme/own']);
-    $shared = Package::factory()->for($operator)->create(['name' => 'acme/shared', 'shared' => true]);
+    // Two ecosystems, so `type` is observable in both directions: it drives the type filter
+    // and the label column, and a single type in the fixture cannot tell the real field from
+    // a constant.
+    $shared = Package::factory()->for($operator)->create([
+        'name' => 'acme/shared',
+        'type' => PackageType::Npm,
+        'shared' => true,
+    ]);
     $group->packages()->attach($own->id);
     $group->packages()->attach($shared->id, ['available_until' => now()->subDay()]);
     $user = User::factory()->create(['organization_id' => $org->id]);
@@ -34,9 +42,17 @@ it('shows an own package and a lapsed shared one, the second marked', function (
             // `true` for every row left this whole directory green while the portal told a
             // customer that each of their own packages was shared with them.
             ->where('packages.0.shared', false)
+            ->where('packages.0.type', 'composer')
+            // PackageFactory creates no versions, so this row HAS no release — and the
+            // negative case is the only one that separates the field from a constant. Every
+            // other row in this file is version-less and unasserted, which let both a literal
+            // and `$row['in_force'] ? … : null` pass the whole suite while every package on
+            // the landing page advertised a version it does not have.
+            ->where('packages.0.latest_version', null)
             ->where('packages.0.in_force', true)
             ->where('packages.1.name', 'acme/shared')
             ->where('packages.1.shared', true)
+            ->where('packages.1.type', 'npm')
             ->where('packages.1.in_force', false));
 });
 

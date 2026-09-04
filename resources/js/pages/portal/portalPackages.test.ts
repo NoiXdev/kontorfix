@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { badgesFor, lapsedNote, noteFor, partlyLapsedNote, registryMarker } from './portalPackages';
+import { badgesFor, lapsedNote, noteFor, partlyLapsedNote, registryMarker, SHARED_BADGE_TITLE } from './portalPackages';
 
 describe('badgesFor', () => {
     it('marks a shared package', () => {
@@ -20,6 +20,12 @@ describe('badgesFor', () => {
 describe('lapsedNote', () => {
     it('says what the customer sees in their build', () => {
         expect(lapsedNote()).toContain('404');
+    });
+
+    it('does not promise a date beside every marker', () => {
+        // `registryMarker` renders a bare `abgelaufen` where `available_until` is null, so
+        // "mit dem Ablaufdatum markiert" is false for at least one marker on a mixed row.
+        expect(lapsedNote()).not.toContain('Ablaufdatum');
     });
 
     it('does not tell the customer to remove anything themselves', () => {
@@ -65,6 +71,16 @@ describe('partlyLapsedNote', () => {
         expect(note).not.toContain('ci');
     });
 
+    it('speaks of one registry in the singular', () => {
+        // The common case, and the one an earlier wording got wrong in the other direction:
+        // "Builds gegen diese Registries" and "die übrigen Registries" about a single lapsed
+        // one. Asserted whole, because a plural anywhere in the sentence is the defect.
+        expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toBe(
+            'In der Registry legacy wird dieses Paket nicht mehr ausgeliefert. Builds, die dort ' +
+                'auflösen, erhalten einen 404. Über Ihre anderen Registries ist das Paket weiterhin verfügbar.',
+        );
+    });
+
     it('states the consequence the customer arrives with', () => {
         expect(partlyLapsedNote({ shared: false, in_force: true, registries: [live, lapsed] })).toContain('404');
     });
@@ -80,7 +96,9 @@ describe('partlyLapsedNote', () => {
             registries: [live, lapsed, { name: 'archive', in_force: false }],
         });
 
-        expect(note).toContain('In legacy und archive');
+        // The article moves with the count — German has no form that covers both, and
+        // "In der Registry legacy und archive" would be the singular defect one word later.
+        expect(note).toContain('In den Registries legacy und archive');
     });
 
     it('says nothing where every registry still serves the package', () => {
@@ -114,5 +132,20 @@ describe('noteFor', () => {
 
     it('leaves a package every registry still serves without a note', () => {
         expect(noteFor({ shared: false, in_force: true, registries: [{ name: 'ci', in_force: true }] })).toBeNull();
+    });
+});
+
+describe('SHARED_BADGE_TITLE', () => {
+    it('names the operator as the source', () => {
+        expect(SHARED_BADGE_TITLE).toContain('Betreiber');
+    });
+
+    it('does not call the assignment a Freigabe to this organization', () => {
+        // `shared` is an organization-agnostic boolean on the package — nothing about it names
+        // a recipient, and what brings the package into this portal is a registry assignment.
+        // This console keeps "Freigabe" for the `shared` marking itself and never for an
+        // assignment, which packageAssignment.ts depends on.
+        expect(SHARED_BADGE_TITLE).not.toContain('freigegeben');
+        expect(SHARED_BADGE_TITLE).not.toContain('Organisation');
     });
 });

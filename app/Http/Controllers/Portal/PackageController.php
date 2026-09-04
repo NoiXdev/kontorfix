@@ -76,7 +76,6 @@ class PackageController extends Controller
                 'registries' => $row['groups']->map(fn (PortalRegistryAssignment $entry): array => [
                     'id' => $entry->group->id,
                     'name' => $entry->group->name,
-                    'slug' => $entry->group->slug,
                     'in_force' => $entry->in_force,
                     'available_until' => $entry->available_until?->toDateString(),
                     // ->all(), so the nested value is a plain list and not a Collection:

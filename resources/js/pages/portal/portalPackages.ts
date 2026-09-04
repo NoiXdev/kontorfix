@@ -19,6 +19,23 @@
 import { formatDay } from '@/pages/admin/groups/packageAssignment';
 
 /**
+ * The customer's reading of the `geteilt` badge, passed to `SharedBadge` in place of its
+ * operator-facing default ("kann Registries anderer Organisationen zugewiesen werden" is a
+ * capability the customer does not have).
+ *
+ * It says only that the operator provides the package, and deliberately NOT that it was
+ * released to this organization. `shared` is an organization-agnostic boolean on the package:
+ * nothing about it names a recipient, and what actually brings the package into this portal is
+ * a registry assignment. In this console "Freigabe" IS the `shared` marking and never an
+ * assignment — `packageAssignment.ts` keeps those two apart on purpose — so calling the
+ * assignment a Freigabe here would undo that distinction on the page that most needs it.
+ *
+ * A constant in this module rather than a literal in the SFC: it was the one German string on
+ * this page that nothing could test, which is the rule this module exists to enforce.
+ */
+export const SHARED_BADGE_TITLE = 'Vom Betreiber bereitgestellt.';
+
+/**
  * The markers a row can carry. A union rather than plain strings: the page maps each one to a
  * component, and a typo would silently render nothing.
  *
@@ -97,8 +114,12 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
  * an assignment, so an instruction the customer cannot follow would be worse than none.
  *
  * "keiner Ihrer Registries", not "die Registry": this note renders only where the package is
- * served by NONE of them, which can be several, and it points at the per-registry markers
- * for which ones and until when rather than naming a single date it does not have.
+ * served by NONE of them, which can be several, and it points at the per-registry markers for
+ * which ones rather than naming a single date it does not have.
+ *
+ * "oben markiert", NOT "mit dem Ablaufdatum markiert". `registryMarker` renders a bare
+ * `abgelaufen` with no day whenever `available_until` is null, so on a mixed set the promise
+ * of a date is false for at least one of the very markers this sentence points at.
  *
  * The console's operator-facing note (`availabilityNote`) also explains that the name stays
  * blocked and is not passed to the upstream. That is deliberately absent here: it is an
@@ -108,8 +129,8 @@ export function badgesFor(row: PortalPackageRow): PortalBadge[] {
 export function lapsedNote(): string {
     return (
         'Dieses Paket wird von keiner Ihrer Registries mehr ausgeliefert: Builds erhalten ' +
-        'dafür einen 404. Die betroffenen Registries sind oben mit dem Ablaufdatum markiert. ' +
-        'Wenden Sie sich an den Betreiber, wenn Sie das Paket weiter benötigen.'
+        'dafür einen 404. Die betroffenen Registries sind oben markiert. Wenden Sie sich an ' +
+        'den Betreiber, wenn Sie das Paket weiter benötigen.'
     );
 }
 
@@ -127,6 +148,20 @@ export function lapsedNote(): string {
  * nicht mehr aus" is true and useless: the reader has to map it back to the entry that is
  * marked, and a customer with several registries cannot tell whether the one their CI uses is
  * among them. The name is the only part of the sentence they can act on.
+ *
+ * The CONSEQUENCE is number-free — "Builds, die dort auflösen", "Ihre anderen Registries" —
+ * because the common case is one lapsed registry and an earlier wording said "diese Registries"
+ * and "die übrigen Registries" about a single one. That is the singular defect of `lapsedNote()`
+ * reflected: copy that assumes a count it does not have.
+ *
+ * The one place a count still shows is the article in front of the names, and German has no
+ * form that covers both. `In der Registry legacy und archive` would be the same defect one word
+ * later, so the article and the noun are chosen with the list and everything after them is not.
+ *
+ * `Über Ihre anderen Registries ist das Paket weiterhin verfügbar` is a guarantee, not a hope:
+ * `in_force` is DERIVED from these same entries, and the entries are already filtered to the
+ * portal-visible registries the page renders. A row that reaches this function therefore has at
+ * least one rendered registry that still serves the package.
  */
 export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalRegistryName[] }): string | null {
     // A row that is in force nowhere is `lapsedNote()`'s case, not this one. Stated here and
@@ -142,9 +177,11 @@ export function partlyLapsedNote(row: PortalPackageRow & { registries: PortalReg
         return null;
     }
 
+    const where = lapsed.length === 1 ? `In der Registry ${lapsed[0]}` : `In den Registries ${joinNames(lapsed)}`;
+
     return (
-        `In ${joinNames(lapsed)} wird dieses Paket nicht mehr ausgeliefert: Builds gegen diese ` +
-        'Registries erhalten einen 404. Über die übrigen Registries ist es weiterhin verfügbar.'
+        `${where} wird dieses Paket nicht mehr ausgeliefert. Builds, die dort auflösen, ` +
+        'erhalten einen 404. Über Ihre anderen Registries ist das Paket weiterhin verfügbar.'
     );
 }
 
