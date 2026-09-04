@@ -8,7 +8,7 @@ import { type SharedData } from '@/types';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import { type RouteList } from 'ziggy-js';
+import { type ParameterValue, type RouteList } from 'ziggy-js';
 
 interface Snippets {
     composer: string;
@@ -27,6 +27,9 @@ interface PersonalToken {
 const props = defineProps<{
     snippets: Snippets;
     storeRoute: keyof RouteList;
+    // Route parameters for `storeRoute`, for a store route that is addressed rather than
+    // global — the portal's token route carries the organization slug in its path.
+    storeRouteParams?: ParameterValue;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
     // Which ecosystems to show setup steps for. Omitted → all.
@@ -64,7 +67,7 @@ watch(plainTextToken, (value) => {
 function createAndInsert() {
     pendingName.value = form.name;
     awaitingToken.value = true;
-    form.transform((data) => ({ ...data, ...(props.storePayload ?? {}) })).post(route(props.storeRoute), {
+    form.transform((data) => ({ ...data, ...(props.storePayload ?? {}) })).post(route(props.storeRoute, props.storeRouteParams), {
         preserveScroll: true,
         onSuccess: () => form.reset('name'),
         onError: () => {

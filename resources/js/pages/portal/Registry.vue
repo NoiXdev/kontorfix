@@ -48,6 +48,8 @@ interface TokenRow {
 }
 
 const props = defineProps<{
+    // The organization the URL addresses — the first segment of every portal link here.
+    orgSlug: string;
     registry: Registry;
     snippets: Snippets;
     packages: PackageRow[];
@@ -161,7 +163,7 @@ const tokenForm = useForm({
 });
 
 function submitToken() {
-    tokenForm.post(route('portal.tokens.store'), {
+    tokenForm.post(route('portal.tokens.store', props.orgSlug), {
         preserveScroll: true,
         onSuccess: () => {
             tokenForm.reset('name');
@@ -175,15 +177,15 @@ function abilityLabel(ability: 'read' | 'publish') {
 }
 
 function destroyToken(id: string) {
-    router.delete(route('portal.tokens.destroy', id), {
+    router.delete(route('portal.tokens.destroy', [props.orgSlug, id]), {
         preserveScroll: true,
         onBefore: () => confirm('Token wirklich widerrufen?'),
     });
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Registries', href: '/portal' },
-    { title: props.registry.name, href: `/portal/registries/${props.registry.id}` },
+    { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
+    { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
 ];
 </script>
 
@@ -209,6 +211,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                         :snippets="props.snippets"
                         :types="registryTypes"
                         store-route="portal.tokens.store"
+                        :store-route-params="props.orgSlug"
                         :store-payload="{ group_id: props.registry.id }"
                         :personal-tokens="props.tokens"
                     />
@@ -238,7 +241,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                                 class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                             >
                                 <td class="px-4 py-3 font-mono">
-                                    <Link :href="route('portal.registries.package', [props.registry.id, pkg.id])" class="hover:underline">
+                                    <Link :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])" class="hover:underline">
                                         {{ pkg.name }}
                                     </Link>
                                 </td>

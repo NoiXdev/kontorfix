@@ -28,7 +28,7 @@ it('shows the same package in admin detail and read-only portal detail', functio
             ->has('groups', 1));
 
     // Portal detail (read-only) for the customer, including install snippet
-    $this->actingAs($member)->get("/portal/registries/{$group->id}/packages/{$pkg->id}")
+    $this->actingAs($member)->get("/c/{$org->slug}/registries/{$group->id}/packages/{$pkg->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Package')
             ->where('package.name', 'acme/widget')->has('versions', 1)
@@ -40,5 +40,5 @@ it('shows the same package in admin detail and read-only portal detail', functio
     // stays doing so.
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
     $foreign->packages()->attach($pkg);
-    $this->actingAs($member)->get("/portal/registries/{$foreign->id}/packages/{$pkg->id}")->assertForbidden();
+    $this->actingAs($member)->get("/c/{$org->slug}/registries/{$foreign->id}/packages/{$pkg->id}")->assertForbidden();
 });

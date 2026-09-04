@@ -36,7 +36,7 @@ it('sends the readme html to the portal detail page', function () {
     $group->packages()->attach($package);
 
     $this->actingAs($member)
-        ->get("/portal/registries/{$group->id}/packages/{$package->id}")
+        ->get("/c/{$org->slug}/registries/{$group->id}/packages/{$package->id}")
         ->assertInertia(fn ($page) => $page->where('package.readme_html', '<h1>Projekt</h1>'));
 });
 
@@ -48,6 +48,6 @@ it('sends null on the portal detail page when the package has no readme', functi
     $group->packages()->attach($package);
 
     $this->actingAs($member)
-        ->get("/portal/registries/{$group->id}/packages/{$package->id}")
+        ->get("/c/{$org->slug}/registries/{$group->id}/packages/{$package->id}")
         ->assertInertia(fn ($page) => $page->where('package.readme_html', null));
 });

@@ -14,10 +14,13 @@ interface RegistryRow {
 }
 
 const props = defineProps<{
+    // The organization the URL addresses. The portal is addressed by organization, so it
+    // is the first segment of every portal link this page builds.
+    orgSlug: string;
     registries: RegistryRow[];
 }>();
 
-const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: '/portal' }];
+const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: `/c/${props.orgSlug}/registries` }];
 </script>
 
 <template>
@@ -33,7 +36,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Registries', href: '/portal' }]
                 <Link
                     v-for="registry in props.registries"
                     :key="registry.id"
-                    :href="route('portal.registries.show', registry.id)"
+                    :href="route('portal.registries.show', [props.orgSlug, registry.id])"
                     class="block rounded-xl transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-hidden"
                 >
                     <Card class="h-full transition-colors hover:border-verdigris/40">

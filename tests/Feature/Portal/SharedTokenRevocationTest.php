@@ -23,8 +23,8 @@ it('refuses a plain member of the owning org who is only an admin at home', func
 
     $shared = RegistryToken::factory()->for($this->other)->create(['user_id' => null]);
 
-    $this->actingAs($actor)->from('/portal')
-        ->delete("/portal/tokens/{$shared->id}")
+    $this->actingAs($actor)->from("/c/{$this->home->slug}/registries")
+        ->delete("/c/{$this->home->slug}/tokens/{$shared->id}")
         ->assertForbidden();
 
     expect(RegistryToken::find($shared->id))->not->toBeNull();
@@ -36,8 +36,8 @@ it('allows an admin of the owning org who is only a member at home', function ()
 
     $shared = RegistryToken::factory()->for($this->other)->create(['user_id' => null]);
 
-    $this->actingAs($actor)->from('/portal')
-        ->delete("/portal/tokens/{$shared->id}")
+    $this->actingAs($actor)->from("/c/{$this->home->slug}/registries")
+        ->delete("/c/{$this->home->slug}/tokens/{$shared->id}")
         ->assertRedirect();
 
     expect(RegistryToken::find($shared->id))->toBeNull();
@@ -47,8 +47,8 @@ it('still refuses an organization the caller does not belong to at all', functio
     $actor = User::factory()->for($this->home)->create(['role' => UserRole::Admin]);
     $shared = RegistryToken::factory()->for($this->other)->create(['user_id' => null]);
 
-    $this->actingAs($actor)->from('/portal')
-        ->delete("/portal/tokens/{$shared->id}")
+    $this->actingAs($actor)->from("/c/{$this->home->slug}/registries")
+        ->delete("/c/{$this->home->slug}/tokens/{$shared->id}")
         ->assertForbidden();
 
     expect(RegistryToken::find($shared->id))->not->toBeNull();

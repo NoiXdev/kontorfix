@@ -49,8 +49,8 @@ it('requires password confirmation to mint an api key', function () {
 it('requires password confirmation to mint a registry token through the portal', function () {
     $group = Group::factory()->for($this->organization)->create();
 
-    $this->actingAs($this->user)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'stolen', 'group_id' => $group->id])
+    $this->actingAs($this->user)->from("/c/{$this->organization->slug}/registries")
+        ->post("/c/{$this->organization->slug}/tokens", ['name' => 'stolen', 'group_id' => $group->id])
         ->assertRedirect(route('password.confirm'));
 
     expect(RegistryToken::count())->toBe(0);

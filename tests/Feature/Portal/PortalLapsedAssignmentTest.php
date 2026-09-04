@@ -40,7 +40,7 @@ beforeEach(function () {
 });
 
 it('counts only the assignments the registry still serves', function () {
-    $this->actingAs($this->member)->get('/portal')
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registries')
             ->has('registries', 1)
@@ -50,7 +50,7 @@ it('counts only the assignments the registry still serves', function () {
 });
 
 it('lists only the assignments the registry still serves', function () {
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registry')
             ->has('packages', 1)
@@ -67,7 +67,7 @@ it('does not offer a version of a package the registry no longer serves', functi
         'version_pretty' => '9.9.9',
     ]);
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registry')
             ->has('packages', 1)
@@ -78,13 +78,13 @@ it('does not offer a version of a package the registry no longer serves', functi
 
 it('serves the detail page of an assignment that is still in force', function () {
     $this->actingAs($this->member)
-        ->get("/portal/registries/{$this->group->id}/packages/{$this->live->id}")
+        ->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->live->id}")
         ->assertOk();
 });
 
 it('answers 404 for the detail page of a lapsed assignment, as the registry does', function () {
     $this->actingAs($this->member)
-        ->get("/portal/registries/{$this->group->id}/packages/{$this->lapsed->id}")
+        ->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->lapsed->id}")
         ->assertNotFound();
 });
 
@@ -96,10 +96,10 @@ it('serves an assignment again once its availability is pushed back into the fut
     ]);
 
     $this->actingAs($this->member)
-        ->get("/portal/registries/{$this->group->id}/packages/{$this->lapsed->id}")
+        ->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->lapsed->id}")
         ->assertOk();
 
-    $this->actingAs($this->member)->get('/portal')
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->where('registries.0.packages_count', 2));
 });

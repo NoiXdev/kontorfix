@@ -47,6 +47,7 @@ class OrganizationController extends Controller
                 'name' => $organization->name,
                 'slug' => $organization->slug,
                 'is_operator' => $organization->is_operator,
+                'portal_enabled' => $organization->portal_enabled,
                 'notification_cadence' => $organization->notification_cadence,
                 // Changing the slug moves the URL of every registry this organization owns
                 // (the organization segment is the first path component of all of them) —
@@ -151,7 +152,13 @@ class OrganizationController extends Controller
 
     public function update(UpdateOrganizationRequest $request, Organization $organization): RedirectResponse
     {
-        $organization->update($request->validated());
+        $organization->update([
+            ...$request->validated(),
+            // Stated again rather than left to `validated()`: `boolean()` is what turns an
+            // absent switch into `false`, and this is the one field on the form whose
+            // absence is a meaningful value rather than "leave it alone".
+            'portal_enabled' => $request->boolean('portal_enabled'),
+        ]);
 
         return back()->with('success', "Kunde {$organization->name} aktualisiert.");
     }

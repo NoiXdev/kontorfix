@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -48,6 +50,10 @@ const props = defineProps<{
         name: string;
         slug: string;
         is_operator: boolean;
+        // Whether this customer has a portal at all. Off means /c/{slug} answers 404; the
+        // organization's registries keep serving. Not the per-registry `portal_enabled`,
+        // which only hides one card inside an open portal.
+        portal_enabled: boolean;
         notification_cadence: string;
         // How many registries this organization owns — every one of them changes URL when
         // the organization slug changes, since it is the first segment of each address.
@@ -89,12 +95,14 @@ const cadenceOptions = [
     { value: 'off', label: 'Aus' },
 ];
 
-// Name, slug and cadence all live on the same `update()` route, so every field travels
-// along on each submit rather than the form clobbering the others with an empty value.
-const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string }>({
+// Name, slug, cadence and the portal switch all live on the same `update()` route, so
+// every field travels along on each submit rather than the form clobbering the others
+// with an empty value.
+const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string; portal_enabled: boolean }>({
     name: props.organization.name,
     slug: props.organization.slug,
     notification_cadence: props.organization.notification_cadence,
+    portal_enabled: props.organization.portal_enabled,
 });
 
 const slugChanged = computed(() => settingsForm.slug !== props.organization.slug);
@@ -300,6 +308,18 @@ function detachMember(userId: string) {
                         <SearchableSelect id="org-cadence" v-model="settingsForm.notification_cadence" class="w-48" :options="cadenceOptions" />
                         <InputError :message="settingsForm.errors.notification_cadence" />
                     </div>
+
+                    <div class="flex items-start gap-3">
+                        <Switch id="org-portal" v-model="settingsForm.portal_enabled" class="mt-1" />
+                        <div>
+                            <Label for="org-portal">Kundenportal</Label>
+                            <p class="text-sm text-muted-foreground">
+                                Aus: <code>/c/{{ settingsForm.slug }}</code> antwortet mit 404. Die Registries der Organisation liefern weiter aus —
+                                Builds sind nicht betroffen.
+                            </p>
+                        </div>
+                    </div>
+                    <InputError :message="settingsForm.errors.portal_enabled" />
 
                     <div>
                         <Button type="submit" :disabled="settingsForm.processing">Speichern</Button>

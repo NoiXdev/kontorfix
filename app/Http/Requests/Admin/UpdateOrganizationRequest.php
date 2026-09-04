@@ -14,6 +14,16 @@ class UpdateOrganizationRequest extends FormRequest
     }
 
     /**
+     * An unchecked switch posts no field at all, so the absent case has to be spelled as
+     * an explicit `false` before validation runs — otherwise `boolean` would never see it
+     * and switching the portal off would silently save nothing.
+     */
+    protected function prepareForValidation(): void
+    {
+        $this->merge(['portal_enabled' => $this->boolean('portal_enabled')]);
+    }
+
+    /**
      * @return array<string, array<int, mixed>>
      */
     public function rules(): array
@@ -34,6 +44,9 @@ class UpdateOrganizationRequest extends FormRequest
                 UnclaimedSlug::byRegistry(),
             ],
             'notification_cadence' => ['required', Rule::in(['hourly', 'daily', 'off'])],
+            // Whether this customer has a portal at all — off makes /c/{slug} a 404. Not
+            // `groups.portal_enabled`, which only hides one registry inside that portal.
+            'portal_enabled' => ['boolean'],
         ];
     }
 }

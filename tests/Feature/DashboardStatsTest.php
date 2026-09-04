@@ -27,7 +27,7 @@ it('shows real operational stats to an operator', function () {
 it('redirects members away from the dashboard to the portal', function () {
     $member = User::factory()->for(Organization::factory())->create(['role' => UserRole::Member]);
 
-    $this->actingAs($member)->get('/dashboard')->assertRedirect(route('portal.registries.index'));
+    $this->actingAs($member)->get('/dashboard')->assertRedirect(route('portal.packages.index', $member->organization->slug));
 });
 
 it('surfaces failed packages in the dashboard widget with their error', function () {

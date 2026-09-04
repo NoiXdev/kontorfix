@@ -19,9 +19,9 @@ beforeEach(function () {
 it('creates a token scoped to the members own org and returns the plaintext once', function () {
     $group = Group::factory()->for($this->orgA)->create();
 
-    $this->actingAs($this->member)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'CI', 'group_id' => $group->id, 'ability' => 'read'])
-        ->assertRedirect('/portal')
+    $this->actingAs($this->member)->from("/c/{$this->orgA->slug}/registries")
+        ->post("/c/{$this->orgA->slug}/tokens", ['name' => 'CI', 'group_id' => $group->id, 'ability' => 'read'])
+        ->assertRedirect("/c/{$this->orgA->slug}/registries")
         ->assertSessionHas('plainTextToken');
 
     $token = RegistryToken::first();
@@ -33,8 +33,8 @@ it('creates a token scoped to the members own org and returns the plaintext once
 it('rejects assigning a token to a foreign registry', function () {
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
 
-    $this->actingAs($this->member)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'CI', 'group_id' => $foreign->id])
+    $this->actingAs($this->member)->from("/c/{$this->orgA->slug}/registries")
+        ->post("/c/{$this->orgA->slug}/tokens", ['name' => 'CI', 'group_id' => $foreign->id])
         ->assertSessionHasErrors('group_id');
 
     expect(RegistryToken::count())->toBe(0);
@@ -45,9 +45,10 @@ it('revokes only own personal tokens', function () {
     $own = RegistryToken::factory()->for($this->orgA)->create(['user_id' => $this->member->id]);
     $foreign = RegistryToken::factory()->for(Organization::factory()->create())->create();
 
-    $this->actingAs($this->member)->delete("/portal/tokens/{$foreign->id}")->assertForbidden();
+    $this->actingAs($this->member)->delete("/c/{$this->orgA->slug}/tokens/{$foreign->id}")->assertForbidden();
     expect(RegistryToken::find($foreign->id))->not->toBeNull();
 
-    $this->actingAs($this->member)->from('/portal')->delete("/portal/tokens/{$own->id}")->assertRedirect('/portal');
+    $this->actingAs($this->member)->from("/c/{$this->orgA->slug}/registries")
+        ->delete("/c/{$this->orgA->slug}/tokens/{$own->id}")->assertRedirect("/c/{$this->orgA->slug}/registries");
     expect(RegistryToken::find($own->id))->toBeNull();
 });

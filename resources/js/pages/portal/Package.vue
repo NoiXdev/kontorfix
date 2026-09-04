@@ -42,14 +42,16 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     install: string;
+    // The organization the URL addresses — the first segment of every portal link here.
+    orgSlug: string;
 }>();
 
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Registries', href: '/portal' },
-    { title: props.registry.name, href: `/portal/registries/${props.registry.id}` },
-    { title: props.package.name, href: `/portal/registries/${props.registry.id}/packages` },
+    { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
+    { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
+    { title: props.package.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}/packages` },
 ];
 
 // Version selector: defaults to the newest version (props.versions[0], guaranteed by VersionOrder::sort()).

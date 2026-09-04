@@ -13,7 +13,7 @@ it('forbids a member from revoking another members personal token in the same or
     $group = Group::factory()->for($org)->create();
     [$tokenOfA] = RegistryToken::issue($org, 'a-token', $group, owner: $a);
 
-    $this->actingAs($b)->delete(route('portal.tokens.destroy', $tokenOfA->id))->assertForbidden();
+    $this->actingAs($b)->delete(route('portal.tokens.destroy', [$org->slug, $tokenOfA->id]))->assertForbidden();
     expect(RegistryToken::find($tokenOfA->id))->not->toBeNull();
 });
 
@@ -23,8 +23,8 @@ it('allows a member to revoke their own personal token', function () {
     $group = Group::factory()->for($org)->create();
     [$tokenOfA] = RegistryToken::issue($org, 'a-token', $group, owner: $a);
 
-    $this->actingAs($a)->from('/portal')
-        ->delete(route('portal.tokens.destroy', $tokenOfA->id))->assertRedirect();
+    $this->actingAs($a)->from("/c/{$org->slug}/registries")
+        ->delete(route('portal.tokens.destroy', [$org->slug, $tokenOfA->id]))->assertRedirect();
     expect(RegistryToken::find($tokenOfA->id))->toBeNull();
 });
 
@@ -33,7 +33,7 @@ it('forbids a member from revoking an org-shared token without owner', function 
     $member = User::factory()->for($org)->create(['role' => UserRole::Member]);
     $shared = RegistryToken::factory()->for($org)->create(['user_id' => null]);
 
-    $this->actingAs($member)->delete(route('portal.tokens.destroy', $shared->id))->assertForbidden();
+    $this->actingAs($member)->delete(route('portal.tokens.destroy', [$org->slug, $shared->id]))->assertForbidden();
     expect(RegistryToken::find($shared->id))->not->toBeNull();
 });
 
@@ -42,8 +42,8 @@ it('allows an admin to revoke an org-shared token without owner', function () {
     $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
     $shared = RegistryToken::factory()->for($org)->create(['user_id' => null]);
 
-    $this->actingAs($admin)->from('/portal')
-        ->delete(route('portal.tokens.destroy', $shared->id))->assertRedirect();
+    $this->actingAs($admin)->from("/c/{$org->slug}/registries")
+        ->delete(route('portal.tokens.destroy', [$org->slug, $shared->id]))->assertRedirect();
     expect(RegistryToken::find($shared->id))->toBeNull();
 });
 
@@ -55,7 +55,7 @@ it('only lists the current members own tokens on the portal registry page', func
     RegistryToken::issue($org, 'a-token', $group, owner: $a);
     RegistryToken::issue($org, 'b-token', $group, owner: $b);
 
-    $this->actingAs($a)->get(route('portal.registries.show', $group->id))
+    $this->actingAs($a)->get(route('portal.registries.show', [$org->slug, $group->id]))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->has('tokens', 1)->where('tokens.0.name', 'a-token'));
 });

@@ -126,7 +126,7 @@ it('shows registries of additional organizations in the portal', function () {
     $homeGroup = Group::factory()->for($home)->create(['name' => 'Home Reg']);
     $otherGroup = Group::factory()->for($other)->create(['name' => 'Other Reg']);
 
-    $this->actingAs($user)->get('/portal')
+    $this->actingAs($user)->get("/c/{$home->slug}/registries")
         ->assertInertia(fn ($page) => $page
             ->has('registries', 2)
             ->where('registries.0.name', 'Home Reg')
@@ -138,10 +138,10 @@ it('hides portal-disabled groups from the portal listing and blocks direct acces
     $user = User::factory()->for($org)->create(['role' => UserRole::Member]);
     $collection = Group::factory()->for($org)->create(['portal_enabled' => false]);
 
-    $this->actingAs($user)->get('/portal')
+    $this->actingAs($user)->get("/c/{$org->slug}/registries")
         ->assertInertia(fn ($page) => $page->has('registries', 0));
 
-    $this->actingAs($user)->get("/portal/registries/{$collection->id}")->assertForbidden();
+    $this->actingAs($user)->get("/c/{$org->slug}/registries/{$collection->id}")->assertForbidden();
 });
 
 it('lets a member create a token for a registry of an additional organization', function () {
@@ -154,7 +154,7 @@ it('lets a member create a token for a registry of an additional organization', 
     $user->organizations()->attach($other->id);
     $group = Group::factory()->for($other)->create();
 
-    $this->actingAs($user)->post('/portal/tokens', [
+    $this->actingAs($user)->post("/c/{$home->slug}/tokens", [
         'name' => 'ci', 'group_id' => $group->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
@@ -167,7 +167,7 @@ it('still refuses a token for a foreign organizations registry', function () {
     $user = User::factory()->for(Organization::factory()->create())->create(['role' => UserRole::Member]);
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
 
-    $this->actingAs($user)->post('/portal/tokens', [
+    $this->actingAs($user)->post("/c/{$user->organization->slug}/tokens", [
         'name' => 'ci', 'group_id' => $foreign->id,
     ])->assertSessionHasErrors('group_id');
 });

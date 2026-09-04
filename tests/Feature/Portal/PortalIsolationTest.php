@@ -19,26 +19,26 @@ it('fully isolates two customers across list, detail, snippets and tokens', func
     $groupA->packages()->attach($pkg);
 
     // Overview: only the member's own registry
-    $this->actingAs($memberA)->get('/portal')
+    $this->actingAs($memberA)->get("/c/{$orgA->slug}/registries")
         ->assertInertia(fn ($p) => $p->has('registries', 1)->where('registries.0.slug', 'acme'));
 
     // Own detail: snippets + package visible
-    $this->actingAs($memberA)->get("/portal/registries/{$groupA->id}")
+    $this->actingAs($memberA)->get("/c/{$orgA->slug}/registries/{$groupA->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->where('snippets.npm', fn ($v) => str_contains($v, registryPath($groupA).'/'))->has('packages', 1));
 
     // Foreign detail: forbidden
-    $this->actingAs($memberA)->get("/portal/registries/{$groupB->id}")->assertForbidden();
+    $this->actingAs($memberA)->get("/c/{$orgA->slug}/registries/{$groupB->id}")->assertForbidden();
 
     // Minting sits behind `password.confirm`; the isolation this test is about is the
     // org scoping behind that gate.
     $this->withSession(['auth.password_confirmed_at' => time()]);
 
     // Token for own registry: ok
-    $this->actingAs($memberA)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'CI', 'group_id' => $groupA->id])->assertRedirect('/portal');
+    $this->actingAs($memberA)->from("/c/{$orgA->slug}/registries")
+        ->post("/c/{$orgA->slug}/tokens", ['name' => 'CI', 'group_id' => $groupA->id])->assertRedirect("/c/{$orgA->slug}/registries");
 
     // Token for foreign registry: rejected
-    $this->actingAs($memberA)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'evil', 'group_id' => $groupB->id])->assertSessionHasErrors('group_id');
+    $this->actingAs($memberA)->from("/c/{$orgA->slug}/registries")
+        ->post("/c/{$orgA->slug}/tokens", ['name' => 'evil', 'group_id' => $groupB->id])->assertSessionHasErrors('group_id');
 });

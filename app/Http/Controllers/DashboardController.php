@@ -24,9 +24,11 @@ class DashboardController extends Controller
 
     public function index(Request $request): Response|RedirectResponse
     {
-        // Anyone without console access (plain members) belongs in the portal.
+        // Anyone without console access (plain members) belongs in the portal. The portal
+        // is addressed by organization now, and the one a plain member belongs in is their
+        // own home organization — the same resolution GET /portal performs.
         if (! $request->user()->canAdministerConsole()) {
-            return redirect()->route('portal.registries.index');
+            return redirect()->route('portal.packages.index', $request->user()->organization->slug);
         }
 
         $scope = app(OrgScope::class);

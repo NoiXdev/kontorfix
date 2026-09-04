@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
@@ -42,6 +43,7 @@ class RegistryController extends Controller
             ->get();
 
         return Inertia::render('portal/Registries', [
+            'orgSlug' => $this->portalOrganization($request)->slug,
             'registries' => $groups->map(fn (Group $g) => [
                 'id' => $g->id,
                 'name' => $g->name,
@@ -74,6 +76,7 @@ class RegistryController extends Controller
             ->get();
 
         return Inertia::render('portal/Registry', [
+            'orgSlug' => $this->portalOrganization($request)->slug,
             'registry' => [
                 'id' => $group->id,
                 'name' => $group->name,
@@ -115,6 +118,7 @@ class RegistryController extends Controller
         $install = $package->type->installHint($package->name);
 
         return Inertia::render('portal/Package', [
+            'orgSlug' => $this->portalOrganization($request)->slug,
             'registry' => [
                 'id' => $group->id,
                 'name' => $group->name,
@@ -138,5 +142,19 @@ class RegistryController extends Controller
             ]),
             'install' => $install,
         ]);
+    }
+
+    /**
+     * The organization the URL addresses, put on the request by ResolvePortalContext.
+     * Every portal page needs its slug: it is the first segment of every portal URL the
+     * page builds, so it travels to the client as a prop rather than being re-derived
+     * there from window.location.
+     */
+    private function portalOrganization(Request $request): Organization
+    {
+        /** @var Organization $organization */
+        $organization = $request->attributes->get('portalOrganization');
+
+        return $organization;
     }
 }
