@@ -128,7 +128,14 @@ const newPathPattern = computed(() =>
 // rename moves that too, and NOT as a milder version of the registry consequence. BOTH
 // addresses break: `groups.legacy_slug` freezes only the one-segment PRE-UPGRADE address
 // /r/{registry}, so an organization rename leaves /r/{old-org}/{registry} answering 404 —
-// OrganizationSlugEditTest's first case asserts exactly that. What differs is WHO is
+// OrganizationSlugEditTest's first case asserts exactly that.
+//
+// The ONE exception both warnings now name is the one-segment PRE-UPGRADE address itself:
+// LegacySlugRedirector::target() builds its destination through RegistryUrl::path(), which
+// reads the organization's CURRENT slug, so /r/{registry} keeps pointing at the registry
+// through a rename rather than at the old path. "Keine Weiterleitungen" without that clause
+// was conservative but false for every registry that predates the slug-scoping migration —
+// OrganizationSlugEditTest pins it. What differs is WHO is
 // affected: the /r/ addresses are held by machines the operator reconfigures deliberately,
 // the portal address by people whose bookmarks nobody collects. Offering the portal's
 // missing redirect as a CONTRAST with /r/ would be false, and this page's own neighbouring
@@ -176,7 +183,8 @@ function saveSettings() {
                     'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.\n\n' +
                     `Auch die Portal-Adresse dieser Organisation ändert sich, von ${oldPortalPath.value} auf ${newPortalPath.value}. ` +
                     'Gespeicherte Links müssen ebenfalls ersetzt werden.\n\n' +
-                    'Weiterleitungen von den alten Adressen gibt es in keinem der beiden Fälle.',
+                    'Weiterleitungen von den alten Adressen gibt es in keinem der beiden Fälle. Nur die alten ' +
+                    'einsegmentigen /r/-Adressen ohne Organisation folgen der Umbenennung weiterhin.',
             ),
     });
 }
@@ -314,7 +322,7 @@ function detachMember(userId: string) {
                             sind. Auch die Portal-Adresse ändert sich, von <code>{{ oldPortalPath }}</code> auf
                             <code>{{ newPortalPath }}</code
                             >: Gespeicherte Links müssen ebenfalls ersetzt werden. Weiterleitungen von den alten Adressen gibt es in keinem der
-                            beiden Fälle.
+                            beiden Fälle. Nur die alten einsegmentigen /r/-Adressen ohne Organisation folgen der Umbenennung weiterhin.
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
                             Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch
