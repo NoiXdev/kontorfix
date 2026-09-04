@@ -90,7 +90,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * The portal header's props, or null on a request that addresses no portal.
      *
-     * @return array{organization: array{name: string, slug: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool}|null
+     * @return array{organization: array{name: string, slug: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool, may_publish_tokens: bool}|null
      */
     private function portal(Request $request, ?User $user): ?array
     {
@@ -115,7 +115,11 @@ class HandleInertiaRequests extends Middleware
         // member of it, mints there like anybody else, and must not be told it is looking at
         // somebody else's portal.
         $accessible = $user->accessibleOrganizationIds();
-        $isMember = in_array($organization->id, $accessible, true);
+        // belongsToOrganization() IS `in_array($id, accessibleOrganizationIds(), true)`, and it
+        // is what RegistryTokenPolicy::create() and GroupPolicy already ask. Spelling the
+        // in_array out here made "these cannot drift apart" a claim resting on a comment;
+        // calling the method makes it a property of the code.
+        $isMember = $user->belongsToOrganization($organization->id);
 
         return [
             'organization' => ['name' => $organization->name, 'slug' => $organization->slug],
@@ -136,6 +140,17 @@ class HandleInertiaRequests extends Middleware
                 ->values()->all(),
             'viewing_as_operator' => ! $isMember,
             'may_mint_tokens' => $isMember,
+            // Whether the "Veröffentlichen" ability may be offered, from administers() —
+            // the SAME method RegistryTokenPolicy::create() asks for exactly this ability,
+            // rather than a second spelling of the rule.
+            //
+            // The page used to gate this on `auth.can.console`, which means "administers
+            // SOME organization". The policy means "administers THIS one", so an admin of A
+            // who is a plain member of B was offered "Veröffentlichen" in /c/B and got a 403
+            // — the shown-and-then-refused shape this whole task exists to remove, one level
+            // further down. Scoped to the addressed organization, that population is offered
+            // "Lesen" alone, which is all it may mint there.
+            'may_publish_tokens' => $user->administers($organization->id),
         ];
     }
 }

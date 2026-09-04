@@ -52,6 +52,12 @@ export interface PortalContext {
     viewing_as_operator: boolean;
     /** Membership — the same question TokenController::store() answers before it mints. */
     may_mint_tokens: boolean;
+    /**
+     * Whether the publish ability may be offered for THIS organization —
+     * `User::administers($id)`, the method RegistryTokenPolicy::create() calls. Not
+     * `auth.can.console`, which is true for an admin of any organization at all.
+     */
+    may_publish_tokens: boolean;
 }
 
 export interface BreadcrumbItem {

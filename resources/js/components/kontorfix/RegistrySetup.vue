@@ -9,6 +9,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
+import { offersMinting } from './registrySetup';
 
 interface Snippets {
     composer: string;
@@ -42,9 +43,7 @@ const props = defineProps<{
     mayMint?: boolean;
 }>();
 
-// `!== false` rather than `?? true`: an omitted prop arrives as undefined, and the console
-// omits it.
-const mayMint = computed(() => props.mayMint !== false);
+const mayMint = computed(() => offersMinting(props.mayMint));
 
 const PLACEHOLDER = '<dein-token>';
 
@@ -157,7 +156,10 @@ function selectSession(value: string) {
                         Token erstellen
                     </Button>
                 </div>
-                <p class="text-xs text-muted-foreground">
+                <!-- Same `v-if` as the button it describes: it ends by telling the reader
+                     to create a token, which is advice with nothing to act on once the
+                     button above it is hidden. -->
+                <p v-if="mayMint" class="text-xs text-muted-foreground">
                     Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
                     — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
                 </p>

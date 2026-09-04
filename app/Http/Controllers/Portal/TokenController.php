@@ -34,10 +34,12 @@ class TokenController extends Controller
         // true for a super-admin before RegistryTokenPolicy::create is ever consulted, so the
         // policy's own membership clause cannot carry this. Ahead of RegistryToken::issue in
         // any case — a refusal that still wrote the row is not a refusal.
-        abort_unless(
-            in_array($organization->id, $request->user()->accessibleOrganizationIds(), true),
-            403,
-        );
+        //
+        // belongsToOrganization(), which is the ONE statement of the membership question and
+        // the one RegistryTokenPolicy::create() asks below. The portal's `may_mint_tokens`
+        // prop hides the form on exactly this answer, so the two cannot be made to disagree
+        // by editing one of two copies of an in_array.
+        abort_unless($request->user()->belongsToOrganization($organization->id), 403);
 
         $group = $request->validated('group_id')
             ? Group::findOrFail($request->validated('group_id'))

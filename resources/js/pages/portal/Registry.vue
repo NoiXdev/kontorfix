@@ -117,11 +117,18 @@ const mayMint = computed(() => page.props.portal?.may_mint_tokens ?? false);
 // Publish tokens are organization write credentials and are admin/maintainer-only on the
 // server (RegistryTokenPolicy::create). Do not offer the option to plain members.
 //
+// `portal.may_publish_tokens`, NOT `auth.can.console`. That flag means "administers SOME
+// organization"; the policy asks whether the caller administers THIS one. An admin of A who
+// is a plain member of B was therefore offered "Veröffentlichen" in /c/B and refused with a
+// 403 on submit — the same shown-and-then-refused shape the token form itself was hidden to
+// avoid. The prop is `User::administers($organization->id)`, which is the method the policy
+// calls.
+//
 // The explicit return type keeps `value` as the literal `'read' | 'publish'` union (what
 // `tokenForm.ability` is actually typed as) rather than the widened `string` a plain object
 // literal would infer — `SearchableSelect`'s `v-model` needs the two to line up exactly.
 const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
-    page.props.auth.can?.console
+    page.props.portal?.may_publish_tokens
         ? [
               { value: 'read', label: 'Lesen' },
               { value: 'publish', label: 'Veröffentlichen' },

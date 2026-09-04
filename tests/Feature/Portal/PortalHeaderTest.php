@@ -6,16 +6,39 @@ use App\Models\User;
 it('offers the organizations the user belongs to', function () {
     $home = Organization::factory()->create(['slug' => 'home', 'name' => 'Home']);
     $other = Organization::factory()->create(['slug' => 'other', 'name' => 'Other']);
+    // A stranger, so the fixture can tell the two readings apart at all. Neither the count
+    // NOR the whole list distinguishes "the viewer's own memberships" from "every
+    // organization" while every organization in the instance is one of the viewer's own —
+    // building `switchable` from Organization::query() survived both versions of this
+    // assertion until this row existed. Named to sort FIRST, so a mutation that let it in
+    // changes the head of the list and not only its length.
+    Organization::factory()->create(['slug' => 'stranger', 'name' => 'Aaa Stranger']);
     $user = User::factory()->create(['organization_id' => $home->id]);
     $user->organizations()->attach($other->id, ['role' => 'member']);
 
+    // The WHOLE list, in order, not `has(…, 2)`: a count cannot say WHICH two rows survived,
+    // and swapping a membership for the stranger keeps the count at two.
     $this->actingAs($user)->get('/c/home')
-        ->assertInertia(fn ($page) => $page->has('portal.switchable', 2)
-            ->where('portal.viewing_as_operator', false));
+        ->assertInertia(fn ($page) => $page->where('portal.switchable', [
+            ['name' => 'Home', 'slug' => 'home'],
+            ['name' => 'Other', 'slug' => 'other'],
+        ]));
+});
+
+it('does not call a member of the addressed organization an operator', function () {
+    // Split from the case above rather than a second assertion on it: a failure in the
+    // switcher assertion would abort the test before this one could speak, and they are
+    // different rules that happen to share a fixture.
+    $home = Organization::factory()->create(['slug' => 'home', 'name' => 'Home']);
+    $user = User::factory()->create(['organization_id' => $home->id]);
+
+    $this->actingAs($user)->get('/c/home')
+        ->assertInertia(fn ($page) => $page->where('portal.viewing_as_operator', false));
 });
 
 it('tells an operator account whose portal it is looking at', function () {
-    Organization::factory()->create(['is_operator' => true]);
+    // superAdmin() brings the operator organization with it; a second one would put the
+    // instance in a state SetupController never produces.
     Organization::factory()->create(['slug' => 'acme', 'name' => 'Acme GmbH']);
 
     $this->actingAs(superAdmin())->get('/c/acme')
@@ -24,7 +47,6 @@ it('tells an operator account whose portal it is looking at', function () {
 });
 
 it('hides the token form from an operator who may not mint', function () {
-    Organization::factory()->create(['is_operator' => true]);
     Organization::factory()->create(['slug' => 'acme']);
 
     // Task 5 refuses the POST. Showing the form anyway would be the shown-and-refused
@@ -42,14 +64,20 @@ it('offers the token form to a member', function () {
 });
 
 it('does not offer an operator the customer list as a switcher', function () {
-    Organization::factory()->create(['is_operator' => true]);
+    $super = superAdmin();
     Organization::factory()->create(['slug' => 'acme']);
     Organization::factory()->count(3)->create();
 
     // The switcher is the viewer's own memberships. Feeding it the customer directory
     // would make that directory a by-product of navigation.
-    $this->actingAs(superAdmin())->get('/c/acme')
-        ->assertInertia(fn ($page) => $page->has('portal.switchable', 1));
+    //
+    // Named, not counted: this is the disclosure assertion of this task, and "one row
+    // survived" is also true of the inverse — dropping the operator's own organization and
+    // keeping the addressed customer. The row has to be the operator's own.
+    $this->actingAs($super)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('portal.switchable', [
+            ['name' => $super->organization->name, 'slug' => $super->organization->slug],
+        ]));
 });
 
 it('shares no portal context on a page outside the portal', function () {
@@ -81,4 +109,38 @@ it('leaves an organization whose portal is off out of the switcher', function ()
         ->assertInertia(fn ($page) => $page->where('portal.switchable', [
             ['name' => 'Home', 'slug' => 'home'],
         ]));
+});
+
+it('offers the publish ability to an admin of the addressed organization', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    $this->actingAs(adminOf($org))->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', true));
+});
+
+it('does not offer the publish ability to a plain member', function () {
+    // The ABSENT case: RegistryTokenPolicy::create() refuses a member the Publish ability,
+    // so offering it would be shown-and-then-refused one level below the token form itself.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', false));
+});
+
+it('does not offer the publish ability to an admin of elsewhere who is only a member here', function () {
+    // The population the page used to get wrong. `auth.can.console` is TRUE for this
+    // account — it administers its home organization — and the page read that flag, so it
+    // offered "Veröffentlichen" under a slug where the policy answers 403 on submit.
+    // administers() is asked of the ADDRESSED organization, where this account is a member.
+    $home = Organization::factory()->create();
+    $addressed = Organization::factory()->create(['slug' => 'acme']);
+    $user = adminOf($home);
+    $user->organizations()->attach($addressed->id, ['role' => 'member']);
+
+    // Both, because narrowing the wrong one would be just as broken: this account may still
+    // mint a READ token here, and hiding the form outright would take that away.
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('portal.may_publish_tokens', false)
+            ->where('portal.may_mint_tokens', true));
 });

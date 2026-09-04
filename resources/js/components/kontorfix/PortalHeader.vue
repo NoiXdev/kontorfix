@@ -13,6 +13,11 @@ const page = usePage<SharedData>();
 // asserting non-null and rendering a blank banner if that ever stops being true.
 const portal = computed(() => page.props.portal ?? null);
 
+// Computed once and handed to both the `v-if` and the control: whether to show the
+// switcher is a question about the rows it would hold, so it must be asked of the same
+// list the control renders.
+const options = computed(() => (portal.value === null ? [] : switcherOptions(portal.value.switchable, portal.value.organization)));
+
 function visit(slug: string) {
     if (portal.value === null || slug === portal.value.organization.slug) {
         return;
@@ -28,18 +33,15 @@ function visit(slug: string) {
 
 <template>
     <div v-if="portal" class="flex flex-col gap-4">
-        <div
-            v-if="portal.viewing_as_operator"
-            class="mb-0 rounded-lg border border-copper/40 bg-copper/10 px-4 py-3 text-sm text-copper-hi"
-        >
+        <div v-if="portal.viewing_as_operator" class="rounded-lg border border-copper/40 bg-copper/10 px-4 py-3 text-sm text-copper-hi">
             {{ operatorBannerNote(portal.organization.name) }}
         </div>
 
         <SearchableSelect
-            v-if="offersSwitcher(portal.switchable)"
+            v-if="offersSwitcher(options)"
             class="w-full sm:w-72"
             :model-value="portal.organization.slug"
-            :options="switcherOptions(portal.switchable)"
+            :options="options"
             @update:model-value="(slug) => visit(String(slug))"
         />
     </div>
