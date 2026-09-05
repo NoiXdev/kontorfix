@@ -28,14 +28,14 @@ it('shows the admin registry detail and the customer portal package list', funct
     // Kunde sieht seine Portal-Paketliste — Suche/Filter laufen client-seitig
     // (useTableState, prefix 'pkg'), der Server liefert immer die volle Liste, auch
     // wenn eine alte Bookmark-URL noch bare q/type-Parameter mitschickt.
-    $this->actingAs($member)->get("/portal/registries/{$group->id}?q=acme")
+    $this->actingAs($member)->get("/c/{$org->slug}/registries/{$group->id}?q=acme")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registry')->has('packages', 2));
 
-    $this->actingAs($member)->get("/portal/registries/{$group->id}?type=npm")
+    $this->actingAs($member)->get("/c/{$org->slug}/registries/{$group->id}?type=npm")
         ->assertInertia(fn ($p) => $p->has('packages', 2));
 
     // Fremde Registry-Detail im Portal bleibt dicht
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
-    $this->actingAs($member)->get("/portal/registries/{$foreign->id}")->assertForbidden();
+    $this->actingAs($member)->get("/c/{$org->slug}/registries/{$foreign->id}")->assertForbidden();
 });

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -48,6 +50,10 @@ const props = defineProps<{
         name: string;
         slug: string;
         is_operator: boolean;
+        // Whether this customer has a portal at all. Off means /c/{slug} answers 404; the
+        // organization's registries keep serving. Not the per-registry `portal_enabled`,
+        // which only hides one card inside an open portal.
+        portal_enabled: boolean;
         notification_cadence: string;
         // How many registries this organization owns — every one of them changes URL when
         // the organization slug changes, since it is the first segment of each address.
@@ -60,6 +66,10 @@ const props = defineProps<{
     // show the /r/... pattern before and after without ever assembling a path itself; see
     // oldPathPattern/newPathPattern below.
     registryUrlTemplate: string;
+    // The portal's address form with the organization slug left open, in the same shape and
+    // for the same reason: the slug also moves /c/{slug}, and this page substitutes rather
+    // than assembling that path itself. See oldPortalPath/newPortalPath below.
+    portalPathTemplate: string;
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
     registries: RegistryRow[];
     users: UserRow[];
@@ -89,12 +99,14 @@ const cadenceOptions = [
     { value: 'off', label: 'Aus' },
 ];
 
-// Name, slug and cadence all live on the same `update()` route, so every field travels
-// along on each submit rather than the form clobbering the others with an empty value.
-const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string }>({
+// Name, slug, cadence and the portal switch all live on the same `update()` route, so
+// every field travels along on each submit rather than the form clobbering the others
+// with an empty value.
+const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string; portal_enabled: boolean }>({
     name: props.organization.name,
     slug: props.organization.slug,
     notification_cadence: props.organization.notification_cadence,
+    portal_enabled: props.organization.portal_enabled,
 });
 
 const slugChanged = computed(() => settingsForm.slug !== props.organization.slug);
@@ -111,6 +123,27 @@ const oldPathPattern = computed(() => props.registryUrlTemplate.replace('{organi
 const newPathPattern = computed(() =>
     props.registryUrlTemplate.replace('{organization}', settingsForm.slug || '…').replace('{registry}', '…'),
 );
+
+// The organization slug is also the first segment of the customer portal's address, so a
+// rename moves that too, and NOT as a milder version of the registry consequence. BOTH
+// addresses break: `groups.legacy_slug` freezes only the one-segment PRE-UPGRADE address
+// /r/{registry}, so an organization rename leaves /r/{old-org}/{registry} answering 404 —
+// OrganizationSlugEditTest's first case asserts exactly that.
+//
+// The ONE exception both warnings now name is the one-segment PRE-UPGRADE address itself:
+// LegacySlugRedirector::target() builds its destination through RegistryUrl::path(), which
+// reads the organization's CURRENT slug, so /r/{registry} keeps pointing at the registry
+// through a rename rather than at the old path. "Keine Weiterleitungen" without that clause
+// was conservative but false for every registry that predates the slug-scoping migration —
+// OrganizationSlugEditTest pins it. What differs is WHO is
+// affected: the /r/ addresses are held by machines the operator reconfigures deliberately,
+// the portal address by people whose bookmarks nobody collects. Offering the portal's
+// missing redirect as a CONTRAST with /r/ would be false, and this page's own neighbouring
+// sentence — that existing client configurations stop working until they are changed —
+// already says so. Substituted out of the server's template for the same reason the /r/
+// patterns are, so this page never assembles a portal path of its own.
+const oldPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', props.organization.slug));
+const newPortalPath = computed(() => props.portalPathTemplate.replace('{organization}', settingsForm.slug || '…'));
 
 // Named so the confirmation states the exact count instead of a vague "some registries".
 const registryImpact = computed(() => {
@@ -147,7 +180,11 @@ function saveSettings() {
                         ? 'Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit. '
                         : '') +
                     'Bestehende Client-Konfigurationen, die auf die alten /r/-Adressen zeigen (composer.json, .npmrc, pip.conf, ' +
-                    'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.',
+                    'CI-Variablen), funktionieren erst wieder, wenn sie auf die neuen Adressen umgestellt sind.\n\n' +
+                    `Auch die Portal-Adresse dieser Organisation ändert sich, von ${oldPortalPath.value} auf ${newPortalPath.value}. ` +
+                    'Gespeicherte Links müssen ebenfalls ersetzt werden.\n\n' +
+                    'Weiterleitungen von den alten Adressen gibt es in keinem der beiden Fälle. Nur die alten ' +
+                    'einsegmentigen /r/-Adressen ohne Organisation folgen der Umbenennung weiterhin.',
             ),
     });
 }
@@ -282,7 +319,10 @@ function detachMember(userId: string) {
                                 Registries auf einer eigenen Domain bleiben unter dieser Domain erreichbar — nur ihre /r/-Adresse ändert sich mit.
                             </template>
                             Bestehende Client-Konfigurationen, die auf die alten Adressen zeigen, funktionieren erst wieder, wenn sie umgestellt
-                            sind.
+                            sind. Auch die Portal-Adresse ändert sich, von <code>{{ oldPortalPath }}</code> auf
+                            <code>{{ newPortalPath }}</code
+                            >: Gespeicherte Links müssen ebenfalls ersetzt werden. Weiterleitungen von den alten Adressen gibt es in keinem der
+                            beiden Fälle. Nur die alten einsegmentigen /r/-Adressen ohne Organisation folgen der Umbenennung weiterhin.
                         </p>
                         <p v-else class="text-xs text-muted-foreground">
                             Der Slug ist der oberste Namensraum aller Registries dieser Organisation. Eine Änderung wird vor dem Speichern noch
@@ -300,6 +340,18 @@ function detachMember(userId: string) {
                         <SearchableSelect id="org-cadence" v-model="settingsForm.notification_cadence" class="w-48" :options="cadenceOptions" />
                         <InputError :message="settingsForm.errors.notification_cadence" />
                     </div>
+
+                    <div class="flex items-start gap-3">
+                        <Switch id="org-portal" v-model="settingsForm.portal_enabled" class="mt-1" />
+                        <div>
+                            <Label for="org-portal">Kundenportal</Label>
+                            <p class="text-sm text-muted-foreground">
+                                Aus: <code>/c/{{ settingsForm.slug }}</code> antwortet mit 404. Die Registries der Organisation liefern weiter aus —
+                                Builds sind nicht betroffen.
+                            </p>
+                        </div>
+                    </div>
+                    <InputError :message="settingsForm.errors.portal_enabled" />
 
                     <div>
                         <Button type="submit" :disabled="settingsForm.processing">Speichern</Button>

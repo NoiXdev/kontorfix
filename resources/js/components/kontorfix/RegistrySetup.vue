@@ -8,7 +8,8 @@ import { type SharedData } from '@/types';
 import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import { type RouteList } from 'ziggy-js';
+import { type ParameterValue, type RouteList } from 'ziggy-js';
+import { offersMinting, offersPublishing } from './registrySetup';
 
 interface Snippets {
     composer: string;
@@ -27,12 +28,60 @@ interface PersonalToken {
 const props = defineProps<{
     snippets: Snippets;
     storeRoute: keyof RouteList;
+    // Route parameters for `storeRoute`, for a store route that is addressed rather than
+    // global — the portal's token route carries the organization slug in its path.
+    storeRouteParams?: ParameterValue;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
     // Which ecosystems to show setup steps for. Omitted → all.
     types?: string[];
+    // Whether to offer minting at all. Omitted → yes, which is the console's case: every
+    // caller there is already an admin or maintainer of the organization. The portal passes
+    // the shared `portal.may_mint_tokens`, so an operator standing in a customer's portal is
+    // not offered a form the server would then refuse — the same reason portal/Registry.vue
+    // hides its own token form, and this is the portal's SECOND way to the same POST.
+    mayMint?: boolean;
+    // Whether to offer the publish ability. Omitted → yes, the console's case again: an
+    // admin or maintainer of the organization, which is exactly whom
+    // RegistryTokenPolicy::create() allows Publish. The portal passes
+    // `portal.may_publish_tokens`, so a plain member is offered "Lesen" alone rather than a
+    // choice the server answers 403 to — the refusal PublishTokenEscalationTest already
+    // pins.
+    mayPublish?: boolean;
 }>();
 
+const mayMint = computed(() => offersMinting(props.mayMint));
+
+// The explicit return type keeps `value` as the literal union `form.ability` is typed as,
+// rather than the widened `string` a plain object literal infers — SearchableSelect's
+// `v-model` needs the two to line up exactly. Same shape as portal/Registry.vue's own
+// options list, which gates on the same prop.
+const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
+    offersPublishing(props.mayPublish)
+        ? [
+              { value: 'read', label: 'Lesen' },
+              { value: 'publish', label: 'Veröffentlichen' },
+          ]
+        : [{ value: 'read', label: 'Lesen' }],
+);
+
+/**
+ * The token stand-in the server writes into every snippet, so that substituting a freshly
+ * minted token is a plain string replace.
+ *
+ * IT IS A CONTRACT, NOT COPY, and that is why it is not a string to reword in passing.
+ * `SetupSnippetBuilder` emits this exact literal into composer's auth.json, .npmrc,
+ * pip.conf, .netrc and twine's config, and SetupSnippetBuilderTest asserts it there three
+ * times across two cases. Changing it on this side alone would redden NOTHING: the
+ * substitution below would simply stop matching, and the customer would copy a snippet
+ * still carrying the placeholder after minting a token — into their own .npmrc. A
+ * rewording is a coordinated change to the builder, this constant and those assertions at
+ * once.
+ *
+ * It is also not a sentence addressed to the reader. It is angle-bracketed metasyntax
+ * inside a config file, the same shape as the `<slug>` and `<organisation>` placeholders
+ * this console already uses, so the `du` in it is not the console's address form.
+ */
 const PLACEHOLDER = '<dein-token>';
 
 const sessionTokens = ref<{ name: string; value: string }[]>([]);
@@ -64,7 +113,7 @@ watch(plainTextToken, (value) => {
 function createAndInsert() {
     pendingName.value = form.name;
     awaitingToken.value = true;
-    form.transform((data) => ({ ...data, ...(props.storePayload ?? {}) })).post(route(props.storeRoute), {
+    form.transform((data) => ({ ...data, ...(props.storePayload ?? {}) })).post(route(props.storeRoute, props.storeRouteParams), {
         preserveScroll: true,
         onSuccess: () => form.reset('name'),
         onError: () => {
@@ -139,18 +188,21 @@ function selectSession(value: string) {
                             <option v-for="t in personalTokens" :key="t.id" value="" disabled>{{ t.name }} · {{ t.ability }}</option>
                         </optgroup>
                     </select>
-                    <Button variant="outline" size="sm" type="button" @click="showCreate = !showCreate">
+                    <Button v-if="mayMint" variant="outline" size="sm" type="button" @click="showCreate = !showCreate">
                         <Plus class="size-4" />
                         Token erstellen
                     </Button>
                 </div>
-                <p class="text-xs text-muted-foreground">
+                <!-- Same `v-if` as the button it describes: it ends by telling the reader
+                     to create a token, which is advice with nothing to act on once the
+                     button above it is hidden. -->
+                <p v-if="mayMint" class="text-xs text-muted-foreground">
                     Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
                     — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
                 </p>
             </div>
 
-            <form v-if="showCreate" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end" @submit.prevent="createAndInsert">
+            <form v-if="mayMint && showCreate" class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end" @submit.prevent="createAndInsert">
                 <div class="grid gap-1.5">
                     <Label for="setup_token_name">Name</Label>
                     <Input id="setup_token_name" v-model="form.name" placeholder="ci-token" autocomplete="off" />
@@ -162,10 +214,7 @@ function selectSession(value: string) {
                         id="setup_token_ability"
                         v-model="form.ability"
                         class="min-w-40"
-                        :options="[
-                            { value: 'read', label: 'Lesen' },
-                            { value: 'publish', label: 'Veröffentlichen' },
-                        ]"
+                        :options="abilityOptions"
                     />
                 </div>
                 <Button type="submit" :disabled="form.processing || !form.name">Erstellen &amp; einsetzen</Button>

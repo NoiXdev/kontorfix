@@ -37,6 +37,10 @@ const page = usePage<SharedData>();
 //   - console: any organization admin/maintainer — sees the scoped registry surface.
 //   - super:   the global super-admin — additionally sees instance-wide administration.
 // Anyone without console access (a plain member) sees only the portal.
+//
+// Both portal links point at `portal.home` rather than at a /c/{orgSlug} address: the portal
+// is addressed by organization now, and the sidebar has no organization in hand — that route
+// resolves the signed-in user's own home organization and redirects there.
 const canConsole = computed(() => page.props.auth.can?.console ?? false);
 const isSuper = computed(() => page.props.auth.can?.super ?? false);
 const appVersion = computed(() => page.props.appVersion ?? null);
@@ -50,7 +54,7 @@ interface NavSection {
 const navSections = computed<NavSection[]>(() => {
     // Anyone without console access (plain members) sees exclusively the portal.
     if (!canConsole.value) {
-        return [{ label: 'Portal', items: [{ title: 'Registries', href: route('portal.registries.index'), icon: Boxes }] }];
+        return [{ label: 'Portal', items: [{ title: 'Portal', href: route('portal.home'), icon: Boxes }] }];
     }
 
     // Organization admins & maintainers.
@@ -108,7 +112,7 @@ const navSections = computed<NavSection[]>(() => {
 
     sections.push({
         label: 'Portal',
-        items: [{ title: 'Kundenportal', href: route('portal.registries.index'), icon: Package }],
+        items: [{ title: 'Kundenportal', href: route('portal.home'), icon: Package }],
     });
 
     return sections;

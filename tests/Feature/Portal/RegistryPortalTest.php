@@ -16,7 +16,7 @@ it('lists only the members own registries', function () {
     $mine = Group::factory()->for($this->orgA)->create(['name' => 'Acme Registry', 'slug' => 'acme']);
     Group::factory()->for(Organization::factory()->create())->create(['name' => 'Foreign']);
 
-    $this->actingAs($this->member)->get('/portal')
+    $this->actingAs($this->member)->get("/c/{$this->orgA->slug}/registries")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registries')
             ->has('registries', 1)
@@ -28,7 +28,7 @@ it('shows a registry with setup snippets and its packages', function () {
     $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/widget']);
     $group->packages()->attach($pkg);
 
-    $this->actingAs($this->member)->get("/portal/registries/{$group->id}")
+    $this->actingAs($this->member)->get("/c/{$this->orgA->slug}/registries/{$group->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registry')
             ->where('registry.slug', 'acme')
@@ -40,10 +40,10 @@ it('shows a registry with setup snippets and its packages', function () {
 it('forbids viewing a foreign registry', function () {
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
 
-    $this->actingAs($this->member)->get("/portal/registries/{$foreign->id}")->assertForbidden();
+    $this->actingAs($this->member)->get("/c/{$this->orgA->slug}/registries/{$foreign->id}")->assertForbidden();
 });
 
 it('redirects guests to login', function () {
     $group = Group::factory()->for($this->orgA)->create();
-    $this->get("/portal/registries/{$group->id}")->assertRedirect('/login');
+    $this->get("/c/{$this->orgA->slug}/registries/{$group->id}")->assertRedirect('/login');
 });

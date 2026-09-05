@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import DataTable from '@/components/kontorfix/DataTable.vue';
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +15,7 @@ import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
 import { Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import { badgesFor, registryLapsedNote, SHARED_BADGE_TITLE } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -35,6 +38,20 @@ interface PackageRow {
     type: string;
     description: string | null;
     latest_version: string | null;
+    /** The package is owned by the operator organization and shared into this registry. */
+    shared: boolean;
+    /**
+     * REGISTRY-LOCAL: whether THIS registry still serves the package — not whether the
+     * customer can get it at all. Deliberately NOT the `in_force` of `PortalPackageRow`,
+     * whose contract is "served by at least one of this customer's registries"; the two
+     * differ exactly on a package that lapsed here and still runs next door, which is the
+     * case the portal's copy has to keep straight (see portalPackages.ts, TWO ANSWERS). This
+     * interface used to extend that one and inherited the wrong contract in silence.
+     *
+     * Decided by RegistryAccessService — expiry AND own-or-shared, the predicate the registry
+     * endpoints themselves answer by.
+     */
+    in_force: boolean;
 }
 
 interface TokenRow {
@@ -48,6 +65,8 @@ interface TokenRow {
 }
 
 const props = defineProps<{
+    // The organization the URL addresses — the first segment of every portal link here.
+    orgSlug: string;
     registry: Registry;
     snippets: Snippets;
     packages: PackageRow[];
@@ -91,14 +110,28 @@ const packageTable = useTableState<PackageRow>({
 const page = usePage<SharedData>();
 const plainTextToken = computed(() => page.props.flash?.plainTextToken ?? null);
 
+// Both token forms on this page POST to portal.tokens.store, so both read the one flag.
+// `?? false` for the null case: no addressed organization means no portal token to mint.
+const mayMint = computed(() => page.props.portal?.may_mint_tokens ?? false);
+// One reading of the publish flag for both of this page's token forms — the tokens tab's
+// ability picker below, and the Einrichtung tab's, which RegistrySetup renders.
+const mayPublish = computed(() => page.props.portal?.may_publish_tokens ?? false);
+
 // Publish tokens are organization write credentials and are admin/maintainer-only on the
 // server (RegistryTokenPolicy::create). Do not offer the option to plain members.
+//
+// `portal.may_publish_tokens`, NOT `auth.can.console`. That flag means "administers SOME
+// organization"; the policy asks whether the caller administers THIS one. An admin of A who
+// is a plain member of B was therefore offered "Veröffentlichen" in /c/B and refused with a
+// 403 on submit — the same shown-and-then-refused shape the token form itself was hidden to
+// avoid. The prop is `User::administers($organization->id)`, which is the method the policy
+// calls.
 //
 // The explicit return type keeps `value` as the literal `'read' | 'publish'` union (what
 // `tokenForm.ability` is actually typed as) rather than the widened `string` a plain object
 // literal would infer — `SearchableSelect`'s `v-model` needs the two to line up exactly.
 const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }[] =>
-    page.props.auth.can?.console
+    mayPublish.value
         ? [
               { value: 'read', label: 'Lesen' },
               { value: 'publish', label: 'Veröffentlichen' },
@@ -161,7 +194,7 @@ const tokenForm = useForm({
 });
 
 function submitToken() {
-    tokenForm.post(route('portal.tokens.store'), {
+    tokenForm.post(route('portal.tokens.store', props.orgSlug), {
         preserveScroll: true,
         onSuccess: () => {
             tokenForm.reset('name');
@@ -175,15 +208,26 @@ function abilityLabel(ability: 'read' | 'publish') {
 }
 
 function destroyToken(id: string) {
-    router.delete(route('portal.tokens.destroy', id), {
+    router.delete(route('portal.tokens.destroy', [props.orgSlug, id]), {
         preserveScroll: true,
         onBefore: () => confirm('Token wirklich widerrufen?'),
     });
 }
 
+/**
+ * The note a row carries here: the single-registry sentence, or nothing.
+ *
+ * NOT `noteFor()`. That function chooses between two notes that both speak about the
+ * customer's registries as a set — which this page does not have, and whose `in_force` is
+ * registry-local. `registryLapsedNote()` is the sentence for exactly this shape.
+ */
+function noteForRow(pkg: PackageRow): string | null {
+    return pkg.in_force ? null : registryLapsedNote();
+}
+
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Registries', href: '/portal' },
-    { title: props.registry.name, href: `/portal/registries/${props.registry.id}` },
+    { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
+    { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
 ];
 </script>
 
@@ -192,6 +236,8 @@ const breadcrumbs: BreadcrumbItem[] = [
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
+            <PortalHeader />
+
             <div>
                 <h1 class="text-xl font-semibold">{{ props.registry.name }}</h1>
                 <p class="mt-1 font-mono text-sm break-all text-muted-foreground">{{ props.registry.url }}</p>
@@ -209,8 +255,11 @@ const breadcrumbs: BreadcrumbItem[] = [
                         :snippets="props.snippets"
                         :types="registryTypes"
                         store-route="portal.tokens.store"
+                        :store-route-params="props.orgSlug"
                         :store-payload="{ group_id: props.registry.id }"
                         :personal-tokens="props.tokens"
+                        :may-mint="mayMint"
+                        :may-publish="mayPublish"
                     />
                 </TabsContent>
 
@@ -232,20 +281,50 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </template>
 
                         <template #default="{ rows }">
-                            <tr
-                                v-for="pkg in rows"
-                                :key="pkg.id"
-                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                            >
-                                <td class="px-4 py-3 font-mono">
-                                    <Link :href="route('portal.registries.package', [props.registry.id, pkg.id])" class="hover:underline">
-                                        {{ pkg.name }}
-                                    </Link>
-                                </td>
-                                <td class="px-4 py-3">{{ pkg.type }}</td>
-                                <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
-                                <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
-                            </tr>
+                            <template v-for="pkg in rows" :key="pkg.id">
+                                <!-- The separator belongs to the LAST row of this package's block,
+                                     so the main row gives it up whenever the note follows it —
+                                     the same rule portal/Packages.vue and admin/groups/Show.vue
+                                     follow: an outage warning below a separator reads as belonging
+                                     to the next package. -->
+                                <tr :class="noteForRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'">
+                                    <td class="px-4 py-3 font-mono">
+                                        <div class="flex items-center gap-2">
+                                            <!-- The name of a lapsed assignment stays LINKED, as it
+                                                 does on portal/Packages.vue: the detail page serves
+                                                 it with the explanation instead of 404ing, so this
+                                                 is no longer a dead end on either page. -->
+                                            <Link
+                                                :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])"
+                                                class="hover:underline"
+                                            >
+                                                {{ pkg.name }}
+                                            </Link>
+                                            <!-- One decision, in the tested module: which markers
+                                                 this row carries and in what order. -->
+                                            <template v-for="badge in badgesFor(pkg)" :key="badge">
+                                                <SharedBadge v-if="badge === 'geteilt'" :title="SHARED_BADGE_TITLE" />
+                                                <!-- v-else-if, not v-else: a catch-all would render
+                                                     any badge added later in destructive red, which
+                                                     is the wrong default for a marker that is not a
+                                                     fault. -->
+                                                <span
+                                                    v-else-if="badge === 'abgelaufen'"
+                                                    class="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-sans text-xs font-medium text-destructive"
+                                                >
+                                                    {{ badge }}
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3">{{ pkg.type }}</td>
+                                    <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
+                                    <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
+                                </tr>
+                                <tr v-if="noteForRow(pkg)" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                    <td colspan="4" class="px-4 pb-3 text-xs text-destructive">{{ noteForRow(pkg) }}</td>
+                                </tr>
+                            </template>
                         </template>
                     </DataTable>
                 </TabsContent>
@@ -270,7 +349,13 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </div>
                     </div>
 
+                    <!-- Hidden rather than shown and then refused: TokenController::store()
+                         requires MEMBERSHIP of the addressed organization, which an operator
+                         account looking at a customer's portal does not have. `may_mint_tokens`
+                         is that same question, answered once on the server — see
+                         HandleInertiaRequests::portal(). -->
                     <form
+                        v-if="mayMint"
                         class="mb-4 grid gap-4 rounded-xl border border-sidebar-border/70 p-4 sm:grid-cols-[1fr_auto_auto] sm:items-end dark:border-sidebar-border"
                         @submit.prevent="submitToken"
                     >

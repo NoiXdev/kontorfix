@@ -2,6 +2,7 @@
 
 use App\Models\Group;
 use App\Models\Organization;
+use App\Services\Portal\PortalUrl;
 use App\Services\Registry\RegistryUrl;
 
 it('changes an organization slug and with it every registry url it owns', function () {
@@ -17,6 +18,34 @@ it('changes an organization slug and with it every registry url it owns', functi
     $this->get('/r/new-org/packages/packages.json')->assertOk();
     $this->get('/r/old-org/packages/packages.json')->assertNotFound();
     expect($group->fresh()->slug)->toBe('packages');
+});
+
+/**
+ * The one exception the slug confirmation now names. Its previous sentence — "Weiterleitungen
+ * von den alten Adressen gibt es in keinem der beiden Fälle" — was conservative but false for
+ * every registry that predates the slug-scoping migration: `LegacySlugRedirector::target()`
+ * builds its destination through `RegistryUrl::path()`, which reads the organization's CURRENT
+ * slug, so a one-segment /r/{registry} address follows the rename instead of breaking with it.
+ *
+ * Pinned here rather than left to the copy, so the half-sentence the dialog gained is a claim
+ * the suite keeps true. Both directions are asserted: the two-segment address under the OLD
+ * organization slug still 404s (the first case in this file), and the one-segment one lands on
+ * the NEW one — a target built from a frozen organization slug would answer the old path and
+ * pass any assertion that only checked for a 301.
+ */
+it('keeps the one-segment legacy address pointing at the registry through a rename', function () {
+    $org = Organization::factory()->create(['slug' => 'old-org']);
+    $group = Group::factory()->preUpgrade()->for($org)->create(['slug' => 'packages', 'public' => true]);
+
+    $this->actingAs(superAdmin())->put(route('admin.organizations.update', $org), [
+        'name' => $org->name,
+        'slug' => 'new-org',
+        'notification_cadence' => cadenceOf($org),
+    ])->assertRedirect();
+
+    $this->get('/r/packages/packages.json')
+        ->assertStatus(301)
+        ->assertRedirect('/r/new-org/packages/packages.json');
 });
 
 it('refuses an organization slug that is already taken', function () {
@@ -80,4 +109,30 @@ it('hands the console the bare url pattern and the affected registry count', fun
         ->assertInertia(fn ($page) => $page
             ->where('registryUrlTemplate', app(RegistryUrl::class)->template())
             ->where('organization.registries_count', 2));
+});
+
+/**
+ * The organization slug is the first segment of the customer portal's address as well, so a
+ * rename breaks a saved /c/... link. It breaks the /r/... addresses too — the first case in
+ * this file asserts that /r/{old-org}/... answers 404, because `groups.legacy_slug` freezes
+ * only the ONE-SEGMENT pre-upgrade address and there is no organization-level equivalent.
+ * The portal is therefore not the milder case and must not be described as one; it is the
+ * case where the people holding the link are the ones nobody has a list of. The
+ * confirmation has to name the address, and this pins the payload it substitutes into.
+ *
+ * Two assertions, because either alone would prove nothing. The expect() pins the address
+ * FORM against the route the application actually answers on, so a change to the /c/ prefix
+ * reddens a test rather than quietly rewording a dialog. The assertInertia() pins the WIRING
+ * the way the registry pattern above is pinned — stated against PortalUrl rather than a
+ * literal, so the payload and the form cannot be made to disagree by editing one of them.
+ */
+it('hands the console the portal address form the slug change moves', function () {
+    $org = Organization::factory()->create(['slug' => 'kunde']);
+
+    expect(app(PortalUrl::class)->template())->toBe('/c/{organization}')
+        ->and(app(PortalUrl::class)->pathFor($org->slug))->toBe('/c/kunde');
+
+    $this->actingAs(superAdmin())->get(route('admin.organizations.show', $org))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('portalPathTemplate', app(PortalUrl::class)->template()));
 });

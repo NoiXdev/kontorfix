@@ -12,6 +12,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
+use App\Services\Portal\PortalUrl;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
@@ -39,7 +40,7 @@ class OrganizationController extends Controller
         ]);
     }
 
-    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url): Response
+    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url, PortalUrl $portal): Response
     {
         return Inertia::render('admin/organizations/Show', [
             'organization' => [
@@ -47,6 +48,7 @@ class OrganizationController extends Controller
                 'name' => $organization->name,
                 'slug' => $organization->slug,
                 'is_operator' => $organization->is_operator,
+                'portal_enabled' => $organization->portal_enabled,
                 'notification_cadence' => $organization->notification_cadence,
                 // Changing the slug moves the URL of every registry this organization owns
                 // (the organization segment is the first path component of all of them) —
@@ -58,6 +60,15 @@ class OrganizationController extends Controller
             // confirmation dialog substitutes the organization segment for its "before" and
             // "after" preview, and must never assemble a /r/... path of its own.
             'registryUrlTemplate' => $url->template(),
+            // The portal's address form, with the organization slug left open, substituted
+            // by the same dialog and never assembled on the page. The slug moves the portal
+            // as well as the registries, and NEITHER old address keeps answering:
+            // `groups.legacy_slug` freezes only the one-segment pre-upgrade address
+            // /r/{registry}, so there is no organization-level redirect for the /r/ URLs
+            // either (OrganizationSlugEditTest's first case asserts the 404). The dialog
+            // names both because both have to be reconfigured — the /r/ ones by whoever
+            // maintains the clients, the /c/ one by whoever holds the link.
+            'portalPathTemplate' => $portal->template(),
             // Registry-type availability: the instance ceiling, the org's effective set,
             // and whether the org pins an explicit override (vs. inheriting the ceiling).
             'registryTypes' => [

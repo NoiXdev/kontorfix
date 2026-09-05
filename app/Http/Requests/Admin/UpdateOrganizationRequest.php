@@ -14,6 +14,26 @@ class UpdateOrganizationRequest extends FormRequest
     }
 
     /**
+     * An unchecked switch posts no field at all, so a request that *carries* the switch has
+     * its absent case spelled as an explicit `false` before validation runs — otherwise
+     * `boolean` would never see it and switching the portal off would save nothing.
+     *
+     * Conditional on `has()`, not unconditional, because "the form sent an unchecked switch"
+     * and "the request never mentioned the switch" are different intentions and only the
+     * console can tell them apart by always sending every field. An unconditional merge made
+     * them identical, so a partial PUT naming only `name` disabled a customer's portal as a
+     * side effect. This `has()` check is the whole mechanism, and the rule below carries no
+     * `sometimes` to suggest otherwise. StoreGroupRequest makes the mirror choice for the
+     * create path, where an absent switch means `true` rather than "leave alone".
+     */
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('portal_enabled')) {
+            $this->merge(['portal_enabled' => $this->boolean('portal_enabled')]);
+        }
+    }
+
+    /**
      * @return array<string, array<int, mixed>>
      */
     public function rules(): array
@@ -34,6 +54,18 @@ class UpdateOrganizationRequest extends FormRequest
                 UnclaimedSlug::byRegistry(),
             ],
             'notification_cadence' => ['required', Rule::in(['hourly', 'daily', 'off'])],
+            // Whether this customer has a portal at all — off makes /c/{slug} a 404. Not
+            // `groups.portal_enabled`, which only hides one registry inside that portal.
+            //
+            // Load-bearing beyond validation: `validated()` returns only fields that carry a
+            // rule, so dropping this line evicts the switch from the update entirely and the
+            // column silently keeps whatever it had — switching a portal off would save
+            // nothing. PortalContextTest's two console round-trip cases are what says so.
+            //
+            // No `sometimes`: it would be a modifier no mutation can redden, since `boolean`
+            // already passes an absent field and `validated()` already omits one. What makes
+            // an omitted switch mean "leave it alone" is the conditional merge above.
+            'portal_enabled' => ['boolean'],
         ];
     }
 }

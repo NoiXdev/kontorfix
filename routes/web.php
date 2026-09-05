@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Portal\PackageController;
 use App\Http\Controllers\Portal\RegistryController;
 use App\Http\Controllers\Portal\TokenController;
 use App\Http\Controllers\SetupController;
@@ -183,18 +184,27 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::delete('robots/{user}', [Admin\RobotController::class, 'destroy'])->name('robots.destroy');
 });
 
-Route::middleware(['auth', 'verified'])->prefix('portal')->name('portal.')->group(function () {
-    Route::get('/', [RegistryController::class, 'index'])->name('registries.index');
-    Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
-    Route::get('registries/{group}/packages/{package}', [RegistryController::class, 'showPackage'])->name('registries.package');
-    // The portal mints exactly the credential `settings/tokens` mints, so it carries the
-    // same `password.confirm` gate — gating one surface and not the other would only tell
-    // a session thief which URL to use. `destroy` stays ungated so that revoking a token
-    // is never harder than minting one.
-    Route::post('tokens', [TokenController::class, 'store'])
-        ->middleware('password.confirm')->name('tokens.store');
-    Route::delete('tokens/{token}', [TokenController::class, 'destroy'])->name('tokens.destroy');
-});
+// The old address is not a second way in; it resolves the signed-in user's own portal and
+// hands off to the gate below. Named, so that the surfaces with no organization in hand
+// (the sidebar, the dashboard) can point at it without assembling a path.
+Route::middleware(['auth', 'verified'])
+    ->get('/portal', [PackageController::class, 'home'])->name('portal.home');
+
+Route::middleware(['auth', 'verified', 'portal.context'])
+    ->prefix('/c/{orgSlug}')->where(['orgSlug' => '[a-z0-9-]+'])
+    ->name('portal.')->group(function () {
+        Route::get('/', [PackageController::class, 'index'])->name('packages.index');
+        Route::get('registries', [RegistryController::class, 'index'])->name('registries.index');
+        Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
+        Route::get('registries/{group}/packages/{package}', [RegistryController::class, 'showPackage'])->name('registries.package');
+        // The portal mints exactly the credential `settings/tokens` mints, so it carries the
+        // same `password.confirm` gate — gating one surface and not the other would only tell
+        // a session thief which URL to use. `destroy` stays ungated so that revoking a token
+        // is never harder than minting one.
+        Route::post('tokens', [TokenController::class, 'store'])
+            ->middleware('password.confirm')->name('tokens.store');
+        Route::delete('tokens/{token}', [TokenController::class, 'destroy'])->name('tokens.destroy');
+    });
 
 require __DIR__.'/settings.php';
 require __DIR__.'/auth.php';

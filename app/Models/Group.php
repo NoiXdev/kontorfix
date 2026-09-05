@@ -58,6 +58,14 @@ class Group extends Model
             ->dontLogEmptyChanges();
     }
 
+    /**
+     * `portal_enabled` here answers "does this registry appear in its organization's
+     * portal" — off hides the card and leaves this registry's own /r/... endpoints serving
+     * exactly as before. It is NOT `organizations.portal_enabled`, which answers "does this
+     * customer have a portal at all" and makes /c/{slug} a 404 outright. The two compose and
+     * neither is derived from the other: an open portal can show no registry at all, and a
+     * closed one hides registries that are individually switched on.
+     */
     protected $fillable = [
         'organization_id',
         'name',

@@ -20,17 +20,29 @@ class Organization extends Model
     {
         return LogOptions::defaults()
             ->useLogName('organization')
-            ->logOnly(['name', 'slug', 'is_operator'])
+            ->logOnly(['name', 'slug', 'is_operator', 'portal_enabled'])
             ->logOnlyDirty()
             ->dontLogEmptyChanges();
     }
 
-    protected $fillable = ['name', 'slug', 'is_operator', 'enabled_registry_types', 'notification_cadence', 'last_digest_sent_at'];
+    /**
+     * `portal_enabled` here answers "does this customer have a portal at all" — off means
+     * /c/{slug} is 404. It is NOT `groups.portal_enabled`, which answers "does this registry
+     * appear in that portal" and leaves the registry's /r/... endpoints untouched. The two
+     * compose and neither is derived from the other: turning every registry off still leaves
+     * an open portal showing an empty package list.
+     */
+    protected $fillable = ['name', 'slug', 'is_operator', 'portal_enabled', 'enabled_registry_types', 'notification_cadence', 'last_digest_sent_at'];
+
+    protected $attributes = [
+        'portal_enabled' => true,
+    ];
 
     protected function casts(): array
     {
         return [
             'is_operator' => 'bool',
+            'portal_enabled' => 'bool',
             // Null = inherit the instance-wide set; otherwise a restriction within it.
             'enabled_registry_types' => 'array',
             'last_digest_sent_at' => 'datetime',

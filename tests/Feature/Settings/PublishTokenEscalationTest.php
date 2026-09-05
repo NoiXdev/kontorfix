@@ -51,8 +51,8 @@ it('forbids a member from minting a publish token via the portal', function () {
     $group = Group::factory()->for($org)->create();
     $member = User::factory()->create(['organization_id' => $org->id, 'role' => UserRole::Member]);
 
-    $this->actingAs($member)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'evil', 'group_id' => $group->id, 'ability' => 'publish'])
+    $this->actingAs($member)->from("/c/{$org->slug}/registries")
+        ->post("/c/{$org->slug}/tokens", ['name' => 'evil', 'group_id' => $group->id, 'ability' => 'publish'])
         ->assertForbidden();
 
     expect(RegistryToken::count())->toBe(0);
@@ -103,9 +103,9 @@ it('still lets an org maintainer mint a publish token via the portal', function 
     $group = Group::factory()->for($org)->create();
     $maintainer = User::factory()->create(['organization_id' => $org->id, 'role' => UserRole::Maintainer]);
 
-    $this->actingAs($maintainer)->from('/portal')
-        ->post('/portal/tokens', ['name' => 'ci', 'group_id' => $group->id, 'ability' => 'publish'])
-        ->assertRedirect('/portal');
+    $this->actingAs($maintainer)->from("/c/{$org->slug}/registries")
+        ->post("/c/{$org->slug}/tokens", ['name' => 'ci', 'group_id' => $group->id, 'ability' => 'publish'])
+        ->assertRedirect("/c/{$org->slug}/registries");
 
     expect(RegistryToken::sole()->ability)->toBe(TokenAbility::Publish);
 });

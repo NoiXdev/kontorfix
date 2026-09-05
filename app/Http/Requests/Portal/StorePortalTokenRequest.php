@@ -25,6 +25,15 @@ class StorePortalTokenRequest extends FormRequest
                 'uuid',
                 // Only groups of an organization the user belongs to — prevents
                 // assignment to a foreign registry.
+                //
+                // Membership, deliberately, and NOT the organization the portal address
+                // names. Narrowing this to the context organization would fold the two
+                // refusals into one and answer both with a validation error, and they are
+                // not the same refusal: a group of an organization the caller has no part in
+                // is a bad field value, reportable on the field; a group of an organization
+                // the caller genuinely belongs to, submitted under a different
+                // organization's address, is an authorization question the field cannot
+                // carry. TokenController::store() answers that second case with a 403.
                 Rule::exists('groups', 'id')->whereIn('organization_id', $this->user()->accessibleOrganizationIds()),
             ],
             'ability' => ['nullable', Rule::enum(TokenAbility::class)],

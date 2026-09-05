@@ -160,7 +160,10 @@ class ProfileUpdateTest extends TestCase
 
         $this->assertSame('moved@example.com', $user->email);
         $this->assertNotNull($user->email_verified_at);
-        $this->actingAs($user)->get('/dashboard')->assertRedirectContains('portal');
+        // A plain member lands in their own organization's portal, which is addressed by
+        // that organization's slug — reaching it at all is what proves the account is not
+        // stuck behind an undeliverable verification challenge.
+        $this->actingAs($user)->get('/dashboard')->assertRedirect("/c/{$user->organization->slug}");
     }
 
     public function test_a_failing_mailer_rolls_the_email_change_back_instead_of_locking_the_user_out()

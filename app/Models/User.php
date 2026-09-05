@@ -193,6 +193,48 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
         return array_values(array_unique($ids));
     }
 
+    /**
+     * Whether this account acts FOR THE OPERATOR rather than for a customer.
+     *
+     * THE ONE STATEMENT OF THAT QUESTION FOR THE PORTAL. It had two, and they disagreed: the
+     * portal gate (ResolvePortalContext::mayOpen) asked this, while GroupPolicy::view() asked
+     * the much narrower `role === Admin && organization?->is_operator`. An operator-
+     * organization maintainer, and anyone holding an operator role through a membership, were
+     * therefore admitted to a customer's portal and then answered 403 on every registry
+     * inside it — a portal with pages its own gate refuses. Spec decision 4 (an operator sees
+     * what the customer sees) is not met while the two can differ, so both now call this.
+     *
+     * TWO CHARACTER-IDENTICAL COPIES OF THE NARROW VERSION SURVIVE OUTSIDE THE PORTAL:
+     * RegistryTokenPolicy::delete() and the `viewApiDocs` gate in AppServiceProvider. Both
+     * are dead code for the same reason the third one was — the condition IS isSuperAdmin()'s
+     * grandfather clause, and Gate::before answers for that population before either runs —
+     * but replacing them is a decision about token deletion and about who may read the
+     * management API reference, not about the portal, so they are named here rather than
+     * quietly widened by this change.
+     *
+     * A super-admin first and on its own terms, not as a shortcut past the scan below: the
+     * scan can only answer yes if an `is_operator` row exists, and the `is_super_admin` flag
+     * is not conditional on one. Without this clause an instance with no operator
+     * organization would refuse its own super-admin. (Through Gate::before, a super-admin
+     * short-circuits every policy anyway; this keeps the method true when called directly.)
+     *
+     * Below that: admin OR MAINTAINER of an operator organization, held by home role or by
+     * an organization membership's pivot role — administeredOrganizationIds() covers all
+     * four shapes. That breadth is deliberate (they administer the operator organization),
+     * but it is not readable from the helper's name, hence spelling it out here.
+     */
+    public function administersOperatorOrganization(): bool
+    {
+        if ($this->isSuperAdmin()) {
+            return true;
+        }
+
+        $administered = $this->administeredOrganizationIds();
+
+        return Organization::query()->where('is_operator', true)->pluck('id')
+            ->contains(fn (string $id): bool => in_array($id, $administered, true));
+    }
+
     /** Whether the user may reach the admin console at all (super-admin or org admin/maintainer). */
     public function canAdministerConsole(): bool
     {

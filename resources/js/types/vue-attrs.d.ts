@@ -25,6 +25,11 @@ declare module '@vue/runtime-dom' {
 declare module '@inertiajs/vue3' {
     interface InertiaLinkProps {
         tabindex?: number;
+        // Same gap, same reason: the portal's area navigation marks the entry for the area the
+        // viewer is in, which is what `aria-current="page"` is for, and `Link` forwards it onto
+        // the `<a>` it renders. Kept as the literal kebab-case key because the template checker
+        // reports it under that name for this component rather than normalising it.
+        'aria-current'?: 'page' | undefined;
     }
 }
 

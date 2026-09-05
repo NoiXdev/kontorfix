@@ -5,9 +5,10 @@ use App\Models\Organization;
 use App\Models\User;
 
 it('shares no console/super capability and an empty scope for a plain member', function () {
-    $member = User::factory()->for(Organization::factory())->create(['role' => UserRole::Member]);
+    $org = Organization::factory()->create();
+    $member = User::factory()->for($org)->create(['role' => UserRole::Member]);
 
-    $this->actingAs($member)->get('/portal')
+    $this->actingAs($member)->get("/c/{$org->slug}/registries")
         ->assertInertia(fn ($p) => $p
             ->where('auth.can.console', false)
             ->where('auth.can.super', false)

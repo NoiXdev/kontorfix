@@ -117,20 +117,30 @@ it('attaches a member with a per-organization role from the organization view', 
         ->and($fresh->roleIn($org->id))->toBe(UserRole::Admin);
 });
 
-it('shows registries of additional organizations in the portal', function () {
+it('reaches the registries of an additional organization at that organizations own portal', function () {
+    // This used to assert the merge: /c/{home}/registries listed BOTH organizations'
+    // registries, which was the only answer available while the portal had one address.
+    // /c/{orgSlug} names an organization, so the page shows that organization's registries
+    // and the additional membership is reached at its own slug. Asserted from both addresses
+    // — the membership must still grant reach, and a scoping fix that quietly dropped extra
+    // memberships would pass the first half alone.
     $home = Organization::factory()->create();
     $other = Organization::factory()->create();
     $user = User::factory()->for($home)->create(['role' => UserRole::Member]);
     $user->organizations()->attach($other->id);
 
-    $homeGroup = Group::factory()->for($home)->create(['name' => 'Home Reg']);
-    $otherGroup = Group::factory()->for($other)->create(['name' => 'Other Reg']);
+    Group::factory()->for($home)->create(['name' => 'Home Reg']);
+    Group::factory()->for($other)->create(['name' => 'Other Reg']);
 
-    $this->actingAs($user)->get('/portal')
+    $this->actingAs($user)->get("/c/{$home->slug}/registries")
         ->assertInertia(fn ($page) => $page
-            ->has('registries', 2)
-            ->where('registries.0.name', 'Home Reg')
-            ->where('registries.1.name', 'Other Reg'));
+            ->has('registries', 1)
+            ->where('registries.0.name', 'Home Reg'));
+
+    $this->actingAs($user)->get("/c/{$other->slug}/registries")
+        ->assertInertia(fn ($page) => $page
+            ->has('registries', 1)
+            ->where('registries.0.name', 'Other Reg'));
 });
 
 it('hides portal-disabled groups from the portal listing and blocks direct access', function () {
@@ -138,10 +148,16 @@ it('hides portal-disabled groups from the portal listing and blocks direct acces
     $user = User::factory()->for($org)->create(['role' => UserRole::Member]);
     $collection = Group::factory()->for($org)->create(['portal_enabled' => false]);
 
-    $this->actingAs($user)->get('/portal')
+    $this->actingAs($user)->get("/c/{$org->slug}/registries")
         ->assertInertia(fn ($page) => $page->has('registries', 0));
 
-    $this->actingAs($user)->get("/portal/registries/{$collection->id}")->assertForbidden();
+    // 404, and it used to be 403. The refusal moved: GroupPolicy::view() answered first, and
+    // a policy is the wrong home for "does this registry appear in the portal" — that is a
+    // property of the surface, not of the viewer, and a policy can be bypassed for a viewer
+    // (Gate::before, for super-admins) while the surface property cannot change with who
+    // asks. RegistryController states it before authorize() now, so every population gets one
+    // answer. Inverted rather than dropped: the rule is unchanged, only the code that says it.
+    $this->actingAs($user)->get("/c/{$org->slug}/registries/{$collection->id}")->assertNotFound();
 });
 
 it('lets a member create a token for a registry of an additional organization', function () {
@@ -154,7 +170,16 @@ it('lets a member create a token for a registry of an additional organization', 
     $user->organizations()->attach($other->id);
     $group = Group::factory()->for($other)->create();
 
-    $this->actingAs($user)->post('/portal/tokens', [
+    // At the OTHER organization's address, and that is the whole change. The reach into an
+    // additional organization is unchanged; what moved is where it is exercised. This used
+    // to post to the HOME address and mint against `$other` anyway, which is the behaviour
+    // the single-address portal (/portal) had no way to avoid: with no organization in the
+    // URL, the submitted group was the only thing that could name one. With /c/{orgSlug} the
+    // address names it, and a token minted under one organization's address against another
+    // organization's registry makes that address mean nothing. PortalTokenTest's
+    // 'refuses a group from another organization' pins the refusal; this pins that the reach
+    // itself survives at the right door.
+    $this->actingAs($user)->post("/c/{$other->slug}/tokens", [
         'name' => 'ci', 'group_id' => $group->id,
     ])->assertRedirect()->assertSessionHasNoErrors();
 
@@ -167,7 +192,7 @@ it('still refuses a token for a foreign organizations registry', function () {
     $user = User::factory()->for(Organization::factory()->create())->create(['role' => UserRole::Member]);
     $foreign = Group::factory()->for(Organization::factory()->create())->create();
 
-    $this->actingAs($user)->post('/portal/tokens', [
+    $this->actingAs($user)->post("/c/{$user->organization->slug}/tokens", [
         'name' => 'ci', 'group_id' => $foreign->id,
     ])->assertSessionHasErrors('group_id');
 });

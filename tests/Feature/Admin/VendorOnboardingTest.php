@@ -32,7 +32,7 @@ it('onboards a customer end-to-end: org -> user -> registry -> portal', function
     // thing a real logout does via session()->invalidate().
     $this->flushSession();
 
-    $this->actingAs($member)->get('/portal')
+    $this->actingAs($member)->get('/c/kadenz-org/registries')
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Registries')->has('registries', 1)->where('registries.0.slug', 'kadenz-reg'));
 });

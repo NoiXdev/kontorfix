@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import { registryLapsedNote } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -31,6 +33,7 @@ interface VersionRow {
 const props = defineProps<{
     registry: Registry;
     package: {
+        id: string;
         type: 'composer' | 'npm';
         name: string;
         description: string | null;
@@ -42,14 +45,25 @@ const props = defineProps<{
     };
     versions: VersionRow[];
     install: string;
+    // REGISTRY-LOCAL: whether THIS registry still serves the assignment — this page is
+    // addressed by one registry and says nothing about the others. Decided by
+    // RegistryAccessService (expiry AND own-or-shared), the predicate the registry endpoints
+    // answer by. The page used to 404 for a lapsed one, so the customer arrived here because
+    // their build failed and was shown nothing at all; it is served now, and the install
+    // command is replaced by the reason.
+    in_force: boolean;
+    // The organization the URL addresses — the first segment of every portal link here.
+    orgSlug: string;
 }>();
 
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Registries', href: '/portal' },
-    { title: props.registry.name, href: `/portal/registries/${props.registry.id}` },
-    { title: props.package.name, href: `/portal/registries/${props.registry.id}/packages` },
+    { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
+    { title: props.registry.name, href: `/c/${props.orgSlug}/registries/${props.registry.id}` },
+    // The package's own address. `.../packages` was never a route — it was a fiction that
+    // 404s — and this crumb pointing at the page it labels is the standard shape anyway.
+    { title: props.package.name, href: route('portal.registries.package', [props.orgSlug, props.registry.id, props.package.id]) },
 ];
 
 // Version selector: defaults to the newest version (props.versions[0], guaranteed by VersionOrder::sort()).
@@ -82,6 +96,8 @@ function depCount(deps: Record<string, string>): number {
 
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-6 p-4">
+            <PortalHeader />
+
             <div class="flex flex-col gap-3">
                 <div class="flex flex-wrap items-center gap-3">
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>
@@ -124,7 +140,7 @@ function depCount(deps: Record<string, string>): number {
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Installation</h2>
-                <div class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                <div v-if="props.in_force" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                     <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                         <h3 class="font-medium">Paket installieren</h3>
                         <Button variant="outline" size="sm" @click="copyInstall">
@@ -133,6 +149,15 @@ function depCount(deps: Record<string, string>): number {
                         </Button>
                     </div>
                     <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ props.install }}</pre>
+                </div>
+                <!-- The command REPLACES nothing else on the page: the readme, the versions and
+                     the dependency tree stay, because they are what the customer came to check
+                     against. Only the one element that would not work is withheld — a snippet
+                     that answers 404 is worse than none. The single-registry sentence, from
+                     the tested module: this page knows only the registry it is addressed by,
+                     and the landing page's note claims none of them serve it. -->
+                <div v-else class="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                    {{ registryLapsedNote() }}
                 </div>
             </section>
 

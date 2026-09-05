@@ -18,7 +18,7 @@ beforeEach(function () {
 });
 
 it('shows a package detail within the customers own registry', function () {
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->pkg->id}")
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('portal/Package')
             ->where('package.name', 'acme/widget')->has('versions', 1)
@@ -30,7 +30,7 @@ it('sends the portal detail page its versions newest first', function () {
         PackageVersion::factory()->create(['package_id' => $this->pkg->id, 'version' => $v, 'version_pretty' => $v]);
     }
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->pkg->id}")
         ->assertInertia(fn ($p) => $p->where(
             'versions.0.version', '1.10.0'
         )->where('versions.1.version', '1.9.0'));
@@ -43,14 +43,14 @@ it('sends the portal detail page the abandonment marker props', function () {
         'abandonment_reason' => 'Nicht mehr gepflegt.',
     ]);
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->pkg->id}")
         ->assertInertia(fn ($p) => $p->where('package.abandoned_at', '2026-01-15')
             ->where('package.replacement_package', 'symfony/mailer')
             ->where('package.abandonment_reason', 'Nicht mehr gepflegt.'));
 });
 
 it('sends null abandonment markers for a live package', function () {
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$this->pkg->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$this->pkg->id}")
         ->assertInertia(fn ($p) => $p->where('package.abandoned_at', null)
             ->where('package.replacement_package', null)
             ->where('package.abandonment_reason', null));
@@ -62,9 +62,9 @@ it('forbids a package not in the members registry', function () {
     $otherGroup->packages()->attach($otherPkg);
 
     // foreign registry → 403 (GroupPolicy)
-    $this->actingAs($this->member)->get("/portal/registries/{$otherGroup->id}/packages/{$otherPkg->id}")->assertForbidden();
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$otherGroup->id}/packages/{$otherPkg->id}")->assertForbidden();
 
     // own registry, but package not assigned → 404
     $unassigned = Package::factory()->create();
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}/packages/{$unassigned->id}")->assertNotFound();
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}/packages/{$unassigned->id}")->assertNotFound();
 });

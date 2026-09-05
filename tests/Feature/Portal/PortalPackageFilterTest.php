@@ -23,15 +23,15 @@ it('always sends the full portal package list — search/type filtering is clien
     // reset the filter from the UI (search/type now live entirely in useTableState,
     // prefix 'pkg', driven by `pkg_q`/`pkg_type`). The full list reaches the client
     // regardless of what a legacy URL carries, and there is no `filters` prop anymore.
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?q=acme")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}?q=acme")
         ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?type=npm")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}?type=npm")
         ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}?q=acme&type=composer")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}?q=acme&type=composer")
         ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 
-    $this->actingAs($this->member)->get("/portal/registries/{$this->group->id}")
+    $this->actingAs($this->member)->get("/c/{$this->org->slug}/registries/{$this->group->id}")
         ->assertInertia(fn ($p) => $p->has('packages', 2)->missing('filters'));
 });

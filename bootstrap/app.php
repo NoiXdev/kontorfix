@@ -10,6 +10,7 @@ use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\PinUrlRoot;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
+use App\Http\Middleware\ResolvePortalContext;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
 use App\Services\Http\TrustedHosts;
@@ -125,6 +126,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'registry.auth' => AuthenticateRegistry::class,
             'registry.context' => ResolveRegistryContext::class,
             'registry.type' => EnsureRegistryTypeEnabled::class,
+            'portal.context' => ResolvePortalContext::class,
             'operator' => EnsureOperator::class,
             'super' => EnsureSuperAdmin::class,
             'api.auth' => AuthenticateApiKey::class,
