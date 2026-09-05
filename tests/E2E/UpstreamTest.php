@@ -72,12 +72,15 @@ it('falls through to npmjs for a package the registry does not hold', function (
 
 it('falls through to PyPI for a package the registry does not hold', function () {
     $context = E2eStack::context();
+    // Derived, not the literal `app:8080/r/e2e-customer/e2e-registry` PypiTest.php's own
+    // scripts used to spell out by hand in three places — see E2eStack::pipIndexUrl().
+    $indexUrl = E2eStack::pipIndexUrl($context['read_token']);
 
     $script = <<<SH
         set -e
         rm -rf /work/upvenv && python -m venv /work/upvenv
         /work/upvenv/bin/pip install --no-cache-dir --quiet \
-            --index-url http://x:{$context['read_token']}@app:8080/r/e2e-customer/e2e-registry/simple \
+            --index-url {$indexUrl} \
             --trusted-host app \
             six==1.16.0
         /work/upvenv/bin/python -c "import six; print(six.__version__)"
@@ -88,8 +91,11 @@ it('falls through to PyPI for a package the registry does not hold', function ()
     expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
 
     // Equality on the final line, not a suffix match on the whole output: `toEndWith` would
-    // also accept "21.16.0", and would survive stray output ahead of the version. Matches
-    // PypiTest.php's sibling assertion on the identical `print(x.__version__)` shape.
+    // also accept "21.16.0". This mirrors NpmTest.php's and PypiTest.php's own REFUSAL
+    // tests, which use exactly this last-non-empty-line shape — not PypiTest.php's install
+    // test, which gets away with a plain trim()->toBe() because a `--quiet` pip install
+    // there leaves stdout to the final print alone; kept defensive here rather than
+    // assuming that stays true for every future addition to this script.
     $lines = array_values(array_filter(
         array_map('trim', explode("\n", $process->getOutput())),
         fn (string $line): bool => $line !== '',

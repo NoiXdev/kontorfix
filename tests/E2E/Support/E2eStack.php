@@ -126,6 +126,23 @@ final class E2eStack
     }
 
     /**
+     * pip's `--index-url` embeds credentials as URL userinfo (`http://x:<token>@host/...`),
+     * built here from `base_url` rather than repeated as a literal `app:8080` in every test
+     * that needs one. Three call sites (PypiTest.php's install and refusal scripts,
+     * UpstreamTest.php's PyPI fallthrough) had the host and registry path spelled out by
+     * hand; a slug change in the seeder would have had to be echoed into all three by hand
+     * as well, and Composer's and npm's own tests already read `base_url` directly rather
+     * than duplicating it — pip was the odd one out only because embedding a credential in
+     * the URL itself isn't something the other two ecosystems' clients need.
+     */
+    public static function pipIndexUrl(?string $token = null): string
+    {
+        $credential = $token !== null ? "x:{$token}@" : '';
+
+        return preg_replace('#^(https?://)#', '$1'.$credential, self::context()['base_url']).'/simple';
+    }
+
+    /**
      * Turns an absolute registry URL — as it appears inside p2/packument metadata, always
      * built from APP_URL (`http://app:8080/...`, the address the app and worker containers
      * see each other at) — into the path suffix `get()` needs. `get()` reaches the stack from

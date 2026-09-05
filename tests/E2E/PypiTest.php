@@ -38,11 +38,18 @@ it('installs the uploaded wheel with the real pip client', function () {
     // test above this one leaves the publish token sitting right there to reach for by
     // habit — using it here would make this test blind to a broken or revoked read token,
     // which is the credential this path actually depends on in production.
+    //
+    // The index URL is derived from $context['base_url'] via E2eStack::pipIndexUrl(), not
+    // spelled out as a literal `app:8080/r/e2e-customer/e2e-registry` — Composer's and
+    // npm's tests already read base_url directly, and a slug changed in the seeder should
+    // not require echoing it by hand into a third file.
+    $indexUrl = E2eStack::pipIndexUrl($context['read_token']);
+
     $script = <<<SH
         set -e
         rm -rf /work/venv && python -m venv /work/venv
         /work/venv/bin/pip install --no-cache-dir --quiet \
-            --index-url http://x:{$context['read_token']}@app:8080/r/e2e-customer/e2e-registry/simple \
+            --index-url {$indexUrl} \
             --trusted-host app \
             {$context['python_package']}=={$context['version']}
         /work/venv/bin/python -c "import {$context['python_module']}; print({$context['python_module']}.__version__)"
@@ -71,10 +78,12 @@ it('refuses an anonymous pip index read with 401 and installs nothing', function
     // hits EOFError — which would otherwise glue straight onto the marker line below and
     // break the exact-match on it. Nothing about what the test proves depends on pip's
     // chatter, only on whether the import worked afterwards.
+    $indexUrl = E2eStack::pipIndexUrl();
+
     $script = <<<SH
         rm -rf /work/anonvenv /work/anoncache && python -m venv /work/anonvenv
         PIP_CACHE_DIR=/work/anoncache /work/anonvenv/bin/pip install --no-cache-dir --quiet \
-            --index-url http://app:8080/r/e2e-customer/e2e-registry/simple \
+            --index-url {$indexUrl} \
             --trusted-host app \
             {$context['python_package']} >/dev/null 2>&1 || true
         /work/anonvenv/bin/python -c "import {$context['python_module']}" 2>/dev/null && echo IMPORTED || echo ABSENT
