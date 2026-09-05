@@ -3,24 +3,15 @@
 use Tests\E2E\Support\E2eStack;
 
 /**
- * `npm publish` and `npm install` against a registry whose auth is a bearer token. The npm
- * config key is keyed by the registry's own path, so it carries the full base URL minus the
- * scheme.
- *
- * The registry URL is normalized to a trailing slash before deriving that key. npm's own
- * nerf-dart algorithm (`@npmcli/config`'s `nerfDart()`) resolves the credential key by
- * taking the URL's directory — `new URL('.', registry)` — so a registry URL without a
- * trailing slash treats its last path segment as a filename and drops it: the auth key
- * `npm config set` ends up keyed one path segment shorter than the URL npm actually requests
- * against, and every request is sent unauthenticated. Confirmed against the real client:
- * without the trailing slash, `npm publish` failed with ENEEDAUTH even though the token was
- * set under what looked like the matching key.
+ * `npm publish` and `npm install` against a registry whose auth is a bearer token. The auth
+ * key itself comes from `E2eStack::npmAuthKey()` — see there for why it needs a trailing
+ * slash on the registry URL to line up with what npm's nerf-dart algorithm looks up.
  */
 function npmScript(string $body): string
 {
     $context = E2eStack::context();
     $registry = rtrim($context['base_url'], '/').'/';
-    $authKey = str_replace('http:', '', $registry).':_authToken';
+    $authKey = E2eStack::npmAuthKey();
 
     return <<<SH
         set -e
@@ -86,7 +77,6 @@ it('refuses an anonymous npm install with 401 and installs nothing', function ()
     // install and pass for the wrong reason.
     $script = <<<SH
         rm -rf /work/anon && mkdir -p /work/anon && cd /work/anon
-        npm config delete '{$context['npm_package']}' > /dev/null 2>&1 || true
         rm -f /root/.npmrc
         npm init -y > /dev/null
         npm install {$context['npm_package']} --registry {$context['base_url']} --no-audit --no-fund || true
@@ -95,5 +85,14 @@ it('refuses an anonymous npm install with 401 and installs nothing', function ()
 
     $process = E2eStack::exec('client-npm', $script);
 
-    expect(trim($process->getOutput()))->toEndWith('0');
+    // Equality on the final line, not a suffix match on the whole output: `toEndWith('0')`
+    // would also accept "10", "20" or "100" — a suffix match on a numeric string proves
+    // nothing about the actual count. `ls | wc -l` is the last line npm's own chatter
+    // leaves behind, so that line, trimmed, is compared for exact equality.
+    $lines = array_values(array_filter(
+        array_map('trim', explode("\n", $process->getOutput())),
+        fn (string $line): bool => $line !== '',
+    ));
+
+    expect(end($lines))->toBe('0');
 });

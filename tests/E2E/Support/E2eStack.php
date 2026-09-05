@@ -68,6 +68,29 @@ final class E2eStack
     }
 
     /**
+     * The npm config key under which the auth token for this registry must be set.
+     *
+     * npm's own nerf-dart algorithm (`@npmcli/config`'s `nerfDart()`) resolves the
+     * credential key by taking the URL's directory — `new URL('.', registry)` — so a
+     * registry URL without a trailing slash treats its last path segment as a filename and
+     * drops it: the auth key would end up keyed one path segment shorter than the URL npm
+     * actually requests against, and every request goes out unauthenticated. Confirmed
+     * against the real client: without the trailing slash, `npm publish` failed with
+     * ENEEDAUTH even though the token was set under what looked like the matching key.
+     *
+     * Centralized here rather than duplicated per test file: two independent copies of a
+     * rule that was found by experiment, and that fails silently (ENEEDAUTH, not a config
+     * error) when wrong, is exactly the shape that drifts the next time someone touches it.
+     * Task 6 needs the identical key against the identical registry.
+     */
+    public static function npmAuthKey(): string
+    {
+        $registry = rtrim(self::context()['base_url'], '/').'/';
+
+        return str_replace('http:', '', $registry).':_authToken';
+    }
+
+    /**
      * A direct read of the registry from the host, over the published loopback port. Used
      * for the assertions the clients cannot make — above all the refusal tests, which have
      * to establish that the answer was 401 and not merely that a command failed.
