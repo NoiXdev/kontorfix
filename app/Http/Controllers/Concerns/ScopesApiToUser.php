@@ -117,8 +117,13 @@ trait ScopesApiToUser
 
     /**
      * Aborts 403 unless every submitted package is owned by the organization it is being
-     * attached into. A package owned elsewhere is refused, otherwise attaching it would
-     * grant write access to it through assertCanWritePackage().
+     * attached into, or is shared. A package owned elsewhere is refused, otherwise attaching
+     * it would grant write access to it through assertCanWritePackage().
+     *
+     * WHO may hand out a shared package is a separate question, asked by
+     * {@see GuardsPackageAttachment::assertSharedAssignmentsUnchanged()} over the registry's
+     * resulting assignment set — it cannot be answered here, because this method sees the
+     * submission and not what the registry already carries.
      *
      * Checked against the target organization specifically, not the caller's broader
      * administered set: a key owner who administers several organizations must not be

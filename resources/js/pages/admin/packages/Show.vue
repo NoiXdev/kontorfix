@@ -2,6 +2,7 @@
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -96,6 +97,7 @@ const props = defineProps<{
         abandoned_at: string | null;
         replacement_package: string | null;
         abandonment_reason: string | null;
+        shared: boolean;
     };
     versions: VersionRow[];
     pythonDists: PythonDistRow[];
@@ -104,6 +106,10 @@ const props = defineProps<{
     sharedElsewhere: number;
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
+    // Whether the viewer holds the share-packages ability — passed from the server rather
+    // than re-derived here, since the rule behind it (super-admin, or an operator-org
+    // maintainer once the instance setting allows it) is not something the client knows.
+    canSharePackages: boolean;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -207,6 +213,15 @@ function saveAbandonment() {
         .put(route('admin.packages.abandonment', props.package.id), { preserveScroll: true });
 }
 
+// --- Shared ---
+// Rendered at all only when props.canSharePackages — the capability the server passed,
+// not a rule re-derived here (see the prop's doc comment above).
+const sharedForm = useForm({ shared: props.package.shared });
+
+function saveShared() {
+    sharedForm.put(route('admin.packages.shared', props.package.id), { preserveScroll: true });
+}
+
 // The displayed sync status. Local state, so neither source below mutates the prop.
 //
 // The broadcast used to be the only source, and it is the one that can be missed: creating
@@ -256,6 +271,11 @@ useOperatorChannel({
                     <h1 class="font-mono text-2xl font-semibold">{{ props.package.name }}</h1>
                     <TypeBadge :type="props.package.type" />
                     <StatusPill :status="syncStatus" />
+                    <!-- Spec §6 wants the marker on the detail page, not only in the listing.
+                         Here rather than only on the toggle further down: that toggle renders
+                         behind `canSharePackages`, so without this an operator who may not
+                         change the flag saw no sign the package was shared at all. -->
+                    <SharedBadge v-if="props.package.shared" />
                 </div>
                 <p v-if="props.package.description" class="max-w-2xl text-sm text-muted-foreground">
                     {{ props.package.description }}
@@ -602,6 +622,28 @@ useOperatorChannel({
 
                         <div>
                             <Button type="submit" :disabled="abandonmentForm.processing">Speichern</Button>
+                        </div>
+                    </form>
+
+                    <form
+                        v-if="props.canSharePackages"
+                        class="mt-4 flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
+                        @submit.prevent="saveShared"
+                    >
+                        <label class="flex items-start gap-2 text-sm">
+                            <Switch v-model="sharedForm.shared" class="mt-1" />
+                            <span>
+                                Für andere Organisationen freigeben
+                                <span class="block text-xs text-muted-foreground">
+                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der
+                                    besitzenden Organisation. Nur für Pakete der Betreiber-Organisation möglich.
+                                </span>
+                            </span>
+                        </label>
+                        <p v-if="sharedForm.errors.shared" class="text-sm text-destructive">{{ sharedForm.errors.shared }}</p>
+
+                        <div>
+                            <Button type="submit" :disabled="sharedForm.processing">Speichern</Button>
                         </div>
                     </form>
                 </TabsContent>

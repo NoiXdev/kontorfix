@@ -9,6 +9,7 @@ use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Http\Resources\Api\GroupResource;
 use App\Models\Group;
+use App\Services\Package\SharedAssignment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -31,13 +32,23 @@ class GroupController extends Controller
         return new GroupResource($group);
     }
 
-    public function store(StoreGroupRequest $request): JsonResponse
+    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment): JsonResponse
     {
         $organizationId = $this->resolveWriteOrg($request->validated('organization_id'));
 
         // Never let a registry be seeded with another organization's packages.
         $packageIds = $request->validated('package_ids', []);
         $this->assertCanAttachPackages($packageIds, $organizationId);
+
+        // …and never with a shared package the caller may not hand out. The registry does not
+        // exist yet, so it carries nothing and every shared package in the submission is one
+        // this write ADDS. Mirrors Admin\GroupController::store().
+        $this->assertSharedAssignmentsUnchanged([], $packageIds);
+
+        // …and never leaving the registry serving a shared package beside an own one of
+        // the same name. The registry starts empty, so its post-state is the submission.
+        // Before the insert, so a refusal leaves no empty registry behind.
+        $sharedAssignment->assertReplacementAssignable($packageIds);
 
         $group = Group::create([
             'name' => $request->validated('name'),

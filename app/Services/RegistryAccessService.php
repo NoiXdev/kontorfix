@@ -7,7 +7,6 @@ use App\Models\Group;
 use App\Models\GroupPackage;
 use App\Models\Package;
 use App\Models\RegistryToken;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
@@ -104,32 +103,47 @@ class RegistryAccessService
     }
 
     /**
-     * The single place for the expiry predicate of the group assignment — and for the
-     * ownership predicate that goes with it.
+     * The single place for the ownership predicate of the group assignment — and the one
+     * caller-facing statement of the expiry predicate, which the relation itself carries.
      *
-     * Constrained to the addressed registry's organization for the same reason findLocal()
-     * and the PyPI read paths are: the pivot row records *assignment*, and canAccessPackage()
-     * checks assignment and group access — neither compares the package's organization to the
-     * registry's. A cross-organization pivot row would therefore be served here, and this
-     * method feeds packagesFor() (Composer's `available-packages` index), packageBelongsToGroup()
-     * (the npm publish membership check) and canAccessPackage() (every ecosystem's access
-     * check). Without the constraint a registry with no Composer upstream listed another
-     * tenant's package *name* in available-packages — name disclosure, not content, since
-     * findLocal() still refused to serve it.
+     * Constrained to the addressed registry's organization — or shared — for the same reason
+     * findLocal() and the PyPI read paths are: the pivot row records *assignment*, and
+     * canAccessPackage() checks assignment and group access — neither compares the package's
+     * organization to the registry's. A cross-organization pivot row would therefore be served
+     * here, and this method feeds packagesFor() (Composer's `available-packages` index),
+     * packageBelongsToGroup() (the npm publish membership check) and canAccessPackage() (every
+     * ecosystem's access check). Without the constraint a registry with no Composer upstream
+     * listed another tenant's package *name* in available-packages — name disclosure, not
+     * content, since findLocal() still refused to serve it.
      *
-     * The enforcement migration now refuses to complete while such a row exists, so this
-     * should never match anything; it is stated anyway, because an invariant that only the
-     * read paths spell out one by one is one edit from being lost.
+     * A shared package is exactly the cross-organization row this refused, and now the one
+     * kind that is legitimate: it is owned by the operator organization rather than by a
+     * tenant (spec §1) and is deliberately offered to others. The pivot row is still what
+     * grants access — an unassigned shared package appears in no registry.
+     *
+     * The enforcement migration is not what holds the non-shared half. It refuses on ANY
+     * cross-organization row, shared or not — it has no `shared` clause and exempts nothing —
+     * and it runs once, before `packages.shared` exists, so it constrains the data at that one
+     * moment and says nothing about rows written afterwards. Every shared assignment this method
+     * exists to serve is such a row. So the non-shared half is held by the write paths alone
+     * (GuardsPackageAttachment), and stated here as well, because an invariant that only the read
+     * paths spell out one by one is one edit from being lost.
+     *
+     * The operational consequence is an operator's rather than this method's: rolling the schema
+     * back past 2026_09_03_120000_add_shared_to_packages.php drops the column while the shared
+     * assignments stay behind, so re-running the enforcement migration from there aborts and names
+     * every one of them as a violation. Recorded in docs/development.md, "Shared packages".
      *
      * @return BelongsToMany<Package, Group, GroupPackage>
      */
     private function availablePackages(Group $group): BelongsToMany
     {
-        return $group->packages()
-            ->where('packages.organization_id', $group->organization_id)
-            ->where(function (Builder $q) {
-                $q->whereNull('group_package.available_until')
-                    ->orWhere('group_package.available_until', '>', now());
-            });
+        // The expiry predicate itself lives on the relation (Group::assignedPackages), so
+        // the attach-time guard asks the same question of a row that this read path does.
+        // Columns qualified because the relation query joins `group_package`.
+        return $group->assignedPackages()
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true));
     }
 }

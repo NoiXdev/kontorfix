@@ -20,6 +20,7 @@ interface Pkg {
     id: string;
     name: string;
     type: 'composer' | 'npm' | 'python';
+    shared: boolean;
 }
 
 interface OrgOption {

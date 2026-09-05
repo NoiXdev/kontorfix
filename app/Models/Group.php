@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Database\Factories\GroupFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -93,6 +94,52 @@ class Group extends Model
         return $this->belongsToMany(Package::class)
             ->using(GroupPackage::class)
             ->withPivot('version_constraint', 'available_until');
+    }
+
+    /**
+     * The assignments that are actually in force: `available_until` makes an assignment
+     * time-limited, and an expired row serves nothing.
+     *
+     * The one statement of that predicate. RegistryAccessService decides what a registry
+     * serves with it, App\Services\Package\SharedAssignment decides whether a name is
+     * already taken with it, and App\Http\Controllers\Registry\PypiController decides
+     * through it which project a twine upload may target — questions that must never be able
+     * to disagree about whether a given row counts.
+     *
+     * `available_until` HAS EXACTLY ONE WRITER: Admin\GroupController::updateAssignment(),
+     * the assignment dialog's date field (spec §6). Everything else only reads the column.
+     *
+     * That writer asks SharedAssignment before it writes, and it has to. SharedAssignment's
+     * tolerance of expired rows — it permits assigning or creating a customer's own package
+     * under a name only a lapsed shared assignment used to serve — is safe only while an
+     * expired assignment stays expired. Pushing one back into the future reverses that
+     * decision retroactively and reaches the collision the attach guard refuses, through a
+     * request that changes no pivot membership at all and so passes none of the six
+     * membership writers' guards. Extending an assignment is an assignment.
+     *
+     * ANY FURTHER WRITER OF THIS COLUMN MUST DO THE SAME. The reasoning above is a property
+     * of the column, not of the controller that happens to hold the form today.
+     *
+     * Separately, and NOT an entry point of that guard — the counts above are about
+     * SharedAssignment's three, and these add none — this relation has *dependents* that a
+     * date pushed back into the future reopens:
+     *   - PypiController::upload() resolves its target project through this relation and
+     *     through nothing else, never reaching canAccessPackage(), so it is a publish path
+     *     and not only a read path. npm's equivalent reaches the same relation through
+     *     RegistryAccessService::packageBelongsToGroup().
+     *   - Admin\GroupController::show() reports per assignment whether the registry serves
+     *     it, decided here rather than by comparing dates in the payload or the browser: a
+     *     second statement of the predicate could disagree with what the registry does, and
+     *     the console disagreeing with the registry about exactly this is what made an
+     *     expired assignment look live on that page.
+     *
+     * @return BelongsToMany<Package, $this, GroupPackage>
+     */
+    public function assignedPackages(): BelongsToMany
+    {
+        return $this->packages()->where(fn (Builder $q) => $q
+            ->whereNull('group_package.available_until')
+            ->orWhere('group_package.available_until', '>', now()));
     }
 
     /**

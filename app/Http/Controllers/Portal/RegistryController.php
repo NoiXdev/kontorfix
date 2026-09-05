@@ -31,7 +31,13 @@ class RegistryController extends Controller
             ->where('portal_enabled', true)
             // `organization` too: RegistryUrl::path() reads its slug, and this is a loop.
             ->with(['domains', 'organization'])
-            ->withCount('packages')
+            // assignedPackages(), not packages(): this count is the customer's answer to
+            // "what is in this registry", and an assignment past its `available_until`
+            // serves nothing. Counting the pivot rows made a lapsed share look live here
+            // while `composer install` answered 404 — the same console-disagrees-with-the-
+            // registry defect `in_force` was added to fix on the admin page, on the page the
+            // customer actually reads.
+            ->withCount('assignedPackages')
             ->orderBy('name')
             ->get();
 
@@ -41,7 +47,7 @@ class RegistryController extends Controller
                 'name' => $g->name,
                 'slug' => $g->slug,
                 'url' => $this->url->base($g),
-                'packages_count' => $g->packages_count,
+                'packages_count' => $g->assigned_packages_count,
             ]),
         ]);
     }
@@ -58,7 +64,11 @@ class RegistryController extends Controller
         // search/type filtering via useTableState (prefix 'pkg') — no server-side
         // pre-filter here, so there is no bare q/type param that could silently and
         // invisibly narrow the list with no way to see or reset it from the UI.
-        $packages = $group->packages()
+        //
+        // assignedPackages(): see index(). The portal must list what the registry serves —
+        // a lapsed assignment appeared here with its latest version and no marker of any
+        // kind, and this page has no "abgelaufen" badge to explain one.
+        $packages = $group->assignedPackages()
             ->with(['versions' => fn ($q) => $q->orderByDesc('released_at')])
             ->orderBy('packages.name')
             ->get();
@@ -94,7 +104,10 @@ class RegistryController extends Controller
     public function showPackage(Request $request, Group $group, Package $package): Response
     {
         $this->authorize('view', $group);
-        abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
+        // assignedPackages(): the detail page served the readme, the version list and the
+        // dependency tree for an assignment that had lapsed, while the registry answered 404
+        // for the same package. 404 here is the same answer the registry gives.
+        abort_unless($group->assignedPackages()->whereKey($package->id)->exists(), 404);
 
         $package->load('versions');
         $package->setRelation('versions', VersionOrder::sort($package->versions));

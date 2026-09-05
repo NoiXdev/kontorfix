@@ -688,6 +688,163 @@ Pakete/Registries/Nutzer entfernen)" instead of a raw `SQLSTATE[23503]` foreign-
 page. To delete an organization: remove or reassign its packages, delete its registries, remove
 its users, then delete the organization.
 
+### Shared packages
+
+A **shared package** lets one package serve several customers: the operator organization owns it,
+syncs it once and stores its artifacts once, and the operator hands it to each customer's registry
+individually. It widens the ownership invariant above by exactly one clause — a package may only be
+attached to registries of the organization that owns it, **unless it is shared** — and nothing else
+about that invariant is undone.
+
+A shared package is **owned and marked, never ownerless**: `packages.shared` is a boolean, `NOT
+NULL`, default `false`, and `organization_id` stays `NOT NULL`. The alternative is worth writing
+down because it looks right. A `NULL` owner could not be told apart from the orphan the enforcement
+migration above refuses to run over — the package any tenant who learns its id can claim — so the
+feature would reopen the hole v0.8.0 closed and remove the ability to distinguish the two. And
+Postgres does not collide `NULL`s in a unique index, so under `unique(organization_id, type, name)`
+two shared `composer/acme-tools` could exist side by side: the one category that has to be
+unambiguous instance-wide would be the only one with no uniqueness at all.
+
+**Sharing and assigning are two separate gates.** Marking a package shared makes it *eligible* to
+leave its organization; it appears in a customer's registry only once it is **assigned** to that
+registry, and in no other. There is no "shared with everybody" state and no exclusion list —
+exclusion is the absence of an assignment. A shared package is marked as such (badge "Geteilt") in
+the package listing and on the package detail page, in the registry's assignment table, and in the
+assignment picker, so an operator can see what they are handing over.
+
+Who may do what is deliberately split:
+
+- **Assigning a shared package to a registry, changing that assignment's availability, and
+  withdrawing it** all require administering the organization that owns the package — in practice
+  the operator organization, since only its packages can be shared. A customer's own admin may do
+  none of the three, on their own registry included: how long a customer keeps the operator's
+  package is the operator's decision, not theirs.
+- **A customer keeps full control of their own packages.** They assign, detach and re-date those as
+  before. What is refused is a write that would *change* which shared packages their registry
+  carries, so re-submitting the registry's whole package list with a shared package sitting in it
+  — the usual `PUT /api/v1/groups/{group}/packages` shape — is accepted and changes nothing.
+- **The assignment picker only offers shared packages whose owning organization the caller
+  administers**, so it never shows an operator's package to a customer admin who would then be
+  refused on submit.
+
+**Who may mark a package shared is an instance setting** on `admin/system`, with two values:
+
+| Value | Who may mark a package shared |
+|---|---|
+| `super_admin` (default) | Super-admins only |
+| `operator_maintainer` | Additionally, maintainers of the operator organization |
+
+An Admin whose home organization *is* the operator organization already counts as a super-admin in
+this application (`User::isSuperAdmin()` grandfathers that account in, on the grounds that it has
+always been the "can do everything" login). Such an admin may therefore share at **either** value:
+the permissive value adds maintainers, it does not add admins. This is why "admin of the operator
+organization" is not one of the two choices — it would name a population the strict value already
+includes, and the setting would be decorative. The labels on the page say so as well.
+
+**Only a super-admin can change the setting**, because `admin/system` sits behind the `super`
+middleware. The delegation therefore runs one way only: a super-admin may grant the capability to
+maintainers of the operator organization, and nobody can grant it to themselves.
+
+Marking a package shared is a console action (`PUT /admin/packages/{package}/shared`), split from
+the other package writes because it carries its own authorization rule. The JSON API has no
+equivalent, and no interface accepts `shared` when a package is *created* — a package always starts
+out non-shared and is shared afterwards, deliberately.
+
+**Only a package the operator organization owns may be shared.** Marking a customer-owned package
+shared is refused with *"Nur Pakete der Betreiber-Organisation können geteilt werden."* The reason
+is deletion rather than tidiness: a customer-owned shared package would leave that customer able to
+delete, from their own package page and with nothing on it saying anyone else depends on it, a
+package other customers' builds resolve through. Moving an existing package into the operator
+organization is not supported — create it there.
+
+**Sharing hands out reads, never writes.** The npm publish and PyPI upload paths resolve their
+target strictly within the addressed registry's *own* organization, so a customer's publish token
+is answered for a shared name exactly as it is for an unknown one (404). Without that, one
+customer's publish token could add a distribution to the operator's package and put that file into
+every other customer's build.
+
+**A customer's own package always wins a name collision** — but only among the packages that
+registry actually *serves*, so a customer's package assigned to some other registry never shadows a
+shared package the operator did assign here. Rather than being accepted and quietly shadowed, both
+directions of creating such a collision are refused:
+
+- Assigning a shared package into a registry that already serves an own package of that name:
+  *"Diese Registry führt bereits ein eigenes Paket mit demselben Namen: … Ein geteiltes Paket darf
+  ein eigenes nicht verdecken."*
+- Creating an own package under a name a shared assignment already serves in one of the registries
+  it is being attached to: *"Die Registry … führt dieses Paket bereits als geteiltes Paket.
+  Entfernen Sie es dort zuerst, oder wählen Sie einen anderen Namen."*
+
+**What to do when you meet either refusal:** decide which of the two that one registry should serve
+under that name. To leave the customer's own package in place, simply do not assign the shared one
+*there* — the refusal is per registry, and the shared package stays assigned everywhere else. To
+hand the customer the shared one instead, take their own package out of that registry; doing both
+in one submission is accepted, because the write that adds the shared row detaches the own row in
+the same step and the registry never serves both at once.
+
+The rule is measured over what a registry serves, not over what it lists, so an assignment whose
+availability has lapsed blocks nothing and a registry can end up carrying a lapsed shared row
+beside a live own row of the same name. That is a legitimate state — and it is what the next point
+is about.
+
+**Expiry fails closed, and this is the one an operator is most likely to misread.**
+`group_package.available_until` gives a time-limited share, editable per assignment on the registry
+page. It is a day and it is inclusive (stored as the last moment of that day); empty means
+unlimited. When the day has passed:
+
+- **The registry stops serving the package.** Composer, npm and pip get a 404 for it.
+- **The name stays blocked against the upstream.** The request is *not* forwarded to Packagist,
+  npmjs or PyPI.
+
+The second half is the surprising one, and it is deliberate. The customer demonstrably consumed
+that name from this registry — it is in their `composer.json` and their lock file — so if expiry
+opened the fallthrough, their next `composer update` would resolve the name from whoever holds it
+on the public index, with no act by anyone and nothing to say a substitution had happened. That is
+dependency confusion arriving through the passage of time, inside the guard built to prevent it. A
+lapsed share is therefore a loud build failure and not a quiet swap.
+
+**Detaching the assignment is the act that releases the name back to the upstream.** An explicit
+decision opens the fallthrough; a date passing does not. This is the one place where delivery and
+the upstream guard deliberately disagree, and they disagree because they answer different
+questions: *may this client have it* versus *could a public package silently take its place*.
+
+In practice:
+
+- **To withdraw a share safely, set the date — do not detach.** A date in the past is accepted and
+  is the point rather than an oversight: delivery ends immediately, the name stays blocked, and the
+  customer's build fails visibly. Detach only when that customer genuinely should resolve the name
+  from the public index again.
+- **A lapsed assignment stays listed on the registry page**, marked expired with its date and with
+  a note that explains the 404 in the same place the operator is looking. It has to stay visible:
+  detaching is the only thing that ends it, and an operator cannot detach a row the page hides.
+  Extending the date puts the assignment back in force.
+- **Detaching does not always release the name.** If the registry's own organization also owns a
+  package of that `(type, name)`, that package holds the name against the upstream by itself, with
+  or without an assignment; the name comes free only once no package of that organization carries
+  it any more. The registry page says which of the two cases a row is in rather than advising a
+  detach that would not help. For Python the comparison is PEP 503-normalised, so `Shared_Lib` and
+  `shared-lib` are the same name.
+
+**Un-sharing is refused while assignments to registries of other organizations still exist** —
+expired ones included — and the refusal names them: *"Dieses Paket ist noch der Registry … einer
+anderen Organisation zugewiesen. Entfernen Sie es dort zuerst."* Clearing the flag is the reverse
+of an attach: every cross-organization `group_package` row for the package turns back into a
+violation of the ownership rule — one the enforcement migration above refuses to run over — and the
+package would drop out of those registries silently, so the name falls through to the public index
+it was assigned there to pre-empt. Expired rows count for the same reason they count everywhere
+else on this path: it is the row's existence that suppresses the upstream. The destructive step
+stays explicit and stays the operator's, registry by registry, rather than being taken on their
+behalf.
+
+**The ownership enforcement migration is unchanged**, and still refuses *every* cross-organization
+`group_package` row, shared or not. That costs nothing on an upgrade: it runs before
+`packages.shared` exists, at a point in a fresh install's history where there are no rows for it to
+inspect. It matters in exactly one situation — rolling the schema back past
+`2026_09_03_120000_add_shared_to_packages.php` drops the `shared` column while the
+cross-organization rows it legitimises stay behind, so running the enforcement migration again from
+there aborts and names every shared assignment as a violation. Detach the shared assignments before
+rolling back that far, or roll forward again.
+
 ### Organization-scoped registry slugs
 
 The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is

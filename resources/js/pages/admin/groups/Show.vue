@@ -3,6 +3,7 @@ import InputError from '@/components/InputError.vue';
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import { Button } from '@/components/ui/button';
@@ -10,11 +11,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { cn } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Copy, Plus, Trash2 } from 'lucide-vue-next';
+import { CalendarClock, Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import {
+    availabilityLabel,
+    availabilityNote,
+    availabilityOf,
+    endsImmediately,
+    expiryConsequence,
+    immediateWithdrawalNote,
+    type AssignedPackage,
+    type NameHolding,
+} from './packageAssignment';
 
 interface GroupInfo {
     id: string;
@@ -33,12 +46,10 @@ interface GroupInfo {
     url_pattern: string;
 }
 
-interface PackageRow {
-    id: string;
-    name: string;
-    type: string;
-    sync_status: 'pending' | 'syncing' | 'synced' | 'failed';
-}
+// The assignment, not just the package: `shared` says whether other tenants receive it
+// too, and `available_until`/`in_force` say whether this registry actually serves it right
+// now. See `./packageAssignment` for what an expiry does — it is not what it looks like.
+type PackageRow = AssignedPackage;
 
 interface DomainRow {
     id: string;
@@ -89,6 +100,11 @@ const props = defineProps<{
     setup: Setup;
     stats: { downloads: number; storage_bytes: number; packages: number };
     activities: ActivityRow[];
+    // The application's own calendar day (`YYYY-MM-DD`), from the controller. Not derived
+    // from the browser clock: the application runs in UTC and a browser west of it is on
+    // the previous day for several hours, so the two would disagree about whether a chosen
+    // date has already passed.
+    today: string;
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -144,7 +160,7 @@ function save() {
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
-const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' }[]>([]);
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python'; shared: boolean }[]>([]);
 
 // Which ecosystems this registry actually hosts — drives the setup snippets shown.
 const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
@@ -224,6 +240,107 @@ const pageProps = usePage();
 // Attaching a hostname is operator-only server-side (routes/web.php) — a hostname is an
 // instance-wide, globally unique claim. Detaching stays with the owning organization.
 const canAttachDomain = computed(() => (pageProps.props.auth as { can?: { super?: boolean } } | undefined)?.can?.super === true);
+
+// --- Availability of a single assignment (group_package.available_until) ---
+//
+// One row at a time: the editor opens on the row it edits, seeded with the day that row
+// already carries. `editedUntil` is the raw `YYYY-MM-DD` of the date input; the empty string
+// is "no date", which the server is sent as null.
+const editingAssignment = ref<string | null>(null);
+const editedUntil = ref('');
+const savingAssignment = ref(false);
+
+// A date already in the past is allowed, and is the safe way to withdraw a share: delivery
+// stops at once while the name stays suppressed against the upstream, which detaching does
+// not do. The field has no lower bound, so the consequence is spelled out while the operator
+// is still choosing. The comparison lives in `./packageAssignment` and runs against the
+// SERVER's day, never the browser's.
+const withdrawsImmediately = computed(() => endsImmediately(editedUntil.value, props.today));
+
+// The row whose editor was last submitted. The error bag is page-wide, so without this a
+// refusal on one assignment would still be showing in the editor of the next row the
+// operator opens, against a package it says nothing about.
+const submittedAssignment = ref<string | null>(null);
+
+function editAvailability(pkg: PackageRow) {
+    editingAssignment.value = pkg.id;
+    editedUntil.value = pkg.available_until ?? '';
+}
+
+function cancelAvailability() {
+    editingAssignment.value = null;
+    editedUntil.value = '';
+    // Otherwise reopening the same row after cancelling brings back the refusal it was
+    // cancelled out of — stale rather than misleading, but there is nothing to say.
+    submittedAssignment.value = null;
+}
+
+/**
+ * Whether a second row follows this package's main row — the editor, or the consequence
+ * note. Stated once because the main row's separator and those two rows' `v-if`s have to
+ * agree; when they drifted apart the note rendered below the separator and read as the next
+ * package's.
+ */
+function hasBlockRow(pkg: PackageRow): boolean {
+    return editingAssignment.value === pkg.id || noteFor(pkg) !== null;
+}
+
+/**
+ * What the copy needs about this row: whether the organization already holds the name — the
+ * one thing in the text an operator can act on wrongly — and how to name the ecosystem, which
+ * the rule is per. The label comes from the PackageType enum through the shared composable,
+ * so the console names ecosystems in one place.
+ */
+// The PackageType enum's own labels, shared to the frontend via Inertia. Not a table here:
+// the console names ecosystems in one place.
+const { label: registryTypeLabel } = useRegistryTypes();
+
+function holdingFor(pkg: PackageRow): NameHolding {
+    return { ownedByRegistryOrg: pkg.owned_by_registry_org, type: pkg.type, typeLabel: registryTypeLabel(pkg.type) };
+}
+
+/** This row's consequence note. */
+function noteFor(pkg: PackageRow): string | null {
+    return availabilityNote(availabilityOf(pkg), holdingFor(pkg));
+}
+
+// The guard that refuses a name collision (App\Services\Package\SharedAssignment) keys its
+// refusal `package_ids` — the key every other writer of this pivot uses. It is not this
+// form's field name, but it is the guard's, and restating the rule under a second key would
+// be a second statement of it. The one sentence prepended here is context, not a second
+// statement: the guard's own text names the conflict and the remedy but not what was refused,
+// which on the attach path is obvious and here is not.
+//
+// Shown only on the row that was actually submitted; the error bag itself is page-wide.
+const assignmentErrors = computed(() => {
+    const errors =
+        submittedAssignment.value !== null && submittedAssignment.value === editingAssignment.value
+            ? (pageProps.props.errors as Record<string, string> | undefined)
+            : undefined;
+
+    return {
+        available_until: errors?.available_until,
+        collision:
+            errors?.package_ids === undefined ? undefined : `Die Verfügbarkeit der Zuweisung kann nicht geändert werden: ${errors.package_ids}`,
+    };
+});
+
+function saveAvailability(packageId: string) {
+    savingAssignment.value = true;
+    submittedAssignment.value = packageId;
+    router.put(
+        route('admin.groups.packages.update', [props.group.id, packageId]),
+        { available_until: editedUntil.value === '' ? null : editedUntil.value },
+        {
+            preserveScroll: true,
+            onSuccess: () => cancelAvailability(),
+            onFinish: () => {
+                savingAssignment.value = false;
+            },
+        },
+    );
+}
+
 const plainTextToken = computed(() => (pageProps.props.flash as { plainTextToken?: string } | undefined)?.plainTextToken ?? null);
 const tokenCalloutDismissed = ref(false);
 watch(plainTextToken, (v) => {
@@ -372,8 +489,8 @@ async function copyToken() {
                                 <p class="font-mono text-xs text-muted-foreground">{{ nextUrl }}</p>
                                 <p v-if="slugChanged" class="text-xs text-copper-hi">
                                     Der Slug ist Teil der Registry-Adresse. Nach dem Speichern antwortet
-                                    <span class="font-mono">{{ props.group.url }}</span> nicht mehr — bestehende Client-Konfigurationen müssen auf
-                                    die neue Adresse umgestellt werden.
+                                    <span class="font-mono">{{ props.group.url }}</span> nicht mehr — bestehende Client-Konfigurationen müssen auf die
+                                    neue Adresse umgestellt werden.
                                 </p>
                                 <p v-else class="text-xs text-muted-foreground">
                                     Der Slug ist der Registry-Endpunkt. Eine Änderung wird vor dem Speichern noch einmal bestätigt.
@@ -413,35 +530,130 @@ async function copyToken() {
                                         <th class="px-4 py-3 font-medium">Name</th>
                                         <th class="px-4 py-3 font-medium">Typ</th>
                                         <th class="px-4 py-3 font-medium">Status</th>
+                                        <th class="px-4 py-3 font-medium">Verfügbarkeit</th>
                                         <th class="px-4 py-3 font-medium">Aktionen</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr
-                                        v-for="pkg in props.packages"
-                                        :key="pkg.id"
-                                        class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
-                                    >
-                                        <td class="px-4 py-3 font-mono">
-                                            <Link :href="route('admin.packages.show', pkg.id)" class="hover:underline">
-                                                {{ pkg.name }}
-                                            </Link>
-                                        </td>
-                                        <td class="px-4 py-3">{{ pkg.type }}</td>
-                                        <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
-                                        <td class="px-4 py-3">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                aria-label="Paket aus Registry entfernen"
-                                                @click="removePackage(pkg.id)"
+                                    <template v-for="pkg in props.packages" :key="pkg.id">
+                                        <!-- The separator belongs to the LAST row of this package's block, so
+                                             the main row gives it up whenever the note or the editor follows it.
+                                             Keeping it here would put the red 404 explanation below a separator,
+                                             where it reads as belonging to the next package — an outage warning
+                                             attributed to the wrong package is worse than none. -->
+                                        <tr
+                                            :class="
+                                                hasBlockRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'
+                                            "
+                                        >
+                                            <td class="px-4 py-3 font-mono">
+                                                <!-- Same rule as the row actions below, for the same reason: an
+                                                     operator who may not manage this assignment is not permitted on
+                                                     the package page either, so a link there answers 403. Offering
+                                                     it and refusing it is the defect the hidden actions avoid; the
+                                                     name is still shown, because they are entitled to know what
+                                                     their registry carries — only not to open it. -->
+                                                <div class="flex items-center gap-2">
+                                                    <Link v-if="pkg.manageable" :href="route('admin.packages.show', pkg.id)" class="hover:underline">
+                                                        {{ pkg.name }}
+                                                    </Link>
+                                                    <span v-else>{{ pkg.name }}</span>
+                                                    <SharedBadge v-if="pkg.shared" />
+                                                </div>
+                                            </td>
+                                            <td class="px-4 py-3">{{ pkg.type }}</td>
+                                            <td class="px-4 py-3"><StatusPill :status="pkg.sync_status" /></td>
+                                            <td class="px-4 py-3">
+                                                <!-- The whole point of this column: an assignment past its date used
+                                                     to look exactly like a live one here, while the registry served
+                                                     nothing and the customer's build got a 404. -->
+                                                <span
+                                                    :class="
+                                                        cn(
+                                                            'inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium',
+                                                            pkg.in_force
+                                                                ? 'border-sidebar-border/70 text-muted-foreground dark:border-sidebar-border'
+                                                                : 'border-destructive/30 bg-destructive/10 text-destructive',
+                                                        )
+                                                    "
+                                                >
+                                                    {{ availabilityLabel(availabilityOf(pkg)) }}
+                                                </span>
+                                            </td>
+                                            <td class="px-4 py-3">
+                                                <!-- Hidden rather than disabled for an assignment this operator may not
+                                                     manage: both actions answer 403, and the registry's own admin is not
+                                                     the one who decides whether their customer keeps a shared package.
+                                                     The label names the OWNING organization, not the operator: the guard
+                                                     asks about the package's `organization_id`, and only the sharing gate
+                                                     asks about `is_operator`. Identical today, but a label promising
+                                                     something the rule does not check is how copy starts drifting. -->
+                                                <div v-if="pkg.manageable" class="flex items-center gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        :aria-label="`Verfügbarkeit von ${pkg.name} bearbeiten`"
+                                                        @click="editingAssignment === pkg.id ? cancelAvailability() : editAvailability(pkg)"
+                                                    >
+                                                        <CalendarClock class="size-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        aria-label="Paket aus Registry entfernen"
+                                                        @click="removePackage(pkg.id)"
+                                                    >
+                                                        <Trash2 class="size-4 text-destructive" />
+                                                    </Button>
+                                                </div>
+                                                <span v-else class="text-xs text-muted-foreground">Von der Eigentümer-Organisation verwaltet</span>
+                                            </td>
+                                        </tr>
+                                        <!-- What this assignment currently means for the customer. Shown without
+                                             opening the editor, because the operator reading a failing build needs
+                                             the diagnosis, not a form. -->
+                                        <tr
+                                            v-if="noteFor(pkg) && editingAssignment !== pkg.id"
+                                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                        >
+                                            <td
+                                                colspan="5"
+                                                class="px-4 pb-3 text-xs"
+                                                :class="pkg.in_force ? 'text-muted-foreground' : 'text-destructive'"
                                             >
-                                                <Trash2 class="size-4 text-destructive" />
-                                            </Button>
-                                        </td>
-                                    </tr>
+                                                {{ noteFor(pkg) }}
+                                            </td>
+                                        </tr>
+                                        <tr
+                                            v-if="editingAssignment === pkg.id"
+                                            class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                                        >
+                                            <td colspan="5" class="px-4 pb-4">
+                                                <div class="flex flex-col gap-2">
+                                                    <Label :for="`available-until-${pkg.id}`">Verfügbar bis (leer = unbefristet)</Label>
+                                                    <!-- No `min`: a date already past is legitimate, and is the only
+                                                         way to say "stop delivering now, keep the name blocked". -->
+                                                    <Input :id="`available-until-${pkg.id}`" v-model="editedUntil" type="date" class="max-w-xs" />
+                                                    <p class="max-w-2xl text-xs text-muted-foreground">
+                                                        {{ expiryConsequence(holdingFor(pkg)) }}
+                                                    </p>
+                                                    <p v-if="withdrawsImmediately" class="max-w-2xl text-xs text-copper-hi">
+                                                        {{ immediateWithdrawalNote(holdingFor(pkg)) }}
+                                                    </p>
+                                                    <InputError :message="assignmentErrors.available_until" />
+                                                    <InputError :message="assignmentErrors.collision" />
+                                                    <div class="flex gap-2">
+                                                        <Button size="sm" :disabled="savingAssignment" @click="saveAvailability(pkg.id)">
+                                                            Speichern
+                                                        </Button>
+                                                        <Button variant="outline" size="sm" @click="cancelAvailability">Abbrechen</Button>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </template>
                                     <tr v-if="props.packages.length === 0">
-                                        <td colspan="4" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
+                                        <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">Noch keine Pakete in dieser Registry.</td>
                                     </tr>
                                 </tbody>
                             </table>

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Enums\SharedPackageRole;
 use App\Enums\UserRole;
 use App\Events\PackageSynced;
 use App\Events\PackageSyncFailed;
@@ -9,6 +10,8 @@ use App\Events\WebhookDeliveryFailed;
 use App\Listeners\DispatchOutgoingWebhooks;
 use App\Listeners\LogAuthenticationEvent;
 use App\Listeners\RecordNotificationEvent;
+use App\Models\Organization;
+use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Upstream\HostResolver;
@@ -187,6 +190,39 @@ class AppServiceProvider extends ServiceProvider
         // it exposes the internal management API.
         Gate::define('viewApiDocs', function (User $user): bool {
             return $user->role === UserRole::Admin && (bool) $user->organization?->is_operator;
+        });
+
+        // Who may mark a package as shared, per the instance setting. A super-admin always
+        // may; a maintainer of the operator organization only when the setting says so. A
+        // plain organization admin never may — a shared package is served into other
+        // tenants' registries, which is not theirs to decide.
+        //
+        // Deliberately not an admin check: an admin whose home organization is the operator
+        // organization is already a super-admin via User::isSuperAdmin()'s grandfather
+        // clause (role === Admin && organization?->is_operator), so that population already
+        // bypasses this gate through Gate::before before the closure below ever runs — see
+        // SharedPackageRole's docblock. A maintainer of the operator organization is the
+        // tier that genuinely sits below super-admin.
+        //
+        // User::roleIn() covers both shapes a maintainer of the operator organization can
+        // take with one check: a Maintainer whose home organization IS the operator
+        // organization (roleIn returns $user->role directly once isSuperAdmin() is ruled
+        // out), and a Maintainer role granted through an additional-organization membership
+        // on the operator organization (the organization_user pivot — see
+        // PerOrgRoleScopeTest). Confirmed by reading roleIn(), not assumed.
+        Gate::define('share-packages', function (User $user): bool {
+            if ($user->isSuperAdmin()) {
+                return true;
+            }
+
+            if (SystemSetting::current()->shared_package_role !== SharedPackageRole::OperatorMaintainer) {
+                return false;
+            }
+
+            return Organization::query()
+                ->where('is_operator', true)
+                ->pluck('id')
+                ->contains(fn (string $operatorOrgId): bool => $user->roleIn($operatorOrgId) === UserRole::Maintainer);
         });
     }
 }

@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import InputError from '@/components/InputError.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -11,8 +14,12 @@ const props = defineProps<{
     settings: {
         registration_enabled: boolean;
         enabled_registry_types: string[];
+        shared_package_role: string;
     };
     registryTypes: string[];
+    // Both values with their German labels, from App\Enums\SharedPackageRole::options().
+    // The two cases are stated once, in PHP, because the gate reads the same enum.
+    sharedPackageRoles: { value: string; label: string }[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'System', href: '/admin/system' }];
@@ -20,6 +27,7 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'System', href: '/admin/system' 
 const form = useForm({
     registration_enabled: props.settings.registration_enabled,
     enabled_registry_types: [...props.settings.enabled_registry_types],
+    shared_package_role: props.settings.shared_package_role,
 });
 
 function toggleType(type: string, on: boolean) {
@@ -73,6 +81,23 @@ function save() {
                             <span class="font-mono">{{ type }}</span>
                         </label>
                     </div>
+                </div>
+
+                <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                    <h2 class="text-sm font-medium">Pakete freigeben</h2>
+                    <p class="mb-3 text-xs text-muted-foreground">
+                        Wer ein Paket der Betreiber-Organisation für andere Organisationen freigeben darf. Ein freigegebenes („geteiltes“) Paket lässt
+                        sich jeder Registry der Instanz zuweisen, nicht nur denen der besitzenden Organisation. Diese Einstellung ändern kann
+                        ausschließlich ein Super-Admin — sonst könnte sich jemand die Berechtigung selbst erteilen.
+                    </p>
+                    <Label for="shared_package_role" class="mb-1.5 block">Berechtigung zum Freigeben</Label>
+                    <SearchableSelect
+                        id="shared_package_role"
+                        v-model="form.shared_package_role"
+                        class="max-w-md"
+                        :options="props.sharedPackageRoles"
+                    />
+                    <InputError :message="form.errors.shared_package_role" />
                 </div>
 
                 <div>

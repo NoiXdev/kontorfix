@@ -88,6 +88,48 @@ function adminOf(Organization $org): User
 }
 
 /**
+ * A maintainer of the given organization — a plain (non-operator) org maintainer.
+ *
+ * Added for the share-packages gate's regression coverage: a Maintainer of an ordinary
+ * customer organization must never satisfy `roleIn($anyOperatorOrgId) === Maintainer`, since
+ * the gate iterates every is_operator organization and asks that question of the caller.
+ * Declared here rather than in the test file for the same reason as the other helpers above:
+ * a top-level function only exists once its declaring file has been required, so a test file
+ * using it would fail to run standalone if it lived in just one test file.
+ */
+function maintainerOf(Organization $org): User
+{
+    return User::factory()->for($org)->create(['role' => UserRole::Maintainer]);
+}
+
+/**
+ * A maintainer of the operator organization — the tier `share-packages` actually
+ * delegates to when `shared_package_role` is widened, per SharedPackageRole's docblock.
+ *
+ * Given the straightforward shape (home organization IS the operator organization, role
+ * Maintainer): unlike the admin tier, `UserRole::Maintainer` never trips
+ * `User::isSuperAdmin()`'s grandfather clause (`role === Admin && organization?->is_operator`
+ * — Maintainer never satisfies `role === Admin`), so this is a real, reachable population
+ * distinct from superAdmin(), with no need for the pivot-membership workaround the
+ * admin-tier version of this helper required. `User::roleIn()` returns `$user->role`
+ * directly for the home organization once isSuperAdmin() is ruled out, so this resolves to
+ * UserRole::Maintainer exactly as the gate expects.
+ *
+ * A pivot-membership variant (Maintainer role on the operator organization via an
+ * additional, non-home membership) would also satisfy the gate — roleIn() covers that shape
+ * too, see AppServiceProvider's share-packages gate — but no test here needs to exercise
+ * that path, so it is dropped in favour of this simpler, more representative shape.
+ *
+ * Declared here rather than locally for the same reason as superAdmin()/adminOf() above:
+ * a top-level function only exists once its declaring file has been required, so a test
+ * file using it would fail to run standalone if it lived in just one test file.
+ */
+function operatorMaintainer(): User
+{
+    return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Maintainer]);
+}
+
+/**
  * A registry in the user's own organization, to be passed as the mandatory `group_ids` of a
  * package create. Creating a package into no registry is refused (StorePackageRequest): the
  * row would burn its instance-global name while being invisible to its own creator.

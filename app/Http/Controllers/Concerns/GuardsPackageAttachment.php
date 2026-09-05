@@ -2,33 +2,105 @@
 
 namespace App\Http\Controllers\Concerns;
 
+use App\Models\Group;
 use App\Models\Package;
+use App\Models\User;
+use Illuminate\Support\Facades\Auth;
 
 /**
- * The one implementation of the cross-tenant attach check.
+ * The cross-tenant assignment checks, and the two INDEPENDENT questions every write that
+ * touches `group_package` has to ask.
  *
- * A package is owned by an organization outright (`packages.organization_id`), so this is
- * a comparison rather than a reconstruction. It used to re-derive ownership from the
+ * 1. MAY THIS ROW EXIST AT ALL? — {@see assertPackagesReachableIn}. v0.8.0's ownership rule:
+ *    a package may only be attached to registries of the organization that owns it. A
+ *    package marked `shared` is the one exception, because that flag exists to let an
+ *    operator-organization package leave its organization.
+ *
+ * 2. WHO MAY CHANGE WHO HAS IT? — {@see assertSharedAssignmentsUnchanged} and
+ *    {@see assertMayEditSharedAssignment}. Spec §4: sharing and assigning are two gates.
+ *    `shared` says a package MAY leave its organization; the assignment says which customer
+ *    actually receives it and until when, and the operator makes that decision per customer.
+ *
+ * The two are deliberately not merged. Question 1 is about the row, question 2 about the
+ * caller, and an earlier version of this task answered both inside `assertPackagesReachableIn`
+ * — which made a submission naming an ALREADY ASSIGNED shared package a refusal, because
+ * that method can only see the submission and not what the registry already carries. On the
+ * API's `sync()` endpoint, where the submission is the whole post-state, that left a customer
+ * admin unable to send any package list at all once the operator had placed a shared package
+ * in their registry: naming it was an attach they may not make, omitting it a detach they may
+ * not make. The rule below has no such blind spot because it is not stated over the
+ * submission.
+ *
+ * QUESTION 2, STATED OVER THE RESULTING SET RATHER THAN THE OPERATION:
+ *
+ *   the shared assignments a caller may not manage must be the SAME before and after
+ *   the write.
+ *
+ * Same shape, and for the same reason, as App\Services\Package\SharedAssignment: a rule
+ * phrased as "does this write add a shared package" has a DIRECTION and forgets the reverse —
+ * a `sync()` that drops one adds nothing and would satisfy it. A set comparison has no
+ * direction, so one predicate covers attach, detach, replace and swap, and each caller only
+ * has to say what its pivot operation leaves behind:
+ *
+ *   `sync($ids)`                   → the submission
+ *   `syncWithoutDetaching($ids)`   → the current assignment ∪ the submission
+ *   `detach($id)`                  → the current assignment ∖ {$id}
+ *   create-then-`sync($ids)`       → the submission (the registry starts empty)
+ *
+ * It also says exactly what spec §4 says and nothing more: a write that leaves the shared
+ * assignments as they were neither attaches a shared package nor edits one, so it is not the
+ * customer's to be refused.
+ *
+ * WHAT THE SET RULE DOES NOT COVER, and why the second method exists: `available_until` lives
+ * on the pivot row, not in the set of package ids, so re-dating an assignment leaves the
+ * resulting set identical and passes the comparison untouched. That is not an accident to be
+ * relied on — it is the other half of spec §4's sentence ("…and editing such an assignment's
+ * availability…") and it is asked separately, by {@see assertMayEditSharedAssignment}.
+ *
+ * Only an operator-organization package can be marked shared (Admin\PackageController::shared),
+ * so "administering the owner" is in practice administering the operator organization. Both
+ * methods nevertheless ask over the package's actual `organization_id`: it is the row's owner
+ * the exception is granted against, and a rule asking a different question would have to be
+ * kept in step with the sharing gate by hand.
+ *
+ * ONE WRITE OF `group_package` DELIBERATELY ASKS NEITHER, and it looks like a hole until the
+ * question is stated precisely: Admin\GroupController::destroy() deletes a registry, and the
+ * foreign key cascades away its pivot rows — so a customer admin who may not detach a single
+ * shared assignment may drop all of them at once. That is safe, and not merely tolerated.
+ * Question 2 is "who decides which customers receive this shared package", and a registry that
+ * no longer exists receives nothing and serves nobody: there is no client left to be cut off,
+ * and no name left suppressed against an upstream that anyone can still address. Deleting the
+ * registry the assignment lives in is not a way to take the assignment away from someone —
+ * it is the same act, one level up, and it is already guarded as such by
+ * assertAdministersGroup(). A guard here would only refuse the customer their own registry
+ * because the operator had put something in it.
+ *
+ * Neither question is the whole of the shared decision: a shared package may also not shadow
+ * a customer's own package of the same name. That refusal lives in
+ * App\Services\Package\SharedAssignment, is orthogonal to both, and must be asked separately
+ * by every caller that writes a `group_package` row.
+ *
+ * A package is owned by an organization outright (`packages.organization_id`), so question 1
+ * is a comparison rather than a reconstruction. It used to re-derive ownership from the
  * registries a package happened to be attached to, which could not answer for a package
- * attached to none: deleting a registry cascaded the pivot rows and left an orphan
- * claimable by any tenant who learned its id. Ownership survives the registries now, so
- * that case is simply a package owned by someone else.
- *
- * Both `assertCanAttachPackages()` callers (console and API) resolve the target
- * organization their own way — the console via the sidebar scope/`resolveCreationOrg()`,
- * the API via `resolveWriteOrg()` — but both pass this trait exactly the one organization
- * the attach targets, never the caller's broader reach. Attaching creates a `group_package`
- * row the enforcement migration requires to agree with `packages.organization_id`, so this
- * holds for every caller including a super-admin: there is no organization-spanning
- * exemption for the decision below, only for who may reach it.
+ * attached to none: deleting a registry cascaded the pivot rows and left an orphan claimable
+ * by any tenant who learned its id. Ownership survives the registries now, so that case is
+ * simply a package owned by someone else.
  */
 trait GuardsPackageAttachment
 {
     /**
-     * Aborts 403 unless every submitted package is owned by one of the given organizations.
-     * An empty `$orgIds` refuses every non-empty submission. `assertCanAttachPackages()` in
-     * both {@see ScopesToAdministeredOrgs} and {@see ScopesApiToUser} always calls this with
-     * exactly one — the organization being attached into.
+     * Aborts 403 unless every submitted package is owned by one of the given organizations,
+     * or is shared. Question 1 above, unchanged since the shared-packages feature landed —
+     * WHO may create such an assignment is question 2 and is not asked here.
+     *
+     * An empty `$orgIds` still refuses every non-empty submission of non-shared packages.
+     * `assertCanAttachPackages()` in both {@see ScopesToAdministeredOrgs} and
+     * {@see ScopesApiToUser} always calls this with exactly one — the organization being
+     * attached into, never the caller's broader reach. Attaching creates a `group_package`
+     * row the enforcement migration requires to agree with `packages.organization_id`, so
+     * this holds for every caller including a super-admin: there is no organization-spanning
+     * exemption for it, only for who may reach it.
      *
      * @param  array<int, string>  $packageIds
      * @param  array<int, string>  $orgIds
@@ -40,9 +112,206 @@ trait GuardsPackageAttachment
         }
 
         $foreign = Package::whereIn('id', $packageIds)
+            ->where('shared', false)
             ->whereNotIn('organization_id', $orgIds)
             ->exists();
 
         abort_if($foreign, 403);
+    }
+
+    /**
+     * Aborts 403 unless the shared assignments this caller may not manage are identical
+     * before and after the write. Question 2 above, in one directionless predicate.
+     *
+     * Both arguments are package-id sets for ONE registry: what it carries now, and what it
+     * would carry afterwards. The caller states the second from its own pivot operation (see
+     * the table in the class docblock) rather than this method guessing it, exactly as
+     * SharedAssignment's callers state their post-state.
+     *
+     * Shared packages the caller DOES administer are absent from both sides and so are
+     * unconstrained — an operator adds, moves and withdraws its own shared packages freely.
+     * Non-shared packages never appear on either side; they are question 1's business.
+     *
+     * Compared by identity and not by size: swapping one unmanageable shared package for
+     * another leaves the count alone and is exactly the write this rule exists to refuse.
+     * Both sides come back ordered by id and deduplicated by the database, so `!==` is a set
+     * comparison and a submission that names a package twice cannot fake a difference.
+     *
+     * THE PERMITTED RE-SUBMISSION RESTS ON A FRAMEWORK PROPERTY NOTHING ELSE STATES. Letting a
+     * caller name a shared package the registry already carries is only harmless because
+     * `sync()` and `syncWithoutDetaching()`, GIVEN A FLAT LIST OF IDS, insert the missing rows
+     * and delete the extra ones and write no columns on the rows that already exist. Handed
+     * pivot attributes instead — `sync([$id => ['available_until' => …]])` — they update every
+     * named row, and this method would go on saying "the set is unchanged" while the write
+     * re-dated an assignment: the second half of spec §4 circumvented through the first, by a
+     * caller the first half deliberately permits.
+     *
+     * That is not hypothetical. `group_package` already carries an unused `version_constraint`
+     * column, so the fuse is in the schema and only the endpoints are missing. Before any
+     * write path here accepts pivot attributes, {@see assertMayEditSharedAssignment} has to be
+     * asked for every named row as well. Pinned by the two "does not rewrite the availability
+     * of a re-submitted shared assignment" tests, which fail the moment a caller starts
+     * passing attributes.
+     *
+     * @param  array<int, string>  $currentPackageIds  what the registry carries now
+     * @param  array<int, string>  $resultingPackageIds  what it would carry after the write
+     */
+    protected function assertSharedAssignmentsUnchanged(array $currentPackageIds, array $resultingPackageIds): void
+    {
+        if ($this->administersEveryOrganization()) {
+            return;
+        }
+
+        $administeredOrgIds = $this->administeredOrganizationIds();
+
+        abort_if(
+            $this->unmanageableSharedPackageIds($currentPackageIds, $administeredOrgIds)
+                !== $this->unmanageableSharedPackageIds($resultingPackageIds, $administeredOrgIds),
+            403,
+        );
+    }
+
+    /**
+     * Aborts 403 if the given package is shared and owned by an organization the caller does
+     * not administer — the second half of spec §4's sentence, for a write that changes the
+     * ASSIGNMENT ROW rather than the set of assignments.
+     *
+     * Only `group_package.available_until` is such a write today. It leaves membership
+     * untouched, so {@see assertSharedAssignmentsUnchanged} accepts it and must: the set
+     * really is unchanged. Deciding how long a customer keeps the operator's package is
+     * nevertheless the operator's decision — in BOTH directions, since pushing a lapsed share
+     * back into force and ending a live one are the same write — so it is asked here instead.
+     *
+     * Reachability is not re-asked: the pivot row already exists, so it passed
+     * {@see assertPackagesReachableIn} when it was written.
+     */
+    protected function assertMayEditSharedAssignment(Package $package): void
+    {
+        if ($this->administersEveryOrganization()) {
+            return;
+        }
+
+        abort_if(
+            $this->unmanageableSharedPackageIds(
+                [(string) $package->getKey()],
+                $this->administeredOrganizationIds(),
+            ) !== [],
+            403,
+        );
+    }
+
+    /**
+     * The package ids a registry carries right now — the `$currentPackageIds` argument of
+     * {@see assertSharedAssignmentsUnchanged}, stated once because every caller that has an
+     * existing registry needs exactly this.
+     *
+     * `packages()`, not `assignedPackages()`: the rule is about the assignment ROW existing,
+     * not about whether the registry serves it today. A lapsed shared assignment is exactly
+     * as much the operator's to withdraw as a live one — and per spec §4 as amended it still
+     * suppresses the name against the upstream, so detaching it is still a decision with
+     * consequences for the customer. This is the same distinction
+     * Admin\PackageController::shared() draws when it refuses to un-share while any
+     * cross-organization row survives, expired or not, and deliberately unlike
+     * SharedAssignment, which asks what a registry SERVES.
+     *
+     * Not a stylistic choice and not left to review: swapping this for assignedPackages()
+     * would make a LAPSED shared assignment invisible on both sides of the comparison, so
+     * dropping one would read as no change at all — and detaching is the one act that
+     * releases the name back to the upstream. Pinned by the two "lapsed shared assignment"
+     * tests in tests/Feature/Admin/SharedAssignmentAuthorityTest.php, which were added
+     * because that mutation survived the first time it was run.
+     *
+     * @return list<string>
+     */
+    protected function currentAssignmentIds(Group $group): array
+    {
+        return $group->packages()->pluck('packages.id')
+            ->map(fn (mixed $id): string => (string) $id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Of the given packages, the shared ones owned outside `$administeredOrgIds` — the only
+     * rows either decision above turns on, so both are built from this one statement of
+     * "shared, and not this caller's to hand out".
+     *
+     * Ordered by id so two calls are comparable, and returned as ids rather than as a count
+     * or a boolean so the comparison can be an identity one.
+     *
+     * THE `shared` CLAUSE CANNOT BE PINNED ON ITS OWN, and that is a property of the ownership
+     * invariant rather than a gap. Replacing `true` with `false` makes this method answer `[]`
+     * for every real row, which reddens exactly the union of "delete the set comparison" and
+     * "delete the availability guard" (mutations N1, N6 and N8 of the task-6b report) — it
+     * disables both callers rather than changing what either refuses. Telling the two apart
+     * would need an existing assignment of a NON-shared package owned outside the caller's
+     * administration, and no such row is reachable: v0.8.0 lets a package be assigned only to
+     * registries of its own organization, un-sharing is refused while any cross-organization
+     * assignment survives, and anyone who administers a registry administers the organization
+     * that owns its non-shared packages. On the submitted side the unreachability also depends
+     * on {@see assertPackagesReachableIn} running FIRST at every call site — it is what refuses
+     * a foreign non-shared package before this helper ever sees the id. The clause is kept anyway — without it this method
+     * would silently widen both guards into a second statement of the ownership rule, which is
+     * neither what their names say nor what spec §4 asks of them.
+     *
+     * @param  array<int, string>  $packageIds
+     * @param  array<int, string>  $administeredOrgIds
+     * @return list<string>
+     */
+    private function unmanageableSharedPackageIds(array $packageIds, array $administeredOrgIds): array
+    {
+        if ($packageIds === []) {
+            return [];
+        }
+
+        return Package::whereIn('id', $packageIds)
+            ->where('shared', true)
+            ->whereNotIn('organization_id', $administeredOrgIds)
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(fn (mixed $id): string => (string) $id)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Whether the caller administers every organization there is — a super-admin, including
+     * the operator-organization admin User::isSuperAdmin() grandfathers in.
+     *
+     * A SHORTCUT, NOT AN EXEMPTION, and the distinction matters because question 1 has no
+     * organization-spanning exemption and must not appear to grow one. Such a caller's
+     * `administeredOrganizationIds()` is every organization id in the table, so
+     * {@see unmanageableSharedPackageIds} would answer `[]` for any input and both guards
+     * would pass anyway. Returning early only saves the work: one `Organization::pluck()` plus
+     * two `packages` queries on every guarded write, with an `IN` list that grows with the
+     * number of tenants — paid by exactly the accounts that do most of the assigning. Deleting
+     * it must redden nothing, which is asserted rather than assumed (mutation P4).
+     */
+    private function administersEveryOrganization(): bool
+    {
+        $user = Auth::user();
+
+        return $user instanceof User && $user->isSuperAdmin();
+    }
+
+    /**
+     * The organizations the current caller administers — the set question 2 is measured
+     * against, and the one {@see ScopesToAdministeredOrgs::scopeAssignablePackageQuery()}
+     * builds the picker from, so the guard and the picker cannot drift apart over who the
+     * caller is.
+     *
+     * A super-admin administers every organization (see User::administeredOrganizationIds),
+     * which is what keeps an operator login able to place a shared package anywhere. An
+     * unauthenticated caller administers none, so every shared package is beyond them —
+     * these routes are behind `auth`/`api.auth` anyway, and the conservative answer is the
+     * right one for a guard.
+     *
+     * @return list<string>
+     */
+    protected function administeredOrganizationIds(): array
+    {
+        $user = Auth::user();
+
+        return $user instanceof User ? $user->administeredOrganizationIds() : [];
     }
 }

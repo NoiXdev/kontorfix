@@ -68,6 +68,10 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Mark/unmark a package as abandoned. Split from the repository-source update above:
     // that one carries credential-retarget logic abandonment has nothing to do with.
     Route::put('packages/{package}/abandonment', [Admin\PackageController::class, 'abandonment'])->name('packages.abandonment');
+    // Mark/unmark a package as shared, gated by the `share-packages` ability. Split from
+    // the actions above for the same reason abandonment is: an unrelated concern with its
+    // own authorization rule, not a fragment of the repository-source update.
+    Route::put('packages/{package}/shared', [Admin\PackageController::class, 'shared'])->name('packages.shared');
     // Re-queue a sync for a git-sourced package; refused (409) for a publish-based one.
     Route::post('packages/{package}/resync', [Admin\PackageController::class, 'resync'])->name('packages.resync');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
@@ -75,6 +79,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');
     // Assign/remove packages directly from the registry (group) view.
     Route::post('groups/{group}/packages', [Admin\GroupController::class, 'attachPackages'])->name('groups.packages.store');
+    // The assignment itself, not its membership: `group_package.available_until` makes a
+    // share time-limited. A seventh writer of that pivot table, and the first that changes
+    // no membership — see GroupController::updateAssignment() for why it still has to ask
+    // SharedAssignment.
+    Route::put('groups/{group}/packages/{package}', [Admin\GroupController::class, 'updateAssignment'])->name('groups.packages.update');
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');

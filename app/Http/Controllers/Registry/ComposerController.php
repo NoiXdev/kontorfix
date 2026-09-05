@@ -53,7 +53,12 @@ class ComposerController extends Controller
 
         return response()->json([
             'metadata-url' => "{$prefix}/p2/%package%.json",
-            'available-packages' => $this->access->packagesFor($group)->pluck('name')->sort()->values(),
+            // unique(): with both a customer's own package and a shared one of that name
+            // assigned, the pool carries two rows and the name would be listed twice. Only
+            // reachable from the state SharedAssignment refuses, and a duplicated string is
+            // not a wrong answer the way a wrongly resolved package is — but Composer reads
+            // this list as the set of names this registry hosts, and a set has no repeats.
+            'available-packages' => $this->access->packagesFor($group)->pluck('name')->unique()->sort()->values(),
         ]);
     }
 

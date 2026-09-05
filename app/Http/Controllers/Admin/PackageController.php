@@ -16,6 +16,7 @@ use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Package\PackageDependencies;
+use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Scope\OrgScope;
@@ -96,6 +97,7 @@ class PackageController extends Controller
                 'groups_count' => $p->groups_count,
                 'synced_at' => $p->synced_at?->diffForHumans(),
                 'is_abandoned' => $p->isAbandoned(),
+                'shared' => $p->shared,
             ]);
 
         return Inertia::render('admin/packages/Index', [
@@ -151,7 +153,7 @@ class PackageController extends Controller
             ->all();
     }
 
-    public function show(Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
+    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
     {
         $this->assertCanTouchPackage($package);
 
@@ -205,7 +207,12 @@ class PackageController extends Controller
                 'abandoned_at' => $package->abandoned_at?->toDateString(),
                 'replacement_package' => $package->replacement_package,
                 'abandonment_reason' => $package->abandonment_reason,
+                'shared' => $package->shared,
             ],
+            // Whether the viewer holds the share-packages ability at all — passed rather
+            // than re-derived in Vue so the front end never restates the gate's rule (the
+            // instance setting it reads is not itself exposed to the client).
+            'canSharePackages' => (bool) $request->user()?->can('share-packages'),
             // Managed credentials assignable to this package (never exposes the token).
             'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
                 ->orderBy('name')->get(['id', 'name', 'provider'])
@@ -319,7 +326,7 @@ class PackageController extends Controller
         return response()->json($result);
     }
 
-    public function store(StorePackageRequest $request): RedirectResponse|JsonResponse
+    public function store(StorePackageRequest $request, SharedAssignment $sharedAssignment): RedirectResponse|JsonResponse
     {
         // A package may only be attached to registries the user administers, so it can
         // never be slipped into another organization's registry.
@@ -327,6 +334,18 @@ class PackageController extends Controller
         foreach ($groupIds as $groupId) {
             $this->assertAdministersGroup(Group::findOrFail($groupId));
         }
+
+        // A package must not claim a name one of these registries already serves through a
+        // shared package: the end state would be one registry serving a shared and an own
+        // package under one name, which SharedAssignment refuses from the assignment side.
+        // `shared` is fillable but StorePackageRequest has no rule for it, so it never
+        // reaches $request->safe() and the row below is always created non-shared — if that
+        // ever changes, this call has to grow the assignment-side check too.
+        $sharedAssignment->assertNameUnclaimedIn(
+            $groupIds,
+            PackageType::from($request->validated('type')),
+            (string) $request->validated('name'),
+        );
 
         // A referenced credential must belong to an organization the user administers,
         // and may only be paired with a repository on the host it is bound to.
@@ -360,6 +379,12 @@ class PackageController extends Controller
                 'id' => $package->id,
                 'name' => $package->name,
                 'type' => $package->type,
+                // Always false — creation never marks a package shared, whatever the
+                // request says (see the attribute assembly above, and its regression test).
+                // Stated rather than omitted so the picker's selection chips carry the same
+                // shape as a searched row and the marker is decided by data, not by which
+                // way the entry got into the list.
+                'shared' => $package->shared,
             ], 201);
         }
 
@@ -469,6 +494,82 @@ class PackageController extends Controller
         ]);
 
         return back()->with('success', $abandoned ? 'Paket als verwaist markiert.' : 'Markierung als verwaist entfernt.');
+    }
+
+    /**
+     * Marks or unmarks a package as shared, gated by the `share-packages` ability
+     * (super-admin always; a maintainer of the operator organization only once the
+     * instance setting says so — see AppServiceProvider's gate definition).
+     *
+     * Deliberately not guarded by assertCanTouchPackage(): that helper checks the
+     * package's organization against the caller's *active console scope*
+     * (`OrgScope::ids()`, see the "active scope" vocabulary two methods above), which is
+     * the wrong tool for an action whose entire purpose is to act across organization
+     * scope — a super-admin (or a multi-org maintainer) who has the console scoped to one
+     * customer organization is still meant to share a package the operator organization
+     * owns, and `assertCanTouchPackage()` would reject that call on scope alone even
+     * though `share-packages` authorizes it unconditionally. The ownership check below
+     * (`$package->organization->is_operator`) is the actual security boundary for this
+     * action: it is what refuses a customer-owned package regardless of who is calling,
+     * and a caller-scope check adds nothing beyond it.
+     *
+     * The two directions are not symmetric. Setting the flag is what makes cross-organization
+     * assignments legal, so nothing can be outstanding when it is set; clearing it can strand
+     * assignments that were legal a moment earlier, so the clear is refused while any exist.
+     */
+    public function shared(Request $request, Package $package): RedirectResponse
+    {
+        abort_unless($request->user()?->can('share-packages'), 403);
+
+        $data = $request->validate(['shared' => ['required', 'boolean']]);
+
+        // Only a package the operator organization owns may be shared. A customer-owned
+        // shared package would let that customer delete a dependency other customers'
+        // builds resolve through it.
+        if ($data['shared'] && ! $package->organization->is_operator) {
+            throw ValidationException::withMessages([
+                'shared' => 'Nur Pakete der Betreiber-Organisation können geteilt werden.',
+            ]);
+        }
+
+        // Un-sharing is the reverse of an attach, and it can invalidate assignments that
+        // were legitimate while the flag was set. The invariant at stake is the ownership
+        // rule this application has held since packages became organization-owned: a
+        // `group_package` row may only join a package to a registry of the organization
+        // that owns it. `shared` is the single exception, so clearing it turns every
+        // cross-organization row for this package back into a violation — one the ownership
+        // enforcement refuses to migrate over — and, once resolution is scoped again, drops
+        // the package out of those registries silently, so the name falls through to the
+        // public index it was assigned there to pre-empt. Refuse and name the registries,
+        // the way that enforcement does, rather than detaching rows on the operator's
+        // behalf: the destructive step stays explicit.
+        //
+        // Every row counts here, expired or not — deliberately unlike SharedAssignment,
+        // which asks what a registry SERVES and so skips expired assignments. The rule
+        // above is about the row existing at all and says nothing about `available_until`,
+        // so a lapsed row is exactly as much of a violation as a live one.
+        if (! $data['shared']) {
+            $foreign = $package->groups()
+                ->where('groups.organization_id', '!=', $package->organization_id)
+                ->orderBy('groups.name')
+                ->pluck('groups.name');
+
+            if ($foreign->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'shared' => $foreign->count() === 1
+                        ? "Dieses Paket ist noch der Registry {$foreign->first()} einer anderen Organisation "
+                            .'zugewiesen. Entfernen Sie es dort zuerst.'
+                        : 'Dieses Paket ist noch Registrys anderer Organisationen zugewiesen: '
+                            .$foreign->implode(', ').'. Entfernen Sie es dort zuerst.',
+                ]);
+            }
+        }
+
+        $package->update(['shared' => $data['shared']]);
+
+        return back()->with('success', $data['shared']
+            ? 'Paket wird jetzt für andere Organisationen freigegeben.'
+            : 'Freigabe für andere Organisationen aufgehoben.');
     }
 
     public function destroy(Package $package): RedirectResponse

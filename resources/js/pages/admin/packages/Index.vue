@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
+import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import StatusPill from '@/components/kontorfix/StatusPill.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -25,6 +26,7 @@ interface PackageRow {
     groups_count: number;
     synced_at: string | null;
     is_abandoned: boolean;
+    shared: boolean;
 }
 
 interface GroupOption {
@@ -253,7 +255,12 @@ const table = useTableState<PackageRow>({
                                 </span>
                             </div>
                         </td>
-                        <td class="px-4 py-3"><TypeBadge :type="pkg.type" /></td>
+                        <td class="px-4 py-3">
+                            <div class="flex items-center gap-2">
+                                <TypeBadge :type="pkg.type" />
+                                <SharedBadge v-if="pkg.shared" />
+                            </div>
+                        </td>
                         <td class="px-4 py-3">
                             <span :title="pkg.sync_status === 'failed' ? (pkg.sync_error ?? undefined) : undefined">
                                 <StatusPill :status="pkg.sync_status" />

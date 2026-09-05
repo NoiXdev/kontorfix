@@ -58,8 +58,15 @@ class PypiController extends Controller
         abort_unless($this->access->canPublishToGroup($token, $group), 403);
 
         $normalized = PythonName::normalize((string) $request->input('name', ''));
+        // Own-organization only, mirroring NpmController::respondPublish(). The read paths
+        // resolve a shared project from every registry it is assigned to; a customer's
+        // publish token adding a distribution to it would put that file into every other
+        // customer's builds. Sharing hands out reads, never writes — so the write path asks
+        // the narrower question, and answers a shared name the same way it answers an
+        // unknown one.
         $pkg = $this->pythonPackagesOfGroup($group)
-            ->first(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
+            ->first(fn (Package $p): bool => $p->organization_id === $group->organization_id
+                && PythonName::normalize($p->name) === $normalized);
         abort_if($pkg === null, 404, 'Unknown project for this registry.');
         // A git-mirror project derives its files from tags — reject uploads into it.
         abort_if($pkg->isGitSourced(), 409, 'This project mirrors a git repository and cannot be uploaded to.');
@@ -86,6 +93,13 @@ class PypiController extends Controller
 
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
+        // NOT de-duplicated here, unlike ComposerController::root(): with both a customer's
+        // own project and a shared one of that name assigned, this pool carries two rows that
+        // normalise to one PEP 503 name — but PythonSimpleIndexBuilder::rootHtml() takes
+        // `unique()` over the names it is given, and Composer's list has no such builder. A
+        // second `unique()` here would be a line no mutation could redden. The property is
+        // pinned end-to-end by the last case in
+        // tests/Feature/Registry/SharedPackageResolutionTest.php.
         $names = $this->pythonPackagesOfGroup($group)
             ->filter(fn (Package $p): bool => $this->access->canAccessPackage($token, $group, $p))
             ->map(fn (Package $p): string => PythonName::normalize($p->name))
@@ -192,16 +206,20 @@ class PypiController extends Controller
         // pattern refuses those already; this does not rely on it.
         abort_unless(Str::isUuid($package), 404);
 
-        // Scoped like every other read path. A UUID cannot collide across organizations the
-        // way a name can, so this is not closing a guessing attack — it closes the same
-        // cross-organization pivot row the index and project page now refuse, which would
-        // otherwise still stream its distributions through the foreign registry.
+        // Scoped like every other read path — own-organization, or shared. A UUID cannot
+        // collide across organizations the way a name can, so this is not closing a guessing
+        // attack — it closes the same cross-organization pivot row the index and project page
+        // refuse, which would otherwise still stream its distributions through the foreign
+        // registry. The shared clause is what lets the files of a project this registry does
+        // serve actually be fetched; without it the project page would link to a 404.
         //
         // Redundant since RegistryAccessService::availablePackages() states the same rule, so
         // canAccessPackage() below already refuses this row. Kept: it costs one predicate, and
         // it lets this handler be read on its own without tracing into the access service.
         $pkg = Package::where('type', PackageType::Python)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true))
             ->whereKey($package)
             ->first();
         abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
@@ -223,40 +241,94 @@ class PypiController extends Controller
     }
 
     /**
-     * Python packages assigned to the group (unfiltered by access — callers refine).
+     * The Python projects this registry serves (unfiltered by group access — callers refine).
      *
-     * Constrained to the owning organization for the same reason findLocal() is: the pivot
-     * row records assignment, and canAccessPackage() checks assignment and group access —
-     * neither compares the package's organization to the registry's. A cross-organization
-     * pivot row would therefore be served here. The enforcement migration now refuses to
-     * complete while such a row exists, so this constraint should never match anything;
-     * it is stated anyway, because this is the only ecosystem where ownership was left
-     * implied by the access check rather than written into the query, and an invariant
-     * that only one of three read paths spells out is one edit from being lost.
+     * assignedPackages(), not packages(): an assignment past its `available_until` serves
+     * nothing, and this method is the *only* statement of that for upload(), which never
+     * reaches canAccessPackage(). The read paths were already filtered — both re-ask through
+     * canAccessPackage(), which reads the same relation — so the behaviour that changes here
+     * is upload()'s, which now refuses a publish into a lapsed assignment. That is what npm
+     * already did (packageBelongsToGroup() reads the same relation), so the two publish paths
+     * no longer disagree about whether an expired row counts.
      *
-     * Not made redundant by the same constraint now living in
+     * Own-organization, or shared, for the same reason findLocal() is: the pivot row records
+     * assignment, and canAccessPackage() checks assignment and group access — neither compares
+     * the package's organization to the registry's. A cross-organization pivot row would
+     * therefore be served here, and the enforcement migration does not rule that out: it refuses
+     * on ANY cross-organization row, shared or not, but it runs once — before `packages.shared`
+     * exists — so it constrains the data at that one moment and not what is written afterwards
+     * (argued in full on RegistryAccessService::availablePackages(), together with what a
+     * rollback past the column's migration then does). The non-shared half is held by the write
+     * paths, and stated here as well, because this is the only ecosystem where ownership was
+     * left implied by the access check rather than written into the query, and an invariant that
+     * only one of three read paths spells out is one edit from being lost.
+     *
+     * A shared package is the cross-organization row that is legitimate: owned by the
+     * operator organization (spec §1) and deliberately offered to others. Without this
+     * clause the PyPI half of the feature would not exist — worse, once the dependency-
+     * confusion guard counts an assigned shared name as hosted, pip would be answered with
+     * a flat 404 for a project the operator did assign.
+     *
+     * Not made redundant by the same predicate now living in
      * RegistryAccessService::availablePackages(): the publish path (upload()) resolves the
      * target project through this method *without* canAccessPackage(), so here this is still
-     * the only statement of the rule.
+     * the only statement of the rule — and upload() narrows it back to own-organization
+     * itself, because sharing hands out reads and never writes.
+     *
+     * Ordered own-organization-first, then by id, for the reasons given on
+     * ResolvesRegistryPackage::findLocal(): simpleProject() takes the first match by
+     * normalised name, spec §5 says the customer's own project wins over a shared one of that
+     * name, and where the spec settles nothing the answer should at least be reproducible.
      *
      * @return Collection<int, Package>
      */
     private function pythonPackagesOfGroup(Group $group): Collection
     {
-        return $group->packages()
+        return $group->assignedPackages()
             ->where('type', PackageType::Python)
-            ->where('packages.organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere('packages.shared', true))
+            ->orderByRaw('(packages.organization_id = ?) desc, packages.id', [$group->organization_id])
             ->get();
     }
 
     /**
-     * The Python half of the dependency-confusion guard, scoped to the addressed
-     * organization for the reasons given on ResolvesRegistryPackage::packageExistsLocally().
+     * The Python half of the dependency-confusion guard: the addressed organization owns
+     * the name, or a shared package of that name is assigned to this registry. Both halves
+     * and their different scopes are argued on
+     * ResolvesRegistryPackage::packageExistsLocally(); this is the same predicate, filtered
+     * in PHP because PEP 503 normalisation happens outside SQL.
+     *
+     * NOT pythonPackagesOfGroup(), and the resemblance is the trap. That method answers
+     * "what is assigned to *this registry*"; this one answers "is the name hosted", and the
+     * organization half must stay assignment-free — a private project attached to no
+     * registry still must not have its name asked about at pypi.org. Reusing that method
+     * here would drop the organization half's unassigned rows and leak those names upstream;
+     * reusing this one there would serve projects no operator assigned. Two questions, two
+     * predicates, and only the shared half of this one is registry-scoped.
+     *
+     * The two also read different relations, and that difference is deliberate: that method
+     * reads assignedPackages(), this one packages(), so a project whose share has lapsed
+     * stops being served while its name keeps suppressing the fallthrough. Without that, the
+     * first `pip install` after an assignment expires resolves the project from pypi.org —
+     * from whoever registered the name there — with no act by anyone. See
+     * ResolvesRegistryPackage::packageExistsLocally() for the full argument.
+     *
+     * @see tests/Feature/Registry/SharedPackageUpstreamTest.php — as with the Composer and
+     * npm guard, the positive direction of the shared clause is reachable through HTTP only
+     * via a lapsed assignment; for a live one, pythonPackagesOfGroup() answers first, so the
+     * direct predicate test in that file is its only coverage. The negative direction is
+     * covered end-to-end too.
      */
     private function pythonExistsLocally(string $normalized, Group $group): bool
     {
         return Package::where('type', PackageType::Python)
-            ->where('organization_id', $group->organization_id)
+            ->where(fn ($q) => $q
+                ->where('packages.organization_id', $group->organization_id)
+                ->orWhere(fn ($q2) => $q2
+                    ->where('packages.shared', true)
+                    ->whereIn('packages.id', $group->packages()->select('packages.id'))))
             ->get()
             ->contains(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
     }
