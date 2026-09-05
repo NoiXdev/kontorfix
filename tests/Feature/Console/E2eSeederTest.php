@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PackageType;
 use App\Models\Organization;
 use Database\Seeders\E2eSeeder;
 use Illuminate\Support\Facades\Artisan;
@@ -40,12 +41,34 @@ it('seeds the composer package against the git daemon and leaves it unsynced', f
     Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
 
     $package = Organization::where('slug', 'e2e-customer')->firstOrFail()
-        ->packages()->where('name', 'kontorfix-e2e/demo')->firstOrFail();
+        ->packages()->where('type', PackageType::Composer)->where('name', 'kontorfix-e2e/demo')->firstOrFail();
 
     // The worker syncs it; the seeder must not, or the E2E run would prove nothing about
     // the queued path it exists to cover.
     expect($package->repository_url)->toBe('git://gitserver/demo.git')
         ->and($package->versions()->count())->toBe(0)
+        ->and($package->groups()->where('groups.slug', 'e2e-registry')->exists())->toBeTrue();
+});
+
+it('seeds an npm package the publish tests can target, with no repository to sync from', function () {
+    Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
+
+    $package = Organization::where('slug', 'e2e-customer')->firstOrFail()
+        ->packages()->where('type', PackageType::Npm)->where('name', 'kontorfix-e2e-demo')->firstOrFail();
+
+    // Publish-based: nothing to sync, so a repository_url here would mean the app tries to
+    // queue a sync that a publish-based package cannot satisfy.
+    expect($package->repository_url)->toBeNull()
+        ->and($package->groups()->where('groups.slug', 'e2e-registry')->exists())->toBeTrue();
+});
+
+it('seeds a python package the twine tests can target, with no repository to sync from', function () {
+    Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
+
+    $package = Organization::where('slug', 'e2e-customer')->firstOrFail()
+        ->packages()->where('type', PackageType::Python)->where('name', 'kontorfix-e2e-demo')->firstOrFail();
+
+    expect($package->repository_url)->toBeNull()
         ->and($package->groups()->where('groups.slug', 'e2e-registry')->exists())->toBeTrue();
 });
 

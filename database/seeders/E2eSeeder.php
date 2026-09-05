@@ -86,11 +86,21 @@ class E2eSeeder extends Seeder
             'repository_url' => 'git://gitserver/demo.git',
         ]);
 
-        // Unlike Composer, npm packages are publish-based (PackageSourceMode::Publish, the
-        // `source_mode` column's own default): there is no git tag for SyncPackage to import
-        // versions from, so the row itself must exist before the first `npm publish` — the
-        // registry endpoint resolves the package by (type, name, organization) and 404s a
-        // write aimed at a name nobody registered, exactly as it would for a foreign package.
+        // Unlike Composer, npm and Python packages are publish-based (PackageSourceMode::
+        // Publish, the `source_mode` column's own default): there is no git tag for
+        // SyncPackage to import versions from, so each row must exist before the first
+        // `npm publish` / `twine upload` — NpmController and PypiController both resolve
+        // their target package by (type, name, organization) before accepting a write, and
+        // 404 otherwise, exactly as they would for a foreign package. That refusal is
+        // deliberate, not an obstacle to route around: it is what stops a token from
+        // inventing package names on the fly, and this seeder models the sequence a real
+        // deployment goes through — the operator registers the package first, then CI
+        // publishes versions into it. No `repository_url` on either: publish-based packages
+        // have nothing to sync from.
+        //
+        // npm and Python share the name `kontorfix-e2e-demo` on purpose — the uniqueness
+        // constraint on `packages` is (organization_id, type, name), scoped by type, so the
+        // two coexist and the fixture world can use one recognisable name across ecosystems.
         $npmPackage = Package::create([
             'organization_id' => $customer->id,
             'type' => PackageType::Npm,
@@ -98,7 +108,14 @@ class E2eSeeder extends Seeder
             'description' => 'Fixture package for the end-to-end suite.',
         ]);
 
-        $group->packages()->attach([$composerPackage->id, $npmPackage->id]);
+        $pythonPackage = Package::create([
+            'organization_id' => $customer->id,
+            'type' => PackageType::Python,
+            'name' => 'kontorfix-e2e-demo',
+            'description' => 'Fixture package for the end-to-end suite.',
+        ]);
+
+        $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id]);
 
         [, $readToken] = RegistryToken::issue($customer, 'e2e-read', $group, TokenAbility::Read);
         [, $publishToken] = RegistryToken::issue($customer, 'e2e-publish', $group, TokenAbility::Publish);
