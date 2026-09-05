@@ -96,6 +96,21 @@ it('seeds a python package the twine tests can target, with no repository to syn
         ->and($package->groups()->where('groups.slug', 'e2e-registry')->exists())->toBeTrue();
 });
 
+it('configures one upstream per ecosystem', function () {
+    Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
+
+    $group = Organization::where('slug', 'e2e-customer')->firstOrFail()
+        ->groups()->where('slug', 'e2e-registry')->firstOrFail();
+
+    // Created unconditionally, not behind E2E_UPSTREAM: only the TESTS are gated. A seeder
+    // that read the flag would make the two runs differ in more than which tests execute.
+    expect($group->upstreams()->pluck('url', 'type')->all())->toBe([
+        'composer' => 'https://repo.packagist.org',
+        'npm' => 'https://registry.npmjs.org',
+        'python' => 'https://pypi.org',
+    ]);
+});
+
 it('refuses to run in production', function () {
     app()['env'] = 'production';
 

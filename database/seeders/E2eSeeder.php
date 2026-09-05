@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
+use App\Enums\UpstreamPolicy;
 use App\Enums\UserRole;
 use App\Jobs\SyncPackage;
 use App\Models\Group;
@@ -79,6 +80,27 @@ class E2eSeeder extends Seeder
             'public' => false,
             'portal_enabled' => true,
         ]);
+
+        // One upstream per ecosystem, created unconditionally. Only the tests that USE them
+        // are gated on E2E_UPSTREAM — a seeder that read the flag would make the flagged and
+        // unflagged runs differ in more than which tests execute, and then a green default
+        // run would say nothing about the configuration the flagged run exercises.
+        //
+        // `proxy` rather than `strict`: strict is the dependency-confusion allowlist, and an
+        // allowlist with nothing on it would refuse the very fallthrough these tests measure.
+        foreach ([
+            'composer' => 'https://repo.packagist.org',
+            'npm' => 'https://registry.npmjs.org',
+            'python' => 'https://pypi.org',
+        ] as $type => $url) {
+            $group->upstreams()->create([
+                'type' => $type,
+                'url' => $url,
+                'policy' => UpstreamPolicy::Proxy,
+                'priority' => 1,
+                'enabled' => true,
+            ]);
+        }
 
         // `source_mode` is NOT optional here, and its absence fails silently: the column
         // defaults to `publish` (see the migration that introduced it), and
