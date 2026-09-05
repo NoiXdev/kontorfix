@@ -50,7 +50,17 @@ tests
 vitest.config.ts
 resources/js/**/*.test.ts
 
+# The E2E suite's own PHPUnit config (see phpunit.e2e.xml's own note on why it is not a
+# third suite in phpunit.xml). It points at `tests/E2E`, which the `tests` rule above
+# already keeps out, and it drives a Docker-in-Docker run that cannot happen inside the
+# image it would otherwise ship in.
+phpunit.e2e.xml
+
 # Developer tooling, never executed inside the image. check-runtime-props.mjs compiles the
 # Vue components and reports which runtime props each one actually emits — a class of defect
 # no other gate detects, but a check that belongs on a workstation, not in a container.
 scripts
+
+# Host-side test harness (bin/e2e) that drives Docker itself against the built image.
+# It has no function inside the container it drives, so shipping it is pure surface.
+bin
