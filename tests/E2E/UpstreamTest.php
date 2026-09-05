@@ -40,7 +40,10 @@ it('falls through to Packagist for a package the registry does not hold', functi
 
 it('falls through to npmjs for a package the registry does not hold', function () {
     $context = E2eStack::context();
-    $authKey = str_replace('http:', '', rtrim($context['base_url'], '/')).'/:_authToken';
+    // Reuse the one place that holds the nerf-dart derivation, not a second copy of it — see
+    // E2eStack::npmAuthKey()'s own docblock for why a drifted copy fails silently (the token
+    // is simply never sent) rather than with an error.
+    $authKey = E2eStack::npmAuthKey();
 
     $script = <<<SH
         set -e
@@ -82,6 +85,15 @@ it('falls through to PyPI for a package the registry does not hold', function ()
 
     $process = E2eStack::exec('client-python', $script, 600);
 
-    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput())
-        ->and(trim($process->getOutput()))->toEndWith('1.16.0');
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
+
+    // Equality on the final line, not a suffix match on the whole output: `toEndWith` would
+    // also accept "21.16.0", and would survive stray output ahead of the version. Matches
+    // PypiTest.php's sibling assertion on the identical `print(x.__version__)` shape.
+    $lines = array_values(array_filter(
+        array_map('trim', explode("\n", $process->getOutput())),
+        fn (string $line): bool => $line !== '',
+    ));
+
+    expect(end($lines))->toBe('1.16.0');
 });
