@@ -112,6 +112,20 @@ final class E2eStack
     }
 
     /**
+     * Scheme+host(+port) only, no path — for endpoints that sit outside the registry prefix
+     * (`/up`). `host_base_url` in the context always carries the registry's own path suffix
+     * (`/r/<org>/<registry>`), which a health-check endpoint at the site root does not share.
+     */
+    public static function hostRoot(): string
+    {
+        $parts = parse_url(self::context()['host_base_url']);
+
+        $root = "{$parts['scheme']}://{$parts['host']}";
+
+        return isset($parts['port']) ? "{$root}:{$parts['port']}" : $root;
+    }
+
+    /**
      * Turns an absolute registry URL — as it appears inside p2/packument metadata, always
      * built from APP_URL (`http://app:8080/...`, the address the app and worker containers
      * see each other at) — into the path suffix `get()` needs. `get()` reaches the stack from
