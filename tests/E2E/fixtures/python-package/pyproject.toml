@@ -1,0 +1,18 @@
+[build-system]
+# The upper bound is deliberate: setuptools >=77 emits Metadata-Version 2.4 (PEP 639
+# license expressions), which the twine version pinned in docker/e2e/python-client's
+# image cannot parse — its vendored pkginfo only understands metadata versions up to
+# 2.3 and silently drops Name/Version, so twine rejects the upload as an
+# "InvalidDistribution". Pinning the build backend here keeps the wheel's metadata
+# inside what the real client in this stack can read.
+requires = ["setuptools>=68,<77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kontorfix-e2e-demo"
+version = "1.0.0"
+description = "Fixture package for the kontorfix end-to-end suite."
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["src"]
