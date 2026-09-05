@@ -39,7 +39,12 @@ $COMPOSE up -d --wait
 $COMPOSE exec -T app php artisan db:seed --class=E2eSeeder --force \
     | sed -n 's/^E2E_CONTEXT=//p' > "$CONTEXT_FILE"
 
-test -s "$CONTEXT_FILE" || { echo "e2e: seeder produced no context" >&2; exit 1; }
+# A bare `exit 1` on the right side of `||` does not fire `trap ... ERR` in bash,
+# even under set -e — so this must call fail() explicitly, not exit directly.
+if ! test -s "$CONTEXT_FILE"; then
+    echo "e2e: seeder produced no context" >&2
+    fail
+fi
 
 vendor/bin/pest -c phpunit.e2e.xml
 
