@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+COMPOSE="docker compose -f docker/compose.e2e.yaml"
+CONTEXT_FILE="tests/E2E/.context.json"
+
+# Never committed: a fresh key per run, so no application key lives in the repository.
+export E2E_APP_KEY="base64:$(openssl rand -base64 32)"
+
+# A typo here (e.g. --upstrem) used to be silently ignored: the run would proceed as the
+# default suite and still print "e2e: green" at the end, with nobody having noticed the
+# upstream tests never ran. Any argument other than the one this script understands is now
+# a hard error instead of quietly falling through.
+case "${1:-}" in
+    '')
+        ;;
+    --upstream)
+        export E2E_UPSTREAM=1
+        echo "e2e: upstream tests enabled"
+        ;;
+    *)
+        echo "e2e: unrecognized argument '${1}'" >&2
+        echo "usage: bin/e2e [--upstream]" >&2
+        exit 1
+        ;;
+esac
+
+dump_logs() {
+    echo "----- app + worker logs -----" >&2
+    $COMPOSE logs --no-color app worker >&2 || true
+}
+
+teardown() {
+    $COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -f "$CONTEXT_FILE"
+}
+
+fail() {
+    dump_logs
+    teardown
+    exit 1
+}
+
+trap fail ERR
+
+$COMPOSE build
+$COMPOSE up -d --wait
+
+# The app container migrates on start (docker/entrypoint.sh). Seeding is ours.
+$COMPOSE exec -T app php artisan db:seed --class=E2eSeeder --force \
+    | sed -n 's/^E2E_CONTEXT=//p' > "$CONTEXT_FILE"
+
+# A bare `exit 1` on the right side of `||` does not fire `trap ... ERR` in bash,
+# even under set -e — so this must call fail() explicitly, not exit directly.
+if ! test -s "$CONTEXT_FILE"; then
+    echo "e2e: seeder produced no context" >&2
+    fail
+fi
+
+vendor/bin/pest -c phpunit.e2e.xml
+
+trap - ERR
+teardown
+echo "e2e: green"

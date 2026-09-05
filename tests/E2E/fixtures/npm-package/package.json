@@ -1,0 +1,8 @@
+{
+    "name": "kontorfix-e2e-demo",
+    "version": "1.0.0",
+    "description": "Fixture package for the kontorfix end-to-end suite.",
+    "main": "index.js",
+    "license": "MIT",
+    "private": false
+}

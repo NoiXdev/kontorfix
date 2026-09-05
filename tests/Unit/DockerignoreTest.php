@@ -139,6 +139,13 @@ it('keeps developer tooling, internal notes and credentials out of the image', f
         'resources/js/shallow.test.ts',
         'resources/js/composables/useTableState.test.ts',
         'resources/js/deeply/nested/somewhere/else.test.ts',
+        // The E2E stack's compose file and fixture build contexts. `docker` itself is on
+        // the shipped root list below (docker/entrypoint.sh needs it), so the root-entry
+        // tripwire test cannot see these — they need pinning by concrete path here instead.
+        'docker/compose.e2e.yaml',
+        'docker/e2e/gitserver/Dockerfile',
+        'docker/e2e/gitserver/entrypoint.sh',
+        'docker/e2e/python-client/Dockerfile',
     ];
 
     foreach ($mustNotShip as $path) {

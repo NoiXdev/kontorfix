@@ -1,0 +1,41 @@
+name: E2E
+
+# Not on pull_request, deliberately: this project merges branches locally and pushes, so a
+# pull-request trigger would almost never fire and would only look like a gate.
+on:
+  push: { branches: [main] }
+  workflow_dispatch:
+    inputs:
+      upstream:
+        description: 'Also run the upstream fallthrough tests (reaches Packagist, npmjs, PyPI)'
+        type: boolean
+        default: false
+
+# Least privilege, stated rather than inherited — same reasoning as ci.yml.
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5.0.0
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.4'
+          extensions: zip, intl
+          coverage: none
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Setup Docker buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      # bin/e2e already dumps the app/worker logs on failure and tears the stack down with
+      # `down -v`; do not add an `if: failure()` step here for the same thing, or the log
+      # dump ends up living in two places and the two can drift.
+      - name: Run the end-to-end suite
+        run: bin/e2e ${{ inputs.upstream && '--upstream' || '' }}

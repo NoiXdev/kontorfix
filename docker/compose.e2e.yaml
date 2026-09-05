@@ -1,0 +1,123 @@
+name: kontorfix-e2e
+
+# Shared by app and worker so the two cannot drift. KONTORFIX_VCS_* are the documented
+# operator escape hatches for a self-hosted git server on a private network
+# (config/kontorfix.php): `gitserver` resolves to a Docker-internal address and speaks
+# git://, and GitUrlSafety refuses both by default. They are set here rather than being
+# bypassed in code so the guard stays in force for every other host.
+x-app-env: &app-env
+  APP_ENV: local
+  APP_DEBUG: 'true'
+  APP_KEY: ${E2E_APP_KEY:?set by bin/e2e — run the stack through it}
+  APP_URL: http://app:8080
+  DB_CONNECTION: pgsql
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  DB_DATABASE: kontorfix
+  DB_USERNAME: kontorfix
+  DB_PASSWORD: e2e
+  REDIS_HOST: redis
+  CACHE_STORE: redis
+  QUEUE_CONNECTION: redis
+  SESSION_DRIVER: redis
+  BROADCAST_CONNECTION: 'null'
+  LOG_CHANNEL: stderr
+  KONTORFIX_VCS_ALLOWED_SCHEMES: https,ssh,git
+  KONTORFIX_VCS_ALLOWED_HOSTS: gitserver
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: kontorfix-e2e:local
+    environment:
+      <<: *app-env
+      CONTAINER_ROLE: app
+    # Loopback only. The clients reach the app as `app:8080` over the compose network;
+    # this publication exists so a human can look at a failing stack.
+    ports: ['127.0.0.1:8099:8080']
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8080/up']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - artifacts:/app/storage/app
+
+  worker:
+    image: kontorfix-e2e:local
+    environment:
+      <<: *app-env
+      CONTAINER_ROLE: worker
+    depends_on:
+      app: { condition: service_healthy }
+    # The base image (dunglas/frankenphp) bakes a HEALTHCHECK that curls the Caddy admin
+    # API on :2019. That is correct for the `app` role but this container execs
+    # `php artisan horizon` instead (docker/entrypoint.sh) and never listens there, so the
+    # inherited check fails forever — `docker compose up --wait` waits on every container
+    # with a healthcheck, not just ones another service depends on, and exits non-zero the
+    # moment one is unhealthy. Disabling it here doesn't hide a real failure: nothing in
+    # this stack gates on the worker being "healthy", and Horizon's own liveness is what
+    # the client tests exercise indirectly by waiting on sync results.
+    healthcheck:
+      disable: true
+    # The same volume the app serves artifacts from — SyncPackage writes the git mirror
+    # and the built dist here.
+    volumes:
+      - artifacts:/app/storage/app
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kontorfix
+      POSTGRES_USER: kontorfix
+      POSTGRES_PASSWORD: e2e
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kontorfix']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  gitserver:
+    build:
+      context: e2e/gitserver
+    volumes:
+      - ../tests/E2E/fixtures/composer-package:/fixture:ro
+
+  # The three clients are shells the tests reach into, not services.
+  client-composer:
+    image: composer:2
+    entrypoint: ['sleep', 'infinity']
+    working_dir: /work
+    volumes:
+      - ../tests/E2E/fixtures:/fixtures:ro
+
+  client-npm:
+    image: node:22-alpine
+    entrypoint: ['sleep', 'infinity']
+    working_dir: /work
+    volumes:
+      - ../tests/E2E/fixtures:/fixtures:ro
+
+  client-python:
+    build:
+      context: e2e/python-client
+    entrypoint: ['sleep', 'infinity']
+    working_dir: /work
+    volumes:
+      - ../tests/E2E/fixtures:/fixtures:ro
+
+volumes:
+  artifacts:

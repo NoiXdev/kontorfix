@@ -73,6 +73,35 @@ Two consequences worth knowing:
   away. Two suites started from the *same* directory still share a database; run them from
   separate checkouts, or give one an explicit `DB_DATABASE`.
 
+## End-to-end registry tests
+
+`tests/Feature/Registry/` proves the registry answers the requests we believe a client makes.
+This suite proves that `composer`, `npm` and `pip` — the actual binaries — agree.
+
+```bash
+bin/e2e              # the default run: publish, install and refusal, per ecosystem
+bin/e2e --upstream   # additionally the fallthrough to Packagist, npmjs and PyPI
+```
+
+It builds the production image from `docker/Dockerfile` and runs it beside Postgres, Redis, a
+`git daemon` serving the Composer fixture, and three client containers. The fixture world is
+created by `database/seeders/E2eSeeder.php`, which prints its tokens as a single
+`E2E_CONTEXT=` line; `bin/e2e` writes that to the git-ignored `tests/E2E/.context.json` and
+deletes it on teardown.
+
+It runs on the host PHP, not inside DDEV — the DDEV web container has no access to the Docker
+socket. `php artisan test` never runs it: the suite has its own `phpunit.e2e.xml`.
+
+A failing run prints the `app` and `worker` logs before tearing the stack down. That is a
+requirement, not a convenience: a black-box run that fails without server logs tells you less
+than the manual test it replaces.
+
+In CI it is its own workflow (`.github/workflows/e2e.yml`), on `main` and on demand, with the
+upstream part behind a dispatch input.
+
+**Not covered, and still manual:** custom domains at the host root, and anything that only
+appears behind Traefik with real TLS.
+
 ## Directory layout (overview)
 
 - `app/Http/Controllers/{Registry,Api/V1,Admin,Portal,Auth,Settings}` — endpoints per area.
