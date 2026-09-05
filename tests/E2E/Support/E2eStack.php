@@ -139,7 +139,14 @@ final class E2eStack
     {
         $credential = $token !== null ? "x:{$token}@" : '';
 
-        return preg_replace('#^(https?://)#', '$1'.$credential, self::context()['base_url']).'/simple';
+        // Not preg_replace('#^(https?://)#', '$1'.$credential, ...): the token lands in the
+        // *replacement* string there, where `$` and `\` are backreference syntax. A token
+        // that happened to contain either would be silently mangled rather than inserted
+        // verbatim — str_replace has no such reading of its replacement argument.
+        $baseUrl = self::context()['base_url'];
+        $scheme = (string) parse_url($baseUrl, PHP_URL_SCHEME);
+
+        return str_replace("{$scheme}://", "{$scheme}://{$credential}", $baseUrl).'/simple';
     }
 
     /**

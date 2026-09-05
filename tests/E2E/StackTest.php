@@ -12,10 +12,14 @@ it('answers the health endpoint on the published port', function () {
 it('advertises a metadata-url built on the address the client was given', function () {
     $context = E2eStack::context();
 
-    // Spec §1: the harness must assert this before any install runs, because Composer
-    // follows it (and the dist URLs it leads to) without complaint — a mismatch here does
-    // not fail loudly, it makes the client resolve every subsequent request against the
-    // wrong address. `metadata-url` is root-relative (Composer resolves it against the
+    // Spec §1 put this check here; PHPUnit walks tests/E2E in filename order, which runs it
+    // after the three install test files, not before. That ordering is not what makes this
+    // check worthwhile, though: it is independent of the install tests and would catch an
+    // APP_URL/port mismatch — the address the app thinks it is, versus the one the client
+    // was actually given — on its own, regardless of when it runs. Composer follows this
+    // value (and the dist URLs it leads to) without complaint, so a mismatch here does not
+    // fail loudly; it makes the client resolve every subsequent request against the wrong
+    // address. `metadata-url` is root-relative (Composer resolves it against the
     // origin of whichever repository URL configured it — `composer config
     // repositories.kontorfix composer {base_url}` in every other test in this suite), so
     // "points at the address the client was given" means: resolved against that origin, it

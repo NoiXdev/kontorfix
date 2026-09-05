@@ -133,10 +133,14 @@ it('installs the synced package with the real composer client', function () {
     // at all (checked — there is nothing to assert there), so the version has to come from
     // installed.json, right next to installation-source. Composer records it in the raw
     // tag form (composerTagVersion()), same as the p2 "version" field this file already
-    // compares against `v1.0.0` for the same reason. Without this: a tag-mapping bug that
-    // built the dist from `main` while still labelling it `v1.0.0` would satisfy every
-    // other assertion here — name, shipped file, dist transport — and only the version
-    // actually installed would be wrong.
+    // compares against `v1.0.0` for the same reason. What this catches: the client having
+    // recorded a version other than the fixture's one tag — e.g. a proxied upstream copy
+    // resolving under the same package name, a live possibility here since the seeder
+    // configures a Packagist upstream unconditionally — or a registry advertising some
+    // non-tag version string. What it does NOT catch: content-versus-label drift, such as a
+    // tag-mapping bug that built the dist from `main` while still labelling it `v1.0.0` —
+    // every value compared here, on both the registry and the client side, would read
+    // `v1.0.0` regardless, and this assertion would stay green.
     expect($installedEntry)->not->toBeNull()
         ->and($installedEntry['installation-source'] ?? null)->toBe('dist')
         ->and($installedEntry['version'] ?? null)->toBe(composerTagVersion($context['version']));
