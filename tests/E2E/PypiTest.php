@@ -33,12 +33,16 @@ it('installs the uploaded wheel with the real pip client', function () {
 
     // --index-url REPLACES PyPI rather than adding to it, so a resolution that reached the
     // public index would be a failure here, not a fallback. --trusted-host is required
-    // because the stack speaks plain HTTP.
+    // because the stack speaks plain HTTP. The credential here MUST be read_token, not
+    // publish_token: a consuming client only ever holds a read credential, and the upload
+    // test above this one leaves the publish token sitting right there to reach for by
+    // habit — using it here would make this test blind to a broken or revoked read token,
+    // which is the credential this path actually depends on in production.
     $script = <<<SH
         set -e
         rm -rf /work/venv && python -m venv /work/venv
         /work/venv/bin/pip install --no-cache-dir --quiet \
-            --index-url http://x:{$context['publish_token']}@app:8080/r/e2e-customer/e2e-registry/simple \
+            --index-url http://x:{$context['read_token']}@app:8080/r/e2e-customer/e2e-registry/simple \
             --trusted-host app \
             {$context['python_package']}=={$context['version']}
         /work/venv/bin/python -c "import {$context['python_module']}; print({$context['python_module']}.__version__)"
