@@ -86,7 +86,19 @@ class E2eSeeder extends Seeder
             'repository_url' => 'git://gitserver/demo.git',
         ]);
 
-        $group->packages()->attach($composerPackage);
+        // Unlike Composer, npm packages are publish-based (PackageSourceMode::Publish, the
+        // `source_mode` column's own default): there is no git tag for SyncPackage to import
+        // versions from, so the row itself must exist before the first `npm publish` — the
+        // registry endpoint resolves the package by (type, name, organization) and 404s a
+        // write aimed at a name nobody registered, exactly as it would for a foreign package.
+        $npmPackage = Package::create([
+            'organization_id' => $customer->id,
+            'type' => PackageType::Npm,
+            'name' => 'kontorfix-e2e-demo',
+            'description' => 'Fixture package for the end-to-end suite.',
+        ]);
+
+        $group->packages()->attach([$composerPackage->id, $npmPackage->id]);
 
         [, $readToken] = RegistryToken::issue($customer, 'e2e-read', $group, TokenAbility::Read);
         [, $publishToken] = RegistryToken::issue($customer, 'e2e-publish', $group, TokenAbility::Publish);
