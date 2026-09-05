@@ -16,6 +16,18 @@ function composerTagVersion(string $version): string
     return "v{$version}";
 }
 
+// The install test's script marks each blob of output it cares about with a delimiter line
+// rather than relying on brace-counting: composer.json and vendor/composer/installed.json
+// are both read off the same stdout stream, and installed.json's own braces would break any
+// attempt to find "the" first/last JSON object once two blobs are concatenated.
+function extractBetween(string $haystack, string $start, string $end): string
+{
+    $startPos = strpos($haystack, $start) + strlen($start);
+    $endPos = strpos($haystack, $end, $startPos);
+
+    return trim(substr($haystack, $startPos, $endPos - $startPos));
+}
+
 it('syncs the seeded package from the git daemon through the queued worker', function () {
     $context = E2eStack::context();
 
@@ -34,16 +46,29 @@ it('installs the synced package with the real composer client', function () {
     // secure-http is off because the stack speaks plain HTTP; COMPOSER_AUTH carries the
     // token as HTTP Basic, which is the form AuthenticateRegistry accepts for Composer.
     //
-    // The evidence is read off disk, not asked of Composer: `composer show --format=json`
-    // reports Composer's own resolved-repository bookkeeping — the same metadata it already
-    // trusted while resolving the dependency. A bug that made ComposerMetadataBuilder and
-    // the installer self-consistently agree on name and version while the dist extracted
-    // wrongly or was empty would still pass that check. NpmTest.php and PypiTest.php don't
-    // have this hole: npm reads package.json out of the installed tarball, and PyPI imports
-    // the installed module and prints its real __version__ — both look at bytes the archive
-    // actually produced. The fixture ships a real file, src/Demo.php, for exactly this: `cat`
-    // the installed composer.json for the name, and confirm src/Demo.php exists, so this test
-    // checks what actually landed in vendor/, not what Composer believes it installed.
+    // The content evidence is read off disk, not asked of Composer: `composer show
+    // --format=json` reports Composer's own resolved-repository bookkeeping — the same
+    // metadata it already trusted while resolving the dependency. A bug that made
+    // ComposerMetadataBuilder and the installer self-consistently agree on name and version
+    // while the dist extracted wrongly or was empty would still pass that check. NpmTest.php
+    // and PypiTest.php don't have this hole: npm reads package.json out of the installed
+    // tarball, and PyPI imports the installed module and prints its real __version__ — both
+    // look at bytes the archive actually produced. The fixture ships a real file, src/Demo.php,
+    // for exactly this: `cat` the installed composer.json for the name, and confirm
+    // src/Demo.php exists, so this test checks what actually landed in vendor/, not what
+    // Composer believes it installed.
+    //
+    // That is not the whole story, though: neither check tells dist from git apart. Stripping
+    // `dist` from ComposerMetadataBuilder's output left Composer falling back to the `source`
+    // entry and cloning straight from git://gitserver/demo.git — reachable from this very
+    // container — so src/Demo.php was present either way and both checks above passed. The
+    // dist path is the registry's actual product: the zip it builds, stores and serves: a
+    // package.json/… check that also passes when the registry stops serving dists entirely
+    // is not testing the registry, it is testing that a git server is reachable. Two more
+    // assertions below cover the two halves of that: the registry side (the p2 metadata
+    // advertises a dist, and that dist URL is actually servable) and the client side
+    // (vendor/composer/installed.json — Composer's own bookkeeping, but here that is the
+    // right source, since only Composer knows which transport it actually chose).
     $script = <<<SH
         set -e
         rm -rf /work/proj && mkdir -p /work/proj && cd /work/proj
@@ -52,8 +77,13 @@ it('installs the synced package with the real composer client', function () {
         composer config secure-http false
         composer config repositories.kontorfix composer {$context['base_url']}
         composer require {$context['composer_package']}:^1.0 --no-interaction --no-progress
+        echo ===MANIFEST===
         cat vendor/{$context['composer_package']}/composer.json
+        echo ===MANIFEST-END===
         test -f vendor/{$context['composer_package']}/src/Demo.php && echo DEMO_PHP_PRESENT || echo DEMO_PHP_MISSING
+        echo ===INSTALLED===
+        cat vendor/composer/installed.json
+        echo ===INSTALLED-END===
         SH;
 
     $process = E2eStack::exec('client-composer', $script, 600);
@@ -61,13 +91,38 @@ it('installs the synced package with the real composer client', function () {
     expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
 
     $output = $process->getOutput();
-    $manifest = json_decode(
-        substr($output, (int) strpos($output, '{'), (int) strrpos($output, '}') - (int) strpos($output, '{') + 1),
-        true,
-    );
+    $manifest = json_decode(extractBetween($output, '===MANIFEST===', '===MANIFEST-END==='), true);
+    $installed = json_decode(extractBetween($output, '===INSTALLED===', '===INSTALLED-END==='), true);
 
     expect($manifest['name'])->toBe($context['composer_package'])
         ->and($output)->toContain('DEMO_PHP_PRESENT');
+
+    // Registry side: the p2 metadata must actually advertise a dist, and that exact dist.url
+    // must actually be servable. There is only ever one tagged version in this fixture, so
+    // index [0] is the version this whole test installs.
+    $metadata = E2eStack::get("/p2/{$context['composer_package']}.json", $context['read_token']);
+    expect($metadata['status'])->toBe(200);
+
+    $versions = json_decode($metadata['body'], true)['packages'][$context['composer_package']] ?? [];
+    $distUrl = $versions[0]['dist']['url'] ?? null;
+    expect($distUrl)->not->toBeNull();
+
+    $distFetch = E2eStack::get(E2eStack::pathFromRegistryUrl($distUrl), $context['read_token']);
+    expect($distFetch['status'])->toBe(200);
+
+    // Client side: which transport Composer actually chose for THIS package. Only Composer's
+    // own bookkeeping can answer that — it is the right source here, unlike the content
+    // checks above, because the question is precisely what installed.json exists to record.
+    $installedEntry = null;
+    foreach ($installed['packages'] ?? [] as $package) {
+        if (($package['name'] ?? null) === $context['composer_package']) {
+            $installedEntry = $package;
+            break;
+        }
+    }
+
+    expect($installedEntry)->not->toBeNull()
+        ->and($installedEntry['installation-source'] ?? null)->toBe('dist');
 });
 
 it('refuses an anonymous composer read with 401 and installs nothing', function () {

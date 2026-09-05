@@ -112,6 +112,30 @@ final class E2eStack
     }
 
     /**
+     * Turns an absolute registry URL — as it appears inside p2/packument metadata, always
+     * built from APP_URL (`http://app:8080/...`, the address the app and worker containers
+     * see each other at) — into the path suffix `get()` needs. `get()` reaches the stack from
+     * the host over the published loopback port under `host_base_url`
+     * (`http://127.0.0.1:8099/...`) instead, but both share the exact same path structure
+     * under the registry prefix; only the host differs. Exists so a test that needs to follow
+     * a URL out of a metadata response (e.g. a dist URL) asks this rather than hand-assembling
+     * one from string replacement.
+     */
+    public static function pathFromRegistryUrl(string $absoluteUrl): string
+    {
+        $prefix = (string) parse_url(self::context()['base_url'], PHP_URL_PATH);
+        $path = (string) parse_url($absoluteUrl, PHP_URL_PATH);
+
+        if (! str_starts_with($path, $prefix)) {
+            throw new RuntimeException(
+                "Registry URL {$absoluteUrl} does not share the expected path prefix {$prefix}."
+            );
+        }
+
+        return substr($path, strlen($prefix));
+    }
+
+    /**
      * Waits for the queued SyncPackage to finish, by asking the registry the question a
      * Composer client asks: does this package have versions yet?
      *
