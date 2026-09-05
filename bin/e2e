@@ -9,10 +9,23 @@ CONTEXT_FILE="tests/E2E/.context.json"
 # Never committed: a fresh key per run, so no application key lives in the repository.
 export E2E_APP_KEY="base64:$(openssl rand -base64 32)"
 
-if [ "${1:-}" = "--upstream" ]; then
-    export E2E_UPSTREAM=1
-    echo "e2e: upstream tests enabled"
-fi
+# A typo here (e.g. --upstrem) used to be silently ignored: the run would proceed as the
+# default suite and still print "e2e: green" at the end, with nobody having noticed the
+# upstream tests never ran. Any argument other than the one this script understands is now
+# a hard error instead of quietly falling through.
+case "${1:-}" in
+    '')
+        ;;
+    --upstream)
+        export E2E_UPSTREAM=1
+        echo "e2e: upstream tests enabled"
+        ;;
+    *)
+        echo "e2e: unrecognized argument '${1}'" >&2
+        echo "usage: bin/e2e [--upstream]" >&2
+        exit 1
+        ;;
+esac
 
 dump_logs() {
     echo "----- app + worker logs -----" >&2
