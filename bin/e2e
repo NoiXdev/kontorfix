@@ -12,7 +12,9 @@ export E2E_APP_KEY="base64:$(openssl rand -base64 32)"
 # A typo here (e.g. --upstrem) used to be silently ignored: the run would proceed as the
 # default suite and still print "e2e: green" at the end, with nobody having noticed the
 # upstream tests never ran. Any argument other than the one this script understands is now
-# a hard error instead of quietly falling through.
+# a hard error instead of quietly falling through — including a second one, which used to
+# pass straight through unchecked (e.g. `bin/e2e --upstream junk` ran the full stack and
+# still printed "e2e: green").
 case "${1:-}" in
     '')
         ;;
@@ -22,6 +24,16 @@ case "${1:-}" in
         ;;
     *)
         echo "e2e: unrecognized argument '${1}'" >&2
+        echo "usage: bin/e2e [--upstream]" >&2
+        exit 1
+        ;;
+esac
+
+case "${2:-}" in
+    '')
+        ;;
+    *)
+        echo "e2e: unrecognized argument '${2}'" >&2
         echo "usage: bin/e2e [--upstream]" >&2
         exit 1
         ;;
