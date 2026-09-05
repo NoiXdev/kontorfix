@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+COMPOSE="docker compose -f docker/compose.e2e.yaml"
+CONTEXT_FILE="tests/E2E/.context.json"
+
+# Never committed: a fresh key per run, so no application key lives in the repository.
+export E2E_APP_KEY="base64:$(openssl rand -base64 32)"
+
+if [ "${1:-}" = "--upstream" ]; then
+    export E2E_UPSTREAM=1
+    echo "e2e: upstream tests enabled"
+fi
+
+dump_logs() {
+    echo "----- app + worker logs -----" >&2
+    $COMPOSE logs --no-color app worker >&2 || true
+}
+
+teardown() {
+    $COMPOSE down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -f "$CONTEXT_FILE"
+}
+
+fail() {
+    dump_logs
+    teardown
+    exit 1
+}
+
+trap fail ERR
+
+$COMPOSE build
+$COMPOSE up -d --wait
+
+# The app container migrates on start (docker/entrypoint.sh). Seeding is ours.
+$COMPOSE exec -T app php artisan db:seed --class=E2eSeeder --force \
+    | sed -n 's/^E2E_CONTEXT=//p' > "$CONTEXT_FILE"
+
+test -s "$CONTEXT_FILE" || { echo "e2e: seeder produced no context" >&2; exit 1; }
+
+vendor/bin/pest -c phpunit.e2e.xml
+
+trap - ERR
+teardown
+echo "e2e: green"

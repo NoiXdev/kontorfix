@@ -1,0 +1,11 @@
+{
+    "name": "kontorfix-e2e/demo",
+    "description": "Fixture package for the kontorfix end-to-end suite.",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "KontorfixE2e\\Demo\\": "src/"
+        }
+    }
+}
