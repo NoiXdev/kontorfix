@@ -20,8 +20,12 @@ use RuntimeException;
  * The fixture world for the end-to-end run (docker/compose.e2e.yaml).
  *
  * It ships inside the production image — seeders are not excluded from the build — so the
- * environment guard below is what stands between a stray `db:seed` on a production host and
- * an organization holding a live publish token.
+ * environment guard below is what stands between a stray `db:seed` on a host this fixture
+ * was never meant for and an organization holding a live publish token, plus an admin
+ * account (`e2e@example.invalid` / `e2e-password`) that also satisfies RequireSetup. The
+ * guard allows only `local` and `testing` rather than refusing only `production` by name:
+ * on a `staging` host — or any other environment nobody has named yet — a manual
+ * `db:seed --class=E2eSeeder --force` would otherwise sail straight through.
  *
  * The Composer package's repository_url is written straight to the model, as the test
  * factories do, because RepositoryUrlRules::shape() accepts only https and ssh. The clone
@@ -33,8 +37,8 @@ class E2eSeeder extends Seeder
 {
     public function run(): void
     {
-        if (app()->environment('production')) {
-            throw new RuntimeException('E2eSeeder refuses to run in production.');
+        if (! app()->environment(['local', 'testing'])) {
+            throw new RuntimeException('E2eSeeder refuses to run outside local/testing environments.');
         }
 
         $operator = Organization::create([

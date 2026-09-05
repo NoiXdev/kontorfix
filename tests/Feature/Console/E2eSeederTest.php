@@ -4,6 +4,7 @@ use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Jobs\SyncPackage;
 use App\Models\Organization;
+use App\Models\User;
 use Database\Seeders\E2eSeeder;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Queue;
@@ -111,11 +112,23 @@ it('configures one upstream per ecosystem', function () {
     ]);
 });
 
-it('refuses to run in production', function () {
-    app()['env'] = 'production';
+it('refuses to run outside local and testing environments', function () {
+    // staging, not production: the guard used to check `=== 'production'` by name, which
+    // would also refuse staging by accident only if it happened to equal that literal — it
+    // did not. staging is the value that actually distinguishes "refuses only production"
+    // from "refuses everything but local/testing"; asserting against production alone would
+    // pass under either version of the guard and prove nothing about which one is in place.
+    app()['env'] = 'staging';
 
     expect(fn () => Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]))
-        ->toThrow(RuntimeException::class, 'E2eSeeder refuses to run in production');
+        ->toThrow(RuntimeException::class, 'E2eSeeder refuses to run outside local/testing environments');
 
-    expect(Organization::where('slug', 'e2e-customer')->exists())->toBeFalse();
+    // All three of the guard's real consequences, not just the customer org: the operator
+    // organization is created FIRST, so a regression that moved this check between the two
+    // Organization::create() calls would leave a stray operator org and an admin account
+    // with a hardcoded password (e2e@example.invalid / e2e-password) on a production-like
+    // host, and asserting only e2e-customer's absence would stay green through exactly that.
+    expect(Organization::where('slug', 'e2e-customer')->exists())->toBeFalse()
+        ->and(Organization::where('slug', 'e2e-operator')->exists())->toBeFalse()
+        ->and(User::where('email', 'e2e@example.invalid')->exists())->toBeFalse();
 });
