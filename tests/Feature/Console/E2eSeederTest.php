@@ -1,9 +1,22 @@
 <?php
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
+use App\Jobs\SyncPackage;
 use App\Models\Organization;
 use Database\Seeders\E2eSeeder;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Queue;
+
+// The seeder now unconditionally dispatches SyncPackage for the Composer row (see
+// E2eSeeder), and phpunit.xml sets QUEUE_CONNECTION=sync — so every test in this file that
+// runs the seeder would otherwise execute that job inline. GitRepository::sync() rejects
+// `git://` under the default (non-E2E) allowed schemes and — deliberately, so the real
+// queue retries transient failures — SyncPackage::handle() rethrows after recording the
+// failure, which would bubble straight out of Artisan::call() and fail the test for a
+// reason that has nothing to do with what it is checking. Faking the queue for every test
+// here keeps the dispatch a plain, inert fact instead of a job that actually runs.
+beforeEach(fn () => Queue::fake());
 
 it('creates the fixture world and prints a parsable context line', function () {
     Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
@@ -37,17 +50,28 @@ it('creates the fixture world and prints a parsable context line', function () {
         ->and(Organization::where('slug', 'e2e-operator')->value('is_operator'))->toBeTrue();
 });
 
-it('seeds the composer package against the git daemon and leaves it unsynced', function () {
+it('seeds the composer package as git-sourced and queues its sync', function () {
     Artisan::call('db:seed', ['--class' => E2eSeeder::class, '--force' => true]);
 
     $package = Organization::where('slug', 'e2e-customer')->firstOrFail()
         ->packages()->where('type', PackageType::Composer)->where('name', 'kontorfix-e2e/demo')->firstOrFail();
 
-    // The worker syncs it; the seeder must not, or the E2E run would prove nothing about
-    // the queued path it exists to cover.
+    // Not "the package has zero versions": under a faked queue that is true no matter what
+    // the seeder does, since nothing ever runs the job — it would pass even with the
+    // `source_mode` bug this test exists to catch. The two assertions below are the ones
+    // that can actually fail: `source_mode` has to be `git` (isGitSourced() reads exactly
+    // this column, and its default is `publish` — see the seeder's own comment on this),
+    // and SyncPackage has to have been queued for THIS package, not merely pushed at all.
+    // Both were true before this test existed and both are what the E2E worker actually
+    // depends on to pick the package up.
     expect($package->repository_url)->toBe('git://gitserver/demo.git')
-        ->and($package->versions()->count())->toBe(0)
+        ->and($package->source_mode)->toBe(PackageSourceMode::Git)
         ->and($package->groups()->where('groups.slug', 'e2e-registry')->exists())->toBeTrue();
+
+    Queue::assertPushed(
+        SyncPackage::class,
+        fn (SyncPackage $job): bool => $job->package->is($package),
+    );
 });
 
 it('seeds an npm package the publish tests can target, with no repository to sync from', function () {

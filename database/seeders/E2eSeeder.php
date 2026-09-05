@@ -2,9 +2,11 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Enums\UserRole;
+use App\Jobs\SyncPackage;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -78,12 +80,23 @@ class E2eSeeder extends Seeder
             'portal_enabled' => true,
         ]);
 
+        // `source_mode` is NOT optional here, and its absence fails silently: the column
+        // defaults to `publish` (see the migration that introduced it), and
+        // Package::isGitSourced() reads this column rather than inferring anything from
+        // `repository_url` being set. A Composer row created without it looks correctly
+        // seeded in every way a quick read would check — repository_url is there, the type
+        // is right — but `packages:resync` skips it forever, because it filters on
+        // isGitSourced(), and no error, log line, or failed job ever appears to say why. The
+        // real creation paths (Admin\PackageController, Api\V1\PackageController,
+        // PackageFactory) all set this explicitly for exactly this reason; this seeder must
+        // match them rather than rely on the column default meant for npm/Python.
         $composerPackage = Package::create([
             'organization_id' => $customer->id,
             'type' => PackageType::Composer,
             'name' => 'kontorfix-e2e/demo',
             'description' => 'Fixture package for the end-to-end suite.',
             'repository_url' => 'git://gitserver/demo.git',
+            'source_mode' => PackageSourceMode::Git,
         ]);
 
         // Unlike Composer, npm and Python packages are publish-based (PackageSourceMode::
@@ -116,6 +129,17 @@ class E2eSeeder extends Seeder
         ]);
 
         $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id]);
+
+        // Every real creation path dispatches this itself right after creating a
+        // git-sourced package (Admin\PackageController, Api\V1\PackageController) — nothing
+        // else in the E2E stack will. There is deliberately no `scheduler` service in
+        // docker/compose.e2e.yaml, so the hourly `packages:resync` schedule that would
+        // otherwise catch a package like this never runs there. This dispatch does NOT make
+        // the seeder perform the sync itself: it only pushes the job onto Redis, and the
+        // `worker` container is what actually clones the repository, scans its tags, and
+        // builds the dist — which is precisely the queued path the Composer E2E run exists
+        // to exercise.
+        SyncPackage::dispatch($composerPackage);
 
         [, $readToken] = RegistryToken::issue($customer, 'e2e-read', $group, TokenAbility::Read);
         [, $publishToken] = RegistryToken::issue($customer, 'e2e-publish', $group, TokenAbility::Publish);
