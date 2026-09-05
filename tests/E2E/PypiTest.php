@@ -62,16 +62,29 @@ it('refuses an anonymous pip index read with 401 and installs nothing', function
     // Half two: nothing landed on disk. A fresh venv and a fresh pip cache directory make
     // sure no credential or cached response from the earlier authenticated install can leak
     // into this run and rescue it for the wrong reason.
+    // pip's own output is discarded: on a 401 with no TTY, pip tries to prompt for a
+    // username, writes "User for app:8080: " to stdout with no trailing newline, then
+    // hits EOFError — which would otherwise glue straight onto the marker line below and
+    // break the exact-match on it. Nothing about what the test proves depends on pip's
+    // chatter, only on whether the import worked afterwards.
     $script = <<<SH
         rm -rf /work/anonvenv /work/anoncache && python -m venv /work/anonvenv
         PIP_CACHE_DIR=/work/anoncache /work/anonvenv/bin/pip install --no-cache-dir --quiet \
             --index-url http://app:8080/r/e2e-customer/e2e-registry/simple \
             --trusted-host app \
-            {$context['python_package']} || true
+            {$context['python_package']} >/dev/null 2>&1 || true
         /work/anonvenv/bin/python -c "import {$context['python_module']}" 2>/dev/null && echo IMPORTED || echo ABSENT
         SH;
 
     $process = E2eStack::exec('client-python', $script, 600);
 
-    expect(trim($process->getOutput()))->toEndWith('ABSENT');
+    // Equality on the final line, not a suffix match on the whole output: `toEndWith`
+    // reads the wrong shape here too, for the same reason NpmTest.php's sibling test spells
+    // out — it happens to be safe today only because "IMPORTED" cannot end with "ABSENT".
+    $lines = array_values(array_filter(
+        array_map('trim', explode("\n", $process->getOutput())),
+        fn (string $line): bool => $line !== '',
+    ));
+
+    expect(end($lines))->toBe('ABSENT');
 });
