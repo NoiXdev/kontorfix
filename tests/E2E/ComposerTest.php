@@ -45,6 +45,13 @@ it('installs the synced package with the real composer client', function () {
 
     // secure-http is off because the stack speaks plain HTTP; COMPOSER_AUTH carries the
     // token as HTTP Basic, which is the form AuthenticateRegistry accepts for Composer.
+    // repositories.packagist.org is disabled for the same reason UpstreamTest.php's own
+    // fallthrough test disables it: without this line Composer still queries Packagist for
+    // metadata on every `require`, even though the package it wants is right here — a slow
+    // or unreachable Packagist would turn this run red for a reason that has nothing to do
+    // with the registry. npm and pip have no equivalent default-registry fallback to turn
+    // off; Composer does, and spec decision 3 ("the standard run depends on nothing outside
+    // the stack") only held for two of the three ecosystems until this line existed here too.
     //
     // The content evidence is read off disk, not asked of Composer: `composer show
     // --format=json` reports Composer's own resolved-repository bookkeeping — the same
@@ -75,6 +82,7 @@ it('installs the synced package with the real composer client', function () {
         export COMPOSER_AUTH='{"http-basic":{"app:8080":{"username":"x","password":"{$context['read_token']}"}}}'
         composer init -n --name=kontorfix-e2e/consumer > /dev/null
         composer config secure-http false
+        composer config repositories.packagist.org false
         composer config repositories.kontorfix composer {$context['base_url']}
         composer require {$context['composer_package']}:^1.0 --no-interaction --no-progress
         echo ===MANIFEST===
@@ -121,8 +129,17 @@ it('installs the synced package with the real composer client', function () {
         }
     }
 
+    // Not the composer.json check above: the fixture's manifest carries no "version" field
+    // at all (checked — there is nothing to assert there), so the version has to come from
+    // installed.json, right next to installation-source. Composer records it in the raw
+    // tag form (composerTagVersion()), same as the p2 "version" field this file already
+    // compares against `v1.0.0` for the same reason. Without this: a tag-mapping bug that
+    // built the dist from `main` while still labelling it `v1.0.0` would satisfy every
+    // other assertion here — name, shipped file, dist transport — and only the version
+    // actually installed would be wrong.
     expect($installedEntry)->not->toBeNull()
-        ->and($installedEntry['installation-source'] ?? null)->toBe('dist');
+        ->and($installedEntry['installation-source'] ?? null)->toBe('dist')
+        ->and($installedEntry['version'] ?? null)->toBe(composerTagVersion($context['version']));
 });
 
 it('refuses an anonymous composer read with 401 and installs nothing', function () {
@@ -146,6 +163,7 @@ it('refuses an anonymous composer read with 401 and installs nothing', function 
         unset COMPOSER_AUTH
         composer init -n --name=kontorfix-e2e/anon > /dev/null
         composer config secure-http false
+        composer config repositories.packagist.org false
         composer config repositories.kontorfix composer {$context['base_url']}
         composer require {$context['composer_package']}:^1.0 --no-interaction --no-progress || true
         ls vendor/kontorfix-e2e 2>/dev/null | wc -l
