@@ -57,7 +57,27 @@ fail() {
 
 trap fail ERR
 
-$COMPOSE build
+# `docker compose build` takes no cache-from/cache-to flags, so it cannot use a
+# layer cache. CI builds the image itself with docker/build-push-action (which
+# does accept those flags) and tags it exactly `kontorfix-e2e:local` — the tag
+# the `app` service's `image:` already names — then sets E2E_SKIP_BUILD=1 so this
+# script does not immediately rebuild over it. Locally, the default stays
+# "always build": nobody has to know this variable exists to get a correct run.
+if [ "${E2E_SKIP_BUILD:-}" = "1" ]; then
+    if ! docker image inspect kontorfix-e2e:local >/dev/null 2>&1; then
+        # Not a job for fail(): nothing has started yet, so there are no
+        # containers to log or tear down, and exit (unlike a failing command)
+        # does not run the ERR trap anyway — see the CONTEXT_FILE check below.
+        echo "e2e: E2E_SKIP_BUILD=1 but image 'kontorfix-e2e:local' does not exist" >&2
+        echo "e2e: build it first, e.g.:" >&2
+        echo "  docker buildx build --load -t kontorfix-e2e:local -f docker/Dockerfile ." >&2
+        exit 1
+    fi
+    echo "e2e: E2E_SKIP_BUILD=1, using existing kontorfix-e2e:local image"
+else
+    $COMPOSE build
+fi
+
 $COMPOSE up -d --wait
 
 # The app container migrates on start (docker/entrypoint.sh). Seeding is ours.

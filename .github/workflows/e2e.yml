@@ -34,8 +34,26 @@ jobs:
       - name: Setup Docker buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
+      # `docker compose build` (what bin/e2e uses locally) has no cache-from/cache-to
+      # flags, so it can never hit a remote cache — every run rebuilt the image from
+      # scratch. build-push-action does accept them, so CI builds the image itself
+      # here, `load: true` puts it in the daemon under the exact tag
+      # docker/compose.e2e.yaml's `app` service already names, and E2E_SKIP_BUILD
+      # below tells bin/e2e to trust that image instead of rebuilding over it.
+      - name: Build the e2e image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: kontorfix-e2e:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       # bin/e2e already dumps the app/worker logs on failure and tears the stack down with
       # `down -v`; do not add an `if: failure()` step here for the same thing, or the log
       # dump ends up living in two places and the two can drift.
       - name: Run the end-to-end suite
+        env:
+          E2E_SKIP_BUILD: '1'
         run: bin/e2e ${{ inputs.upstream && '--upstream' || '' }}

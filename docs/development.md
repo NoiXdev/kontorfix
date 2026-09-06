@@ -97,7 +97,20 @@ requirement, not a convenience: a black-box run that fails without server logs t
 than the manual test it replaces.
 
 In CI it is its own workflow (`.github/workflows/e2e.yml`), on `main` and on demand, with the
-upstream part behind a dispatch input.
+upstream part behind a dispatch input. CI builds the image itself with
+`docker/build-push-action` (a GitHub Actions layer cache; `docker compose build` accepts no
+`cache-from`/`cache-to` flags) and tags it `kontorfix-e2e:local`, then runs `bin/e2e` with
+`E2E_SKIP_BUILD=1` so it reuses that image instead of rebuilding it. Locally, the default
+stays "always build" — nobody has to set anything to get a correct run. If you want to try
+the same path locally, build the image yourself first and pass the same flag:
+
+```bash
+docker buildx build --load -t kontorfix-e2e:local -f docker/Dockerfile .
+E2E_SKIP_BUILD=1 bin/e2e
+```
+
+`bin/e2e` verifies the image actually exists before skipping the build; with `E2E_SKIP_BUILD=1`
+and no matching image, it fails with a clear message rather than a confusing compose error.
 
 **Not covered, and still manual:** custom domains at the host root, and anything that only
 appears behind Traefik with real TLS.
