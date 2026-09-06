@@ -29,6 +29,10 @@ FROM dunglas/frankenphp:1-php8.4 AS app
 RUN install-php-extensions pcntl posix pdo_pgsql redis zip intl opcache
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
     && rm -rf /var/lib/apt/lists/*
+# See docker/php.ini's own comment: the base image loads no php.ini at all, so without
+# this the compiled-in post_max_size=8M default would reject any OCI blob push above that
+# size before the streaming upload path in App\Services\Oci\BlobStore ever ran.
+COPY docker/php.ini /usr/local/etc/php/conf.d/kontorfix.ini
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /app
 COPY composer.json composer.lock ./

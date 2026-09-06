@@ -1,0 +1,8 @@
+# Pairs with Dockerfile.b for the deduplication test. Both COPY the exact same `base.bin`
+# from the same build context, first, before their own distinct file — so the layer that
+# `COPY base.bin` produces is byte-for-byte identical between the two images (content,
+# path and mode are all that a layer's digest depends on, and all three are identical
+# here), while `unique.txt` differs and forces a genuinely new second layer per image.
+FROM scratch
+COPY base.bin /base.bin
+COPY unique-a.txt /unique.txt

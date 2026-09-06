@@ -8,6 +8,7 @@ use App\Enums\TokenAbility;
 use App\Enums\UpstreamPolicy;
 use App\Enums\UserRole;
 use App\Jobs\SyncPackage;
+use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -45,14 +46,14 @@ class E2eSeeder extends Seeder
             'name' => 'E2E Operator',
             'slug' => 'e2e-operator',
             'is_operator' => true,
-            'enabled_registry_types' => ['composer', 'npm', 'python'],
+            'enabled_registry_types' => ['composer', 'npm', 'python', 'docker'],
         ]);
 
         $customer = Organization::create([
             'name' => 'E2E Customer',
             'slug' => 'e2e-customer',
             'is_operator' => false,
-            'enabled_registry_types' => ['composer', 'npm', 'python'],
+            'enabled_registry_types' => ['composer', 'npm', 'python', 'docker'],
         ]);
 
         // RequireSetup makes the wizard the only reachable part of the web group while no
@@ -154,7 +155,41 @@ class E2eSeeder extends Seeder
             'description' => 'Fixture package for the end-to-end suite.',
         ]);
 
-        $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id]);
+        // Docker repositories are publish-based too — same reasoning as npm/Python above,
+        // and the same reason `ociWritableRepository()` refuses an unregistered name: a
+        // publish token must not be able to invent a repository on push.
+        //
+        // The name reuses the lowercase-with-dashes form the other two publish-based types
+        // already share (`kontorfix-e2e-demo`) — legal under PackageType::Docker's own name
+        // grammar (a single lowercase-alphanumeric-and-dash component), and the uniqueness
+        // constraint is scoped by `type`, so all three coexist under one name.
+        $dockerPackage = Package::create([
+            'organization_id' => $customer->id,
+            'type' => PackageType::Docker,
+            'name' => 'kontorfix-e2e-demo',
+            'description' => 'Fixture package for the end-to-end suite.',
+        ]);
+
+        $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id, $dockerPackage->id]);
+
+        // The `/v2/` OCI routes exist ONLY at the domain-access root (routes/registry.php
+        // registers them outside the `/r/{orgSlug}/{groupSlug}` prefix group — a real Docker
+        // client cannot address a path-prefixed registry), so this group needs a `domains`
+        // row, unlike Composer/npm/Python which are reachable at the slug path already.
+        //
+        // The hostname is bare `127.0.0.1`, with NO port, even though the Docker client
+        // reaches this stack at `127.0.0.1:8099` (docker/compose.e2e.yaml's published
+        // loopback port — the one plaintext-HTTP exception the Docker daemon honours for a
+        // registry, see tests/E2E/DockerTest.php). `ResolveRegistryContext` looks the
+        // request up by `Request::getHost()`, and Symfony's implementation of that method
+        // always strips a trailing `:<port>` before returning (confirmed in
+        // vendor/symfony/http-foundation/Request.php) — the same way a browser's Host
+        // header is parsed. A `domains` row seeded WITH the port would simply never match
+        // and this whole suite would 404 on every request. No change to
+        // ResolveRegistryContext was needed for this; tests/Feature/Registry/
+        // CustomDomainTest.php now has a dedicated case pinning that stripping behaviour so
+        // a future change to that lookup cannot silently reintroduce the port into it.
+        Domain::create(['group_id' => $group->id, 'hostname' => '127.0.0.1']);
 
         // Every real creation path dispatches this itself right after creating a
         // git-sourced package (Admin\PackageController, Api\V1\PackageController) — nothing
@@ -184,6 +219,8 @@ class E2eSeeder extends Seeder
             'npm_package' => 'kontorfix-e2e-demo',
             'python_package' => 'kontorfix-e2e-demo',
             'python_module' => 'kontorfix_e2e_demo',
+            'docker_repository' => 'kontorfix-e2e-demo',
+            'docker_host' => '127.0.0.1:8099',
             'version' => '1.0.0',
         ], JSON_THROW_ON_ERROR));
     }
