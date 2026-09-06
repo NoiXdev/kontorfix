@@ -1,5 +1,15 @@
 includes:
     - vendor/larastan/larastan/extension.neon
+    # pestphp/pest-plugin-phpstan (require-dev) resolves Pest's `$this`-closure-binding and
+    # expectation-typing gaps (see the report for the full evaluation). Its extension.neon
+    # sets `universalObjectCratesClasses: PHPUnit\Framework\TestCase` globally — that is
+    # the mechanism that makes `beforeEach()`-assigned properties on `$this` type-check at
+    # all, but its cost is that property access on `$this` in ANY TestCase subclass is
+    # unchecked project-wide (a typo'd property silently yields `mixed` instead of
+    # property.notFound). This is unavoidable given how the plugin resolves closure
+    # binding, and does not affect `app/` — no TestCase subclasses live there, and `app/`
+    # analyses with zero errors under this config exactly as it did on `main` before this
+    # change.
     - vendor/pestphp/pest-plugin-phpstan/extension.neon
 
 parameters:
@@ -106,22 +116,28 @@ parameters:
         #
         # pest-plugin-phpstan added `pest.expectation.redundant`, which flags a `toBeInstanceOf()`
         # / `toBeString()` check as pointless when the value's static type already satisfies it.
-        # Reviewed every one of the 11 occurrences below individually (none suppressed as a
-        # group on the identifier alone). In every case the assertion is doing exactly what its
-        # surrounding test intends: pinning that a class keeps implementing an interface
-        # (`User implements MustVerifyEmail`/`PasskeyUser`, `SendNotificationDigest implements
-        # ShouldBeUnique`, `PackageSynced implements ShouldBroadcast`), that a method keeps
-        # returning the specific type it returns today (`broadcastOn()`, `generateSecret()`,
-        # `ReadmeRenderer::render()`), that a generic helper's return value is genuinely the
-        # object it looks like it passed through (`SlugClaimGuard::claim*Slug()`), that a job's
-        # declared middleware is still the type the timing math next to it assumes
-        # (`SyncTimingRelationsTest`), or that the production container still binds what
-        # `AppServiceProvider` says it does (`SystemHostResolverTest`, the same container-binding
-        # inference discussed in the `TestCase::resolveHostTo()` fix above). PHPStan can already
-        # prove all of these from today's code — that is precisely why each exists: to fail
-        # loudly the day the code it is watching changes, rather than staying silently correct
-        # by accident. Rewriting or removing any of them to satisfy the analyser would be
-        # deleting the regression coverage they exist to provide, which is out of scope here.
+        # Reviewed every one of the 10 occurrences below individually (none suppressed as a
+        # group on the identifier alone) — an eleventh, tests/Unit/TwoFactorAuthenticatorTest.php,
+        # turned out to be a genuine tautology on re-review (`generateSecret()` returns `string`,
+        # so `toBeString()` in `expect($secret)->toBeString()->not->toBeEmpty()` asserted
+        # nothing the chain's real check, `->not->toBeEmpty()`, didn't already cover on its own)
+        # and was fixed by dropping the redundant call instead of suppressing it. The 10 below
+        # are different: each is doing exactly what its surrounding test intends, and none has a
+        # surviving sibling assertion in the same chain that already covers what it checks —
+        # pinning that a class keeps implementing an interface (`User implements
+        # MustVerifyEmail`/`PasskeyUser`, `SendNotificationDigest implements ShouldBeUnique`,
+        # `PackageSynced implements ShouldBroadcast`), that a method keeps returning the specific
+        # type it returns today (`broadcastOn()`, `ReadmeRenderer::render()`), that a generic
+        # helper's return value is genuinely the object it looks like it passed through
+        # (`SlugClaimGuard::claim*Slug()`), that a job's declared middleware is still the type
+        # the timing math next to it assumes (`SyncTimingRelationsTest`), or that the production
+        # container still binds what `AppServiceProvider` says it does (`SystemHostResolverTest`,
+        # the same container-binding inference discussed in the `TestCase::resolveHostTo()` fix
+        # above). PHPStan can already prove all of these from today's code — that is precisely
+        # why each exists: to fail loudly the day the code it is watching changes, rather than
+        # staying silently correct by accident. Rewriting or removing any of them to satisfy the
+        # analyser would be deleting the regression coverage they exist to provide, which is out
+        # of scope here.
         -
             message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\User\>; assertion is redundant\.$#'
             identifier: pest.expectation.redundant
@@ -172,8 +188,3 @@ parameters:
             identifier: pest.expectation.redundant
             count: 1
             path: tests/Unit/SystemHostResolverTest.php
-        -
-            message: '#^Calling toBeString\(\) on Expectation\<string\>; assertion is redundant\.$#'
-            identifier: pest.expectation.redundant
-            count: 1
-            path: tests/Unit/TwoFactorAuthenticatorTest.php
