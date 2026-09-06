@@ -18,12 +18,13 @@ use UnexpectedValueException;
  * no build/prepare scripts are run, so publish mode remains the way to ship pre-built
  * artifacts.
  *
- * npm is never git-sourced (`PackageSourceMode::allowedFor(PackageType::Npm)` excludes
- * `Git`, enforced on both create paths and, as a backstop for rows that predate the rule,
- * in `SyncPackage::handle()` before this class is ever reached) — a built npm tarball is
- * not the repository tree, so mirroring tags would silently ship the wrong content. The
- * `PackageType::Npm` arm below exists only to keep this match exhaustive and to fail loudly
- * if that invariant is ever broken upstream.
+ * npm and Docker are never git-sourced (`PackageSourceMode::allowedFor()` excludes `Git`
+ * for both, enforced on both create paths and, as a backstop for rows that predate the
+ * rule, in `SyncPackage::handle()` before this class is ever reached) — a built npm
+ * tarball or a pushed Docker image is not the repository tree, so mirroring tags would
+ * silently ship the wrong content. The `PackageType::Npm` and `PackageType::Docker` arms
+ * below exist only to keep this match exhaustive and to fail loudly if that invariant is
+ * ever broken upstream.
  */
 class GitSourceImporter
 {
@@ -42,6 +43,7 @@ class GitSourceImporter
                 PackageType::Composer => $this->importManifestVersion($package, $repo, $tag, $normalized, 'composer.json'),
                 PackageType::Npm => throw new \LogicException('npm packages are never git-sourced; SyncPackage::handle() must guard this before calling import().'),
                 PackageType::Python => $this->importPythonDist($package, $repo, $tag),
+                PackageType::Docker => throw new \LogicException('docker packages are never git-sourced; SyncPackage::handle() must guard this before calling import().'),
             };
         }
     }

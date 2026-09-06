@@ -41,6 +41,10 @@ enum PackageSourceMode: string
             PackageType::Composer => [self::Git],
             PackageType::Npm => [self::Publish],
             PackageType::Python => [self::Publish, self::Git],
+            // A Docker repository is never git-sourced (PackageType::manifestFile() has no
+            // answer for it either, for the same reason): an image is built and pushed, not
+            // mirrored from a git tag.
+            PackageType::Docker => [self::Publish],
         };
     }
 
