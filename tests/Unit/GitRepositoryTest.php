@@ -439,7 +439,7 @@ it('re-clones over a stray file sitting at the mirror path', function () {
 // while rename() moves the link itself and never touches what it points at.
 
 it('moves a foreign-owned mirror aside and clones a fresh one in its place', function () {
-    Log::spy();
+    $logSpy = Log::spy();
 
     $key = 'test-pkg-'.uniqid();
     $mirror = storage_path('app/vcs/'.$key.'.git');
@@ -482,7 +482,7 @@ it('moves a foreign-owned mirror aside and clones a fresh one in its place', fun
     // returns false and the message degrades to "gehörte uid unbekannt" — a plausible
     // string, produced by a plausible reordering, that a check on "chown -R" alone would
     // wave through while telling the operator nothing about who to chown from.
-    Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context) use ($mirror, $owner) {
+    $logSpy->shouldHaveReceived('warning')->withArgs(function (string $message, array $context) use ($mirror, $owner) {
         return str_contains($message, 'foreign-owned git mirror')
             && $context['mirror'] === $mirror
             && str_contains($context['displaced'], '.git.foreign-')

@@ -24,6 +24,9 @@ use Illuminate\Support\Str;
  * produce a 5xx**. 404 is the right answer for all of them — an id the caller has no
  * business knowing about names nothing it may distinguish from absent.
  */
+/**
+ * @return list<string>
+ */
 function malformedIds(): array
 {
     return [

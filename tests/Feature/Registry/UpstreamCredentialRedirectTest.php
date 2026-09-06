@@ -19,6 +19,7 @@ use App\Services\Health\HealthService;
 use App\Support\CredentialUrl;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 const MIRROR_USER = 'svc-mirror';
 const MIRROR_PASSWORD = 's3cr3t-mirror-pw';
@@ -29,7 +30,11 @@ function publicRegistryGroup(string $slug): Group
     return Group::factory()->for(Organization::factory())->create(['slug' => $slug, 'public' => true]);
 }
 
-/** Nothing in the status line, the headers or the body may carry the mirror credential. */
+/**
+ * Nothing in the status line, the headers or the body may carry the mirror credential.
+ *
+ * @param  TestResponse<Response>  $response
+ */
 function expectNoMirrorCredential(TestResponse $response): void
 {
     $serialized = json_encode($response->headers->all()).$response->getContent();

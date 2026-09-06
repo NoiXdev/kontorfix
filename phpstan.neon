@@ -1,8 +1,190 @@
 includes:
     - vendor/larastan/larastan/extension.neon
+    # pestphp/pest-plugin-phpstan (require-dev) resolves Pest's `$this`-closure-binding and
+    # expectation-typing gaps (see the report for the full evaluation). Its extension.neon
+    # sets `universalObjectCratesClasses: PHPUnit\Framework\TestCase` globally — that is
+    # the mechanism that makes `beforeEach()`-assigned properties on `$this` type-check at
+    # all, but its cost is that property access on `$this` in ANY TestCase subclass is
+    # unchecked project-wide (a typo'd property silently yields `mixed` instead of
+    # property.notFound). This is unavoidable given how the plugin resolves closure
+    # binding, and does not affect `app/` — no TestCase subclasses live there, and `app/`
+    # analyses with zero errors under this config exactly as it did on `main` before this
+    # change.
+    - vendor/pestphp/pest-plugin-phpstan/extension.neon
 
 parameters:
     paths:
         - app
+        - database
+        - tests
     level: 6
     parseModelCastsMethod: true
+
+    ignoreErrors:
+        # --- Individually verified false positives / intentional design, one at a time ------
+        #
+        # Every entry below is a single, specific finding that was investigated on its own
+        # merits and confirmed to be either a genuine analyser blind spot or an intentional
+        # design decision the test is guarding — not a blanket carve-out. Each is scoped to
+        # one file (and, where practical, one message) so it cannot silently start matching
+        # something else.
+        -
+            # Mockery's own PHPDoc types `Mock::shouldReceive()` as returning `Expectation`,
+            # but at runtime it always returns a `CompositeExpectation`, which additionally
+            # declares `shouldReceive()` itself (delegating back to the mock) so that
+            # `shouldReceive('a')->andThrow(...)->shouldReceive('b')->andThrow(...)` — configuring
+            # two methods on one mock in one fluent statement — is a normal, working Mockery
+            # idiom. `Expectation` itself has no such method, which is exactly what PHPStan is
+            # (correctly, given the inaccurate vendor docblock) reporting. Verified in
+            # vendor/mockery/mockery/library/Mockery/CompositeExpectation.php:154-156.
+            message: '#^Call to an undefined method Mockery\\Expectation::shouldReceive\(\)\.$#'
+            identifier: method.notFound
+            count: 1
+            path: tests/Feature/Settings/ProfileUpdateTest.php
+        -
+            # This assertion's entire job is to prove SyncPackage does NOT declare a $tries
+            # property (it relies on maxExceptions/retryUntil instead — see the test's own
+            # comment) so that a future regression re-adding $tries is caught. PHPStan
+            # confirming the property does not exist *today* is exactly the fact under test,
+            # not a mistake — the day $tries is reintroduced, the property genuinely exists,
+            # this assertion starts failing as designed, and PHPStan's complaint disappears
+            # with it.
+            message: '#^Call to function property_exists\(\) with App\\Jobs\\SyncPackage and ''tries'' will always evaluate to false\.$#'
+            identifier: function.impossibleType
+            count: 1
+            path: tests/Feature/SyncPackageTest.php
+        -
+            # Deliberately reads the raw environment variable rather than config('logging.default')
+            # (see the test's own comment): the point is to prove phpunit.xml itself sets
+            # LOG_CHANNEL, not to re-derive it through config/logging.php's fallback. The
+            # config-caching hazard this Larastan rule warns about is a production concern —
+            # the test suite never runs against a cached config.
+            message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+            identifier: larastan.noEnvCallsOutsideOfConfig
+            count: 1
+            path: tests/Unit/ContainerLoggingTest.php
+        -
+            # Laravel's own scaffolded placeholder test (`php artisan test` ships it by
+            # default): its only job is to prove the test harness boots and can run an
+            # assertion at all, so the assertion has nothing to assert against. PHPStan is
+            # correct that the literal is always true; that triviality is the point, not a
+            # bug, and turning it into a real assertion would just be inventing behaviour to
+            # satisfy the analyser.
+            message: '#^Call to method PHPUnit\\Framework\\Assert::assertTrue\(\) with true will always evaluate to true\.$#'
+            identifier: method.alreadyNarrowedType
+            count: 1
+            path: tests/Unit/ExampleTest.php
+
+        # --- pest-plugin-phpstan gap: dynamically `require`d migration files -----------------
+        #
+        # PackageOwnershipEnforcementTest.php loads a migration file at runtime
+        # (`require database_path('migrations/...')`) and calls `up()`/`down()` on whatever
+        # anonymous class it returns — the same thing Laravel's own migrator does. Laravel's
+        # `Migration` base class declares neither method (each migration file defines them
+        # itself, by convention, with no shared interface), so the only honest return type for
+        # the test's `runEnforcePackageOrganizationMigration()` helper is the native `object`.
+        # pest-plugin-phpstan's closure/expect(...)->toThrow(...) type-narrowing cannot resolve
+        # a template argument through a bare `object`'s dynamic method call, and reports the
+        # `expect(fn () => ...)` call itself as unresolvable. Tried typing the helper's return
+        # as `Illuminate\Database\Migrations\Migration` instead of `object`: that traded this
+        # error for `Call to an undefined method Migration::up()`, which is worse (a false
+        # method.notFound, since real migration files DO implement it) — reverted. No narrower
+        # fix exists without inventing a local interface the migration file doesn't actually
+        # implement, which would be lying to the analyser rather than informing it.
+        -
+            message: '#^Parameter \#1 \$value of function expect contains unresolvable type\.$#'
+            identifier: argument.unresolvableType
+            count: 2
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Return type of call to function expect contains unresolvable type\.$#'
+            identifier: function.unresolvableReturnType
+            count: 2
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Parameter \#1 \$value of method Pest\\Expectation\<Closure\>::and\(\) contains unresolvable type\.$#'
+            identifier: argument.unresolvableType
+            count: 1
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Return type of call to method Pest\\Expectation\<Closure\>::and\(\) contains unresolvable type\.$#'
+            identifier: method.unresolvableReturnType
+            count: 1
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+
+        # --- Statically-provable assertions that are deliberate regression guards ------------
+        #
+        # pest-plugin-phpstan added `pest.expectation.redundant`, which flags a `toBeInstanceOf()`
+        # / `toBeString()` check as pointless when the value's static type already satisfies it.
+        # Reviewed every one of the 10 occurrences below individually (none suppressed as a
+        # group on the identifier alone) — an eleventh, tests/Unit/TwoFactorAuthenticatorTest.php,
+        # turned out to be a genuine tautology on re-review (`generateSecret()` returns `string`,
+        # so `toBeString()` in `expect($secret)->toBeString()->not->toBeEmpty()` asserted
+        # nothing the chain's real check, `->not->toBeEmpty()`, didn't already cover on its own)
+        # and was fixed by dropping the redundant call instead of suppressing it. The 10 below
+        # are different: each is doing exactly what its surrounding test intends, and none has a
+        # surviving sibling assertion in the same chain that already covers what it checks —
+        # pinning that a class keeps implementing an interface (`User implements
+        # MustVerifyEmail`/`PasskeyUser`, `SendNotificationDigest implements ShouldBeUnique`,
+        # `PackageSynced implements ShouldBroadcast`), that a method keeps returning the specific
+        # type it returns today (`broadcastOn()`, `ReadmeRenderer::render()`), that a generic
+        # helper's return value is genuinely the object it looks like it passed through
+        # (`SlugClaimGuard::claim*Slug()`), that a job's declared middleware is still the type
+        # the timing math next to it assumes (`SyncTimingRelationsTest`), or that the production
+        # container still binds what `AppServiceProvider` says it does (`SystemHostResolverTest`,
+        # the same container-binding inference discussed in the `TestCase::resolveHostTo()` fix
+        # above). PHPStan can already prove all of these from today's code — that is precisely
+        # why each exists: to fail loudly the day the code it is watching changes, rather than
+        # staying silently correct by accident. Rewriting or removing any of them to satisfy the
+        # analyser would be deleting the regression coverage they exist to provide, which is out
+        # of scope here.
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\User\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Auth/EmailVerificationEnforcementTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\User\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Auth/PasskeyWiringTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Jobs\\SendNotificationDigest\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Notifications/SendNotificationDigestTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\Group\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/SlugClaimGuardTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\Organization\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/SlugClaimGuardTest.php
+        -
+            message: '#^Calling toBeString\(\) on Expectation\<string\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Vcs/ReadmeLocatorTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Events\\PackageSynced\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/PackageBroadcastTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<Illuminate\\Broadcasting\\PrivateChannel\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/PackageBroadcastTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<Illuminate\\Queue\\Middleware\\WithoutOverlapping\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/SyncTimingRelationsTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Services\\Upstream\\SystemHostResolver\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/SystemHostResolverTest.php

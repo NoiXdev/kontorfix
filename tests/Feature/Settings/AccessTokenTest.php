@@ -4,9 +4,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 // The whole `settings/tokens` area sits behind `password.confirm`; these tests cover the
 // token mechanics, so they start from a confirmed-password session. The gate itself is

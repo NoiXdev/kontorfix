@@ -10,9 +10,6 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 /**
  * `packages.repository_url` carries a git PAT whenever an admin writes it as userinfo

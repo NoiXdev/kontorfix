@@ -26,6 +26,9 @@ use Symfony\Component\Yaml\Yaml;
 /**
  * @return array<string, mixed>
  */
+/**
+ * @return array{services: array<string, array<string, mixed>>}
+ */
 function composeFile(): array
 {
     return Yaml::parseFile(base_path('docker/compose.yaml'));

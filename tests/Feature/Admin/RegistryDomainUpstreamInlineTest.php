@@ -4,6 +4,7 @@ use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 beforeEach(function () {
     $this->admin = User::factory()->operator()->create(['role' => UserRole::Admin]);
@@ -15,7 +16,7 @@ it('adds a domain to the registry and shows it on the detail page', function () 
         ->assertRedirect();
 
     $this->actingAs($this->admin)->get("/admin/groups/{$this->group->id}")
-        ->assertInertia(fn ($p) => $p->where('domains', fn ($d) => collect($d)->pluck('hostname')->contains('packages.kadenz.test')));
+        ->assertInertia(fn ($p) => $p->where('domains', fn (Collection $d) => $d->pluck('hostname')->contains('packages.kadenz.test')));
 });
 
 it('adds an upstream to the registry and shows it on the detail page', function () {

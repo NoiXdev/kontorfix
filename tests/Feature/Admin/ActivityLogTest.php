@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Support\Collection;
 use Spatie\Activitylog\Models\Activity;
 
 function activityAdmin(): User
@@ -56,7 +57,7 @@ it('scopes the activity log to a subject', function () {
     $this->actingAs($admin)->get('/admin/activity?subject_type=Organization&subject_id='.$a->id)
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('activities.data',
-            fn ($rows) => collect($rows)->every(fn ($r) => $r['subject_id'] === $a->id)));
+            fn (Collection $rows) => $rows->every(fn ($r) => $r['subject_id'] === $a->id)));
 });
 
 it('denies the activity log to non-admins', function () {

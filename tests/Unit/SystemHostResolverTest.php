@@ -81,6 +81,12 @@ it('is what the application binds by default', function () {
     // Guards the wiring, not the algorithm. Asserted against a freshly registered
     // application rather than the test one, because tests/TestCase.php substitutes the
     // fixture resolver into this container and asking *it* would prove nothing.
+
+    // Typed explicitly: the container this suite runs under is always the Laravel
+    // Application, but Container::getInstance() is typed to the narrower Container
+    // contract. Restoration below stays unconditional on purpose — a guard here would
+    // make the facade-application restore silently optional instead of guaranteed.
+    /** @var Application $original */
     $original = Container::getInstance();
 
     try {

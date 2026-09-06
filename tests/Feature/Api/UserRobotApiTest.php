@@ -5,9 +5,6 @@ use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->op = Organization::factory()->create(['is_operator' => true]);

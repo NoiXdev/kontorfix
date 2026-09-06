@@ -6,7 +6,11 @@ use App\Models\User;
 use App\Services\Auth\TwoFactorAuthenticator;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
 
+/**
+ * @param  array<string, mixed>  $claimOverrides
+ */
 function fakeIdp(OidcProvider $provider, array $claimOverrides = []): void
 {
     $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
@@ -23,7 +27,7 @@ function fakeIdp(OidcProvider $provider, array $claimOverrides = []): void
     ]);
 }
 
-function primeSession($test, OidcProvider $provider): void
+function primeSession(TestCase $test, OidcProvider $provider): void
 {
     $test->withSession(['oidc' => ['state' => 'state-1', 'nonce' => 'nonce-1', 'verifier' => 'ver-1', 'provider' => $provider->slug]]);
 }

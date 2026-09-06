@@ -15,9 +15,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 // The self-service credential pages sit behind `password.confirm`; this file is about the
 // role check behind that gate, so every request starts from a confirmed-password session.

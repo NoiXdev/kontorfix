@@ -5,9 +5,6 @@ use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\User;
 use App\Models\Webhook;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 beforeEach(function () {
     $this->org = Organization::factory()->create(['is_operator' => true]);

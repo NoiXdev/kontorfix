@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Cache;
  * anonymous request and total instance takeover, so this file pins down what the gate
  * does in every state — including the states where the token store lets us down.
  *
+ * @param  array<string, mixed>  $overrides
  * @return array<string,mixed>
  */
 function gatePayload(array $overrides = []): array

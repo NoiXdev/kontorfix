@@ -3,9 +3,6 @@
 use App\Enums\AccountType;
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('lets an operator admin create a robot and issue a key', function () {
     $op = Organization::factory()->create(['is_operator' => true]);

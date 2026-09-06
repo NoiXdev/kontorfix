@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * Fakes the IdP token + JWKS with a specific nonce (taken from the real session).
+ *
+ * @param  array<string, mixed>  $claimOverrides
  */
 function fakeIdpWithNonce(OidcProvider $provider, string $nonce, array $claimOverrides = []): void
 {

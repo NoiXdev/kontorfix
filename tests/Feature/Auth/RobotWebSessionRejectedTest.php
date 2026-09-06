@@ -2,9 +2,6 @@
 
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('rejects an authenticated robot session on any web route', function () {
     // Simulates an already-established robot login (e.g. via the passkey vendor path).

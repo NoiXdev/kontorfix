@@ -2,9 +2,6 @@
 
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('serves the openapi document to an operator admin and lists api paths', function () {
     $op = Organization::factory()->create(['is_operator' => true]);

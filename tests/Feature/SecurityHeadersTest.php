@@ -4,9 +4,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('sets baseline security headers on web responses', function () {
     $user = User::factory()->create(['organization_id' => Organization::factory()->create()->id]);

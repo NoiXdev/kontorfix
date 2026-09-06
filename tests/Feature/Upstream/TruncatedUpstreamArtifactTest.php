@@ -34,7 +34,11 @@ function seedTruncationDist(Upstream $up, string $name, string $version, string 
     ]);
 }
 
-/** A complete body that reaches EOF cleanly. */
+/**
+ * A complete body that reaches EOF cleanly.
+ *
+ * @return resource|false
+ */
 function completeStream(string $body)
 {
     $handle = fopen('php://temp', 'w+b');
@@ -116,11 +120,11 @@ it('still caches a chunked body that reaches eof cleanly', function () {
 
 it('logs the short relay instead of failing silently', function () {
     Storage::fake('artifacts');
-    Log::spy();
+    $logSpy = Log::spy();
 
     app(UpstreamCache::class)->relayArtifact(completeStream('half'), 'proxy/x/logged.zip', 99);
 
-    Log::shouldHaveReceived('warning')->withArgs(
+    $logSpy->shouldHaveReceived('warning')->withArgs(
         fn (string $message, array $context = []) => str_contains($message, 'truncated')
             && $context['path'] === 'proxy/x/logged.zip'
             && $context['received'] === 4

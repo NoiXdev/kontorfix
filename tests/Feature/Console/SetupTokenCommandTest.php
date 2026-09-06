@@ -3,9 +3,6 @@
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\Setup\SetupToken;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('prints and persists a fresh setup token while the instance is not set up', function () {
     $this->artisan('setup:token')

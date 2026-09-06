@@ -17,6 +17,9 @@
  * Negations are not supported, so the test asserts the file contains none; add support
  * here before adding a `!` line there.
  */
+/**
+ * @return list<string>
+ */
 function dockerignorePatterns(): array
 {
     $lines = file(base_path('.dockerignore'), FILE_IGNORE_NEW_LINES);

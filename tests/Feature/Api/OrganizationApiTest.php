@@ -5,9 +5,6 @@ use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('lets an operator admin create and delete customer orgs', function () {
     $op = Organization::factory()->create(['is_operator' => true]);

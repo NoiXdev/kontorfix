@@ -2,6 +2,7 @@
 
 use App\Enums\PackageType;
 use App\Services\Vcs\RepositoryProbe;
+use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Tests\Support\FixtureRepo;
@@ -52,7 +53,7 @@ it('reports a manifest it could not read as unreadable, and says so in the log',
     // A reachable repository whose manifest read fails used to be indistinguishable from
     // one that has no manifest: both were `ok: true` with a null name and no log line at
     // all. That silence is what made the private-repository case invisible.
-    Log::spy();
+    $logSpy = Log::spy();
 
     $result = (new RepositoryProbe)->probe(PackageType::Composer, 'file://'.FixtureRepo::makeWithBrokenManifest());
 
@@ -60,7 +61,7 @@ it('reports a manifest it could not read as unreadable, and says so in the log',
         ->and($result['name'])->toBeNull()
         ->and($result['manifest'])->toBe('unreadable');
 
-    Log::shouldHaveReceived('warning')
+    $logSpy->shouldHaveReceived('warning')
         ->withArgs(fn (string $message, array $context) => $message === 'Repository probe could not read the package manifest.'
             && $context['step'] === 'parse'
             && $context['manifest'] === 'composer.json')
@@ -83,7 +84,7 @@ it('carries the git credential environment into the manifest read, not only the 
     // never written into the clone's config, so a `show` that does not carry the
     // environment goes out unauthenticated — 401 on a private repository, and a blank name
     // field with no explanation.
-    Process::assertRan(function ($process) {
+    Process::assertRan(function (PendingProcess $process) {
         if (! str_contains(implode(' ', (array) $process->command), 'show')) {
             return false;
         }

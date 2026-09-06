@@ -14,7 +14,7 @@ class ProfileUpdateTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_profile_page_is_displayed()
+    public function test_profile_page_is_displayed(): void
     {
         $user = User::factory()->create();
 
@@ -35,7 +35,7 @@ class ProfileUpdateTest extends TestCase
     // precondition. That is not the gate going missing: the gate itself is pinned by
     // test_changing_the_email_address_requires_a_recent_password_confirmation below.
 
-    public function test_changing_the_email_address_requires_a_recent_password_confirmation()
+    public function test_changing_the_email_address_requires_a_recent_password_confirmation(): void
     {
         $user = User::factory()->create();
         $original = $user->email;
@@ -50,7 +50,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertSame($original, $user->refresh()->email);
     }
 
-    public function test_a_stale_password_confirmation_does_not_open_the_email_change()
+    public function test_a_stale_password_confirmation_does_not_open_the_email_change(): void
     {
         $user = User::factory()->create();
         $original = $user->email;
@@ -66,7 +66,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertSame($original, $user->refresh()->email);
     }
 
-    public function test_a_json_caller_is_told_to_confirm_rather_than_being_redirected()
+    public function test_a_json_caller_is_told_to_confirm_rather_than_being_redirected(): void
     {
         $user = User::factory()->create();
 
@@ -80,7 +80,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertSame($user->email, $user->refresh()->email);
     }
 
-    public function test_a_non_string_email_cannot_slip_past_the_gate()
+    public function test_a_non_string_email_cannot_slip_past_the_gate(): void
     {
         $user = User::factory()->create();
 
@@ -95,7 +95,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertSame($user->email, $user->refresh()->email);
     }
 
-    public function test_a_name_only_change_does_not_demand_the_password()
+    public function test_a_name_only_change_does_not_demand_the_password(): void
     {
         $user = User::factory()->create();
 
@@ -113,7 +113,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertSame('Renamed', $user->refresh()->name);
     }
 
-    public function test_profile_information_can_be_updated()
+    public function test_profile_information_can_be_updated(): void
     {
         Notification::fake();
         // A transport that actually delivers: the new address is unproven, so it loses its
@@ -142,7 +142,7 @@ class ProfileUpdateTest extends TestCase
         Notification::assertSentTo($user, VerifyEmail::class);
     }
 
-    public function test_the_email_stays_verified_when_the_instance_cannot_deliver_mail()
+    public function test_the_email_stays_verified_when_the_instance_cannot_deliver_mail(): void
     {
         Notification::fake();
         // The setup wizard's default. Clearing the stamp here would gate the dashboard and
@@ -166,7 +166,7 @@ class ProfileUpdateTest extends TestCase
         $this->actingAs($user)->get('/dashboard')->assertRedirect("/c/{$user->organization->slug}");
     }
 
-    public function test_a_failing_mailer_rolls_the_email_change_back_instead_of_locking_the_user_out()
+    public function test_a_failing_mailer_rolls_the_email_change_back_instead_of_locking_the_user_out(): void
     {
         config(['mail.default' => 'smtp']);
 
@@ -189,7 +189,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertNotNull($user->email_verified_at);
     }
 
-    public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged()
+    public function test_email_verification_status_is_unchanged_when_the_email_address_is_unchanged(): void
     {
         $user = User::factory()->create();
 
@@ -207,7 +207,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertNotNull($user->refresh()->email_verified_at);
     }
 
-    public function test_user_can_delete_their_account()
+    public function test_user_can_delete_their_account(): void
     {
         $user = User::factory()->create();
 
@@ -225,7 +225,7 @@ class ProfileUpdateTest extends TestCase
         $this->assertNull($user->fresh());
     }
 
-    public function test_correct_password_must_be_provided_to_delete_account()
+    public function test_correct_password_must_be_provided_to_delete_account(): void
     {
         $user = User::factory()->create();
 

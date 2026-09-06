@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FixtureRepo;
 
+/**
+ * @return array<string, string>
+ */
 function domainHeaders(Group $group, string $host): array
 {
     return array_merge(['Host' => $host], tokenHeaderFor($group));

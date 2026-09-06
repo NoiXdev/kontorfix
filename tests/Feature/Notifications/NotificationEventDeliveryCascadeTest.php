@@ -23,6 +23,9 @@ function orgForCascadeTest(): Organization
     return Organization::factory()->create(['is_operator' => true]);
 }
 
+/**
+ * @return array{0: NotificationEventRecord, 1: NotificationRecipient, 2: NotificationEventDelivery}
+ */
 function deliveryFixture(Organization $org): array
 {
     $event = NotificationEventRecord::create([

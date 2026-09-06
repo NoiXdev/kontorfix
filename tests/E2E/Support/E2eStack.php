@@ -181,7 +181,7 @@ final class E2eStack
      * Postgres or adding an artisan command that exists only for tests; the metadata endpoint
      * is the signal a real client sees, and it is the one that has to become true.
      *
-     * @return array<string, mixed> the package's version list
+     * @return list<array<string, mixed>> the package's version list
      */
     public static function waitForComposerVersions(string $package, int $seconds = 180): array
     {

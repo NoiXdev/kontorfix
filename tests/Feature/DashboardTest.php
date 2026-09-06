@@ -11,7 +11,7 @@ class DashboardTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_guests_are_redirected_to_the_login_page()
+    public function test_guests_are_redirected_to_the_login_page(): void
     {
         // Without this the instance is still un-set-up, and RequireSetup sends the
         // guest to the wizard instead of the login page.
@@ -21,7 +21,7 @@ class DashboardTest extends TestCase
         $response->assertRedirect('/login');
     }
 
-    public function test_authenticated_users_can_visit_the_dashboard()
+    public function test_authenticated_users_can_visit_the_dashboard(): void
     {
         // The dashboard is the operator/maintainer screen; members are redirected
         // to the customer portal (see routes/web.php), hence a non-member role here.

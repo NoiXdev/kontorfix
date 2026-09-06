@@ -8,11 +8,8 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
-
-uses(RefreshDatabase::class);
 
 /**
  * A stored git credential belongs to exactly one organization. Every path that accepts a

@@ -55,7 +55,7 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+function something(): void
 {
     // ..
 }
@@ -151,6 +151,9 @@ function registryPath(Group $group): string
     return app(RegistryUrl::class)->path($group);
 }
 
+/**
+ * @return array<string, string>
+ */
 function tokenHeaderFor(Group $group): array
 {
     [, $plain] = RegistryToken::issue($group->organization, 'test', $group);

@@ -9,9 +9,6 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 /** A write-capable bearer token for the given user. */
 function writeKey(User $user): string

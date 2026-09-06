@@ -6,7 +6,7 @@ it('generates a secret, verifies its current code and rejects a wrong one', func
     $svc = app(TwoFactorAuthenticator::class);
     $secret = $svc->generateSecret();
 
-    expect($secret)->toBeString()->not->toBeEmpty();
+    expect($secret)->not->toBeEmpty();
 
     $current = $svc->currentCode($secret);
     expect($svc->verify($secret, $current))->toBeTrue();
