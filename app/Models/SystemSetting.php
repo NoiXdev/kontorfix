@@ -26,7 +26,7 @@ class SystemSetting extends Model
 
     protected $attributes = [
         'registration_enabled' => false,
-        'enabled_registry_types' => '["composer","npm","python"]',
+        'enabled_registry_types' => '["composer","npm","python","docker"]',
         'shared_package_role' => 'super_admin',
     ];
 
