@@ -167,6 +167,16 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
         // Laravel's default unmatched-route handling purely so the response body is valid
         // JSON — an HTML error page fails `TestResponse::decodeResponseJson()`, which
         // rethrows the original routing exception instead of asserting on the body.
+        //
+        // GET-only (Route::fallback()'s own default), registered inside this specific
+        // `->prefix('/v2')` group — so it never reaches past /v2, and does not apply to any
+        // other HTTP verb. One side effect noted, not fixed: a wrong-method request against
+        // an otherwise-valid /v2 path (e.g. POST to a manifest URL) now falls through to
+        // this fallback and answers 404 rather than the 405 a route match with no method
+        // support would normally produce. Arguably fine for an OCI client — the spec's own
+        // error vocabulary has no METHOD_NOT_ALLOWED code — but it was not a deliberate
+        // design choice, just this fallback's shape, so it is recorded here rather than
+        // silently relied on.
         Route::fallback(fn () => response()->json((object) [], 404));
     });
 

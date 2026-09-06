@@ -37,3 +37,16 @@ it('accepts a digest reference and a tag reference', function () {
             ->assertJsonPath('errors.0.code', 'NAME_UNKNOWN');
     }
 });
+
+it('does not let the /v2 fallback route leak outside its own prefix group', function () {
+    // Pinning check for the Route::fallback() registered inside the docker `/v2` group
+    // (see routes/registry.php): it exists to turn a routing miss UNDER /v2 into a bare
+    // JSON 404 instead of Laravel's default HTML error page. If it were ever hoisted out
+    // of that `->prefix('/v2')` group, it would silently swallow every 404 on this host —
+    // registry and web UI alike — with that same empty envelope, and none of this suite's
+    // other tests would notice, since they only ever request paths under /v2 themselves.
+    $this->withHeaders($this->auth)
+        ->get('http://images.test/definitely/not/a/real/path')
+        ->assertNotFound()
+        ->assertHeader('Content-Type', 'text/html; charset=utf-8');
+});

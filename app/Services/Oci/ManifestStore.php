@@ -2,6 +2,7 @@
 
 namespace App\Services\Oci;
 
+use App\Exceptions\OciException;
 use App\Models\OciManifest;
 use App\Models\OciTag;
 use App\Models\Package;
@@ -29,10 +30,22 @@ final class ManifestStore
      * The whole thing runs in one transaction: a manifest row written without its tag would
      * be an image that exists in storage but that no `docker pull <tag>` can ever reach —
      * worse than a failed push, because the client believes the push succeeded.
+     *
+     * When $reference is itself a digest, it MUST match the hash of $payload — exactly the
+     * check BlobStore::finish() already makes for layers, for the same reason: `buildx
+     * --push` writes every child manifest of a multi-arch image by digest, so anything that
+     * alters the bytes in transit (a proxy, a retry that re-serialises the body) would
+     * otherwise store the manifest under its REAL digest while reporting success for the
+     * digest the client announced — an address the client believes it just wrote to, that
+     * a later GET can never find.
      */
     public function put(Package $package, string $reference, string $payload, string $mediaType): OciManifest
     {
         $digest = Digest::of($payload);
+
+        if ($this->isDigest($reference) && $reference !== $digest) {
+            throw OciException::digestInvalid($reference, $digest);
+        }
 
         return DB::transaction(function () use ($package, $reference, $mediaType, $payload, $digest): OciManifest {
             $manifest = OciManifest::updateOrCreate(

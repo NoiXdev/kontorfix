@@ -9,6 +9,8 @@ use App\Models\OciTag;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Oci\Digest;
+use Illuminate\Http\Response;
+use Illuminate\Testing\TestResponse;
 
 /**
  * A Basic-auth Authorization header, as a $server-vars array rather than a headers array.
@@ -32,8 +34,11 @@ function manifestAuthServerVars(Group $group, TokenAbility $ability): array
 /**
  * PUTs a manifest with an explicit set of server variables (typically an auth header) and a
  * Content-Type, so callers never have to repeat the array-merge for CONTENT_TYPE.
+ *
+ * @param  array<string, string>  $serverVars
+ * @return TestResponse<Response>
  */
-function pushManifest(array $serverVars, string $reference, string $payload, string $mediaType = 'application/vnd.oci.image.manifest.v1+json')
+function pushManifest(array $serverVars, string $reference, string $payload, string $mediaType = 'application/vnd.oci.image.manifest.v1+json'): TestResponse
 {
     return test()->withServerVariables($serverVars + ['CONTENT_TYPE' => $mediaType])
         ->call('PUT', "http://images.test/v2/app/manifests/{$reference}", content: $payload);
@@ -91,6 +96,44 @@ it('serves a manifest by digest as well as by tag', function () {
         ->and($byDigest->getContent())->toBe($byTag->getContent());
 });
 
+it('stores and retrieves a manifest pushed directly by its own digest', function () {
+    $payload = '{"schemaVersion":2,"pushed":"by-digest"}';
+    $digest = Digest::of($payload);
+
+    pushManifest($this->publish, $digest, $payload)
+        ->assertStatus(201)
+        ->assertHeader('Docker-Content-Digest', $digest);
+
+    $this->withServerVariables($this->read)
+        ->get("http://images.test/v2/app/manifests/{$digest}")
+        ->assertOk()
+        ->assertHeader('Docker-Content-Digest', $digest);
+});
+
+it('refuses a manifest pushed by a digest that does not match its bytes, and stores nothing', function () {
+    // buildx writes every child manifest of a multi-arch image by digest rather than by
+    // tag. Without this check, anything that alters the bytes in transit (a proxy, a retry
+    // that re-serialises the body) would silently store the manifest under its REAL digest
+    // while reporting success for the digest the client announced — an address the client
+    // believes it just wrote to, that a GET can never find. Mirrors
+    // BlobStore::finish()'s own "verify before promote" guarantee for layers.
+    $payload = '{"schemaVersion":2,"pushed":"by-digest"}';
+    $actualDigest = Digest::of($payload);
+    $announcedDigest = 'sha256:'.str_repeat('d', 64);
+
+    pushManifest($this->publish, $announcedDigest, $payload)
+        ->assertStatus(400)
+        ->assertJsonPath('errors.0.code', 'DIGEST_INVALID');
+
+    expect(OciManifest::where('digest', $announcedDigest)->count())->toBe(0)
+        ->and(OciManifest::where('digest', $actualDigest)->count())->toBe(0);
+
+    $this->withServerVariables($this->read)
+        ->get("http://images.test/v2/app/manifests/{$announcedDigest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'MANIFEST_UNKNOWN');
+});
+
 it('returns the manifest bytes verbatim', function () {
     // The digest is the hash of these exact bytes, whitespace and all. Round-tripping
     // through json_decode/json_encode would reformat this (collapsing the newlines and
@@ -105,6 +148,21 @@ it('returns the manifest bytes verbatim', function () {
         ->assertOk();
 
     expect($response->getContent())->toBe($payload);
+
+    // Every other fixture in this file happens to end in "}" — a mutant that trims a
+    // single trailing byte off the stored payload (e.g. `rtrim($payload, "\n")`) would
+    // slip past every one of them unnoticed. `oras push`, and `docker manifest push` from
+    // a file, both routinely send a manifest with a trailing newline, so that byte has to
+    // survive the round trip too.
+    $trailingNewline = $payload."\n";
+
+    pushManifest($this->publish, 'verbatim-newline', $trailingNewline)->assertStatus(201);
+
+    $withNewline = $this->withServerVariables($this->read)
+        ->get('http://images.test/v2/app/manifests/verbatim-newline')
+        ->assertOk();
+
+    expect($withNewline->getContent())->toBe($trailingNewline);
 });
 
 it('accepts an image index, because buildx pushes one for provenance and sbom', function () {
@@ -152,11 +210,14 @@ it('lists tags', function () {
     pushManifest($this->publish, '2.0', '{"schemaVersion":2,"a":2}')->assertStatus(201);
     pushManifest($this->publish, 'latest', '{"schemaVersion":2,"a":3}')->assertStatus(201);
 
+    // assertExactJson rather than assertJson: assertJson is a subset check, so it would
+    // stay green even if tags() lost its package_id filter and appended foreign tags after
+    // these three — it would still find the three expected entries and never notice the
+    // extras.
     $this->withServerVariables($this->read)
         ->get('http://images.test/v2/app/tags/list')
         ->assertOk()
-        ->assertJsonPath('name', 'app')
-        ->assertJson(['tags' => ['1.0', '2.0', 'latest']]);
+        ->assertExactJson(['name' => 'app', 'tags' => ['1.0', '2.0', 'latest']]);
 });
 
 it('moves a tag when it is pushed again', function () {
