@@ -4,5 +4,145 @@ includes:
 parameters:
     paths:
         - app
+        - database
+        - tests
     level: 6
     parseModelCastsMethod: true
+
+    # --- Pest closure binding: a tooling gap, not a code defect ---------------------------
+    #
+    # Inside a Pest `it()`/`test()` closure, `$this` is genuinely bound to the test's
+    # `Tests\TestCase` instance at runtime (Pest does this via `Closure::bindTo()` before
+    # invoking the closure). PHPStan has no way to see that late binding: it type-checks the
+    # closure by the static type of the argument passed to `it()`/`test()`, which is
+    # `Pest\PendingCalls\TestCall`, and reports every `$this->actingAs()`, `$this->get()`,
+    # every custom property set in `beforeEach()`, and even `$this` passed on to a helper
+    # typed `Tests\TestCase`, as undefined.
+    #
+    # We looked for a real fix before suppressing:
+    #   - Larastan (larastan/larastan v3.10.0, already a dependency) has no Pest-specific
+    #     support for this; `vendor/larastan/larastan/extension.neon` does not mention Pest.
+    #   - Pest itself (pestphp/pest v5.1.1, already a dependency) ships
+    #     `vendor/pestphp/pest/phpstan-pest-extension.neon`, but that extension only teaches
+    #     PHPStan about `HigherOrderExpectation` property access (`expect($x)->prop`); it does
+    #     nothing for closure binding. Including it and re-running left the error count
+    #     unchanged.
+    #   - The actual fix is the separate `pestphp/pest-plugin-phpstan` package, which is not
+    #     currently a dependency. Adding a new package is out of scope for a PHPStan config
+    #     change, so we suppress narrowly instead and record this as a follow-up worth
+    #     considering on its own.
+    #
+    # These entries match only the `Pest\PendingCalls\TestCall` shapes, scoped to `tests/*`,
+    # so nothing in `app/` or `database/` can ever be silenced by them. The optional
+    # `|Pest\Support\HigherOrderTapProxy` union covers the same gap surfacing through a
+    # chained call (e.g. `test(...)->group(...)->actingAs(...)`), where PHPStan widens the
+    # pending-call type to a union with Pest's tap proxy before losing the binding.
+    ignoreErrors:
+        -
+            message: '#^Call to an undefined method Pest\\PendingCalls\\TestCall(?:\|Pest\\Support\\HigherOrderTapProxy)?::[a-zA-Z0-9_]+\(\)\.$#'
+            identifier: method.notFound
+            path: tests/*
+        -
+            message: '#^Access to an undefined property Pest\\PendingCalls\\TestCall::\$[a-zA-Z0-9_]+\.$#'
+            identifier: property.notFound
+            path: tests/*
+        -
+            # Same root cause as above: `$this` inside the closure is typed as TestCall and
+            # gets passed on to a helper function/method typed `Tests\TestCase`.
+            message: '#^Parameter \#\d+ \$\w+ of (?:function|method) [^\s]+ expects [^,]+, Pest\\PendingCalls\\TestCall given\.$#'
+            identifier: argument.type
+            path: tests/*
+
+        # --- Pest expectation API: the same kind of tooling gap, separately ------------------
+        #
+        # `Pest\Mixins\Expectation::$not` (the negation proxy), `Pest\Expectation::$<property>`
+        # (the higher-order proxy that forwards an arbitrary property read to the expectation's
+        # underlying value, e.g. `expect($model)->host->toBe(...)`), and the return type of the
+        # global `expect()` function are declared with PHPDoc generics that PHPStan's engine
+        # cannot always resolve back to a concrete type — most visibly when the expectation is
+        # built from a value whose own type PHPStan already lost track of (e.g. a Collection
+        # pulled out of a query result, or a Closure comparison), or when the proxy relies on
+        # `Expectation::__get()`'s generic `@return` union rather than a real property. This is
+        # a limitation of how Pest's fluent API is typed, not a mistake in the test code using
+        # it.
+        #
+        # We checked for a real fix here too: the only PHPStan-facing extension Pest ships,
+        # `vendor/pestphp/pest/phpstan-pest-extension.neon` (see block above), teaches PHPStan
+        # about `Pest\Expectations\HigherOrderExpectation` specifically, not about
+        # `Pest\Expectation` or `Pest\Mixins\Expectation`. Including it and re-running left every
+        # error in this block unchanged. There is no stub or `@mixin` in this codebase's
+        # dependencies that resolves it.
+        -
+            message: '#^Access to an undefined property Pest\\Mixins\\Expectation\<.*\>::\$(not|each)\.$#'
+            identifier: property.notFound
+            path: tests/*
+        -
+            message: '#^Access to an undefined property Pest\\Expectation\<.*\>::\$[a-zA-Z0-9_]+\.$#'
+            identifier: property.notFound
+            path: tests/*
+        -
+            message: '#^Parameter \#1 \$value of (?:function expect|method Pest\\Expectation\<.*\>::and\(\)) contains unresolvable type\.$#'
+            identifier: argument.unresolvableType
+            path: tests/*
+        -
+            message: '#^Return type of call to function expect contains unresolvable type\.$#'
+            identifier: function.unresolvableReturnType
+            path: tests/*
+        -
+            message: '#^Return type of call to method Pest\\Expectation\<.*\>::and\(\) contains unresolvable type\.$#'
+            identifier: method.unresolvableReturnType
+            path: tests/*
+
+        # --- Individually verified false positives / intentional design, one at a time ------
+        #
+        # Every entry below is a single, specific finding that was investigated on its own
+        # merits and confirmed to be either a genuine analyser blind spot or an intentional
+        # design decision the test is guarding — not a blanket carve-out. Each is scoped to
+        # one file (and, where practical, one message) so it cannot silently start matching
+        # something else.
+        -
+            # Mockery's own PHPDoc types `Mock::shouldReceive()` as returning `Expectation`,
+            # but at runtime it always returns a `CompositeExpectation`, which additionally
+            # declares `shouldReceive()` itself (delegating back to the mock) so that
+            # `shouldReceive('a')->andThrow(...)->shouldReceive('b')->andThrow(...)` — configuring
+            # two methods on one mock in one fluent statement — is a normal, working Mockery
+            # idiom. `Expectation` itself has no such method, which is exactly what PHPStan is
+            # (correctly, given the inaccurate vendor docblock) reporting. Verified in
+            # vendor/mockery/mockery/library/Mockery/CompositeExpectation.php:154-156.
+            message: '#^Call to an undefined method Mockery\\Expectation::shouldReceive\(\)\.$#'
+            identifier: method.notFound
+            count: 1
+            path: tests/Feature/Settings/ProfileUpdateTest.php
+        -
+            # This assertion's entire job is to prove SyncPackage does NOT declare a $tries
+            # property (it relies on maxExceptions/retryUntil instead — see the test's own
+            # comment) so that a future regression re-adding $tries is caught. PHPStan
+            # confirming the property does not exist *today* is exactly the fact under test,
+            # not a mistake — the day $tries is reintroduced, the property genuinely exists,
+            # this assertion starts failing as designed, and PHPStan's complaint disappears
+            # with it.
+            message: '#^Call to function property_exists\(\) with App\\Jobs\\SyncPackage and ''tries'' will always evaluate to false\.$#'
+            identifier: function.impossibleType
+            count: 1
+            path: tests/Feature/SyncPackageTest.php
+        -
+            # Deliberately reads the raw environment variable rather than config('logging.default')
+            # (see the test's own comment): the point is to prove phpunit.xml itself sets
+            # LOG_CHANNEL, not to re-derive it through config/logging.php's fallback. The
+            # config-caching hazard this Larastan rule warns about is a production concern —
+            # the test suite never runs against a cached config.
+            message: '#^Called ''env'' outside of the config directory which returns null when the config is cached, use ''config''\.$#'
+            identifier: larastan.noEnvCallsOutsideOfConfig
+            count: 1
+            path: tests/Unit/ContainerLoggingTest.php
+        -
+            # Laravel's own scaffolded placeholder test (`php artisan test` ships it by
+            # default): its only job is to prove the test harness boots and can run an
+            # assertion at all, so the assertion has nothing to assert against. PHPStan is
+            # correct that the literal is always true; that triviality is the point, not a
+            # bug, and turning it into a real assertion would just be inventing behaviour to
+            # satisfy the analyser.
+            message: '#^Call to method PHPUnit\\Framework\\Assert::assertTrue\(\) with true will always evaluate to true\.$#'
+            identifier: method.alreadyNarrowedType
+            count: 1
+            path: tests/Unit/ExampleTest.php
