@@ -393,7 +393,7 @@ useOperatorChannel({
                                         class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                                     >
                                         <td colspan="2" class="px-4 py-3 text-muted-foreground">
-                                            Zusätzlich in {{ props.sharedElsewhere }} Registry(s) außerhalb deines Bereichs.
+                                            Zusätzlich in {{ props.sharedElsewhere }} Registry(s) außerhalb Ihres Bereichs.
                                         </td>
                                     </tr>
                                     <tr v-if="props.groups.length === 0 && props.sharedElsewhere === 0">

@@ -179,7 +179,7 @@ class UserController extends Controller
     {
         if ($user->is($request->user())) {
             throw ValidationException::withMessages([
-                'user' => 'Du kannst dich nicht selbst löschen.',
+                'user' => 'Sie können sich nicht selbst löschen.',
             ]);
         }
 

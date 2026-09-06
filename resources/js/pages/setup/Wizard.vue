@@ -213,7 +213,7 @@ function submit() {
             <div class="mb-8 flex flex-col items-center gap-3">
                 <AppLogoIcon class="size-9 fill-current text-[var(--foreground)] dark:text-white" />
                 <h1 class="text-xl font-medium">{{ appName }} einrichten</h1>
-                <p class="text-center text-sm text-muted-foreground">Diese Instanz hat noch kein Benutzerkonto. Lege jetzt den Administrator an.</p>
+                <p class="text-center text-sm text-muted-foreground">Diese Instanz hat noch kein Benutzerkonto. Legen Sie jetzt den Administrator an.</p>
             </div>
 
             <!-- Locked: a setup token is configured and hasn't been presented yet. -->

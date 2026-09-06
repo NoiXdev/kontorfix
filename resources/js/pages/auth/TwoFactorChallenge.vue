@@ -27,7 +27,7 @@ const submit = () => {
 </script>
 
 <template>
-    <AuthBase title="Bestätigung" description="Bestätige deine Anmeldung mit einem Code aus deiner Authenticator-App.">
+    <AuthBase title="Bestätigung" description="Bestätigen Sie Ihre Anmeldung mit einem Code aus Ihrer Authenticator-App.">
         <Head title="Bestätigung" />
 
         <form @submit.prevent="submit" class="flex flex-col gap-6">

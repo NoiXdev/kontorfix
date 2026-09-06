@@ -64,7 +64,7 @@ class ConfirmablePasswordController extends Controller
 
         // Same wording either way: a mailbox-less account learns nothing extra, and there
         // is nothing the owner could do about it here anyway.
-        return back()->with('status', __('Wir haben dir einen Link zum Setzen eines Passworts geschickt, sofern ein Postfach hinterlegt ist.'));
+        return back()->with('status', __('Wir haben Ihnen einen Link zum Setzen eines Passworts geschickt, sofern ein Postfach hinterlegt ist.'));
     }
 
     /**

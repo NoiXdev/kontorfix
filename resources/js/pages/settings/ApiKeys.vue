@@ -134,7 +134,7 @@ function destroyApiKey(id: string) {
                             <p class="rounded-md border border-copper/20 bg-background/60 px-3 py-2 font-mono text-sm break-all select-all">
                                 {{ plainApiKey }}
                             </p>
-                            <p class="text-sm text-muted-foreground">Dieser API-Key wird nur einmal angezeigt. Bewahre ihn sicher auf.</p>
+                            <p class="text-sm text-muted-foreground">Dieser API-Key wird nur einmal angezeigt. Bewahren Sie ihn sicher auf.</p>
                         </div>
                         <div class="flex shrink-0 items-center gap-2">
                             <Button variant="outline" size="sm" @click="copyKey">

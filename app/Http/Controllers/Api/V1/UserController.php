@@ -71,7 +71,7 @@ class UserController extends Controller
     public function destroy(Request $request, User $user): JsonResponse
     {
         if ($user->is($request->user())) {
-            throw ValidationException::withMessages(['user' => 'Du kannst dich nicht selbst löschen.']);
+            throw ValidationException::withMessages(['user' => 'Sie können sich nicht selbst löschen.']);
         }
 
         if ($user->isSuperAdmin() && $this->effectiveSuperAdminCount() <= 1) {
