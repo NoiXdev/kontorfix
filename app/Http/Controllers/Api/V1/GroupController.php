@@ -67,6 +67,7 @@ class GroupController extends Controller
 
                 return $group;
             },
+            organizationId: $organizationId,
         );
 
         return (new GroupResource($group))->response()->setStatusCode(201);
@@ -90,6 +91,8 @@ class GroupController extends Controller
             $slugs->claimRegistrySlug(
                 (string) $request->validated('slug'),
                 fn () => $group->update([...$attributes, 'slug' => $request->validated('slug')]),
+                organizationId: $group->organization_id,
+                excludeGroupId: $group->id,
             );
         } else {
             $group->update($attributes);

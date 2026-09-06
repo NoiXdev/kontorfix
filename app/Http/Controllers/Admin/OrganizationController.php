@@ -169,6 +169,7 @@ class OrganizationController extends Controller
         $slugs->claimOrganizationSlug(
             (string) $request->validated('slug'),
             fn () => $organization->update($request->validated()),
+            excludeOrganizationId: $organization->id,
         );
 
         return back()->with('success', "Kunde {$organization->name} aktualisiert.");

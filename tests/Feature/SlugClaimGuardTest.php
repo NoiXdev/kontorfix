@@ -39,6 +39,11 @@ use Illuminate\Validation\ValidationException;
  *      transaction. Verified by literally reverting `claimOrganizationSlug()` to take the
  *      lock in its own transaction ahead of `$write()` and confirming the tests using this
  *      helper go red.
+ *
+ * lock()'s own "must run inside an open transaction" precondition is tested separately, in
+ * tests/Unit/Services/Slugs/SlugClaimGuardLockTest.php: every test in this file inherits
+ * RefreshDatabase, which wraps the whole test in its own outer transaction, so
+ * DB::transactionLevel() can never be observed at 0 here.
  */
 function captureTransactionalTimeline(Closure $action): array
 {
@@ -127,6 +132,56 @@ it('refuses to claim a registry slug an organization already holds, bypassing va
     ))->toThrow(ValidationException::class);
 
     expect(Group::where('slug', 'kadenz')->exists())->toBeFalse();
+});
+
+it('refuses to claim an organization slug another organization already holds (same-table race)', function () {
+    Organization::factory()->create(['slug' => 'kadenz']);
+
+    expect(fn () => app(SlugClaimGuard::class)->claimOrganizationSlug(
+        'kadenz',
+        fn () => Organization::factory()->create(['slug' => 'kadenz']),
+    ))->toThrow(ValidationException::class);
+
+    expect(Organization::where('slug', 'kadenz')->count())->toBe(1);
+});
+
+it('lets an organization keep its own unchanged slug when excluded from the same-table check', function () {
+    $org = Organization::factory()->create(['slug' => 'kadenz']);
+
+    app(SlugClaimGuard::class)->claimOrganizationSlug(
+        'kadenz',
+        fn () => $org->update(['name' => 'Renamed']),
+        excludeOrganizationId: $org->id,
+    );
+
+    expect($org->fresh()->name)->toBe('Renamed');
+});
+
+it('refuses to claim a registry slug another registry in the same organization already holds (same-table race)', function () {
+    $org = Organization::factory()->create();
+    Group::factory()->for($org)->create(['slug' => 'kadenz']);
+
+    expect(fn () => app(SlugClaimGuard::class)->claimRegistrySlug(
+        'kadenz',
+        fn () => Group::factory()->for($org)->create(['slug' => 'kadenz']),
+        organizationId: $org->id,
+    ))->toThrow(ValidationException::class);
+
+    expect(Group::where('organization_id', $org->id)->where('slug', 'kadenz')->count())->toBe(1);
+});
+
+it('lets two different organizations share a registry slug (same-table check is scoped)', function () {
+    Group::factory()->create(['slug' => 'kadenz']);
+    $otherOrg = Organization::factory()->create();
+
+    $group = app(SlugClaimGuard::class)->claimRegistrySlug(
+        'kadenz',
+        fn () => Group::factory()->for($otherOrg)->create(['slug' => 'kadenz']),
+        organizationId: $otherOrg->id,
+    );
+
+    expect($group)->toBeInstanceOf(Group::class)
+        ->and(Group::where('slug', 'kadenz')->count())->toBe(2);
 });
 
 it('runs the write and returns its result when the slug is genuinely free', function () {

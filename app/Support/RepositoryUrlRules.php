@@ -64,14 +64,17 @@ final class RepositoryUrlRules
      * untranslated defaults would say so in English.
      *
      * The scheme names are generated from the same `GitUrlSafety::allowedSchemes()` list as
-     * shape() above, so a widened config is reflected in the wording too — an operator who
-     * added `http` and still gets rejected (e.g. for a genuinely unsupported scheme) is told
-     * about every scheme that would have worked, not just the two shipped defaults. A
+     * shape() above, so widening the config with another **non-host-less** scheme is
+     * reflected in the wording too — an operator who added `http` and still gets rejected
+     * (e.g. for a genuinely unsupported scheme) is told about every such scheme that would
+     * have worked, not just the two shipped defaults. That claim does not extend to a
      * host-less transport (currently only `file`, reachable in this codebase only via the
-     * test suite's scheme allowlist) is left out of the enumeration: "must start with
-     * file://" is not meaningful guidance for a URL pasted into a browser form, and omitting
-     * it from the *wording* does not change what shape() above actually *accepts* — with the
-     * shipped default (`https`, `ssh`) this produces byte-identical text to the previous
+     * test suite's scheme allowlist): it is left out of the enumeration on purpose — "must
+     * start with file://" is not meaningful guidance for a URL pasted into a browser form —
+     * so a mixed config such as `['file', 'https']` produces wording that names only
+     * `https://` even though shape() below also accepts `file://`. Omitting it narrows only
+     * the *wording*, never what shape() actually *accepts* — with the shipped default
+     * (`https`, `ssh`, neither host-less) this produces byte-identical text to the previous
      * hardcoded messages.
      *
      * @return array<string, string>

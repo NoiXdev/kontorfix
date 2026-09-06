@@ -341,6 +341,7 @@ class GroupController extends Controller
 
                 return $group;
             },
+            organizationId: $organizationId,
         );
 
         return back()->with('success', "Gruppe {$group->name} erstellt.");
@@ -365,6 +366,8 @@ class GroupController extends Controller
             $slugs->claimRegistrySlug(
                 (string) $request->validated('slug'),
                 fn () => $group->update([...$attributes, 'slug' => $request->validated('slug')]),
+                organizationId: $group->organization_id,
+                excludeGroupId: $group->id,
             );
         } else {
             $group->update($attributes);
