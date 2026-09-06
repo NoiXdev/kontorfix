@@ -14,6 +14,8 @@ use App\Services\Oci\Digest;
 use App\Services\RegistryAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
@@ -115,11 +117,21 @@ class BlobController extends Controller
     }
 
     /**
-     * GET/HEAD /v2/{name}/blobs/{digest} — HEAD only in this task. Task 6 gives GET a body
-     * and the storage-backend streaming branch; this method never inspects the request
-     * method for that reason.
+     * GET/HEAD /v2/{name}/blobs/{digest}. HEAD answers with headers only, exactly as it did
+     * before this method knew how to serve a body — checked first and returned immediately,
+     * so nothing below it can ever change what a HEAD response looks like.
+     *
+     * GET takes one of two branches, chosen by `BlobStore::isLocalDisk()` — the same
+     * adapter-instance check `BlobStore::append()`/`finish()` already use to decide how to
+     * write a blob, reused here rather than re-asked against
+     * `StorageSetting::current()->driver`, which is a configured *intent* and not proof of
+     * what the resolved disk actually is:
+     *
+     *   - Local: streamed back in chunks (see the StreamedResponse below).
+     *   - Remote (S3 today): a 302 to a short-lived presigned URL, so this process never
+     *     reads a payload byte at all.
      */
-    public function show(Request $request, string $name, string $digest): Response
+    public function show(Request $request, string $name, string $digest): SymfonyResponse
     {
         $group = $this->ociGroup($request);
         $package = $this->ociRepository($request, $group, $name);
@@ -132,7 +144,33 @@ class BlobController extends Controller
             throw OciException::blobUnknown($digest);
         }
 
-        return response('', 200, [
+        if ($request->isMethod('HEAD')) {
+            return response('', 200, [
+                'Content-Length' => (string) $blob->size,
+                'Docker-Content-Digest' => $blob->digest,
+            ]);
+        }
+
+        if (! $this->blobs->isLocalDisk()) {
+            return redirect()->away($this->blobs->presignedUrl($blob));
+        }
+
+        // A pull on local storage occupies a FrankenPHP worker thread for the whole transfer.
+        // For a large image over a slow link that is minutes, and docker/compose.yaml already
+        // warns about thread-pool saturation at its healthcheck. S3 answers with a redirect
+        // instead and never touches a payload byte; that is the difference the storage
+        // settings page names at the point where the backend is chosen.
+        return new StreamedResponse(function () use ($blob): void {
+            $stream = $this->blobs->readStream($blob);
+
+            while (! feof($stream)) {
+                echo fread($stream, 1024 * 1024);
+                flush();
+            }
+
+            fclose($stream);
+        }, 200, [
+            'Content-Type' => 'application/octet-stream',
             'Content-Length' => (string) $blob->size,
             'Docker-Content-Digest' => $blob->digest,
         ]);

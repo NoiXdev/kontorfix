@@ -56,10 +56,40 @@ final class BlobStore
      * to when no S3 setting is stored, and a driver *name* is not proof that `disk()->path()`
      * returns a path this process can open — the adapter class is Flysystem's own answer to
      * exactly that question, so it is the one thing this method trusts.
+     *
+     * Public because BlobController::show() asks the identical question when deciding
+     * whether to stream a pull's bytes itself or redirect it to a presigned URL: the same
+     * "is this actually a local filesystem, not merely configured to say so" concern
+     * applies to reading a blob back out as much as it does to writing one in, so the
+     * download path reuses this rather than growing a second, weaker check against
+     * `StorageSetting::current()->driver`.
      */
-    private function isLocalDisk(): bool
+    public function isLocalDisk(): bool
     {
         return $this->disk()->getAdapter() instanceof LocalFilesystemAdapter;
+    }
+
+    /**
+     * Opens a readable stream over an already-promoted blob's bytes, for
+     * BlobController::show() to copy to the client in chunks on the local branch without
+     * ever loading the whole file into memory. The caller owns the returned resource and
+     * must fclose() it.
+     *
+     * @return resource
+     */
+    public function readStream(OciBlob $blob)
+    {
+        return $this->disk()->readStream($blob->path);
+    }
+
+    /**
+     * A short-lived presigned URL for an already-promoted blob, for BlobController::show()
+     * to redirect a pull to on the remote branch — the point of which is that PHP never
+     * reads a payload byte at all.
+     */
+    public function presignedUrl(OciBlob $blob): string
+    {
+        return $this->disk()->temporaryUrl($blob->path, now()->addMinutes(5));
     }
 
     /** Opens a new upload session for a repository. */

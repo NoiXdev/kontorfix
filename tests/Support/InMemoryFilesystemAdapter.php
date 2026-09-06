@@ -172,4 +172,19 @@ final class InMemoryFilesystemAdapter implements FilesystemAdapter
 
         $this->files[$destination] = $this->files[$source];
     }
+
+    /**
+     * Stands in for a real object store's presigned-URL support. Not part of Flysystem's
+     * `FilesystemAdapter` interface — Laravel's `FilesystemAdapter::temporaryUrl()` calls it
+     * only when `method_exists($adapter, 'getTemporaryUrl')`, exactly the capability this
+     * fake needs to opt into for `tests/Feature/Oci/BlobDownloadTest.php`'s S3-redirect
+     * case, without a real bucket. The URL is fake but distinguishable and carries the
+     * expiry, so a test can assert against it without following it.
+     *
+     * @param  array<string, mixed>  $options
+     */
+    public function getTemporaryUrl(string $path, \DateTimeInterface $expiration, array $options): string
+    {
+        return 'https://fake-s3.test/'.$path.'?expires='.$expiration->getTimestamp();
+    }
 }

@@ -143,7 +143,6 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
             ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
         Route::match(['GET', 'HEAD'], '/{name}/blobs/{digest}', [BlobController::class, 'show'])
             ->where(['name' => $ociName, 'digest' => 'sha256:[a-f0-9]{64}']);
-        // Task 6 still gives blob GET a real body (see BlobController::show()).
 
         // Manifests and tags (Task 5). {reference} is a tag or a digest, matched by
         // $ociReference; DELETE is digest-only per the OCI spec, so it gets its own
