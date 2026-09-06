@@ -155,16 +155,36 @@ class BlobController extends Controller
             return redirect()->away($this->blobs->presignedUrl($blob));
         }
 
+        // Opened BEFORE the StreamedResponse is constructed — and thus before this method
+        // commits to a 200 with a Content-Length — precisely so a missing file (an
+        // oci_blobs row that outlived its bytes: a database restore older than the
+        // artifacts volume, an operator repointing the artifacts root) is still answerable
+        // as BLOB_UNKNOWN. Opening the stream lazily inside the response callback would
+        // mean the 200 and Content-Length headers have already gone out by the time the
+        // failure is discovered, leaving the client with a truncated body and no server-side
+        // error to diagnose it — readStream() returning null here is exactly that failure,
+        // normalised to one shape regardless of the disk's own `throw` setting.
+        $stream = $this->blobs->readStream($blob);
+
+        if ($stream === null) {
+            throw OciException::blobUnknown($digest);
+        }
+
         // A pull on local storage occupies a FrankenPHP worker thread for the whole transfer.
         // For a large image over a slow link that is minutes, and docker/compose.yaml already
         // warns about thread-pool saturation at its healthcheck. S3 answers with a redirect
         // instead and never touches a payload byte; that is the difference the storage
         // settings page names at the point where the backend is chosen.
-        return new StreamedResponse(function () use ($blob): void {
-            $stream = $this->blobs->readStream($blob);
-
+        return new StreamedResponse(function () use ($stream): void {
             while (! feof($stream)) {
                 echo fread($stream, 1024 * 1024);
+                // @ob_flush() before flush(), matching Symfony's own StreamedResponse::
+                // sendContent() — harmless today (the FrankenPHP base image ships no
+                // php.ini, so output_buffering is off and there is no userland buffer to
+                // flush), but without it, an ini that turns output buffering on would
+                // accumulate the whole blob in that buffer regardless of this chunk loop,
+                // which is exactly the memory blowup streaming exists to avoid.
+                @ob_flush();
                 flush();
             }
 

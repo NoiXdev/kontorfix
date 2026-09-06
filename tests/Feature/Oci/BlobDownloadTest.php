@@ -33,6 +33,12 @@ function blobDownloadAuthServerVars(Group $group, TokenAbility $ability): array
  * Pushes the given bytes as a blob into a repository of a SEPARATE organization/registry —
  * used to prove GET never serves a blob held by another tenant. Mirrors
  * uploadIntoOtherOrganization() in BlobUploadTest.php under a distinct name (see above).
+ *
+ * LOAD-BEARING SIDE EFFECT: withServerVariables() mutates $this->serverVariables on the
+ * TestCase directly (it is not scoped to the one call() above), so this leaves the
+ * FOREIGN organization's publish token attached to every later call() the caller makes on
+ * $this. Every caller MUST call withServerVariables() again with its own credentials
+ * before asserting anything, or it is unknowingly testing with the wrong tenant's token.
  */
 function uploadBlobToOtherOrganization(string $bytes): void
 {
@@ -120,6 +126,25 @@ it('streams a blob when the storage backend is local', function () {
     expect($response->streamedContent())->toBe($bytes);
 });
 
+it('answers BLOB_UNKNOWN rather than a truncated 200 when the blob row has outlived its file', function () {
+    // Simulates an oci_blobs row surviving without its bytes on disk — a database restore
+    // older than the artifacts volume, or an operator repointing the artifacts root, both
+    // leave exactly this shape behind. BlobStore::readStream() must report it as "not
+    // found" and BlobController::show() must check that BEFORE constructing the
+    // StreamedResponse, so the client gets a normal OCI error body instead of a 200 with a
+    // promised Content-Length and a body that silently ends short.
+    $bytes = random_bytes(64);
+    $digest = pushBlobToApp($this->publish, $bytes);
+
+    $path = Digest::pathFor((string) $this->org->id, $digest);
+    Storage::disk('artifacts')->delete($path);
+
+    $this->withServerVariables($this->read)
+        ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'BLOB_UNKNOWN');
+});
+
 it('redirects to a presigned url when the storage backend is s3', function () {
     // The point of the redirect is that PHP never touches a payload byte — asserting the
     // bytes would mean following the presigned URL, which tests S3's own temporaryUrl()
@@ -143,6 +168,27 @@ it('redirects to a presigned url when the storage backend is s3', function () {
         ->assertHeader('Location', $expectedUrl);
 });
 
+it('answers HEAD with headers only even when the storage backend is s3, never a redirect', function () {
+    // HEAD must stay exactly what it was before this task's storage-backend branching
+    // existed — a plain 200 with Content-Length and Docker-Content-Digest, regardless of
+    // which disk is configured. `docker pull` sends HEAD first and reads those headers
+    // from THIS response to decide whether it already has the layer; a 302 here breaks
+    // that. Worse: it would hand a presigned object URL — real, temporary read access to
+    // the bytes — to anyone who merely asked whether a blob exists, without the request
+    // ever being a GET.
+    useRemoteArtifactsDisk();
+
+    $bytes = random_bytes(64);
+    $digest = pushBlobToApp($this->publish, $bytes);
+
+    $this->withServerVariables($this->read)
+        ->call('HEAD', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertStatus(200)
+        ->assertHeader('Content-Length', (string) strlen($bytes))
+        ->assertHeader('Docker-Content-Digest', $digest)
+        ->assertHeaderMissing('Location');
+});
+
 it('404s a blob belonging to another organization', function () {
     // The same bytes held by a different organization must read as absent here — a
     // global digest index would turn this endpoint into an existence oracle, exactly the
@@ -154,6 +200,11 @@ it('404s a blob belonging to another organization', function () {
     $digest = Digest::of($bytes);
     uploadBlobToOtherOrganization($bytes);
 
+    // Load-bearing: uploadBlobToOtherOrganization() leaves the FOREIGN organization's
+    // publish token attached to $this (see its own docblock) — this call resets to
+    // $this->read, this organization's own read token, before the request below. Without
+    // it, the request would run authenticated as the wrong tenant while the test still
+    // claimed to be checking this one.
     $this->withServerVariables($this->read)
         ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
         ->assertStatus(404)

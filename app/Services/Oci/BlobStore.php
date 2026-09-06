@@ -10,6 +10,7 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use League\Flysystem\Local\LocalFilesystemAdapter;
+use League\Flysystem\UnableToReadFile;
 use RuntimeException;
 
 /**
@@ -75,11 +76,25 @@ final class BlobStore
      * ever loading the whole file into memory. The caller owns the returned resource and
      * must fclose() it.
      *
-     * @return resource
+     * Returns null rather than letting a missing file surface as whatever the underlying
+     * disk throws or returns: an `oci_blobs` row can outlive its file (a database restore
+     * older than the artifacts volume, an operator repointing the artifacts root), and the
+     * caller MUST check for null and answer BLOB_UNKNOWN *before* committing to a 200 —
+     * see the call site in BlobController::show(), which opens this before constructing
+     * the StreamedResponse for exactly that reason.
+     *
+     * @return resource|null
      */
     public function readStream(OciBlob $blob)
     {
-        return $this->disk()->readStream($blob->path);
+        try {
+            return $this->disk()->readStream($blob->path);
+        } catch (UnableToReadFile) {
+            // Thrown rather than returned as null when the disk config has `throw => true`
+            // (see StorageManager::diskConfigFor()) — normalised to null here so the
+            // caller has exactly one shape to check, regardless of that setting.
+            return null;
+        }
     }
 
     /**

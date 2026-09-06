@@ -52,6 +52,12 @@ beforeEach(function () {
 /**
  * Pushes the given bytes as a blob into a repository of a SEPARATE organization/registry —
  * used to prove HEAD never reports a blob held by another tenant.
+ *
+ * LOAD-BEARING SIDE EFFECT: withServerVariables() mutates $this->serverVariables on the
+ * TestCase directly (it is not scoped to the one call() above), so this leaves the
+ * FOREIGN organization's publish token attached to every later call() the caller makes on
+ * $this. Every caller MUST call withServerVariables() again with its own credentials
+ * before asserting anything, or it is unknowingly testing with the wrong tenant's token.
  */
 function uploadIntoOtherOrganization(string $bytes): void
 {
@@ -188,6 +194,11 @@ it('does not report another organization\'s blob, so a token cannot probe foreig
     $digest = Digest::of($bytes);
     uploadIntoOtherOrganization($bytes);   // helper defined in the test file
 
+    // Load-bearing: uploadIntoOtherOrganization() leaves the FOREIGN organization's
+    // publish token attached to $this (see its own docblock) — this call resets to
+    // $this->read, this organization's own read token, before the request below. Without
+    // it, the request would run authenticated as the wrong tenant while the test still
+    // claimed to be checking this one.
     $this->withServerVariables($this->read)
         ->head("http://images.test/v2/app/blobs/{$digest}")
         ->assertStatus(404);
