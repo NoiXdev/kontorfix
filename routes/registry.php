@@ -3,6 +3,7 @@
 use App\Http\Controllers\Registry\ComposerController;
 use App\Http\Controllers\Registry\LegacySlugRedirectController;
 use App\Http\Controllers\Registry\NpmController;
+use App\Http\Controllers\Registry\Oci\BlobController;
 use App\Http\Controllers\Registry\Oci\VersionController;
 use App\Http\Controllers\Registry\ProxyDownloadController;
 use App\Http\Controllers\Registry\PypiController;
@@ -115,7 +116,7 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 
 // Domain access: root level. registry.context 404s unknown hosts, so these routes
 // don't shadow the main app (web routes are registered first -> first match).
-Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints) {
+Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints, $ociName) {
     // OCI distribution. Registered ONLY here, and that is a protocol constraint rather than
     // a preference: a Docker client will not accept a path prefix as part of a registry
     // address, so it never sends /v2/ to /r/{org}/{registry}. A second registration there
@@ -129,9 +130,19 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
     // npm's packument controller swallowed every /v2/* request first, 401/404ing with
     // its own body instead of ever reaching VersionController. Verified by matching the
     // request against the route collection directly, not merely by reading the file.
-    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () {
+    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () use ($ociName) {
         Route::get('/', VersionController::class);
-        // Tasks 4-6 add the blob and manifest routes here.
+
+        // Blob upload protocol (Task 4). uploadId is a plain OciBlobUpload UUID, not the
+        // OCI name/reference grammar above, so it gets its own constraint.
+        Route::post('/{name}/blobs/uploads/', [BlobController::class, 'begin'])->where('name', $ociName);
+        Route::patch('/{name}/blobs/uploads/{uploadId}', [BlobController::class, 'append'])
+            ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
+        Route::put('/{name}/blobs/uploads/{uploadId}', [BlobController::class, 'finish'])
+            ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
+        Route::match(['GET', 'HEAD'], '/{name}/blobs/{digest}', [BlobController::class, 'show'])
+            ->where(['name' => $ociName, 'digest' => 'sha256:[a-f0-9]{64}']);
+        // Task 5-6 add the manifest routes here.
     });
 
     $registryEndpoints();

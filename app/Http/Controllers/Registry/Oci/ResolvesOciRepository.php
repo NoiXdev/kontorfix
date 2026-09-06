@@ -23,10 +23,12 @@ trait ResolvesOciRepository
     }
 
     /**
-     * The read path. An anonymous caller gets 401 so the client knows to authenticate; a
-     * caller with a token that simply may not see this registry gets the same NAME_UNKNOWN
-     * an absent repository gets, so a token cannot enumerate other tenants' image names by
-     * response code alone.
+     * The read path. An anonymous caller gets 401 so the client knows to authenticate —
+     * UNLESS the group is public, in which case `RegistryAccessService::canAccessGroup()`
+     * short-circuits true for a null token and the anonymous caller proceeds to package
+     * resolution, exactly as it does for npm/composer/pypi. A caller with a token that
+     * simply may not see this registry gets the same NAME_UNKNOWN an absent repository
+     * gets, so a token cannot enumerate other tenants' image names by response code alone.
      */
     protected function ociRepository(Request $request, Group $group, string $name): Package
     {
