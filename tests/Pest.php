@@ -162,6 +162,18 @@ function tokenHeaderFor(Group $group): array
 }
 
 /**
+ * The raw token value, for callers that build their own Basic-auth header (OCI/Docker
+ * uses the token as the password, not the username, unlike tokenHeaderFor()'s npm-style
+ * "token:<plain>" convention) rather than consuming the ready-made header array.
+ */
+function tokenPlainTextFor(Group $group, TokenAbility $ability = TokenAbility::Read): string
+{
+    [, $plain] = RegistryToken::issue($group->organization, 'test', $group, $ability);
+
+    return $plain;
+}
+
+/**
  * @return array<string, string>
  */
 function publishHeaderFor(Group $group): array
