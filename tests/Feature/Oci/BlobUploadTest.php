@@ -235,6 +235,31 @@ it('falls back to a normal upload when the mount source is in another organizati
         ->assertHeader('Docker-Upload-UUID');
 });
 
+it('refuses a foreign mount source even when the target already holds the same digest itself', function () {
+    // The organization comparison in mountFrom() is invisible unless BOTH organizations
+    // hold the exact same digest — otherwise BlobStore::mount()'s own organization-scoped
+    // find() already returns null regardless of this comparison, which is exactly why the
+    // test above cannot see it. Here $this->org independently already holds the digest
+    // (pushed to its own "app" repository first — blobs dedupe per organization, not per
+    // repository, as the mount-within-one-organization test above establishes), AND a
+    // resolvable shared package in a DIFFERENT organization holds the identical bytes.
+    // Without the comparison, mount() would find $this->org's OWN pre-existing blob and
+    // report 201 — a coincidental "success" that has nothing to do with the named
+    // "shared-base" source actually holding anything for this organization.
+    $bytes = random_bytes(256);
+    $digest = Digest::of($bytes);
+    $this->withServerVariables($this->publish)
+        ->call('POST', "http://images.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes);
+
+    $foreign = sharedDockerPackageIn($this->group, 'shared-base');
+    seedBlobFor($foreign, $bytes);
+
+    $this->withServerVariables($this->publish)
+        ->post("http://images.test/v2/other/blobs/uploads/?mount={$digest}&from=shared-base")
+        ->assertStatus(202)
+        ->assertHeader('Docker-Upload-UUID');
+});
+
 it('refuses a write from a read-only token', function () {
     $this->withServerVariables($this->read)
         ->post('http://images.test/v2/app/blobs/uploads/')
@@ -246,4 +271,28 @@ it('refuses an anonymous write with 401 and the basic challenge', function () {
     $this->post('http://images.test/v2/app/blobs/uploads/')
         ->assertStatus(401)
         ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"');
+});
+
+it('refuses an array digest on finish with the OCI error contract instead of a 500', function () {
+    // PUT .../uploads/{id}?digest[]=x sends `digest` as an array. (string) $array used to
+    // be an uncaught "Array to string conversion" that escaped the JSON error contract as
+    // a bare 500 — requireDigest() now guards with is_string() before ever touching it,
+    // mirroring the guard begin() already had for the same query parameter.
+    $start = $this->withServerVariables($this->publish)->post('http://images.test/v2/app/blobs/uploads/');
+    $location = $start->headers->get('Location');
+
+    $this->withServerVariables($this->publish)
+        ->call('PUT', $location.'?digest[]=x')
+        ->assertStatus(400)
+        ->assertJsonPath('errors.0.code', 'UNSUPPORTED');
+});
+
+it('omits the Range header on a fresh session rather than claiming a byte the client never sent', function () {
+    // A fresh POST used to answer "Range: 0-0", which claims one byte is already on the
+    // server when zero have arrived — a client resuming after an interrupted POST and
+    // trusting that header would skip the first byte of its retry.
+    $this->withServerVariables($this->publish)
+        ->post('http://images.test/v2/app/blobs/uploads/')
+        ->assertStatus(202)
+        ->assertHeaderMissing('Range');
 });

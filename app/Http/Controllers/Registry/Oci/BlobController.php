@@ -144,17 +144,31 @@ class BlobController extends Controller
      * ResolvesOciRepository::ociRepository() draws from) — no special-cased query for
      * "from" that could answer a different existence question than a normal GET would.
      *
-     * The organization comparison below is a fail-fast, NOT the sole guard against a
-     * cross-organization mount: BlobStore::mount()/find() independently scope by
-     * $target's own organization_id, so even with this comparison deleted, a source
-     * package from another organization still cannot yield a hit here — its blob lives
-     * under ITS organization's row, which $target's organization_id will never match.
-     * Verified by actually deleting the line and re-running
-     * tests/Feature/Oci/BlobUploadTest.php's "falls back ... mount source is in another
-     * organization" test: it stayed green, because BlobStore's own scoping already
-     * carries the guarantee. Kept anyway — it avoids a needless trip into BlobStore for a
-     * mismatch this method already knows about, and a future change to mount()/find()
-     * should not have to re-derive this protection from scratch.
+     * The organization comparison below carries exactly one of the two guarantees this
+     * method might look like it makes, and it matters which:
+     *
+     *   - It does NOT stop this method from ever returning ANOTHER organization's blob.
+     *     That guarantee is carried unconditionally by BlobStore::mount()/find(), which
+     *     scope by $target's own organization_id and never by digest alone — no source
+     *     package, present or absent, foreign or not, can make find() hand back a row it
+     *     does not own. That half holds whether or not this comparison exists.
+     *   - It DOES decide what happens when $target's OWN organization independently
+     *     already holds the announced digest — a shared base layer is the ordinary case
+     *     for this, not an edge one. Without the comparison, mount() would find and return
+     *     $target's own pre-existing blob (organization-scoped lookup, so it is a real hit,
+     *     just not one that has anything to do with "from"), and this endpoint would
+     *     answer 201 instead of 202 for a source name that does not actually hold anything
+     *     for THIS organization. Verified directly: deleting this line turns
+     *     tests/Feature/Oci/BlobUploadTest.php's "refuses a foreign mount source even when
+     *     the target already holds the same digest itself" from 202 to 201; the sibling
+     *     "falls back ... mount source is in another organization" test, which has no such
+     *     coincidental digest, stays green either way and does not exercise this line.
+     *
+     * In short: this comparison is load-bearing for OBSERVABLE BEHAVIOUR (which status
+     * code a same-digest-different-source request gets), not for TENANCY (no foreign
+     * organization's content can be disclosed either way). Kept because "confirms the
+     * target's own blob under an unrelated source's name" is a confusing accidental
+     * success this method should refuse outright rather than let happen to work.
      */
     private function mountFrom(Group $group, Package $target, string $digest, string $from): ?OciBlob
     {

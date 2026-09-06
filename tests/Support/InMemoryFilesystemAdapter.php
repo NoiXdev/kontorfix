@@ -5,6 +5,8 @@ namespace Tests\Support;
 use League\Flysystem\Config;
 use League\Flysystem\FileAttributes;
 use League\Flysystem\FilesystemAdapter;
+use League\Flysystem\UnableToCopyFile;
+use League\Flysystem\UnableToMoveFile;
 use League\Flysystem\UnableToReadFile;
 
 /**
@@ -123,26 +125,51 @@ final class InMemoryFilesystemAdapter implements FilesystemAdapter
         return new FileAttributes($path, strlen($this->read($path)));
     }
 
-    /** @return iterable<FileAttributes> */
+    /**
+     * Yields matching keys in LEXICOGRAPHIC order, deliberately not insertion order: a real
+     * S3 `ListObjectsV2` returns keys sorted as plain strings, not in the order they were
+     * written, and not numerically even when the key happens to look like a number. A
+     * fake that yields insertion order would stay "correctly" ordered for any caller that
+     * happens to write its parts in ascending order already — which is exactly what
+     * BlobStore::appendRemotePart() does — and so could never catch a caller that forgot
+     * to re-sort what the adapter handed back.
+     *
+     * @return iterable<FileAttributes>
+     */
     public function listContents(string $path, bool $deep): iterable
     {
         $prefix = $path === '' ? '' : rtrim($path, '/').'/';
 
-        foreach ($this->files as $file => $contents) {
+        $matching = [];
+        foreach (array_keys($this->files) as $file) {
             if ($prefix === '' || str_starts_with($file, $prefix)) {
-                yield new FileAttributes($file, strlen($contents));
+                $matching[] = $file;
             }
+        }
+
+        sort($matching);
+
+        foreach ($matching as $file) {
+            yield new FileAttributes($file, strlen($this->files[$file]));
         }
     }
 
     public function move(string $source, string $destination, Config $config): void
     {
-        $this->files[$destination] = $this->files[$source] ?? '';
+        if (! $this->fileExists($source)) {
+            throw UnableToMoveFile::fromLocationTo($source, $destination);
+        }
+
+        $this->files[$destination] = $this->files[$source];
         unset($this->files[$source]);
     }
 
     public function copy(string $source, string $destination, Config $config): void
     {
-        $this->files[$destination] = $this->files[$source] ?? '';
+        if (! $this->fileExists($source)) {
+            throw UnableToCopyFile::fromLocationTo($source, $destination);
+        }
+
+        $this->files[$destination] = $this->files[$source];
     }
 }
