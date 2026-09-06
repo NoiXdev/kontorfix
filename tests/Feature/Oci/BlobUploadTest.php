@@ -5,8 +5,10 @@ use App\Enums\TokenAbility;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\OciBlob;
+use App\Models\OciBlobUpload;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Services\Oci\BlobStore;
 use App\Services\Oci\Digest;
 use Illuminate\Support\Facades\Storage;
 
@@ -65,6 +67,50 @@ function uploadIntoOtherOrganization(string $bytes): void
     test()->withServerVariables($publish)
         ->call('POST', "http://foreign.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes)
         ->assertStatus(201);
+}
+
+/**
+ * A Docker package owned by a SEPARATE organization, marked shared and attached to
+ * $group — the one shape that makes `RegistryAccessService::packagesFor($group)` return a
+ * repository whose `organization_id` differs from $group's own. This is the only real way
+ * to reach the cross-organization branch in `BlobController::mountFrom()`: a name that is
+ * merely unknown (`from=fremd`, the old version of the fallback test below) never gets far
+ * enough to compare organizations at all — `packagesFor()` simply would not have returned
+ * it. See `sharedPackageIn()` in tests/Feature/Registry/SharedPackageResolutionTest.php for
+ * the established pattern this mirrors.
+ */
+function sharedDockerPackageIn(Group $group, string $name): Package
+{
+    $foreignOrg = Organization::factory()->create();
+    $package = Package::factory()->for($foreignOrg)->create([
+        'type' => PackageType::Docker, 'name' => $name, 'shared' => true,
+    ]);
+    $group->packages()->attach($package);
+
+    return $package;
+}
+
+/**
+ * Seeds a real OciBlob under $package's own organization, without going through HTTP —
+ * used to give a shared foreign package an actual blob to (fail to) mount, so the
+ * cross-organization branch is exercised with genuine content rather than a name that
+ * simply does not resolve.
+ */
+function seedBlobFor(Package $package, string $bytes): string
+{
+    $digest = Digest::of($bytes);
+    $store = app(BlobStore::class);
+    $upload = $store->begin($package);
+
+    $stream = fopen('php://temp', 'r+b');
+    fwrite($stream, $bytes);
+    rewind($stream);
+    $store->append($upload, $stream);
+    fclose($stream);
+
+    $store->finish($upload, $digest);
+
+    return $digest;
 }
 
 it('completes a monolithic upload and stores the blob', function () {
@@ -153,19 +199,38 @@ it('mounts a blob from another repository of the same organization without trans
     $this->withServerVariables($this->publish)
         ->call('POST', "http://images.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes);
 
+    $filesBeforeMount = Storage::disk('artifacts')->allFiles('docker');
+
     $this->withServerVariables($this->publish)
         ->post("http://images.test/v2/other/blobs/uploads/?mount={$digest}&from=app")
         ->assertStatus(201)
         ->assertHeader('Docker-Content-Digest', $digest);
+
+    // "Without transferring it" is the entire point of mounting — asserting only the
+    // status and the digest header would pass unchanged for an implementation that
+    // secretly copies the bytes into a second path, or that opens and quietly abandons an
+    // upload session. Nothing on disk changes, the blob row is not duplicated, and no
+    // session is left behind.
+    expect(Storage::disk('artifacts')->allFiles('docker'))->toBe($filesBeforeMount)
+        ->and(OciBlob::count())->toBe(1)
+        ->and(OciBlobUpload::count())->toBe(0);
 });
 
 it('falls back to a normal upload when the mount source is in another organization', function () {
+    // `from` must name a repository that GENUINELY resolves and GENUINELY holds the
+    // digest, in another organization — an unknown name (the old shape of this test) only
+    // ever reaches the "$source === null" branch of mountFrom(), leaving the actual
+    // cross-organization comparison unexercised by the suite. A shared package is the one
+    // realistic way a name can resolve here while still belonging to a different
+    // organization than the target repository's own.
+    $foreign = sharedDockerPackageIn($this->group, 'shared-base');
+    $bytes = random_bytes(256);
+    $digest = seedBlobFor($foreign, $bytes);
+
     // 202 rather than an error: that is the protocol's own miss path, and it leaks nothing
     // about whether the foreign blob exists.
-    $digest = 'sha256:'.str_repeat('b', 64);
-
     $this->withServerVariables($this->publish)
-        ->post("http://images.test/v2/app/blobs/uploads/?mount={$digest}&from=fremd")
+        ->post("http://images.test/v2/app/blobs/uploads/?mount={$digest}&from=shared-base")
         ->assertStatus(202)
         ->assertHeader('Docker-Upload-UUID');
 });

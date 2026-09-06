@@ -102,8 +102,7 @@ class BlobController extends Controller
         $package = $this->ociWritableRepository($request, $group, $name);
         $upload = $this->findUpload($package, $uploadId);
 
-        $digest = (string) $request->query('digest');
-        Digest::assertValid($digest);
+        $digest = $this->requireDigest($request);
 
         // The client MAY attach a final chunk to this request. append() treats an empty
         // body the same as any other chunk (it appends zero bytes), so there is no need to
@@ -144,6 +143,18 @@ class BlobController extends Controller
      * repository name goes through (RegistryAccessService::packagesFor(), the same set
      * ResolvesOciRepository::ociRepository() draws from) — no special-cased query for
      * "from" that could answer a different existence question than a normal GET would.
+     *
+     * The organization comparison below is a fail-fast, NOT the sole guard against a
+     * cross-organization mount: BlobStore::mount()/find() independently scope by
+     * $target's own organization_id, so even with this comparison deleted, a source
+     * package from another organization still cannot yield a hit here — its blob lives
+     * under ITS organization's row, which $target's organization_id will never match.
+     * Verified by actually deleting the line and re-running
+     * tests/Feature/Oci/BlobUploadTest.php's "falls back ... mount source is in another
+     * organization" test: it stayed green, because BlobStore's own scoping already
+     * carries the guarantee. Kept anyway — it avoids a needless trip into BlobStore for a
+     * mismatch this method already knows about, and a future change to mount()/find()
+     * should not have to re-derive this protection from scratch.
      */
     private function mountFrom(Group $group, Package $target, string $digest, string $from): ?OciBlob
     {
@@ -157,6 +168,25 @@ class BlobController extends Controller
         }
 
         return $this->blobs->mount($target, $digest);
+    }
+
+    /**
+     * `digest` as a plain query string value. `PUT .../uploads/{id}?digest[]=x` sends it as
+     * an array instead — `(string) $array` is an uncaught `Array to string conversion`
+     * TypeError/warning that would escape the OCI JSON error contract as a bare 500.
+     * Mirrors the `is_string()` guard begin() already applies to the same query parameter.
+     */
+    private function requireDigest(Request $request): string
+    {
+        $digest = $request->query('digest');
+
+        if (! is_string($digest)) {
+            throw OciException::unsupported('Nur sha256-Digests werden unterstützt.');
+        }
+
+        Digest::assertValid($digest);
+
+        return $digest;
     }
 
     private function findUpload(Package $package, string $uploadId): OciBlobUpload
@@ -177,11 +207,19 @@ class BlobController extends Controller
 
     private function sessionResponse(string $name, OciBlobUpload $upload): Response
     {
-        return response('', 202, [
+        $headers = [
             'Location' => "/v2/{$name}/blobs/uploads/{$upload->id}",
-            'Range' => '0-'.max($upload->offset - 1, 0),
             'Docker-Upload-UUID' => $upload->id,
-        ]);
+        ];
+
+        // Omitted rather than "0-0" when nothing has been received yet: "0-0" claims one
+        // byte is already on the server, and a client resuming after an interrupted POST
+        // would trust that and skip the first byte of its retry.
+        if ($upload->offset > 0) {
+            $headers['Range'] = '0-'.($upload->offset - 1);
+        }
+
+        return response('', 202, $headers);
     }
 
     private function blobCompletedResponse(string $name, OciBlob $blob): Response
