@@ -196,6 +196,26 @@ class Package extends Model
     }
 
     /**
+     * OCI manifests pushed to this repository. Only ever populated for PackageType::Docker.
+     *
+     * @return HasMany<OciManifest, $this>
+     */
+    public function ociManifests(): HasMany
+    {
+        return $this->hasMany(OciManifest::class);
+    }
+
+    /**
+     * OCI tags in this repository. Only ever populated for PackageType::Docker.
+     *
+     * @return HasMany<OciTag, $this>
+     */
+    public function ociTags(): HasMany
+    {
+        return $this->hasMany(OciTag::class);
+    }
+
+    /**
      * The organization that owns this package. A package may only be attached to
      * registries of this organization — see GuardsPackageAttachment.
      *
