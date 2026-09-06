@@ -20,14 +20,14 @@ it('routes a repository name containing slashes', function () {
         ->get('http://images.test/v2/team/app/manifests/1.0')
         ->assertStatus(404)
         ->assertJsonPath('errors.0.code', 'NAME_UNKNOWN');
-})->todo('Task 5 adds the /manifests/ route this test hits.');
+});
 
 it('rejects an uppercase repository name at the route, not in a controller', function () {
     $this->withHeaders($this->auth)
         ->get('http://images.test/v2/Team/App/manifests/1.0')
         ->assertNotFound()
         ->assertJsonMissingPath('errors');
-})->todo('Task 5 adds the /manifests/ route this test hits.');
+});
 
 it('accepts a digest reference and a tag reference', function () {
     foreach (['1.4.0', 'sha256:'.str_repeat('a', 64)] as $reference) {
@@ -36,4 +36,4 @@ it('accepts a digest reference and a tag reference', function () {
             ->assertStatus(404)
             ->assertJsonPath('errors.0.code', 'NAME_UNKNOWN');
     }
-})->todo('Task 5 adds the /manifests/ route this test hits.');
+});

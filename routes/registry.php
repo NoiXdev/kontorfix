@@ -4,6 +4,7 @@ use App\Http\Controllers\Registry\ComposerController;
 use App\Http\Controllers\Registry\LegacySlugRedirectController;
 use App\Http\Controllers\Registry\NpmController;
 use App\Http\Controllers\Registry\Oci\BlobController;
+use App\Http\Controllers\Registry\Oci\ManifestController;
 use App\Http\Controllers\Registry\Oci\VersionController;
 use App\Http\Controllers\Registry\ProxyDownloadController;
 use App\Http\Controllers\Registry\PypiController;
@@ -116,7 +117,7 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 
 // Domain access: root level. registry.context 404s unknown hosts, so these routes
 // don't shadow the main app (web routes are registered first -> first match).
-Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints, $ociName) {
+Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints, $ociName, $ociReference) {
     // OCI distribution. Registered ONLY here, and that is a protocol constraint rather than
     // a preference: a Docker client will not accept a path prefix as part of a registry
     // address, so it never sends /v2/ to /r/{org}/{registry}. A second registration there
@@ -130,7 +131,7 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
     // npm's packument controller swallowed every /v2/* request first, 401/404ing with
     // its own body instead of ever reaching VersionController. Verified by matching the
     // request against the route collection directly, not merely by reading the file.
-    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () use ($ociName) {
+    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () use ($ociName, $ociReference) {
         Route::get('/', VersionController::class);
 
         // Blob upload protocol (Task 4). uploadId is a plain OciBlobUpload UUID, not the
@@ -142,7 +143,31 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
             ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
         Route::match(['GET', 'HEAD'], '/{name}/blobs/{digest}', [BlobController::class, 'show'])
             ->where(['name' => $ociName, 'digest' => 'sha256:[a-f0-9]{64}']);
-        // Task 5-6 add the manifest routes here.
+        // Task 6 still gives blob GET a real body (see BlobController::show()).
+
+        // Manifests and tags (Task 5). {reference} is a tag or a digest, matched by
+        // $ociReference; DELETE is digest-only per the OCI spec, so it gets its own
+        // narrower constraint rather than reusing $ociReference.
+        Route::match(['GET', 'HEAD'], '/{name}/manifests/{reference}', [ManifestController::class, 'show'])
+            ->where(['name' => $ociName, 'reference' => $ociReference]);
+        Route::put('/{name}/manifests/{reference}', [ManifestController::class, 'put'])
+            ->where(['name' => $ociName, 'reference' => $ociReference]);
+        Route::delete('/{name}/manifests/{digest}', [ManifestController::class, 'destroy'])
+            ->where(['name' => $ociName, 'digest' => 'sha256:[a-f0-9]{64}']);
+        Route::get('/{name}/tags/list', [ManifestController::class, 'tags'])->where('name', $ociName);
+
+        // Anything else under /v2 (an uppercase name, a path with the wrong number of
+        // segments, …) is a ROUTING miss — none of the patterns above matched at all — not
+        // a well-formed-but-absent name a controller ever got to evaluate. That is exactly
+        // the same distinction ResolvesOciRepository draws between a malformed name (plain
+        // 404, no body) and one that is merely unregistered (OciException::nameUnknown(),
+        // a genuine `errors[]` envelope): inventing a name to run NAME_UNKNOWN's lookup
+        // against here would misreport "this input never named a real resource" as "this
+        // resource does not exist". Registered as a Route::fallback() rather than left to
+        // Laravel's default unmatched-route handling purely so the response body is valid
+        // JSON — an HTML error page fails `TestResponse::decodeResponseJson()`, which
+        // rethrows the original routing exception instead of asserting on the body.
+        Route::fallback(fn () => response()->json((object) [], 404));
     });
 
     $registryEndpoints();
