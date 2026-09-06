@@ -176,7 +176,9 @@ return [
     |
     | `allowed_schemes` is an allowlist because git's transport surface is open-ended:
     | file:// reads the container filesystem, ext:: hands git an arbitrary shell command,
-    | git:// is unauthenticated cleartext. Only widen it deliberately.
+    | git:// is unauthenticated cleartext. Only widen it deliberately — it also widens what
+    | the package create/edit form (App\Support\RepositoryUrlRules) accepts, not just what
+    | the probe/sync sinks below reach for.
     |
     | `allowed_hosts` is the escape hatch for a self-hosted git server that genuinely
     | lives on a private network: hosts listed here (exact, or `*.suffix`) skip the

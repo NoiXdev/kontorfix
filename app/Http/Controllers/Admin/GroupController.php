@@ -20,6 +20,7 @@ use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
+use App\Services\Slugs\SlugClaimGuard;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use Carbon\CarbonImmutable;
@@ -301,7 +302,7 @@ class GroupController extends Controller
         ];
     }
 
-    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment): RedirectResponse
+    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment, SlugClaimGuard $slugs): RedirectResponse
     {
         // The organization is the active scope (or, viewing "all", the explicitly chosen
         // one) — always validated to be one the user may administer.
@@ -323,31 +324,54 @@ class GroupController extends Controller
         // refusal leaves no empty registry behind.
         $sharedAssignment->assertReplacementAssignable($packageIds);
 
-        $group = Group::create([
-            'name' => $request->validated('name'),
-            'slug' => $request->validated('slug'),
-            'public' => $request->boolean('public'),
-            'portal_enabled' => $request->boolean('portal_enabled'),
-            'organization_id' => $organizationId,
-        ]);
-        $group->packages()->sync($packageIds);
+        // StoreGroupRequest's UnclaimedSlug rule already checked this — this is the
+        // authoritative, race-proof re-check immediately before the write. See
+        // App\Services\Slugs\SlugClaimGuard's docblock.
+        $group = $slugs->claimRegistrySlug(
+            (string) $request->validated('slug'),
+            function () use ($request, $organizationId, $packageIds) {
+                $group = Group::create([
+                    'name' => $request->validated('name'),
+                    'slug' => $request->validated('slug'),
+                    'public' => $request->boolean('public'),
+                    'portal_enabled' => $request->boolean('portal_enabled'),
+                    'organization_id' => $organizationId,
+                ]);
+                $group->packages()->sync($packageIds);
+
+                return $group;
+            },
+            organizationId: $organizationId,
+        );
 
         return back()->with('success', "Gruppe {$group->name} erstellt.");
     }
 
-    public function update(UpdateGroupRequest $request, Group $group): RedirectResponse
+    public function update(UpdateGroupRequest $request, Group $group, SlugClaimGuard $slugs): RedirectResponse
     {
         $this->assertAdministersGroup($group);
 
-        $group->update([
+        $attributes = [
             'name' => $request->validated('name'),
             'public' => $request->boolean('public'),
             'portal_enabled' => $request->boolean('portal_enabled'),
-            // Present only when the request actually carried a slug (see UpdateGroupRequest).
-            // Changing it moves the registry's URL and breaks client configurations pointing
-            // at the old one, which is why the console confirms before it submits.
-            ...$request->safe()->only('slug'),
-        ]);
+        ];
+
+        // Present only when the request actually carried a slug (see UpdateGroupRequest).
+        // Changing it moves the registry's URL and breaks client configurations pointing at
+        // the old one, which is why the console confirms before it submits — and, same as
+        // the create path above, why the write is re-checked against the authoritative
+        // guard rather than trusting UpdateGroupRequest's UnclaimedSlug rule alone.
+        if ($request->filled('slug')) {
+            $slugs->claimRegistrySlug(
+                (string) $request->validated('slug'),
+                fn () => $group->update([...$attributes, 'slug' => $request->validated('slug')]),
+                organizationId: $group->organization_id,
+                excludeGroupId: $group->id,
+            );
+        } else {
+            $group->update($attributes);
+        }
 
         return back()->with('success', 'Registry aktualisiert.');
     }

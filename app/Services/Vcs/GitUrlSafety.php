@@ -79,8 +79,17 @@ class GitUrlSafety
         return null;
     }
 
-    /** @return list<string> */
-    private static function allowedSchemes(): array
+    /**
+     * The normalised, never-empty scheme allowlist behind `kontorfix.vcs.allowed_schemes`.
+     *
+     * Public because `App\Support\RepositoryUrlRules` — the admin/API form-side guard for
+     * the same field — derives its shape rules from this exact list rather than keeping a
+     * second copy that can silently drift from what this class actually enforces at the
+     * sinks.
+     *
+     * @return list<string>
+     */
+    public static function allowedSchemes(): array
     {
         /** @var array<int, string> $configured */
         $configured = (array) config('kontorfix.vcs.allowed_schemes', ['https', 'ssh']);
@@ -97,8 +106,16 @@ class GitUrlSafety
         return $schemes === [] ? ['https', 'ssh'] : array_values(array_unique($schemes));
     }
 
-    /** Schemes that address the local filesystem and therefore carry no host. */
-    private static function isLocalScheme(string $scheme): bool
+    /**
+     * Schemes that address the local filesystem and therefore carry no host.
+     *
+     * Public so `RepositoryUrlRules` can leave a host-less transport (currently only
+     * `file`, present only via the test suite's scheme allowlist) out of the human-facing
+     * "must start with …" wording — telling an operator to type `file://` is not useful
+     * guidance for a repository URL pasted into a browser form — without hand-rolling a
+     * second notion of which schemes are "local".
+     */
+    public static function isLocalScheme(string $scheme): bool
     {
         return $scheme === 'file';
     }

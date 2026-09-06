@@ -16,6 +16,7 @@ use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupGate;
 use App\Services\Setup\SetupStatus;
 use App\Services\Setup\SetupToken;
+use App\Services\Slugs\SlugClaimGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -90,7 +91,7 @@ class SetupController extends Controller
         return response()->json($manager->sendTest($setting, (string) $request->validated('recipient')));
     }
 
-    public function store(StoreSetupRequest $request, SetupStatus $status, SetupToken $token, SetupGate $gate): RedirectResponse
+    public function store(StoreSetupRequest $request, SetupStatus $status, SetupToken $token, SetupGate $gate, SlugClaimGuard $slugs): RedirectResponse
     {
         // Redundant with EnsureSetupTokenPresented on the route, deliberately: this is
         // the action that hands out the instance, so it does not rely on its routing.
@@ -98,7 +99,7 @@ class SetupController extends Controller
 
         $data = $request->validated();
 
-        $user = DB::transaction(function () use ($data, $status): User {
+        $user = DB::transaction(function () use ($data, $status, $slugs): User {
             // The middleware already checked this, but two concurrent submissions
             // could both pass it and race to create "the" first admin. Re-asserting
             // inside the transaction closes that window.
@@ -108,9 +109,18 @@ class SetupController extends Controller
                 ]);
             }
 
+            // This is the one write path that mints an organization slug *and* a registry
+            // slug in the same request, so it cannot use SlugClaimGuard's one-slug
+            // convenience methods — it uses the lock/re-assert primitives directly. The
+            // registry slug is user-typed (StoreSetupRequest's UnclaimedSlug rule already
+            // gave it a first pass); locking and re-asserting it here is the same
+            // race-proofing every other registry-slug write path gets.
+            $slugs->lock((string) $data['registry_slug']);
+            $slugs->assertNotRegisteredAsOrganization((string) $data['registry_slug'], 'registry_slug');
+
             $organization = Organization::create([
                 'name' => $data['organization_name'],
-                'slug' => $this->uniqueOrganizationSlug($data['organization_name'], (string) $data['registry_slug']),
+                'slug' => $this->uniqueOrganizationSlug($slugs, $data['organization_name'], (string) $data['registry_slug']),
                 // The organization running the instance is the operator — this is what
                 // grants access to the /admin surface via the `operator` middleware.
                 'is_operator' => true,
@@ -184,6 +194,16 @@ class SetupController extends Controller
     }
 
     /**
+     * Derives an unused organization slug and, before returning it, claims it under the
+     * same advisory lock every other slug write goes through — the caller is already
+     * inside the outer transaction, so the lock survives until that transaction commits or
+     * rolls back and covers the Organization::create() that follows.
+     *
+     * Locking (and then discarding) a rejected candidate is harmless: a PostgreSQL
+     * xact-scoped advisory lock cannot be released mid-transaction anyway (only at
+     * COMMIT/ROLLBACK), several of them simply stack, and nobody else can be legitimately
+     * racing for a slug this method is about to reject as already taken.
+     *
      * @param  string  $reserved  a slug this organization may not take — the registry being
      *                            created alongside it. Organization and registry slugs share
      *                            one namespace in the registry URL (see App\Rules\UnclaimedSlug),
@@ -191,7 +211,7 @@ class SetupController extends Controller
      *                            organization yields, because its slug is derived and the
      *                            registry's is what the installer typed.
      */
-    private function uniqueOrganizationSlug(string $name, string $reserved = ''): string
+    private function uniqueOrganizationSlug(SlugClaimGuard $slugs, string $name, string $reserved = ''): string
     {
         // Slugs are derived rather than asked for — one less field in the wizard.
         // A name of only non-latin characters slugs to '', hence the fallback.
@@ -199,22 +219,30 @@ class SetupController extends Controller
         $slug = $base;
         $suffix = 2;
 
-        // Both tables, not just `organizations` and the registry being created alongside:
-        // the wizard reopens whenever the instance holds no users, which an operator can
-        // reach with registries still in place (purged users, a dump restored without
-        // them). Checking only `organizations` there lets the derived organization slug
-        // land on an *existing* registry's slug — the one collision App\Rules\UnclaimedSlug
-        // and 2026_09_03_100000 exist to prevent, minted by the one path that guarded
-        // neither, and silently: nothing in the wizard would report it.
-        while (
-            $slug === $reserved
-            || Organization::query()->where('slug', $slug)->exists()
-            || Group::query()->where('slug', $slug)->exists()
-        ) {
+        while (true) {
+            // The reserved slug (the registry being created alongside) is deliberately
+            // never even locked here — it is the registry_slug the caller already locked
+            // and re-asserted, and doing it again under a candidate that this loop would
+            // reject anyway would just be a second lock for no new information.
+            if ($slug !== $reserved) {
+                $slugs->lock($slug);
+
+                // Both tables, not just `organizations` and the registry being created
+                // alongside: the wizard reopens whenever the instance holds no users, which
+                // an operator can reach with registries still in place (purged users, a
+                // dump restored without them). Checking only `organizations` there lets the
+                // derived organization slug land on an *existing* registry's slug — the one
+                // collision App\Rules\UnclaimedSlug and 2026_09_03_100000 exist to prevent,
+                // minted by the one path that guarded neither, and silently: nothing in the
+                // wizard would report it.
+                if (! Organization::query()->where('slug', $slug)->exists()
+                    && ! Group::query()->where('slug', $slug)->exists()) {
+                    return $slug;
+                }
+            }
+
             $slug = "{$base}-{$suffix}";
             $suffix++;
         }
-
-        return $slug;
     }
 }
