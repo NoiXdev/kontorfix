@@ -23,7 +23,7 @@ Seit der letzten Übersicht sind folgende Fehler aufgetreten:
 @endforeach
 </x-mail::table>
 
-Du bekommst diese Nachricht, weil deine Adresse als Empfänger hinterlegt ist.
+Sie bekommen diese Nachricht, weil Ihre Adresse als Empfänger hinterlegt ist.
 
 <x-mail::button :url="url('/admin/packages')">Zur Verwaltung</x-mail::button>
 </x-mail::message>

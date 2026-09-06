@@ -59,13 +59,13 @@ const disable = () => {
 
         <SettingsLayout>
             <div class="space-y-6">
-                <HeadingSmall title="Zwei-Faktor-Authentifizierung" description="Sichere dein Konto mit einem zusätzlichen Bestätigungscode." />
+                <HeadingSmall title="Zwei-Faktor-Authentifizierung" description="Sichern Sie Ihr Konto mit einem zusätzlichen Bestätigungscode." />
 
                 <!-- State: not enabled -->
                 <div v-if="!enabled" class="space-y-6">
                     <p class="text-sm text-muted-foreground">
-                        Die Zwei-Faktor-Authentifizierung ist derzeit deaktiviert. Aktiviere sie, um bei jeder Anmeldung zusätzlich einen
-                        zeitbasierten Code aus deiner Authenticator-App eingeben zu müssen.
+                        Die Zwei-Faktor-Authentifizierung ist derzeit deaktiviert. Aktivieren Sie sie, um bei jeder Anmeldung zusätzlich einen
+                        zeitbasierten Code aus Ihrer Authenticator-App eingeben zu müssen.
                     </p>
 
                     <Button @click="enable">Zwei-Faktor aktivieren</Button>
@@ -74,8 +74,8 @@ const disable = () => {
                 <!-- State: enabled, but not yet confirmed (setup in progress) -->
                 <div v-else-if="enabled && !confirmed && setup" class="space-y-6">
                     <p class="text-sm text-muted-foreground">
-                        Scanne den folgenden QR-Code mit deiner Authenticator-App und gib anschließend den generierten Code ein, um die Einrichtung
-                        abzuschließen.
+                        Scannen Sie den folgenden QR-Code mit Ihrer Authenticator-App und geben Sie anschließend den generierten Code ein, um die
+                        Einrichtung abzuschließen.
                     </p>
 
                     <div class="grid gap-2">
@@ -90,7 +90,7 @@ const disable = () => {
                     <div class="grid gap-2">
                         <Label>Wiederherstellungscodes</Label>
                         <p class="text-sm text-muted-foreground">
-                            Bewahre diese Wiederherstellungscodes sicher auf — sie werden nur jetzt angezeigt.
+                            Bewahren Sie diese Wiederherstellungscodes sicher auf — sie werden nur jetzt angezeigt.
                         </p>
                         <ul class="grid gap-1 rounded border bg-muted p-3 font-mono text-sm">
                             <li v-for="recoveryCode in setup.recoveryCodes" :key="recoveryCode">{{ recoveryCode }}</li>
@@ -120,7 +120,7 @@ const disable = () => {
                 <div v-else-if="confirmed" class="space-y-6">
                     <p class="text-sm font-medium text-green-600">Die Zwei-Faktor-Authentifizierung ist aktiv.</p>
 
-                    <p class="text-sm text-muted-foreground">Gib dein Passwort ein, um die Zwei-Faktor-Authentifizierung zu deaktivieren.</p>
+                    <p class="text-sm text-muted-foreground">Geben Sie Ihr Passwort ein, um die Zwei-Faktor-Authentifizierung zu deaktivieren.</p>
 
                     <form @submit.prevent="disable" class="space-y-6">
                         <div class="grid gap-2">

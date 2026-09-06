@@ -61,7 +61,7 @@ class UpdateUserRequest extends FormRequest
             if ($this->movesRecoveryAddress() && ! $this->couldCarryTheGate()) {
                 $validator->errors()->add(
                     'email',
-                    'Die E-Mail-Adresse kann über einen API-Key nicht geändert werden — das Passwort lässt sich hier nicht erneut bestätigen. Nutze dafür die Weboberfläche.',
+                    'Die E-Mail-Adresse kann über einen API-Key nicht geändert werden — das Passwort lässt sich hier nicht erneut bestätigen. Nutzen Sie dafür die Weboberfläche.',
                 );
             }
         });

@@ -32,7 +32,7 @@ const supported = passkeysSupported();
 
 const addPasskey = async () => {
     if (name.value.trim() === '') {
-        error.value = 'Bitte gib dem Passkey einen Namen.';
+        error.value = 'Bitte geben Sie dem Passkey einen Namen.';
         return;
     }
 
@@ -64,7 +64,7 @@ const remove = (id: string) => {
             <div class="space-y-6">
                 <HeadingSmall
                     title="Passkeys"
-                    description="Melde dich passwortlos und phishing-sicher mit einem Passkey an (Touch ID, Windows Hello, Sicherheitsschlüssel)."
+                    description="Melden Sie sich passwortlos und phishing-sicher mit einem Passkey an (Touch ID, Windows Hello, Sicherheitsschlüssel)."
                 />
 
                 <div v-if="!supported" class="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">

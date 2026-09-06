@@ -80,9 +80,9 @@ const abilityOptions = computed((): { value: 'read' | 'publish'; label: string }
  *
  * It is also not a sentence addressed to the reader. It is angle-bracketed metasyntax
  * inside a config file, the same shape as the `<slug>` and `<organisation>` placeholders
- * this console already uses, so the `du` in it is not the console's address form.
+ * this console already uses, so it carries no address form (formal or informal) at all.
  */
-const PLACEHOLDER = '<dein-token>';
+const PLACEHOLDER = '<token>';
 
 const sessionTokens = ref<{ name: string; value: string }[]>([]);
 const activeToken = ref('');
@@ -198,7 +198,7 @@ function selectSession(value: string) {
                      button above it is hidden. -->
                 <p v-if="mayMint" class="text-xs text-muted-foreground">
                     Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
-                    — erstelle ein neues, um es direkt in die Snippets zu übernehmen.
+                    — erstellen Sie ein neues, um es direkt in die Snippets zu übernehmen.
                 </p>
             </div>
 

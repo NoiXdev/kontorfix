@@ -28,7 +28,7 @@ class SetupSnippetBuilder
         // file that tends to end up in a repository. Inline credentials in a URL are also
         // what leads operators to put a mirror password into an upstream URL, where the
         // application then has to withhold it from readers (see App\Support\CredentialUrl).
-        $simpleAuth = 'https://token:<dein-token>@'.$host.$prefix.'/simple/';
+        $simpleAuth = 'https://token:<token>@'.$host.$prefix.'/simple/';
 
         return [
             'composer' => json_encode([
@@ -39,7 +39,7 @@ class SetupSnippetBuilder
 
             'auth' => json_encode([
                 'http-basic' => [
-                    $host => ['username' => 'token', 'password' => '<dein-token>'],
+                    $host => ['username' => 'token', 'password' => '<token>'],
                 ],
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
 
@@ -50,10 +50,10 @@ class SetupSnippetBuilder
             'pip' => "pip install --index-url {$simpleAuth} <paket>\n\n"
                 ."# oder dauerhaft — Token in ~/.netrc (chmod 600), nicht in pip.conf:\n"
                 ."# ~/.config/pip/pip.conf:\n[global]\nindex-url = {$simple}\n\n"
-                ."# ~/.netrc:\nmachine {$host}\n  login token\n  password <dein-token>",
+                ."# ~/.netrc:\nmachine {$host}\n  login token\n  password <token>",
 
             // twine: a ~/.pypirc block pointing publishes at this registry.
-            'twine' => "[distutils]\nindex-servers = kontorfix\n\n[kontorfix]\nrepository = {$base}/\nusername = token\npassword = <dein-token>",
+            'twine' => "[distutils]\nindex-servers = kontorfix\n\n[kontorfix]\nrepository = {$base}/\nusername = token\npassword = <token>",
         ];
     }
 
@@ -108,11 +108,11 @@ class SetupSnippetBuilder
             ->values();
 
         if ($scopes->isEmpty()) {
-            $scopes = collect(['@<dein-scope>']);
+            $scopes = collect(['@<scope>']);
         }
 
         $lines = $scopes->map(fn (string $scope): string => "{$scope}:registry={$url}")->implode("\n");
 
-        return $lines."\n//{$authority}:_authToken=<dein-token>";
+        return $lines."\n//{$authority}:_authToken=<token>";
     }
 }

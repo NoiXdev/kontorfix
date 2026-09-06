@@ -121,7 +121,7 @@ class GitCredential extends Model
         return $allowed === null
             ? 'Für dieses Git-Token ist kein Host hinterlegt — bitte den Host am Token ergänzen.'
             : "Dieses Git-Token ist an {$allowed} gebunden (Port inklusive) und darf an keine andere Adresse gesendet werden. "
-                .'Gehört das Repository dorthin, trage den Host — bei Bedarf mit Port, z. B. gitlab.example:8443 — am Token ein und gib das Token neu ein.';
+                .'Gehört das Repository dorthin, tragen Sie den Host — bei Bedarf mit Port, z. B. gitlab.example:8443 — am Token ein und geben Sie das Token neu ein.';
     }
 
     /**

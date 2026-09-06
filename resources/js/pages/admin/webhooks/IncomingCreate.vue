@@ -36,7 +36,7 @@ function submit() {
                     <IncomingForm />
 
                     <p class="text-xs text-muted-foreground">
-                        Nach dem Anlegen werden URL und Secret einmalig angezeigt — trage beides im Git-Host als Webhook ein.
+                        Nach dem Anlegen werden URL und Secret einmalig angezeigt — tragen Sie beides im Git-Host als Webhook ein.
                     </p>
 
                     <div class="flex justify-end gap-2">

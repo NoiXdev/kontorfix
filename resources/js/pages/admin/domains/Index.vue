@@ -105,7 +105,7 @@ function destroyDomain(id: string) {
                 Host zeigen.
             </p>
             <p v-if="!canAttach" class="text-sm text-muted-foreground">
-                Neue Hostnamen werden vom Betreiber der Instanz eingetragen — ein Hostname gilt instanzweit. Bitte wende dich an den Betreiber.
+                Neue Hostnamen werden vom Betreiber der Instanz eingetragen — ein Hostname gilt instanzweit. Bitte wenden Sie sich an den Betreiber.
             </p>
 
             <DataTable :columns="columns" :state="table" empty-message="Noch keine Domains angelegt.">

@@ -27,13 +27,13 @@ const features = [
     {
         icon: Webhook,
         title: 'Automatisch aktuell',
-        body: 'Ein Push hält deine Pakete aktuell; Ereignisse gehen signiert an deine eigenen Systeme.',
+        body: 'Ein Push hält Ihre Pakete aktuell; Ereignisse gehen signiert an Ihre eigenen Systeme.',
     },
 ];
 </script>
 
 <template>
-    <Head title="Kontorfix — ein Kontor für deine Pakete" />
+    <Head title="Kontorfix — ein Kontor für Ihre Pakete" />
 
     <div class="relative min-h-screen overflow-hidden bg-ink text-paper">
         <!-- Atmosphere: copper glow + giant, pale warehouse gable -->
@@ -88,7 +88,7 @@ const features = [
                         class="kf-rise mt-5 font-display text-5xl leading-[1.02] font-extrabold tracking-tight text-balance sm:text-6xl"
                         style="animation-delay: 120ms"
                     >
-                        Ein Kontor für<br />deine Pakete.
+                        Ein Kontor für<br />Ihre Pakete.
                     </h1>
                     <p class="kf-rise mt-6 max-w-xl text-lg leading-relaxed text-paper/70" style="animation-delay: 200ms">
                         Composer- und npm-Pakete zentral verwalten, an Kunden ausliefern und hinter der eigenen Domain absichern — mit modernem Login
@@ -122,11 +122,11 @@ const features = [
                         <pre class="overflow-x-auto px-5 py-4 font-mono text-[13px] leading-relaxed text-paper/85"><code>{
   <span class="text-verdigris">"repositories"</span>: [
     { <span class="text-verdigris">"type"</span>: <span class="text-copper">"composer"</span>,
-      <span class="text-verdigris">"url"</span>: <span class="text-copper">"https://packages.deinkunde.de"</span> }
+      <span class="text-verdigris">"url"</span>: <span class="text-copper">"https://packages.ihrkunde.de"</span> }
   ]
 }</code></pre>
                         <div class="border-t border-white/[0.08] px-5 py-3 font-mono text-xs text-paper/50">
-                            <span class="text-paper/70">~ $</span> composer require <span class="text-paper/85">deinkunde/paket</span>
+                            <span class="text-paper/70">~ $</span> composer require <span class="text-paper/85">ihrkunde/paket</span>
                         </div>
                     </div>
                 </div>
@@ -147,8 +147,8 @@ const features = [
 
             <!-- Foot -->
             <footer class="flex flex-col items-center justify-between gap-2 border-t border-white/[0.08] py-6 text-sm text-paper/45 sm:flex-row">
-                <span class="font-mono lowercase">kontorfix — ein kontor für deine pakete</span>
-                <span>Selbst gehostet. Deine Daten bleiben bei dir.</span>
+                <span class="font-mono lowercase">kontorfix — ein kontor für ihre pakete</span>
+                <span>Selbst gehostet. Ihre Daten bleiben bei Ihnen.</span>
             </footer>
         </div>
     </div>
