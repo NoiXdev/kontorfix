@@ -106,12 +106,16 @@ class SlugClaimGuard
      *
      * @param  string|null  $organizationId  the registry's organization, so the same-table
      *                                       re-assertion can be scoped the way the unique
-     *                                       constraint is. Optional because
+     *                                       constraint is. Required (not defaulted) so a
+     *                                       caller has to decide rather than silently skip
+     *                                       the same-table check by forgetting the argument
+     *                                       — the exact shape of gap this whole class exists
+     *                                       to close. Pass `null` only when there is
+     *                                       genuinely no organization to check yet:
      *                                       SetupController::store() claims a registry slug
      *                                       for an organization that does not exist yet at
      *                                       that point — brand new, so it holds no
-     *                                       registries to collide with, and there is nothing
-     *                                       to check.
+     *                                       registries to collide with.
      * @param  string|null  $excludeGroupId  the row being updated, if any — see
      *                                       $excludeOrganizationId above.
      *
@@ -120,7 +124,7 @@ class SlugClaimGuard
      * @param  Closure(): TReturn  $write
      * @return TReturn
      */
-    public function claimRegistrySlug(string $slug, Closure $write, string $field = 'slug', ?string $organizationId = null, ?string $excludeGroupId = null): mixed
+    public function claimRegistrySlug(string $slug, Closure $write, ?string $organizationId, string $field = 'slug', ?string $excludeGroupId = null): mixed
     {
         return DB::transaction(function () use ($slug, $write, $field, $organizationId, $excludeGroupId) {
             $this->lock($slug);

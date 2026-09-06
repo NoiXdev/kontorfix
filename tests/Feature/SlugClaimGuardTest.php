@@ -126,9 +126,13 @@ it('refuses to claim an organization slug a registry already holds, bypassing va
 it('refuses to claim a registry slug an organization already holds, bypassing validation entirely', function () {
     Organization::factory()->create(['slug' => 'kadenz']);
 
+    // organizationId is explicitly null here — this test is about the cross-table check
+    // only, and $organizationId is required precisely so that omitting it can never be an
+    // accident: null must be a decision, not a default a caller forgot to override.
     expect(fn () => app(SlugClaimGuard::class)->claimRegistrySlug(
         'kadenz',
         fn () => Group::factory()->create(['slug' => 'kadenz']),
+        null,
     ))->toThrow(ValidationException::class);
 
     expect(Group::where('slug', 'kadenz')->exists())->toBeFalse();
