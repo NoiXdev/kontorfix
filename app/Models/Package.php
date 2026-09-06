@@ -19,6 +19,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
+/**
+ * @property-read GroupPackage $pivot The pivot row when loaded through Group::packages() /
+ *                                     Package::groups() — the only belongsToMany this model
+ *                                     participates in.
+ */
 class Package extends Model
 {
     /** @use HasFactory<PackageFactory> */

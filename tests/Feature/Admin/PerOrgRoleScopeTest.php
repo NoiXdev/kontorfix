@@ -45,7 +45,7 @@ it('scopes package search to packages in the admins registries', function () {
     $theirs = Package::factory()->inOrgOf($this->groupB)->create(['name' => 'b/theirs']);
     $this->groupB->packages()->attach($theirs->id);
 
-    $names = collect($this->actingAs($this->adminA)->getJson('/admin/package-search?q=')->json())->pluck('name');
+    $names = $this->actingAs($this->adminA)->getJson('/admin/package-search?q=')->collect()->pluck('name');
 
     expect($names)->toContain('a/mine')->not->toContain('b/theirs');
 });

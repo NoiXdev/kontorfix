@@ -15,6 +15,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 function creatingAdmin(Organization $org): User
 {
@@ -96,7 +97,7 @@ it('lets a super-admin see and re-home an orphan left behind by an earlier creat
     $this->actingAs($super)->get('/admin/packages')
         ->assertInertia(fn ($page) => $page->where(
             'packages.data',
-            fn ($rows) => collect($rows)->contains('name', 'acme/already-orphaned'),
+            fn (Collection $rows) => $rows->contains('name', 'acme/already-orphaned'),
         ));
 
     $this->actingAs($super)->from('/admin/groups')

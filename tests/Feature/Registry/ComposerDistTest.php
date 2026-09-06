@@ -140,7 +140,7 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
     // $internalDontReport and is silent by default — unlike the 500 it replaced, which
     // was reported. A spy rather than a strict mock: it must not choke on unrelated log
     // calls elsewhere in the request, only confirm this one happened.
-    Log::spy();
+    $logSpy = Log::spy();
 
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
@@ -163,7 +163,7 @@ it('answers 503 with Retry-After, on the web budget, when the mirror lock stays 
 
     // The signal that would show pool saturation on a live instance — otherwise this
     // 503 leaves no trace anywhere, silent by construction (see the config above).
-    Log::shouldHaveReceived('info')->once();
+    $logSpy->shouldHaveReceived('info')->once();
 
     // Nothing half-built was left behind, and no download was counted.
     $sha = $pkg->versions()->where('version', '1.0.0.0')->first()->source_reference;

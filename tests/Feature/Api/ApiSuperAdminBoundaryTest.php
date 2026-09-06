@@ -9,7 +9,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-/** Endpoints with no per-organization dimension — super-admin only. */
+/**
+ * Endpoints with no per-organization dimension — super-admin only.
+ *
+ * @return list<string>
+ */
 function instanceOnlyEndpoints(): array
 {
     return ['/api/v1/webhooks', '/api/v1/status', '/api/v1/organizations', '/api/v1/users'];

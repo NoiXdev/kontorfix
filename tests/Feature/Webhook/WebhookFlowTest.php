@@ -13,6 +13,9 @@ beforeEach(function () {
     config(['queue.default' => 'sync']);
 });
 
+/**
+ * @return array{repository: array{clone_url: string}}
+ */
 function githubPushFlow(string $cloneUrl): array
 {
     return ['repository' => ['clone_url' => $cloneUrl]];

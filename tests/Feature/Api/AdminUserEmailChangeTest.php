@@ -14,6 +14,9 @@ use App\Enums\UserRole;
 use App\Models\ApiKey;
 use App\Models\User;
 
+/**
+ * @return array{0: User, 1: string}
+ */
 function superAdminWithWriteKey(): array
 {
     $admin = User::factory()->create(['role' => UserRole::Admin, 'is_super_admin' => true]);

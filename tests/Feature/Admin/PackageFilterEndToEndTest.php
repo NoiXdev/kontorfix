@@ -29,5 +29,5 @@ it('applies combined filters and returns the expected subset', function () {
 it('search endpoint returns matches for a partial name', function () {
     $res = $this->actingAs($this->admin)->getJson('/admin/package-search?q=zeta');
     $res->assertOk();
-    expect(collect($res->json())->pluck('name'))->toContain('zeta/gamma')->not->toContain('acme/alpha');
+    expect($res->collect()->pluck('name'))->toContain('zeta/gamma')->not->toContain('acme/alpha');
 });

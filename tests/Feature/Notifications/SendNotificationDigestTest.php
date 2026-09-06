@@ -35,6 +35,9 @@ function recordFailure(Organization $org, string $type = 'sync.failed', string $
     ]);
 }
 
+/**
+ * @param  list<string>  $events
+ */
 function subscriber(Organization $org, string $email, array $events, bool $enabled = true): NotificationRecipient
 {
     return NotificationRecipient::create([

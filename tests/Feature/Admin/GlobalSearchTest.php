@@ -18,9 +18,9 @@ it('searches packages, registries and customers by name', function () {
     $res = $this->actingAs($this->admin)->getJson('/admin/search?q=acme');
     $res->assertOk();
 
-    expect(collect($res->json('packages'))->pluck('name'))->toContain('acme/widget');
-    expect(collect($res->json('registries'))->pluck('name'))->toContain('Acme Registry');
-    expect(collect($res->json('customers'))->pluck('name'))->toContain('Acme GmbH');
+    expect($res->collect('packages')->pluck('name'))->toContain('acme/widget');
+    expect($res->collect('registries')->pluck('name'))->toContain('Acme Registry');
+    expect($res->collect('customers')->pluck('name'))->toContain('Acme GmbH');
 });
 
 it('is reachable by an org admin (scoped) but blocked for plain members', function () {
@@ -55,6 +55,6 @@ it('does not return customer results to a maintainer (customer detail is super-o
 
     $res = $this->actingAs($maintainer)->getJson('/admin/search?q=acme');
     $res->assertOk();
-    expect(collect($res->json('packages'))->pluck('name'))->toContain('acme/widget'); // Pakete: ja
+    expect($res->collect('packages')->pluck('name'))->toContain('acme/widget'); // Pakete: ja
     expect($res->json('customers'))->toBe([]); // Kunden: nein (nur Super-Admin)
 });

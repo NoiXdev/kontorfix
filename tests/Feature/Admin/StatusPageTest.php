@@ -3,6 +3,7 @@
 use App\Enums\UserRole;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 it('shows the status page to an operator with health checks', function () {
     $admin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
@@ -11,7 +12,7 @@ it('shows the status page to an operator with health checks', function () {
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('admin/status/Index')
             ->has('checks')
-            ->where('checks', fn ($checks) => collect($checks)->contains(fn ($c) => $c['key'] === 'database' && $c['ok'] === true)));
+            ->where('checks', fn (Collection $checks) => $checks->contains(fn ($c) => $c['key'] === 'database' && $c['ok'] === true)));
 });
 
 it('is not reachable for regular members', function () {

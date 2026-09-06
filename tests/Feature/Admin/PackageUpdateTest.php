@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Queue;
 /**
  * Creates a package owned by $org (attached to one of its groups) and returns it,
  * going through the store endpoint so the group/org wiring matches production.
+ *
+ * @param  array<string, mixed>  $overrides
  */
 function ownedPackage(User $admin, Organization $org, array $overrides = []): Package
 {

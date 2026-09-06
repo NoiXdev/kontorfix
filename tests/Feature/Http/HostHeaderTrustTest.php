@@ -198,6 +198,9 @@ it('refuses a request whose Host is not on the allowlist', function () {
     }
 });
 
+/**
+ * @param  list<string>  $patterns
+ */
 function hostIsTrusted(string $host, array $patterns): bool
 {
     foreach ($patterns as $pattern) {

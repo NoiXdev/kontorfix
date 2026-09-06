@@ -11,7 +11,10 @@ use App\Services\Setup\SetupToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
-/** @return array<string,mixed> */
+/**
+ * @param  array<string, mixed>  $overrides
+ * @return array<string,mixed>
+ */
 function setupPayload(array $overrides = []): array
 {
     return array_merge([

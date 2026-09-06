@@ -40,6 +40,11 @@ abstract class TestCase extends BaseTestCase
      */
     protected function resolveHostTo(string $host, array $ips): void
     {
+        // Typed explicitly as the interface: Larastan otherwise resolves
+        // `$this->app->make(HostResolver::class)` to the production container binding
+        // (SystemHostResolver) and treats the instanceof check below as always false,
+        // not knowing that setUp() above swaps in FixtureHostResolver for the test run.
+        /** @var HostResolver $resolver */
         $resolver = $this->app->make(HostResolver::class);
 
         if ($resolver instanceof FixtureHostResolver) {

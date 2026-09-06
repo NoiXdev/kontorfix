@@ -6,10 +6,17 @@ use Illuminate\Support\Facades\Queue;
 
 beforeEach(fn () => config(['kontorfix.incoming_webhook_secret' => 'topsecret']));
 
+/**
+ * @return array{repository: array{clone_url: string}}
+ */
 function githubPush(string $cloneUrl): array
 {
     return ['repository' => ['clone_url' => $cloneUrl]];
 }
+
+/**
+ * @param  array<string, mixed>  $payload
+ */
 function githubSig(array $payload): string
 {
     return 'sha256='.hash_hmac('sha256', json_encode($payload), 'topsecret');

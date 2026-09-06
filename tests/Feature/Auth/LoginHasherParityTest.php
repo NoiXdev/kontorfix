@@ -12,9 +12,7 @@ use Database\Factories\UserFactory;
 /** UserFactory caches its hash in a static, so a driver switch must not outlive the test. */
 function forgetFactoryPassword(): void
 {
-    (function () {
-        static::$password = null;
-    })->bindTo(null, UserFactory::class)();
+    (new ReflectionProperty(UserFactory::class, 'password'))->setValue(null, null);
 }
 
 afterEach(fn () => forgetFactoryPassword());

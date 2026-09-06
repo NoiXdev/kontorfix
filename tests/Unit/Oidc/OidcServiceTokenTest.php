@@ -8,7 +8,10 @@ use Illuminate\Support\Facades\Http;
 
 uses(RefreshDatabase::class);
 
-/** @return array{provider:OidcProvider,idToken:string,jwks:array} */
+/**
+ * @param  array<string, mixed>  $claimOverrides
+ * @return array{provider:OidcProvider,idToken:string,jwks:array<string,mixed>}
+ */
 function oidcFixture(array $claimOverrides = []): array
 {
     $res = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);

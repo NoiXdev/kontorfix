@@ -90,7 +90,12 @@ it('is what the application binds by default', function () {
         expect($fresh->make(HostResolver::class))->toBeInstanceOf(SystemHostResolver::class);
     } finally {
         Container::setInstance($original);
-        Facade::setFacadeApplication($original);
+
+        // The container this suite runs under is always the Laravel Application, but
+        // Container::getInstance() is typed to the narrower Container contract.
+        if ($original instanceof Application) {
+            Facade::setFacadeApplication($original);
+        }
     }
 });
 

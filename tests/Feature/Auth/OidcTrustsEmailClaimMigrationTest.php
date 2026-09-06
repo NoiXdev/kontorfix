@@ -23,16 +23,16 @@ it('backfills a provider that already existed to trusted, and logs which ones', 
     // Simulate the pre-migration schema: this row predates the `trusts_email_claim` column.
     Schema::table('oidc_providers', fn (Blueprint $table) => $table->dropColumn('trusts_email_claim'));
 
-    Log::spy();
+    $logSpy = Log::spy();
 
     runTrustsEmailClaimMigration()->up();
 
     expect((bool) DB::table('oidc_providers')->where('id', $existing->id)->value('trusts_email_claim'))->toBeTrue();
 
-    Log::shouldHaveReceived('warning')
+    $logSpy->shouldHaveReceived('warning')
         ->once()
         ->withArgs(fn (string $message, array $context) => str_contains($message, 'trusting the email claim')
-            && collect($context['providers'])->contains(fn ($p) => $p['slug'] === 'legacy-authentik'));
+            && collect((array) $context['providers'])->contains(fn ($p) => $p['slug'] === 'legacy-authentik'));
 });
 
 it('lets a newly created provider default to untrusted', function () {
@@ -47,9 +47,9 @@ it('lets a newly created provider default to untrusted', function () {
 it('does not log when there are no pre-existing providers to backfill', function () {
     Schema::table('oidc_providers', fn (Blueprint $table) => $table->dropColumn('trusts_email_claim'));
 
-    Log::spy();
+    $logSpy = Log::spy();
 
     runTrustsEmailClaimMigration()->up();
 
-    Log::shouldNotHaveReceived('warning');
+    $logSpy->shouldNotHaveReceived('warning');
 });

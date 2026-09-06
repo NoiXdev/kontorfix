@@ -170,8 +170,11 @@ it('keeps every Horizon supervisor from hard-stopping a worker that is still syn
     // actually carries the value: `environments.*.supervisor-1` has the same key as
     // `defaults.supervisor-1` and declares no timeout, so a merge silently replaced the one
     // setting under test with one that is skipped — and the assertion passed vacuously.
+    /** @var array<string, array<string, mixed>> $environments */
+    $environments = config('horizon.environments');
+
     $scopes = collect(['defaults' => config('horizon.defaults')])
-        ->merge(collect(config('horizon.environments'))->mapWithKeys(
+        ->merge(collect($environments)->mapWithKeys(
             fn (array $group, string $env) => ["environments.{$env}" => $group],
         ));
 

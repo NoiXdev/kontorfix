@@ -3,6 +3,7 @@
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Testing\TestResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 beforeEach(function () {
     // The global test broadcaster is "null", whose auth() is a no-op and never
@@ -21,7 +22,10 @@ beforeEach(function () {
     require base_path('routes/channels.php');
 });
 
-/** @param  User  $user */
+/**
+ * @param  User  $user
+ * @return TestResponse<Response>
+ */
 function authorizeUserChannel($user, string $targetId): TestResponse
 {
     return test()->actingAs($user)->post('/broadcasting/auth', [

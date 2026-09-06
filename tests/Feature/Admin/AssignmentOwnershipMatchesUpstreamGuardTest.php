@@ -101,6 +101,7 @@ function suppressesUpstream(Package $package, Group $group): bool
 /** The `owned_by_registry_org` this registry's console page reports for this assignment. */
 function reportedOwnership(TestCase $test, Group $group, Package $package): bool
 {
+    /** @var array{props: array{packages: array<int, array<string, mixed>>}} $page */
     $page = $test->actingAs(superAdmin())->get(route('admin.groups.show', $group))->viewData('page');
 
     $row = collect($page['props']['packages'])->firstWhere('id', $package->id);

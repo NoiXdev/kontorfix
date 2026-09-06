@@ -4,6 +4,7 @@ use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 beforeEach(function () {
     $this->operator = Organization::factory()->create(['is_operator' => true]);
@@ -19,7 +20,7 @@ it('lists organizations with counts', function () {
         ->assertOk()
         ->assertInertia(fn ($p) => $p->component('admin/organizations/Index')
             ->has('organizations', 2)
-            ->where('organizations', fn ($orgs) => collect($orgs)->firstWhere('name', 'Kadenz GmbH')['users_count'] === 1));
+            ->where('organizations', fn (Collection $orgs) => $orgs->firstWhere('name', 'Kadenz GmbH')['users_count'] === 1));
 });
 
 it('forbids maintainers', function () {

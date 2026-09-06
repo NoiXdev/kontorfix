@@ -14,15 +14,21 @@ use Illuminate\Support\Sleep;
 use Psr\Log\LoggerInterface;
 use Psr\Log\LoggerTrait;
 
-/** Collects every line the application writes, so assertions can be made on content. */
+/**
+ * Collects every line the application writes, so assertions can be made on content.
+ *
+ * @return ArrayObject<int, array{0: string, 1: array<string, mixed>}>
+ */
 function captureLogLines(): ArrayObject
 {
+    /** @var ArrayObject<int, array{0: string, 1: array<string, mixed>}> $lines */
     $lines = new ArrayObject;
 
     Log::swap(new class($lines) implements LoggerInterface
     {
         use LoggerTrait;
 
+        /** @param ArrayObject<int, array{0: string, 1: array<string, mixed>}> $lines */
         public function __construct(private readonly ArrayObject $lines) {}
 
         /** @param array<string, mixed> $context */
@@ -36,6 +42,7 @@ function captureLogLines(): ArrayObject
 }
 
 /**
+ * @param  ArrayObject<int, array{0: string, 1: array<string, mixed>}>  $lines
  * @return array<int, array{0: string, 1: array<string, mixed>}>
  */
 function linesSaying(ArrayObject $lines, string $message): array

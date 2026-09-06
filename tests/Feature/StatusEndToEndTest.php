@@ -21,7 +21,9 @@ it('renders the status page with core checks green and upstream reachability dif
     $this->actingAs($admin)->get('/admin/status')
         ->assertOk()
         ->assertInertia(function ($p) use ($reachable, $down) {
-            $checks = collect($p->toArray()['props']['checks']);
+            /** @var array<int, array<string, mixed>> $checksData */
+            $checksData = $p->toArray()['props']['checks'];
+            $checks = collect($checksData);
 
             expect($checks->firstWhere('key', 'database')['ok'])->toBeTrue();
             expect($checks->firstWhere('key', 'cache')['ok'])->toBeTrue();

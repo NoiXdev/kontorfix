@@ -14,7 +14,12 @@ function webhookAdmin(): User
     return User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);
 }
 
-/** GitHub-style signed request against a given secret. */
+/**
+ * GitHub-style signed request against a given secret.
+ *
+ * @param  array<string, mixed>  $payload
+ * @return array{headers: array<string, string>, body: string|false}
+ */
 function githubSigned(string $secret, array $payload): array
 {
     $body = json_encode($payload);

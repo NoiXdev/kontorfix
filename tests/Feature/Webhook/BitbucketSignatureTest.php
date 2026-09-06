@@ -22,11 +22,18 @@ use Illuminate\Support\Facades\Queue;
  * (WebhookController builds `/webhooks/{provider}/{hook}`) and the REST docs never
  * described the convention, so a Bitbucket hook configured as documented always 401'd.
  */
+/**
+ * @return array{repository: array{links: array{html: array{href: string}}}}
+ */
 function bitbucketPush(string $href = 'https://bitbucket.org/acme/demo'): array
 {
     return ['repository' => ['links' => ['html' => ['href' => $href]]]];
 }
 
+/**
+ * @param  array<string, mixed>  $payload
+ * @return array<string, string>
+ */
 function bitbucketSignature(array $payload, string $secret): array
 {
     return ['X-Hub-Signature' => 'sha256='.hash_hmac('sha256', json_encode($payload), $secret)];

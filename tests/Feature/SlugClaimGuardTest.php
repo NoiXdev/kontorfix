@@ -45,6 +45,9 @@ use Illuminate\Validation\ValidationException;
  * RefreshDatabase, which wraps the whole test in its own outer transaction, so
  * DB::transactionLevel() can never be observed at 0 here.
  */
+/**
+ * @return list<array<string, mixed>>
+ */
 function captureTransactionalTimeline(Closure $action): array
 {
     $timeline = [];
@@ -70,6 +73,9 @@ function captureTransactionalTimeline(Closure $action): array
  * Asserts that locking $slug actually protects the write to $table: the lock statement's
  * own binding is $slug (not a different candidate, and not absent), a write to $table
  * follows it, and no transaction-commit event separates the two.
+ */
+/**
+ * @param  list<array<string, mixed>>  $timeline
  */
 function assertLockGuardsWrite(array $timeline, string $slug, string $table): void
 {
