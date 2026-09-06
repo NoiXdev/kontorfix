@@ -3,9 +3,6 @@
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('exposes the group organization id for inline token creation', function () {
     $operatorOrg = Organization::factory()->create(['is_operator' => true]);

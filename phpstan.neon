@@ -1,5 +1,6 @@
 includes:
     - vendor/larastan/larastan/extension.neon
+    - vendor/pestphp/pest-plugin-phpstan/extension.neon
 
 parameters:
     paths:
@@ -9,90 +10,7 @@ parameters:
     level: 6
     parseModelCastsMethod: true
 
-    # --- Pest closure binding: a tooling gap, not a code defect ---------------------------
-    #
-    # Inside a Pest `it()`/`test()` closure, `$this` is genuinely bound to the test's
-    # `Tests\TestCase` instance at runtime (Pest does this via `Closure::bindTo()` before
-    # invoking the closure). PHPStan has no way to see that late binding: it type-checks the
-    # closure by the static type of the argument passed to `it()`/`test()`, which is
-    # `Pest\PendingCalls\TestCall`, and reports every `$this->actingAs()`, `$this->get()`,
-    # every custom property set in `beforeEach()`, and even `$this` passed on to a helper
-    # typed `Tests\TestCase`, as undefined.
-    #
-    # We looked for a real fix before suppressing:
-    #   - Larastan (larastan/larastan v3.10.0, already a dependency) has no Pest-specific
-    #     support for this; `vendor/larastan/larastan/extension.neon` does not mention Pest.
-    #   - Pest itself (pestphp/pest v5.1.1, already a dependency) ships
-    #     `vendor/pestphp/pest/phpstan-pest-extension.neon`, but that extension only teaches
-    #     PHPStan about `HigherOrderExpectation` property access (`expect($x)->prop`); it does
-    #     nothing for closure binding. Including it and re-running left the error count
-    #     unchanged.
-    #   - The actual fix is the separate `pestphp/pest-plugin-phpstan` package, which is not
-    #     currently a dependency. Adding a new package is out of scope for a PHPStan config
-    #     change, so we suppress narrowly instead and record this as a follow-up worth
-    #     considering on its own.
-    #
-    # These entries match only the `Pest\PendingCalls\TestCall` shapes, scoped to `tests/*`,
-    # so nothing in `app/` or `database/` can ever be silenced by them. The optional
-    # `|Pest\Support\HigherOrderTapProxy` union covers the same gap surfacing through a
-    # chained call (e.g. `test(...)->group(...)->actingAs(...)`), where PHPStan widens the
-    # pending-call type to a union with Pest's tap proxy before losing the binding.
     ignoreErrors:
-        -
-            message: '#^Call to an undefined method Pest\\PendingCalls\\TestCall(?:\|Pest\\Support\\HigherOrderTapProxy)?::[a-zA-Z0-9_]+\(\)\.$#'
-            identifier: method.notFound
-            path: tests/*
-        -
-            message: '#^Access to an undefined property Pest\\PendingCalls\\TestCall::\$[a-zA-Z0-9_]+\.$#'
-            identifier: property.notFound
-            path: tests/*
-        -
-            # Same root cause as above: `$this` inside the closure is typed as TestCall and
-            # gets passed on to a helper function/method typed `Tests\TestCase`.
-            message: '#^Parameter \#\d+ \$\w+ of (?:function|method) [^\s]+ expects [^,]+, Pest\\PendingCalls\\TestCall given\.$#'
-            identifier: argument.type
-            path: tests/*
-
-        # --- Pest expectation API: the same kind of tooling gap, separately ------------------
-        #
-        # `Pest\Mixins\Expectation::$not` (the negation proxy), `Pest\Expectation::$<property>`
-        # (the higher-order proxy that forwards an arbitrary property read to the expectation's
-        # underlying value, e.g. `expect($model)->host->toBe(...)`), and the return type of the
-        # global `expect()` function are declared with PHPDoc generics that PHPStan's engine
-        # cannot always resolve back to a concrete type — most visibly when the expectation is
-        # built from a value whose own type PHPStan already lost track of (e.g. a Collection
-        # pulled out of a query result, or a Closure comparison), or when the proxy relies on
-        # `Expectation::__get()`'s generic `@return` union rather than a real property. This is
-        # a limitation of how Pest's fluent API is typed, not a mistake in the test code using
-        # it.
-        #
-        # We checked for a real fix here too: the only PHPStan-facing extension Pest ships,
-        # `vendor/pestphp/pest/phpstan-pest-extension.neon` (see block above), teaches PHPStan
-        # about `Pest\Expectations\HigherOrderExpectation` specifically, not about
-        # `Pest\Expectation` or `Pest\Mixins\Expectation`. Including it and re-running left every
-        # error in this block unchanged. There is no stub or `@mixin` in this codebase's
-        # dependencies that resolves it.
-        -
-            message: '#^Access to an undefined property Pest\\Mixins\\Expectation\<.*\>::\$(not|each)\.$#'
-            identifier: property.notFound
-            path: tests/*
-        -
-            message: '#^Access to an undefined property Pest\\Expectation\<.*\>::\$[a-zA-Z0-9_]+\.$#'
-            identifier: property.notFound
-            path: tests/*
-        -
-            message: '#^Parameter \#1 \$value of (?:function expect|method Pest\\Expectation\<.*\>::and\(\)) contains unresolvable type\.$#'
-            identifier: argument.unresolvableType
-            path: tests/*
-        -
-            message: '#^Return type of call to function expect contains unresolvable type\.$#'
-            identifier: function.unresolvableReturnType
-            path: tests/*
-        -
-            message: '#^Return type of call to method Pest\\Expectation\<.*\>::and\(\) contains unresolvable type\.$#'
-            identifier: method.unresolvableReturnType
-            path: tests/*
-
         # --- Individually verified false positives / intentional design, one at a time ------
         #
         # Every entry below is a single, specific finding that was investigated on its own
@@ -146,3 +64,116 @@ parameters:
             identifier: method.alreadyNarrowedType
             count: 1
             path: tests/Unit/ExampleTest.php
+
+        # --- pest-plugin-phpstan gap: dynamically `require`d migration files -----------------
+        #
+        # PackageOwnershipEnforcementTest.php loads a migration file at runtime
+        # (`require database_path('migrations/...')`) and calls `up()`/`down()` on whatever
+        # anonymous class it returns — the same thing Laravel's own migrator does. Laravel's
+        # `Migration` base class declares neither method (each migration file defines them
+        # itself, by convention, with no shared interface), so the only honest return type for
+        # the test's `runEnforcePackageOrganizationMigration()` helper is the native `object`.
+        # pest-plugin-phpstan's closure/expect(...)->toThrow(...) type-narrowing cannot resolve
+        # a template argument through a bare `object`'s dynamic method call, and reports the
+        # `expect(fn () => ...)` call itself as unresolvable. Tried typing the helper's return
+        # as `Illuminate\Database\Migrations\Migration` instead of `object`: that traded this
+        # error for `Call to an undefined method Migration::up()`, which is worse (a false
+        # method.notFound, since real migration files DO implement it) — reverted. No narrower
+        # fix exists without inventing a local interface the migration file doesn't actually
+        # implement, which would be lying to the analyser rather than informing it.
+        -
+            message: '#^Parameter \#1 \$value of function expect contains unresolvable type\.$#'
+            identifier: argument.unresolvableType
+            count: 2
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Return type of call to function expect contains unresolvable type\.$#'
+            identifier: function.unresolvableReturnType
+            count: 2
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Parameter \#1 \$value of method Pest\\Expectation\<Closure\>::and\(\) contains unresolvable type\.$#'
+            identifier: argument.unresolvableType
+            count: 1
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+        -
+            message: '#^Return type of call to method Pest\\Expectation\<Closure\>::and\(\) contains unresolvable type\.$#'
+            identifier: method.unresolvableReturnType
+            count: 1
+            path: tests/Feature/Package/PackageOwnershipEnforcementTest.php
+
+        # --- Statically-provable assertions that are deliberate regression guards ------------
+        #
+        # pest-plugin-phpstan added `pest.expectation.redundant`, which flags a `toBeInstanceOf()`
+        # / `toBeString()` check as pointless when the value's static type already satisfies it.
+        # Reviewed every one of the 11 occurrences below individually (none suppressed as a
+        # group on the identifier alone). In every case the assertion is doing exactly what its
+        # surrounding test intends: pinning that a class keeps implementing an interface
+        # (`User implements MustVerifyEmail`/`PasskeyUser`, `SendNotificationDigest implements
+        # ShouldBeUnique`, `PackageSynced implements ShouldBroadcast`), that a method keeps
+        # returning the specific type it returns today (`broadcastOn()`, `generateSecret()`,
+        # `ReadmeRenderer::render()`), that a generic helper's return value is genuinely the
+        # object it looks like it passed through (`SlugClaimGuard::claim*Slug()`), that a job's
+        # declared middleware is still the type the timing math next to it assumes
+        # (`SyncTimingRelationsTest`), or that the production container still binds what
+        # `AppServiceProvider` says it does (`SystemHostResolverTest`, the same container-binding
+        # inference discussed in the `TestCase::resolveHostTo()` fix above). PHPStan can already
+        # prove all of these from today's code — that is precisely why each exists: to fail
+        # loudly the day the code it is watching changes, rather than staying silently correct
+        # by accident. Rewriting or removing any of them to satisfy the analyser would be
+        # deleting the regression coverage they exist to provide, which is out of scope here.
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\User\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Auth/EmailVerificationEnforcementTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\User\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Auth/PasskeyWiringTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Jobs\\SendNotificationDigest\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Notifications/SendNotificationDigestTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\Group\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/SlugClaimGuardTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Models\\Organization\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/SlugClaimGuardTest.php
+        -
+            message: '#^Calling toBeString\(\) on Expectation\<string\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Feature/Vcs/ReadmeLocatorTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Events\\PackageSynced\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/PackageBroadcastTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<Illuminate\\Broadcasting\\PrivateChannel\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/PackageBroadcastTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<Illuminate\\Queue\\Middleware\\WithoutOverlapping\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/SyncTimingRelationsTest.php
+        -
+            message: '#^Calling toBeInstanceOf\(\) on Expectation\<App\\Services\\Upstream\\SystemHostResolver\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/SystemHostResolverTest.php
+        -
+            message: '#^Calling toBeString\(\) on Expectation\<string\>; assertion is redundant\.$#'
+            identifier: pest.expectation.redundant
+            count: 1
+            path: tests/Unit/TwoFactorAuthenticatorTest.php

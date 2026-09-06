@@ -7,9 +7,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 /**
  * A super-admin-equivalent caller: admin of the operator organization. Mirrors

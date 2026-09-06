@@ -6,9 +6,6 @@ use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\RegistryAccessService;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 // `settings/tokens` sits behind `password.confirm` (see CredentialPasswordConfirmationTest);
 // this flow test is about what the minted token can do afterwards.

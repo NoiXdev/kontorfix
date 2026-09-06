@@ -3,9 +3,6 @@
 use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 // The whole `settings/api-keys` area sits behind `password.confirm`; these tests cover the
 // API-key mechanics, so they start from a confirmed-password session. The gate itself is

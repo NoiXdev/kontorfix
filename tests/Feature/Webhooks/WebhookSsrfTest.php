@@ -3,10 +3,7 @@
 use App\Jobs\DeliverWebhook;
 use App\Models\Webhook;
 use App\Models\WebhookDelivery;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
-
-uses(RefreshDatabase::class);
 
 it('refuses to deliver to an internal target and records it as blocked', function () {
     Http::fake(); // nothing may actually go out

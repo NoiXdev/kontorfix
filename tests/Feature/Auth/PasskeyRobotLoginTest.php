@@ -2,13 +2,10 @@
 
 use App\Enums\AccountType;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Laravel\Passkeys\Passkey;
 use Laravel\Passkeys\Passkeys;
-
-uses(RefreshDatabase::class);
 
 // The passkey ceremony itself is crypto-heavy (WebAuthn attestation) and not
 // reasonably testable without brittle mocking. However, the decisive policy decision lives

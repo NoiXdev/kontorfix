@@ -8,9 +8,6 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Upstream;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 /**
  * `upstreams.url` is an ordinary URL column that operators nonetheless put a secret into:

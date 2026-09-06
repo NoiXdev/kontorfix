@@ -3,10 +3,7 @@
 use App\Exceptions\UpstreamException;
 use App\Models\Upstream;
 use App\Services\Upstream\UpstreamClient;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
-
-uses(RefreshDatabase::class);
 
 // I1: getJson() must — like getBytes() — follow redirects manually and check each hop
 // against the SSRF rules. A malicious upstream must not be able to redirect a metadata

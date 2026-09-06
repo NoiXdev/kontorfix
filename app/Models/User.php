@@ -22,6 +22,11 @@ use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
 /**
+ * @property string|null $email Nullable since migrations/2026_08_05_000004_make_users_email_nullable.php,
+ *                              for robot (service) accounts, which carry no mailbox. That migration
+ *                              drops the NOT NULL constraint via a raw `DB::statement()` ALTER, which
+ *                              Larastan's migration scanner cannot see, so this overrides its otherwise
+ *                              non-nullable inference from the original create_users_table migration.
  * @property string|null $two_factor_secret
  * @property list<string>|null $two_factor_recovery_codes
  * @property Carbon|null $two_factor_confirmed_at

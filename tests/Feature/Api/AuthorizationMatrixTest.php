@@ -4,10 +4,7 @@ use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
-
-uses(RefreshDatabase::class);
 
 it('read key is blocked on every mutating verb', function () {
     $op = Organization::factory()->create(['is_operator' => true]);

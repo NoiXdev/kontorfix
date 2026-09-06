@@ -2,9 +2,6 @@
 
 use App\Enums\AccountType;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('defaults new users to human and casts the account type', function () {
     $user = User::factory()->create();

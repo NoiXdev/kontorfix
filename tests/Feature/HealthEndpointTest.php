@@ -1,9 +1,5 @@
 <?php
 
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
-
 // Laravel's built-in `health: '/up'` route renders a vendor Blade that pulls an
 // unpinned @tailwindcss/browser build from jsDelivr and a stylesheet from
 // fonts.bunny.net — third-party script on our own origin, no SRI, no pin. The

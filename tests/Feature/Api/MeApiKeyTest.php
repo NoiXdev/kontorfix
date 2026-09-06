@@ -3,9 +3,6 @@
 use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('lists only the owners keys', function () {
     $me = User::factory()->create();

@@ -3,9 +3,6 @@
 use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 it('rejects requests without a valid bearer key', function () {
     $this->getJson('/api/v1/me')->assertUnauthorized();
