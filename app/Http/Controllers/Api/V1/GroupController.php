@@ -10,6 +10,7 @@ use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Http\Resources\Api\GroupResource;
 use App\Models\Group;
 use App\Services\Package\SharedAssignment;
+use App\Services\Slugs\SlugClaimGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -32,7 +33,7 @@ class GroupController extends Controller
         return new GroupResource($group);
     }
 
-    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment): JsonResponse
+    public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment, SlugClaimGuard $slugs): JsonResponse
     {
         $organizationId = $this->resolveWriteOrg($request->validated('organization_id'));
 
@@ -50,30 +51,49 @@ class GroupController extends Controller
         // Before the insert, so a refusal leaves no empty registry behind.
         $sharedAssignment->assertReplacementAssignable($packageIds);
 
-        $group = Group::create([
-            'name' => $request->validated('name'),
-            'slug' => $request->validated('slug'),
-            'public' => $request->boolean('public'),
-            'organization_id' => $organizationId,
-        ]);
-        $group->packages()->sync($packageIds);
+        // StoreGroupRequest's UnclaimedSlug rule already checked this — this is the
+        // authoritative, race-proof re-check immediately before the write, same as
+        // Admin\GroupController::store(). See App\Services\Slugs\SlugClaimGuard's docblock.
+        $group = $slugs->claimRegistrySlug(
+            (string) $request->validated('slug'),
+            function () use ($request, $organizationId, $packageIds) {
+                $group = Group::create([
+                    'name' => $request->validated('name'),
+                    'slug' => $request->validated('slug'),
+                    'public' => $request->boolean('public'),
+                    'organization_id' => $organizationId,
+                ]);
+                $group->packages()->sync($packageIds);
+
+                return $group;
+            },
+        );
 
         return (new GroupResource($group))->response()->setStatusCode(201);
     }
 
-    public function update(UpdateGroupRequest $request, Group $group): GroupResource
+    public function update(UpdateGroupRequest $request, Group $group, SlugClaimGuard $slugs): GroupResource
     {
         $this->assertCanWriteGroup($group);
+
+        $attributes = [
+            'name' => $request->validated('name'),
+            'public' => $request->boolean('public'),
+        ];
 
         // The slug only when the caller actually sent one — a PUT that names just the fields
         // it wants changed keeps leaving the registry's address alone. Validating it here and
         // then dropping it would leave UnclaimedSlug enforced on the console only, which is
-        // precisely the half-enforced invariant it exists to close.
-        $group->update([
-            'name' => $request->validated('name'),
-            'public' => $request->boolean('public'),
-            ...$request->safe()->only('slug'),
-        ]);
+        // precisely the half-enforced invariant it exists to close — and the same reasoning
+        // is why the write below goes through the authoritative guard, not just the rule.
+        if ($request->filled('slug')) {
+            $slugs->claimRegistrySlug(
+                (string) $request->validated('slug'),
+                fn () => $group->update([...$attributes, 'slug' => $request->validated('slug')]),
+            );
+        } else {
+            $group->update($attributes);
+        }
 
         return new GroupResource($group);
     }

@@ -16,6 +16,7 @@ use App\Services\Portal\PortalUrl;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
+use App\Services\Slugs\SlugClaimGuard;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -150,19 +151,25 @@ class OrganizationController extends Controller
         return back()->with('success', 'Registry-Typen aktualisiert.');
     }
 
-    public function store(StoreOrganizationRequest $request): RedirectResponse
+    public function store(StoreOrganizationRequest $request, SlugClaimGuard $slugs): RedirectResponse
     {
-        $org = Organization::create([
-            ...$request->validated(),
-            'is_operator' => false,
-        ]);
+        // StoreOrganizationRequest's UnclaimedSlug rule already checked this — this is the
+        // authoritative, race-proof re-check immediately before the write. See
+        // App\Services\Slugs\SlugClaimGuard's docblock for why both exist.
+        $org = $slugs->claimOrganizationSlug(
+            (string) $request->validated('slug'),
+            fn () => Organization::create([...$request->validated(), 'is_operator' => false]),
+        );
 
         return back()->with('success', "Kunde {$org->name} angelegt.");
     }
 
-    public function update(UpdateOrganizationRequest $request, Organization $organization): RedirectResponse
+    public function update(UpdateOrganizationRequest $request, Organization $organization, SlugClaimGuard $slugs): RedirectResponse
     {
-        $organization->update($request->validated());
+        $slugs->claimOrganizationSlug(
+            (string) $request->validated('slug'),
+            fn () => $organization->update($request->validated()),
+        );
 
         return back()->with('success', "Kunde {$organization->name} aktualisiert.");
     }

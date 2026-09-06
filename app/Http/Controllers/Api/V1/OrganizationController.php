@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreOrganizationRequest;
 use App\Http\Resources\Api\OrganizationResource;
 use App\Models\Organization;
+use App\Services\Slugs\SlugClaimGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,9 +29,15 @@ class OrganizationController extends Controller
         return new OrganizationResource($organization);
     }
 
-    public function store(StoreOrganizationRequest $request): JsonResponse
+    public function store(StoreOrganizationRequest $request, SlugClaimGuard $slugs): JsonResponse
     {
-        $org = Organization::create([...$request->validated(), 'is_operator' => false]);
+        // Same authoritative re-check as Admin\OrganizationController::store() — both reach
+        // this request class, so both must reach the guard too, or the invariant would be
+        // enforced on the console only. See App\Services\Slugs\SlugClaimGuard's docblock.
+        $org = $slugs->claimOrganizationSlug(
+            (string) $request->validated('slug'),
+            fn () => Organization::create([...$request->validated(), 'is_operator' => false]),
+        );
 
         return (new OrganizationResource($org))->response()->setStatusCode(201);
     }
