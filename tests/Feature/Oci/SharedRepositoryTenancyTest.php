@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Oci\Digest;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Two Criticals from the whole-branch review, both closed the same way NpmController and
@@ -188,10 +189,16 @@ it('does not let a shared-repository PUBLISH token pull a blob from an unshared 
     // for a shared repository, so an ordinary customer publish token walked straight past
     // the check and was served the operator's private layer, 200 OK.
     //
-    // The shortcut has no legitimate use here at all: ociWritableRepository() refuses
-    // every write to a shared repository (the three cases at the top of this file), so
-    // a publish token addressing `shared-base` is never "about to write" — the premise
-    // the exception rests on.
+    // The fix is the organization comparison, and it is the organization — not the
+    // `shared` flag — that separates this caller from a legitimate one. The shortcut is
+    // still live on `shared-base` for the OPERATOR, the organization that owns it:
+    // ociWritableRepository() resolves by `organization_id = $group->organization_id`,
+    // so the operator pushing through its own registry really is about to write into the
+    // very bucket the digest is looked up in (the DELETE case above has it PUT a manifest
+    // into `shared-base` for 201). The customer's publish token is not: it addresses the
+    // repository through the CUSTOMER's group, so `canPublishToGroup()` says yes about an
+    // organization that is not the one holding the blobs, and the premise the exception
+    // rests on — "about to write into this bucket" — is false for it alone.
     $private = Package::factory()->for($this->operatorOrg)->create(['type' => PackageType::Docker, 'name' => 'private-app']);
     $this->operatorGroup->packages()->attach($private);
 
@@ -215,7 +222,20 @@ it('does not let a shared-repository PUBLISH token pull a blob from an unshared 
     // The status alone would also be satisfied by a 404 that still streamed a body, so
     // what actually has to be asserted is that no byte of the operator's layer left this
     // application.
-    expect((string) $response->getContent())->not->toContain($bytes);
+    //
+    // The body has to be read through the accessor that matches the response's SHAPE. On
+    // the leak path BlobController::show() answers with a StreamedResponse, and
+    // getContent() on one of those returns `false`, not the bytes — so `(string)` of it is
+    // the empty string and the assertion below holds no matter how much was streamed.
+    // Measured, with the organization comparison reverted: 200 OK, 128 bytes of the
+    // operator's layer on the wire, and this expectation still green. streamedContent()
+    // runs the callback and returns what was actually sent; the refusal path is an
+    // ordinary JSON response, where streamedContent() would instead fail the test outright.
+    $body = $response->baseResponse instanceof StreamedResponse
+        ? $response->streamedContent()
+        : (string) $response->getContent();
+
+    expect($body)->not->toContain($bytes);
 
     $this->withServerVariables($this->customerPublish)
         ->call('HEAD', "http://customer.test/v2/shared-base/blobs/{$digest}")

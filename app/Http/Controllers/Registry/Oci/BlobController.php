@@ -180,7 +180,8 @@ class BlobController extends Controller
         // THE ONE EXCEPTION is the push shortcut: a client asks `HEAD .../blobs/<digest>`
         // to find out whether a layer is already here BEFORE it uploads it, and therefore
         // long before any manifest of this repository names it (see BlobUploadTest's
-        // "reports an existing blob by digest"). Such a caller is about to write, and a
+        // "reports an existing blob by HEAD so the client skips re-uploading it"). Such a
+        // caller is about to write, and a
         // caller who may write into THIS organization's registry learns nothing from an
         // existence probe it could not learn by pushing. So the exception is scoped to that
         // ability rather than to the method: a HEAD from a read token is answered by the
@@ -198,11 +199,19 @@ class BlobController extends Controller
         // operator's private, manifested layer in the body.
         //
         // The organization comparison is therefore not a belt-and-braces addition, it is
-        // the half that makes "about to write" true. And on a shared repository the
-        // shortcut has no legitimate use to lose: ociWritableRepository() refuses every
-        // write to a shared package (sharing hands out reads, never writes), so a publish
-        // token addressing one is never about to write anything. Pinned by
-        // SharedRepositoryTenancyTest's PUBLISH-token case beside its read-token one.
+        // the half that makes "about to write" true. It is also the whole of what the
+        // shortcut loses on a shared repository, and it loses nothing legitimate: the
+        // shortcut STAYS live there for the organization that OWNS the repository —
+        // ociWritableRepository() resolves by `organization_id = $group->organization_id`,
+        // so the operator pushing into its own `shared-base` through its own registry
+        // passes both halves and still gets its existence probe (the DELETE case in
+        // SharedRepositoryTenancyTest pushes exactly such a manifest, 201). What the
+        // comparison removes is only the CUSTOMER's use of it: the customer addresses the
+        // repository through its own group, whose organization is not the one the blob
+        // bucket belongs to, so it has no write to be "about to" make into that bucket.
+        // Owner and customer are indistinguishable to canPublishToGroup() and are told
+        // apart by this comparison alone. Pinned by SharedRepositoryTenancyTest's
+        // PUBLISH-token case beside its read-token one.
         //
         // The cross-repository MOUNT feature (§3) needs no exception here at all: it is a
         // POST to `.../blobs/uploads/?mount=&from=`, handled by mountFrom() above, and never

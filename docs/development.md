@@ -1095,9 +1095,11 @@ header alone.
   The first two segments are the organization slug and the registry slug — the same pair
   `/r/{orgSlug}/{groupSlug}` uses for Composer/npm/PyPI — and everything after them is the
   repository name. **At least three segments are required.** `registry.example.com/meinapp`
-  names no registry and answers a plain 404 with no body, and so does `3b/intern` with no
-  repository after it: an OCI `errors[]` envelope there would confirm to a caller who merely
-  guessed that the organization or the registry exists.
+  names no registry and answers a plain 404 — Laravel's own HTML error page, carrying no OCI
+  `errors[]` envelope — and so does `3b/intern` with no repository after it. The envelope is
+  what must be absent, and it is what `PathAddressingTest` asserts (an HTML content type, and
+  no `NAME_UNKNOWN` in the body): an `errors[]` envelope there would confirm to a caller who
+  merely guessed that the organization or the registry exists.
 
 Why one resolver rather than two route groups: a path-mode URL *is* a valid domain-mode URL
 whose repository name happens to contain slashes, so the router cannot tell them apart —
