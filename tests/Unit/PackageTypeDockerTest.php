@@ -25,3 +25,15 @@ it('gives docker an install hint that names the registry host placeholder', func
     expect(PackageType::Docker->installHint('meinapp'))->toContain('docker pull')
         ->and(PackageType::Docker->installHint('meinapp'))->toContain('meinapp');
 });
+
+it('uses a real host in the docker install hint once one is known', function () {
+    // The placeholder from Task 1 stands only until a caller can supply the registry's
+    // actual host (RegistryUrl::host(), once its Group carries a domain) — see the
+    // method's doc comment. Every other case ignores the parameter outright.
+    expect(PackageType::Docker->installHint('meinapp', 'images.3b.de'))
+        ->toBe('docker pull images.3b.de/meinapp')
+        ->and(PackageType::Docker->installHint('meinapp', null))
+        ->toBe('docker pull <registry-host>/meinapp')
+        ->and(PackageType::Composer->installHint('acme/widget', 'images.3b.de'))
+        ->toBe('composer require acme/widget');
+});

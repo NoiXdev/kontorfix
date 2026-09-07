@@ -207,7 +207,14 @@ class RegistryController extends Controller
         $package->load('versions');
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
-        $install = $package->type->installHint($package->name);
+        // Ignored by every type but Docker (see PackageType::installHint()'s doc comment) —
+        // loaded here rather than assumed present, since this action (unlike show()) never
+        // eager-loads the group's domains itself.
+        $group->loadMissing('domains');
+        $install = $package->type->installHint(
+            $package->name,
+            $group->domains->isNotEmpty() ? $this->url->host($group) : null,
+        );
 
         return Inertia::render('portal/Package', [
             'orgSlug' => $organization->slug,

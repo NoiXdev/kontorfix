@@ -9,6 +9,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
+import { dockerEmptyStateMessage, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
 import { offersMinting, offersPublishing } from './registrySetup';
 
 interface Snippets {
@@ -17,6 +18,15 @@ interface Snippets {
     npm: string;
     pip: string;
     twine: string;
+    // Docker's raw facts, not a finished snippet — see SetupSnippetBuilder::for()'s doc
+    // comment. Optional so the callers' own (older) local `Snippets` copies stay
+    // assignable without editing them: portal/Registry.vue and admin/groups/Show.vue both
+    // just forward whatever SetupSnippetBuilder returned, so the fields ARE there at
+    // runtime the moment the server is updated — only the type needs to tolerate a caller
+    // that has not been told about them.
+    dockerHost?: string | null;
+    dockerPath?: string;
+    dockerExample?: string | null;
 }
 
 interface PersonalToken {
@@ -141,11 +151,39 @@ const stepDefs = [
     { key: 'npm', eco: 'npm', title: 'npm einrichten' },
     { key: 'pip', eco: 'python', title: 'pip einrichten' },
     { key: 'twine', eco: 'python', title: 'Veröffentlichen mit twine' },
+    { key: 'docker', eco: 'docker', title: dockerStepTitle() },
 ] as const;
 
-const steps = computed(() => {
+interface Step {
+    key: string;
+    title: string;
+    /** The copyable block. Empty and unused when `empty` is true. */
+    content: string;
+    /** True only for the Docker step on a registry with no row in `domains` (plate 1's
+     *  empty state) — the one step this component can render without a code block at all. */
+    empty: boolean;
+    emptyMessage: string;
+}
+
+const steps = computed<Step[]>(() => {
     const show = props.types && props.types.length ? props.types : ['composer', 'npm', 'python'];
-    return stepDefs.filter((s) => show.includes(s.eco)).map((s) => ({ key: s.key, title: s.title, content: substituted.value[s.key] }));
+
+    return stepDefs
+        .filter((s) => show.includes(s.eco))
+        .map((s) => {
+            if (s.key === 'docker') {
+                const host = props.snippets.dockerHost ?? null;
+                return {
+                    key: s.key,
+                    title: s.title,
+                    content: host ? dockerSetupSnippet(host, props.snippets.dockerExample) : '',
+                    empty: host === null,
+                    emptyMessage: host === null ? dockerEmptyStateMessage(props.snippets.dockerPath ?? '') : '',
+                };
+            }
+
+            return { key: s.key, title: s.title, content: substituted.value[s.key], empty: false, emptyMessage: '' };
+        });
 });
 
 const copiedKey = ref<string | null>(null);
@@ -225,12 +263,19 @@ function selectSession(value: string) {
             <div v-for="step in steps" :key="step.key" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                 <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                     <h3 class="font-medium">{{ step.title }}</h3>
-                    <Button variant="outline" size="sm" @click="copy(step.content, step.key)">
+                    <Button v-if="!step.empty" variant="outline" size="sm" @click="copy(step.content, step.key)">
                         <component :is="copiedKey === step.key ? Check : Copy" class="size-4" />
                         {{ copiedKey === step.key ? 'Kopiert!' : 'Kopieren' }}
                     </Button>
                 </div>
-                <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content }}</pre>
+                <pre v-if="!step.empty" class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content }}</pre>
+                <!-- Plate 1's empty state: a registry with no row in `domains` cannot serve
+                     images at all, however it addresses Composer, npm and Python — see
+                     dockerSetup.ts's dockerEmptyStateMessage(). No copy button above: there
+                     is nothing here to paste into a shell. -->
+                <p v-else class="px-4 py-3 text-sm text-muted-foreground">
+                    {{ step.emptyMessage }}
+                </p>
             </div>
         </div>
     </div>

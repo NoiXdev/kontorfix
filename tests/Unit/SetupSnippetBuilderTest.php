@@ -1,7 +1,9 @@
 <?php
 
+use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\Package;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -43,4 +45,29 @@ it('builds pip and twine snippets for the Python registry', function () {
         ->toContain('[distutils]')
         ->toContain('repository = https://reg.example.test/r/kunde/acme/')
         ->toContain('username = token');
+});
+
+it('gives docker no host — only the path — on a registry with no domain', function () {
+    // Docker refuses a path prefix as part of the registry host: this registry IS
+    // reachable, but not by a Docker client, and dockerHost null is the fact that says so
+    // (see the method's doc comment) — not a placeholder string a caller has to sniff for.
+    $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['dockerHost'])->toBeNull()
+        ->and($snips['dockerPath'])->toBe('/r/kunde/acme')
+        ->and($snips['dockerExample'])->toBeNull();
+});
+
+it('gives docker its real host and an example repository once the registry has both', function () {
+    $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
+    Domain::factory()->for($group)->create(['hostname' => 'images.acme.test']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => 'docker', 'name' => 'meinapp']);
+    $group->packages()->attach($pkg);
+
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['dockerHost'])->toBe('images.acme.test')
+        ->and($snips['dockerPath'])->toBe('/r/kunde/acme')
+        ->and($snips['dockerExample'])->toBe('meinapp');
 });

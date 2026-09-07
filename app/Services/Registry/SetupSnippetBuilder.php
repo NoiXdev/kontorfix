@@ -10,9 +10,18 @@ class SetupSnippetBuilder
 
     /**
      * Copy-paste setup snippets per client. Composer/npm/auth as before, plus pip and
-     * twine for the Python registry.
+     * twine for the Python registry, and three raw facts for the Docker step.
      *
-     * @return array{composer: string, auth: string, npm: string, pip: string, twine: string}
+     * The Docker fields deliberately are NOT a finished snippet, unlike every field above
+     * them. `dockerSetup.ts` (resources/js/components/kontorfix/) is what assembles the
+     * `docker login`/`tag`/`push`/`pull` block or the empty-state message — this method's
+     * job stops at supplying the facts that decide between them, because that assembly is
+     * the one piece of RegistrySetup's logic this project can actually unit test (no
+     * component runner here), and duplicating the German copy on this side would only give
+     * it a second place to drift from.
+     *
+     * @return array{composer: string, auth: string, npm: string, pip: string, twine: string,
+     *     dockerHost: ?string, dockerPath: string, dockerExample: ?string}
      */
     public function for(Group $group): array
     {
@@ -54,6 +63,26 @@ class SetupSnippetBuilder
 
             // twine: a ~/.pypirc block pointing publishes at this registry.
             'twine' => "[distutils]\nindex-servers = kontorfix\n\n[kontorfix]\nrepository = {$base}/\nusername = token\npassword = <token>",
+
+            // Docker refuses a path prefix as part of the registry host — the OCI
+            // Distribution Spec requires `/v2/` at the root — so only a registry that
+            // actually carries a domain gets a usable host here. Null is not "unknown", it
+            // is the fact itself: this registry cannot serve images at all, and
+            // dockerSetup.ts's empty-state message is what says so, addressed at
+            // `dockerPath` below rather than at a host it does not have.
+            'dockerHost' => $group->domains->isNotEmpty() ? $host : null,
+
+            // Always present, unlike the host above: the empty state needs the path this
+            // registry IS reachable at (Composer/npm/Python all work there) to explain
+            // what a Docker client specifically cannot do with it.
+            'dockerPath' => $this->url->path($group),
+
+            // The same "derive from what already exists" rule npm's scope line follows
+            // (see npmLines() below): a real repository name when this registry already
+            // hosts a Docker package, so the copy-pasted commands work unmodified. Null,
+            // not a fabricated name, when it does not — dockerSetup.ts fills in a generic
+            // placeholder for that case, the same way it fills in <token> to be replaced.
+            'dockerExample' => $group->packages()->where('type', 'docker')->orderBy('name')->value('name'),
         ];
     }
 

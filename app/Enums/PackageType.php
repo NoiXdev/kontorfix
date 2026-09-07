@@ -54,14 +54,25 @@ enum PackageType: string
         };
     }
 
-    /** Install command shown to consumers. */
-    public function installHint(string $name): string
+    /**
+     * Install command shown to consumers.
+     *
+     * `$dockerHost` is Docker-only and optional: every other case ignores it outright, so
+     * every existing caller stays correct unchanged. It exists because a Docker repository's
+     * real host IS knowable once its registry carries a domain — RegistryUrl::host() reads
+     * exactly the same `domains` row this class's own empty state (see SetupSnippetBuilder)
+     * warns is missing — so a caller that has that Group in hand can hand over a working
+     * command instead of the `<registry-host>` placeholder. Omitted (or a registry with no
+     * domain), the placeholder stands: unlike Composer/npm/Python, no address a Docker
+     * client can reach exists to fall back on.
+     */
+    public function installHint(string $name, ?string $dockerHost = null): string
     {
         return match ($this) {
             self::Composer => "composer require {$name}",
             self::Npm => "npm install {$name}",
             self::Python => "pip install {$name}",
-            self::Docker => "docker pull <registry-host>/{$name}",
+            self::Docker => 'docker pull '.($dockerHost ?? '<registry-host>')."/{$name}",
         };
     }
 

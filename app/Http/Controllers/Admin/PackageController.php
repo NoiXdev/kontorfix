@@ -11,10 +11,13 @@ use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\OciManifest;
+use App\Models\OciTag;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Services\Oci\BlobStore;
 use App\Services\Package\PackageDependencies;
 use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
@@ -157,6 +160,18 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
+        // A Docker repository has nothing in common with the other three types' detail
+        // page: no versions, no git source, no sync job (isPublishBased() covers it, but
+        // there is no PackageVersion row to point "Versionen" at either) — and it needs a
+        // page the other three have no use for at all, plate 2's tag table with its
+        // occupied/shared size composition. Branching here, before any of the generic
+        // payload below is assembled, keeps that composition logic (and the size rule
+        // that goes with it) out of a method that would otherwise carry every type's
+        // concerns at once.
+        if ($package->type === PackageType::Docker) {
+            return $this->showDocker($request, $package, $registryUrl);
+        }
+
         // `groups.organization:id,slug` on top of the group's own columns: the registry list
         // below prints each registry's URL, and RegistryUrl reads the organization's slug for
         // the first segment. Without the relation this would be one lazy load per row; without
@@ -247,6 +262,187 @@ class PackageController extends Controller
             ],
             'activities' => ActivityPresenter::recentFor($package),
         ]);
+    }
+
+    /**
+     * A Docker repository's detail page (plate 2 of the approved mockups): the tag table,
+     * with its own size composition, plus the same ownership/assignment/sharing/activity
+     * surfaces every other package type gets from show() above.
+     *
+     * The size composition is the point of this method, not an afterthought. Two tags can
+     * point at the same manifest (a `latest` alias next to the version it currently means),
+     * and a manifest is counted once regardless of how many tags name it — an occupied
+     * total that counted every tag's manifest in full would sum to a number the disk will
+     * never hold. `shared_bytes` is the subset of `occupied_bytes` that belongs to a
+     * manifest more than one tag points at; a tag on such a manifest reports `size_bytes`
+     * null (never a share of the total, which would be inventing a number the template
+     * cannot state a source for) and the template renders that as "geteilt".
+     */
+    private function showDocker(Request $request, Package $package, RegistryUrl $registryUrl): Response
+    {
+        // `groups.domains`: the access panel below needs to know which of this package's
+        // registries (if any) can actually address it — see the comment on `$dockerGroup`.
+        $package->load(['groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
+
+        // Same visibility rule show() applies above: a cross-organization row for a shared
+        // package is not this caller's business beyond a count. See that method's comment.
+        $scope = app(OrgScope::class);
+        $visibleGroups = $scope->spansAllOrganizations()
+            ? $package->groups
+            : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
+
+        $tags = $package->ociTags()->with('manifest')->orderByDesc('updated_at')->get();
+
+        // How many tags point at each manifest — the one fact both the header total and
+        // every row's "own bytes or shared" answer are built from.
+        $tagsPerManifest = $tags->groupBy('manifest_id')->map->count();
+
+        // Each manifest counted once, by id, however many tags name it — not once per tag.
+        $uniqueManifests = $tags->pluck('manifest')->filter()->unique('id');
+
+        $occupiedBytes = (int) $uniqueManifests->sum('size');
+        $sharedBytes = (int) $uniqueManifests
+            ->filter(fn (OciManifest $m): bool => ($tagsPerManifest->get($m->id) ?? 0) > 1)
+            ->sum('size');
+
+        $blobStore = app(BlobStore::class);
+
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $blobStore, $package): array {
+            $manifest = $tag->manifest;
+            $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
+
+            return [
+                'name' => $tag->name,
+                'digest' => $manifest?->digest,
+                'platform' => $manifest !== null
+                    ? $this->platformFor($manifest, (string) $package->organization_id, $blobStore)
+                    : null,
+                // Null exactly when the manifest is shared — never the manifest's full size
+                // repeated for every tag that names it, and never a fabricated fraction of
+                // it either (see this method's doc comment).
+                'size_bytes' => $shared ? null : $manifest?->size,
+                'shared' => $shared,
+                'pushed_at' => $tag->updated_at?->diffForHumans(),
+            ];
+        });
+
+        // A Docker repository can be assigned to more than one registry; the one a
+        // `docker pull` for THIS image would actually use is whichever of them carries a
+        // domain — see dockerSetup.ts / SetupSnippetBuilder for the same rule applied to
+        // the registry-level Einrichtung tab. The first with a domain, deterministically
+        // (Collection::first() preserves the `groups` query's own order), stands in for
+        // "the" registry when more than one qualifies; a repository shared across several
+        // domained registries is a real but rare shape this page does not need to
+        // disambiguate further.
+        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty());
+        $pathGroup = $dockerGroup ?? $visibleGroups->first();
+
+        return Inertia::render('admin/packages/DockerTags', [
+            'package' => [
+                'id' => $package->id,
+                'type' => $package->type->value,
+                'name' => $package->name,
+                'description' => $package->description,
+                'abandoned_at' => $package->abandoned_at?->toDateString(),
+                'replacement_package' => $package->replacement_package,
+                'abandonment_reason' => $package->abandonment_reason,
+                'shared' => $package->shared,
+            ],
+            'canSharePackages' => (bool) $request->user()?->can('share-packages'),
+            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
+            'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
+            // Plate 1's access panel, package-scoped: whether THIS repository is reachable
+            // by a Docker client right now, and from where. `host` null is the same fact
+            // SetupSnippetBuilder's `dockerHost` states for the registry-level tab — not
+            // "unknown", but "no domain, so no address a docker client can use" — and the
+            // page renders the identical empty-state message for it via dockerSetup.ts.
+            'access' => [
+                'host' => $dockerGroup !== null ? $registryUrl->host($dockerGroup) : null,
+                'registry_path' => $pathGroup !== null ? $registryUrl->path($pathGroup) : null,
+            ],
+            'tags' => $tagRows->values(),
+            'stats' => [
+                'tag_count' => $tags->count(),
+                'occupied_bytes' => $occupiedBytes,
+                'shared_bytes' => $sharedBytes,
+            ],
+            'activities' => ActivityPresenter::recentFor($package),
+        ]);
+    }
+
+    /**
+     * Best-effort platform ("os/architecture") for one manifest, or null when it cannot be
+     * answered — never a guess. Two shapes are understood:
+     *
+     *   - A multi-arch index: its own payload lists one descriptor per platform directly,
+     *     no blob read needed. Summarised as "multi-arch" once more than one distinct
+     *     platform is named, since the column has room for one answer, not a list.
+     *   - A single image manifest: the OCI Image Manifest carries no platform field of its
+     *     own — it lives in the config blob the manifest points at (`config.digest`), the
+     *     Image Configuration spec's `os`/`architecture` fields — so this reads that blob
+     *     via BlobStore, the one class that touches the artifacts disk for OCI content.
+     *
+     * A missing blob, unparsable JSON, or an unrecognised shape all fall through to null
+     * rather than raising: this is a display nicety on an admin table, and a config blob
+     * genuinely can be absent (a database restore older than the artifacts volume) without
+     * that being this page's problem to surface as an error.
+     */
+    private function platformFor(OciManifest $manifest, string $organizationId, BlobStore $blobStore): ?string
+    {
+        $payload = json_decode($manifest->payload, true);
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        if (isset($payload['manifests']) && is_array($payload['manifests'])) {
+            $platforms = collect($payload['manifests'])
+                ->map(function ($entry) {
+                    $platform = is_array($entry) ? ($entry['platform'] ?? null) : null;
+                    if (! is_array($platform)) {
+                        return null;
+                    }
+                    $os = $platform['os'] ?? null;
+                    $arch = $platform['architecture'] ?? null;
+
+                    return (is_string($os) && is_string($arch)) ? "{$os}/{$arch}" : null;
+                })
+                ->filter()
+                ->unique()
+                ->values();
+
+            return match (true) {
+                $platforms->isEmpty() => null,
+                $platforms->count() === 1 => $platforms->first(),
+                default => 'multi-arch',
+            };
+        }
+
+        $configDigest = $payload['config']['digest'] ?? null;
+        if (! is_string($configDigest)) {
+            return null;
+        }
+
+        $blob = $blobStore->find($organizationId, $configDigest);
+        if ($blob === null) {
+            return null;
+        }
+
+        $stream = $blobStore->readStream($blob);
+        if ($stream === null) {
+            return null;
+        }
+
+        $config = json_decode(stream_get_contents($stream) ?: '', true);
+        fclose($stream);
+
+        if (! is_array($config)) {
+            return null;
+        }
+
+        $os = $config['os'] ?? null;
+        $arch = $config['architecture'] ?? null;
+
+        return (is_string($os) && is_string($arch)) ? "{$os}/{$arch}" : null;
     }
 
     /**
