@@ -117,7 +117,7 @@ Route::prefix('/r/{orgSlug}/{groupSlug}')
 
 // Domain access: root level. registry.context 404s unknown hosts, so these routes
 // don't shadow the main app (web routes are registered first -> first match).
-Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints, $ociName, $ociReference) {
+Route::middleware(['registry.context', 'registry.auth'])->group(function () use ($registryEndpoints, $uuid, $ociName, $ociReference) {
     // OCI distribution. Registered ONLY here, and that is a protocol constraint rather than
     // a preference: a Docker client will not accept a path prefix as part of a registry
     // address, so it never sends /v2/ to /r/{org}/{registry}. A second registration there
@@ -131,16 +131,22 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
     // npm's packument controller swallowed every /v2/* request first, 401/404ing with
     // its own body instead of ever reaching VersionController. Verified by matching the
     // request against the route collection directly, not merely by reading the file.
-    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () use ($ociName, $ociReference) {
+    Route::middleware('registry.type:docker')->prefix('/v2')->group(function () use ($uuid, $ociName, $ociReference) {
         Route::get('/', VersionController::class);
 
         // Blob upload protocol (Task 4). uploadId is a plain OciBlobUpload UUID, not the
-        // OCI name/reference grammar above, so it gets its own constraint.
+        // OCI name/reference grammar above, so it gets its own constraint — the file's own
+        // canonical `$uuid` pattern, not a same-length-but-looser stand-in: `[0-9a-f-]{36}`
+        // is satisfied by 36 hyphens as much as by a real UUID, reaches
+        // OciBlobUpload::where('id', $uploadId) unconstrained, and lands on a Postgres
+        // `uuid` comparison — SQLSTATE[22P02], an unrendered QueryException, a 500 with a
+        // stack trace. Precisely the failure this file's own header comment gives as the
+        // reason `$uuid` exists in the first place.
         Route::post('/{name}/blobs/uploads/', [BlobController::class, 'begin'])->where('name', $ociName);
         Route::patch('/{name}/blobs/uploads/{uploadId}', [BlobController::class, 'append'])
-            ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
+            ->where(['name' => $ociName, 'uploadId' => $uuid]);
         Route::put('/{name}/blobs/uploads/{uploadId}', [BlobController::class, 'finish'])
-            ->where(['name' => $ociName, 'uploadId' => '[0-9a-f-]{36}']);
+            ->where(['name' => $ociName, 'uploadId' => $uuid]);
         Route::match(['GET', 'HEAD'], '/{name}/blobs/{digest}', [BlobController::class, 'show'])
             ->where(['name' => $ociName, 'digest' => 'sha256:[a-f0-9]{64}']);
 
@@ -169,13 +175,17 @@ Route::middleware(['registry.context', 'registry.auth'])->group(function () use 
         //
         // GET-only (Route::fallback()'s own default), registered inside this specific
         // `->prefix('/v2')` group — so it never reaches past /v2, and does not apply to any
-        // other HTTP verb. One side effect noted, not fixed: a wrong-method request against
-        // an otherwise-valid /v2 path (e.g. POST to a manifest URL) now falls through to
-        // this fallback and answers 404 rather than the 405 a route match with no method
-        // support would normally produce. Arguably fine for an OCI client — the spec's own
-        // error vocabulary has no METHOD_NOT_ALLOWED code — but it was not a deliberate
-        // design choice, just this fallback's shape, so it is recorded here rather than
-        // silently relied on.
+        // other HTTP verb. A wrong-method request against an otherwise-valid /v2 path (e.g.
+        // POST to a manifest URL) does NOT fall through to this fallback — an earlier
+        // version of this comment claimed it answers 404, which does not hold: Laravel's
+        // router resolves the URI against every registered method before it ever considers
+        // a fallback route (RouteCollection::checkForAlternateVerbs()), so a method
+        // mismatch against a path some route DOES recognise throws
+        // MethodNotAllowedHttpException — a 405 with an `Allow` header — well before this
+        // fallback is reached. Verified directly (not merely reasoned about) and pinned by
+        // OciRoutingTest's "answers a method mismatch under /v2 with 405" case. This
+        // fallback only ever fires for a genuine routing MISS: no registered route, under
+        // any method, recognises the path at all.
         Route::fallback(fn () => response()->json((object) [], 404));
     });
 
