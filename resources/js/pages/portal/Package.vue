@@ -94,6 +94,11 @@ const props = defineProps<{
     // Empty for every type but Docker, and the list below renders it INSTEAD of `versions`
     // there — see TagRow, and plate 4: "statt einer Versionsliste steht darunter die
     // Tag-Tabelle".
+    //
+    // Rendered in the order the server sends, never re-sorted here: the rows arrive in
+    // `OciTag::scopeInPullOrder()`, the same clause that picks the tag `install` above names,
+    // so the first row of the table is the tag in the pull command. Sorting this array in the
+    // browser would break that pairing without touching any PHP.
     tags: TagRow[];
     /**
      * The whole command, built by `SetupSnippetBuilder::installCommand()` from THIS registry's

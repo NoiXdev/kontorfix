@@ -29,6 +29,8 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
 use App\Services\Registry\SetupSnippetBuilder;
+use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     config(['app.url' => 'https://reg.example.test']);
@@ -273,6 +275,42 @@ it('sends the package page a docker repository tags, because it has no versions 
             ->where('tags.0.name', '1.4.0')
             ->where('tags.1.name', '1.2.0')
             ->etc());
+});
+
+it('names one and the same tag in the pull command and in the table\'s first row', function () {
+    // THE TWO SURFACES OF ONE ORDERING, ASSERTED AGAINST EACH OTHER. `showPackage()` builds a
+    // pull command from ONE tag and renders a table of ALL of them directly above it, and the
+    // page claims (in the payload's own comment) that the tag the command names is the table's
+    // first row. Those were two independently written `order by` clauses, and they drifted the
+    // moment the `latest` preference was added to only one of them: the command read `:latest`
+    // while the first row read `1.4.0`.
+    //
+    // `latest` here is the OLDER row, so any ordering that reads `updated_at` alone puts
+    // `1.4.0` first and fails. Neither value is compared with a literal: the point is that the
+    // two surfaces AGREE, so this reddens for any future ordering that stops being shared, in
+    // whichever direction it drifts.
+    $package = installPackage($this->group, 'docker', 'meinapp');
+    pushTag($package, 'latest', now()->subDay()->toDateTimeString());
+    pushTag($package, '1.4.0', now()->toDateTimeString());
+
+    $props = null;
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(function (AssertableInertia $page) use (&$props) {
+            $page->component('portal/Package');
+            $props = $page->toArray()['props'];
+        });
+
+    // The reference is the command's last path segment (`meinapp:latest`); its tag is whatever
+    // follows the colon. A command printed in the untagged form has no colon there, which
+    // leaves $commandTag null — asserted, so the "agreement" cannot be reached by printing no
+    // tag at all on a repository that has two.
+    $reference = Str::afterLast($props['install'], '/');
+    $commandTag = str_contains($reference, ':') ? Str::afterLast($reference, ':') : null;
+
+    expect($commandTag)->not->toBeNull();
+    expect($props['tags'][0]['name'])->toBe($commandTag);
 });
 
 it('sends no tags for a type that cannot have any', function () {
