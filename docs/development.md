@@ -676,6 +676,48 @@ image, and a freshly created `artifacts` volume inherits the ownership from it.
 > docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data
 > ```
 
+### Upload ceilings and request memory
+
+Three limits stack above the application's own `KONTORFIX_*_MAX_*_BYTES` settings, and only
+the innermost one is configurable through `.env`. An operator who raises the application
+setting alone changes nothing except which layer refuses the upload.
+
+| Layer | Value | Applies to |
+| --- | --- | --- |
+| `docker/Caddyfile`, `@oversized` | 256 MiB declared `Content-Length` | every write method outside `/v2/*` |
+| `docker/php.ini`, `post_max_size` | **80 MiB** whole POST body | every route PHP parses a body for, twine's multipart upload included |
+| `config/kontorfix.php` | `KONTORFIX_PYTHON_MAX_DIST_BYTES`, default 200 MiB | the PyPI upload, in application code |
+
+**The effective ceiling for a twine upload is therefore 80 MiB, not the 200 MiB the setting
+defaults to.** Above it, PHP's multipart parser never runs at all, `$_FILES` arrives empty,
+and `PypiController::upload()` answers "Missing distribution file" — a wrong-sounding but
+harmless 400, not a crash.
+
+`post_max_size` cannot simply be raised. It is bound to `memory_limit` by a ratio measured
+against the production image, twice: an `application/x-www-form-urlencoded` body *just under*
+the ceiling is accepted and therefore actually parsed into `$_POST`, and doing that needs
+roughly 6.5x the body's size in memory. 512M/80M is clean over 55 runs across every request
+shape that has ever failed here; 512M/96M — the same memory with a slightly larger body —
+exhausts memory on the first attempt and marks the FrankenPHP thread unhealthy, anonymously,
+on any route. `docker/php.ini` carries the full measurement, including why the obvious
+larger numbers are worse rather than better.
+
+`memory_limit` is per request and therefore per FrankenPHP thread, and FrankenPHP starts
+2 x CPU threads. `docker/compose.yaml` caps the app container at `mem_limit: 2g` so a burst
+of concurrent large bodies restarts the container instead of letting the host's OOM killer
+pick a victim — which on a single-host deployment is as likely to be Postgres. For a hard
+bound rather than a blast radius, pin the thread count with `FRANKENPHP_CONFIG:
+num_threads=8`.
+
+Docker/OCI pushes are bounded by none of this. `BlobController` streams a layer through
+`php://input` without ever populating `$_POST`/`$_FILES`, which is exactly what
+`post_max_size` does not gate, and `@oversized` exempts `/v2/*` outright. Layers above
+500 MiB are covered by `bin/e2e --large-layer`.
+
+Closing the gap to the documented 200 MiB means making the PyPI upload path stream the way
+the OCI push path already does. That is a rewrite of `PythonPublishService`, not an ini
+value.
+
 ### Package ownership invariant
 
 Every package belongs to exactly one organization: `packages.organization_id` is `NOT NULL`,

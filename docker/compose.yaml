@@ -103,6 +103,28 @@ services:
     # quarter of an hour. Moving the build off the request thread is the real fix.
     volumes:
       - artifacts:/app/storage/app
+    # The second half of docker/php.ini's memory reasoning, and it only makes sense read
+    # together with it. `memory_limit` there is 512M — but it is PER REQUEST, therefore per
+    # FrankenPHP thread, and FrankenPHP starts 2 × CPU threads (confirmed against this base
+    # image: `num_threads: 12` on a 6-CPU container). On an 8-core host that is 16 threads,
+    # so the per-request ceiling alone bounds nothing an attacker can reach in parallel: it
+    # decides how large ONE request may grow, not how many may grow at once.
+    #
+    # What this bounds is the BLAST RADIUS, not the attack. Under a flood of concurrent
+    # large bodies the container hits this ceiling and Docker restarts it (`restart:
+    # unless-stopped` below), instead of the host's OOM killer choosing a victim — which on
+    # a single-host deployment is as likely to be Postgres as this container. A dropped
+    # container is a bounded, self-healing outage; a killed database is neither.
+    #
+    # 2g = the app's steady-state footprint (~300M) plus room for a handful of concurrent
+    # requests actually parsing a body near post_max_size. RAISE IT if the host is large and
+    # busy — the failure mode of a value set too low is that a legitimate traffic spike
+    # restarts the container, which is worse than the attack it guards against. For a HARD
+    # bound rather than a blast radius, pin the thread count instead: this image reads
+    # FRANKENPHP_CONFIG into the Caddyfile's `frankenphp` block, so `FRANKENPHP_CONFIG:
+    # num_threads=8` makes the worst case 8 × 512M and turns the arithmetic above into a
+    # decision rather than a function of whatever CPU count the host happens to have.
+    mem_limit: 2g
     restart: unless-stopped
 
   worker:
