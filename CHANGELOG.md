@@ -39,6 +39,7 @@
 * **admin:** stop claiming the old /r/ addresses survive an organization rename ([d22bd36](https://github.com/NoiXdev/kontorfix/commit/d22bd3688e6f8fa398df699f7446ce85eaf6f92a))
 * **admin:** stop telling an operator to detach a name that detaching will not release ([4746c8d](https://github.com/NoiXdev/kontorfix/commit/4746c8db9e7b2c7b14d2feeda3817bd7716c6bd8))
 * **api:** mark a lapsed registry assignment instead of returning it unmarked ([349e766](https://github.com/NoiXdev/kontorfix/commit/349e7662ea97c1c6764ce85d3f942dcab40ff6c5))
+* **api:** accept a customer package-list sync while a shared package is assigned ([3f6f9bd](https://github.com/NoiXdev/kontorfix/commit/3f6f9bd))
 * **docker:** keep bin/ and phpunit.e2e.xml out of the production image ([9571d22](https://github.com/NoiXdev/kontorfix/commit/9571d22140b685e90094b46ca06a503bf78c0aef))
 * **e2e:** escape pip token safely, reject a second bad bin/e2e argument ([2e1e617](https://github.com/NoiXdev/kontorfix/commit/2e1e6174ce5195b8929da4643d91c1b25153ce93))
 * **e2e:** keep the composer install offline and assert the installed version ([138096f](https://github.com/NoiXdev/kontorfix/commit/138096f906b60c80cff6b8665b3d8b50ccc1cb02))
