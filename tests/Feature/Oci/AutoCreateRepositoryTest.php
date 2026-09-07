@@ -124,6 +124,38 @@ it('is off after a migration, so a push to an unknown name is still refused', fu
         ->and($response->json('errors.0.message'))->toContain('Repositories beim Push anlegen');
 });
 
+it('refuses a repository name longer than the column that would store it, with an OCI error body', function () {
+    // `$ociName` in routes/registry.php bounds the SHAPE of a repository name and not its
+    // LENGTH, while `packages.name` is varchar(255). With push-time creation on, a name
+    // above that reached Package::create() and raised SQLSTATE[22001] — an unrendered
+    // QueryException, so an HTML 500 instead of the `errors[]` envelope every other refusal
+    // on this path answers with, plus a stack trace per request in the log. That is exactly
+    // the failure class routes/registry.php's own header says the `$uuid` constraint exists
+    // to prevent, arriving through the one parameter that has no length bound.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $before = Package::count();
+
+    $response = pushBlobIntoRepository($this->publish, str_repeat('a', 300), $this->bytes)
+        ->assertStatus(400)
+        ->assertJsonPath('errors.0.code', 'NAME_INVALID');
+
+    expect(Package::count())->toBe($before)
+        ->and($response->headers->get('Content-Type'))->toStartWith('application/json');
+});
+
+it('still creates a repository whose name exactly fills the column', function () {
+    // The boundary from the other side, so the refusal above cannot drift into refusing
+    // legitimate names: 255 characters is storable and must still be created.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $name = str_repeat('a', 255);
+
+    pushBlobIntoRepository($this->publish, $name, $this->bytes)->assertStatus(201);
+
+    expect(Package::where('name', $name)->where('type', PackageType::Docker)->exists())->toBeTrue();
+});
+
 it('refuses when the organization narrows a globally enabled setting', function () {
     SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
     $this->org->update(['oci_auto_create_repositories' => false]);

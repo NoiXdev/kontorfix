@@ -75,6 +75,22 @@ final class OciException extends Exception
             .'„Repositories beim Push anlegen“ in den Systemeinstellungen.');
     }
 
+    /**
+     * A repository name this registry cannot store, refused BEFORE anything is written.
+     *
+     * The OCI grammar bounds the shape of a name and not its length, and `packages.name` is
+     * varchar(255): with push-time creation on, a longer name reached Package::create() and
+     * raised SQLSTATE[22001], which nothing renders — an HTML 500 rather than an `errors[]`
+     * envelope, and a stack trace per request in the log. NAME_INVALID is the code the OCI
+     * spec registers for exactly this ("Invalid repository name encountered"), and 400 says
+     * what is true: the caller may make this request, the name itself is the problem, and no
+     * amount of retrying or authenticating changes that.
+     */
+    public static function nameInvalid(string $name, int $limit): self
+    {
+        return new self(400, 'NAME_INVALID', 'Der Repository-Name ist mit '.mb_strlen($name)." Zeichen zu lang; erlaubt sind höchstens {$limit}.");
+    }
+
     public static function manifestUnknown(string $reference): self
     {
         return new self(404, 'MANIFEST_UNKNOWN', "Weder Tag noch Digest {$reference} sind bekannt.");

@@ -16,6 +16,15 @@ use Illuminate\Support\Facades\DB;
 
 trait ResolvesOciRepository
 {
+    /**
+     * The longest repository name push-time creation may store, which is the width of
+     * `packages.name` (varchar(255), see 2026_07_08_055350_create_registry_core_tables) and
+     * not a policy of this trait's own. Stated here because routes/registry.php's `$ociName`
+     * cannot express it: the OCI grammar bounds the SHAPE of a name, never its length, so a
+     * 300-character name routes perfectly well and only fails at the INSERT.
+     */
+    private const MAX_NAME_LENGTH = 255;
+
     abstract protected function access(): RegistryAccessService;
 
     protected function ociGroup(Request $request): Group
@@ -242,6 +251,21 @@ trait ResolvesOciRepository
      */
     private function ociCreateRepository(Group $group, string $name): Package
     {
+        // Refused BEFORE the write, and here rather than in the route pattern, because the
+        // answer has to be an OCI error body. Unguarded, a name above the column width
+        // reached Package::create() and raised SQLSTATE[22001] — the same unrendered
+        // QueryException, HTML 500 and per-request stack trace routes/registry.php's own
+        // header names as the reason its `$uuid` pattern exists, arriving through the one
+        // parameter no pattern can bound. A tighter route pattern would answer the bare
+        // `{}` 404 of the /v2 fallback instead, which tells a pushing client nothing.
+        //
+        // Only the CREATE path needs it: an over-long name on any other path is compared
+        // against the column rather than written to it, which Postgres answers with "no
+        // such row" and this trait turns into NAME_UNKNOWN, exactly as it should.
+        if (mb_strlen($name) > self::MAX_NAME_LENGTH) {
+            throw OciException::nameInvalid($name, self::MAX_NAME_LENGTH);
+        }
+
         try {
             return DB::transaction(function () use ($group, $name): Package {
                 $package = Package::create([
