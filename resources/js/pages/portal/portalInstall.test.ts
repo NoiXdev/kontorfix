@@ -11,10 +11,13 @@ import {
     abbreviateCommand,
     installCardTitle,
     installCell,
+    installCellLapsedNote,
     installHeading,
     prerequisiteNote,
     readmeFallbackNote,
     setupLinkLabel,
+    versionsEmptyNote,
+    versionsHeading,
 } from './portalInstall';
 
 describe('installHeading', () => {
@@ -70,6 +73,34 @@ describe('readmeFallbackNote', () => {
     });
 });
 
+describe('versionsHeading / versionsEmptyNote', () => {
+    it('heads a docker repository with its tags, because it has no versions to head', () => {
+        // An OCI push writes an `oci_tags` row and never a `package_versions` one, so the
+        // section headed "Versionen" was empty for every Docker repository however many tags
+        // had been pushed to it — and said so.
+        expect(versionsHeading('docker')).toBe('Tags');
+        expect(versionsHeading('composer')).toBe('Versionen');
+        expect(versionsHeading('npm')).toBe('Versionen');
+        expect(versionsHeading('python')).toBe('Versionen');
+    });
+
+    it('empties that list in the words of the thing that is missing', () => {
+        expect(versionsEmptyNote('docker')).toBe('Noch keine Tags gepusht.');
+        expect(versionsEmptyNote('composer')).toBe('Noch keine Versionen verfügbar.');
+        expect(versionsEmptyNote('python')).toBe('Noch keine Versionen verfügbar.');
+    });
+});
+
+describe('installCellLapsedNote', () => {
+    it('is one short sentence, not the three the package page carries', () => {
+        // Plate 5 draws exactly this in the Installation column. The long
+        // `registryLapsedNote()` is 166 characters over three sentences; in a column sized for
+        // a 35-character command, beside a Beschreibung column, it sets the height of the row
+        // to repeat what the `abgelaufen` badge two columns left already says.
+        expect(installCellLapsedNote()).toBe('Diese Registry liefert das Paket nicht mehr aus.');
+    });
+});
+
 describe('abbreviateCommand', () => {
     it('elides the index url and keeps the flag and the package name', () => {
         expect(abbreviateCommand('pip install --index-url https://token:<token>@registry.3b.de/r/3b/intern/simple/ kernmodul')).toBe(
@@ -108,14 +139,12 @@ describe('installCell', () => {
         });
     });
 
-    it('gives a lapsed row the reason and no command at all', () => {
-        // The literal single-registry sentence, not `registryLapsedNote()` called here: a test
-        // that compares the module's output with the module's own source asserts nothing.
+    it('gives a lapsed row the short reason and no command at all', () => {
+        // The literal, not `installCellLapsedNote()` called here: a test that compares the
+        // module's output with the module's own source asserts nothing.
         expect(installCell({ in_force: false, install: null })).toEqual({
             command: null,
-            text:
-                'Diese Registry liefert das Paket nicht mehr aus. Builds, die hier auflösen, erhalten ' +
-                'einen 404. Wenden Sie sich an den Betreiber, wenn Sie das Paket weiter benötigen.',
+            text: 'Diese Registry liefert das Paket nicht mehr aus.',
         });
     });
 
@@ -126,9 +155,12 @@ describe('installCell', () => {
         expect(installCell({ in_force: false, install: 'composer require 3b/altmodul' }).command).toBe(null);
     });
 
-    it('refuses to print an empty command cell when the command is missing', () => {
-        // The mirror case: `in_force` true with no command. Rendering an empty cell would
-        // drop the explanation silently, which is the one outcome worse than either.
-        expect(installCell({ in_force: true, install: null }).command).toBe(null);
+    it('says nothing at all when a command is missing from a row that is in force', () => {
+        // The mirror case: `in_force` true with no command, unreachable today. It offers no
+        // command — but it must not reach for the lapsed reason either, which is what it used
+        // to print: that sentence is a claim about the assignment, and on this branch the
+        // assignment is in force. Asserted as a whole object so the empty text is pinned
+        // rather than merely unasserted.
+        expect(installCell({ in_force: true, install: null })).toEqual({ command: null, text: '' });
     });
 });

@@ -102,11 +102,20 @@ const props = defineProps<{
 // this registry could not be filtered for at all — the same defect PackagePicker's quick-add
 // carried, and the same reason PackageType's own docblock gives for the enum existing.
 //
+// `label` too, for the Typ column below: the filter offers "Composer"/"Python" and the column
+// used to print the raw enum value beside it, so one table named the same ecosystem two ways —
+// and `portal/Packages.vue`, which lists the same packages, named it a third. One source for
+// both, as that page already does.
+//
 // Every type the instance knows, deliberately, rather than `props.types`: that prop is what
 // this organization MAY serve now, and a registry can hold a package of a type the operator
 // has since switched off. A filter that hid those rows' own type would be a filter that
 // cannot find a row the table is displaying.
-const typeOptions = useRegistryTypes().options();
+const { label: typeLabel, options: typeOptions } = useRegistryTypes();
+
+// Wrapped, like portal/Packages.vue's: `registryTypeMeta` is a shared Inertia prop, so a value
+// read once in setup would not follow a partial reload that replaces it.
+const typeFilterOptions = computed(() => typeOptions());
 
 // Packages and tokens each get their own useTableState instance with a distinct
 // prefix ('pkg' / 'tok') — without it both tables would read and write the same
@@ -130,7 +139,7 @@ const packageTable = useTableState<PackageRow>({
     filters: {
         type: {
             label: 'Typ',
-            options: typeOptions,
+            options: typeFilterOptions.value,
             match: (row, value) => row.type === value,
         },
     },
@@ -245,14 +254,16 @@ function destroyToken(id: string) {
 
 /**
  * The Installation cell of one row: the command, abbreviated for the column, or the reason
- * there is none. Both decisions live in the tested module — including the choice of the
- * single-registry sentence, which is the only one this page may make (see portalPackages.ts,
- * TWO ANSWERS: the landing page's note speaks about every registry, and this page knows one).
+ * there is none. Both decisions live in the tested module — including which sentence, which is
+ * the one choice this page may not get wrong (see portalPackages.ts, TWO ANSWERS: the landing
+ * page's note speaks about every registry, and this page knows one).
  *
  * The reason used to render as a second, full-width row under the package. It renders IN the
- * column now, where the command would have been: printing both would say one sentence twice
- * on one row, and the column a reader is scanning for "how do I get this" is where the answer
- * that they cannot belongs.
+ * column now, where the command would have been: printing both would say one thing twice on
+ * one row, and the column a reader is scanning for "how do I get this" is where the answer
+ * that they cannot belongs. It is the SHORT sentence, `installCellLapsedNote()` — the package
+ * page's three-sentence `registryLapsedNote()` in a cell sized for a command would set the
+ * height of the row.
  */
 function cellFor(pkg: PackageRow) {
     return installCell(pkg);
@@ -331,7 +342,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                         <template #filters>
                             <SearchableSelect
                                 :model-value="packageTable.filterValues.type.value"
-                                :options="typeOptions"
+                                :options="typeFilterOptions"
                                 placeholder="Alle Typen"
                                 class="w-40"
                                 @update:model-value="(v) => packageTable.setFilter('type', String(v))"
@@ -373,7 +384,7 @@ const breadcrumbs: BreadcrumbItem[] = [
                                         </template>
                                     </div>
                                 </td>
-                                <td class="px-4 py-3">{{ pkg.type }}</td>
+                                <td class="px-4 py-3">{{ typeLabel(pkg.type) }}</td>
                                 <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
                                 <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
                                 <td class="px-4 py-3">
@@ -382,18 +393,19 @@ const breadcrumbs: BreadcrumbItem[] = [
                                              there is none and no button to copy one. -->
                                     <div v-if="cellFor(pkg).command" class="flex items-center gap-2">
                                         <span class="font-mono text-xs break-all">{{ cellFor(pkg).text }}</span>
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            class="h-6 shrink-0 px-2 text-xs"
-                                            aria-label="Installationsbefehl kopieren"
-                                            @click="copyInstall(pkg)"
-                                        >
+                                        <Button variant="outline" size="sm" class="h-6 shrink-0 px-2 text-xs" @click="copyInstall(pkg)">
                                             <component :is="copiedId === pkg.id ? Check : Copy" class="size-3" />
                                             {{ copiedId === pkg.id ? 'Kopiert!' : 'Kopieren' }}
                                         </Button>
                                     </div>
-                                    <span v-else class="text-xs text-destructive">{{ cellFor(pkg).text }}</span>
+                                    <!-- Dimmed, as plate 5 draws it, and deliberately not
+                                         `text-destructive`: the red `abgelaufen` pill in the
+                                         name column of this same row already carries the alarm,
+                                         and a second red thing per row makes the badge harder
+                                         to pick out rather than easier. The sentence is the
+                                         short one written for a table cell; the full
+                                         explanation is on the page the name links to. -->
+                                    <span v-else class="text-xs text-muted-foreground">{{ cellFor(pkg).text }}</span>
                                 </td>
                             </tr>
                         </template>

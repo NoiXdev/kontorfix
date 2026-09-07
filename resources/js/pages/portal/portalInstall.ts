@@ -17,7 +17,6 @@
  * about how to obtain a package is here, where a wording mistake is a red test rather than a
  * screenshot nobody takes.
  */
-import { registryLapsedNote } from './portalPackages';
 
 /**
  * The four ecosystems, as `PackageType` spells them.
@@ -92,6 +91,25 @@ export function readmeFallbackNote(type: PortalPackageType): string {
 }
 
 /**
+ * What heads the list under the command on the package page.
+ *
+ * A Docker repository has NO `package_versions` rows — the OCI push path writes none, ever —
+ * so the section headed "Versionen" was empty for every one of them and said "Noch keine
+ * Versionen verfügbar." however many tags had been pushed. What a repository has instead is
+ * `oci_tags`, and plate 4 puts that table here: "statt einer Versionsliste steht darunter die
+ * Tag-Tabelle". `readmeFallbackNote()` above was already type-aware for exactly this reason
+ * while the section it points at was not.
+ */
+export function versionsHeading(type: PortalPackageType): string {
+    return type === 'docker' ? 'Tags' : 'Versionen';
+}
+
+/** The empty state of that same list — the state a Docker repository used to be stuck in. */
+export function versionsEmptyNote(type: PortalPackageType): string {
+    return type === 'docker' ? 'Noch keine Tags gepusht.' : 'Noch keine Versionen verfügbar.';
+}
+
+/**
  * The command as a TABLE CELL shows it — the long one shortened, everything else untouched.
  *
  * Only the pip command is long, and only because it carries the index URL that is the entire
@@ -131,8 +149,35 @@ export interface InstallCell {
      * what tells the page to render the text as an explanation rather than as a command.
      */
     command: string | null;
-    /** The cell's own text: the abbreviated command, or the reason there is none. */
+    /**
+     * The cell's own text: the abbreviated command, the reason there is none, or the empty
+     * string where there is nothing true to say (see `installCell()`'s last branch).
+     */
     text: string;
+}
+
+/**
+ * The lapsed reason AS A TABLE CELL STATES IT — one short sentence, and deliberately not
+ * `registryLapsedNote()`.
+ *
+ * Plate 5 draws exactly this in the Installation column. That note is 166 characters over
+ * three sentences and belongs on the package page, where it runs the width of the content and
+ * the reader arrived asking why their build broke. The column it would land in here is sized
+ * for a 35-character command and stands beside a Beschreibung column in the same row: the
+ * three sentences would set the height of the row and push every other cell's content apart,
+ * to tell a reader scanning a list something the page's own `abgelaufen` badge two columns
+ * left has already told them.
+ *
+ * A LITERAL, not a slice of `registryLapsedNote()`. It is its own sentence with its own job —
+ * a marker in a list rather than an explanation — and deriving it by cutting at the first full
+ * stop would make an edit to the long note silently rewrite this one, in a table, unreviewed.
+ *
+ * Same "Diese Registry" as the long note, and for the same reason: this page is addressed by
+ * ONE registry and knows nothing about the others (portalPackages.ts, TWO ANSWERS). The full
+ * explanation is one click away, on the package page the row's name links to.
+ */
+export function installCellLapsedNote(): string {
+    return 'Diese Registry liefert das Paket nicht mehr aus.';
 }
 
 /**
@@ -140,24 +185,29 @@ export interface InstallCell {
  *
  * A LAPSED ASSIGNMENT GETS THE REASON INSTEAD OF A COMMAND — the same rule
  * `portal/Package.vue` follows, for the same reason: the command that would go here answers
- * 404, and a snippet that 404s is worse than none. `registryLapsedNote()` is the sentence for
- * a page addressed by ONE registry (see portalPackages.ts, TWO ANSWERS); the landing page's
- * `lapsedNote()` claims none of the customer's registries serve the package, which this page
- * cannot know.
+ * 404, and a snippet that 404s is worse than none. The sentence is `installCellLapsedNote()`,
+ * the one written for a table cell; the long `registryLapsedNote()` is the package page's.
  *
  * The reason is rendered here, in place of the command, and NOT additionally as a note under
  * the row. It used to be that note, back when the row had nothing else to give up; printing
  * both would say the same sentence twice on one row, and the column the reader is scanning
  * for an answer is where the answer belongs.
  *
- * `install === null` is treated exactly like `in_force === false` rather than trusted to
- * follow from it. The two come from one server-side condition today, and this function is the
- * one place the page decides whether it has a command — a null slipping through as an empty
- * command cell would silently drop the explanation.
+ * THE LAST BRANCH SAYS NOTHING, AND THAT IS THE WHOLE OF WHAT IT MAY SAY. `in_force` true with
+ * no command is unreachable today — `installCommand()` returns a string for every type — but
+ * this function is the one place the page decides whether it has a command, so a null must not
+ * fall through into an empty cell it thinks holds one. What it must NOT do is print the lapsed
+ * reason, which is what it did: that reason is a factual claim about the assignment, and on
+ * this branch the assignment is in force. A defensive branch may decline to explain; it may not
+ * invent an explanation that contradicts the flag beside it.
  */
 export function installCell(row: InstallCellRow): InstallCell {
-    if (!row.in_force || row.install === null) {
-        return { command: null, text: registryLapsedNote() };
+    if (!row.in_force) {
+        return { command: null, text: installCellLapsedNote() };
+    }
+
+    if (row.install === null) {
+        return { command: null, text: '' };
     }
 
     return { command: row.install, text: abbreviateCommand(row.install) };

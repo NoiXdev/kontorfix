@@ -143,10 +143,28 @@ class SetupSnippetBuilder
      * Inline credentials in a URL are also what leads operators to put a mirror password into
      * an upstream URL, where the application then has to withhold it from readers (see
      * App\Support\CredentialUrl).
+     *
+     * IT IS BUILT FROM `base()`, THE SAME `{$base}/simple/` for()'s pip.conf line prints, with
+     * the credentials pushed into the authority — never re-spelled from a scheme and a host.
+     * The re-spelling was `'https://'.host().pathPrefix()`, and it was wrong twice on any
+     * instance not served over https on :443: it hardcoded the scheme, and `host()` is
+     * parse_url's PHP_URL_HOST, which DROPS the port. On `app.url = http://localhost:8099` one
+     * response then carried three spellings of one registry — `https://…@localhost/…` in the
+     * install command, `http://localhost:8099/…` in the pip.conf line beside it, and
+     * `localhost:8099/…` in the Docker command, which keeps its port because dockerHost()
+     * already learned this lesson. Two of the three pointed nowhere.
      */
     private function simpleAuthUrl(Group $group): string
     {
-        return 'https://token:<token>@'.$this->url->host($group).$this->url->pathPrefix($group).'/simple/';
+        $simple = $this->url->base($group).'/simple/';
+        // After the scheme separator, before the host: the one place a URL takes credentials.
+        // base() always names a scheme (a custom domain is `https://…`, otherwise app.url's
+        // origin); the guard is for a misconfigured app.url rather than a shape produced here.
+        $afterScheme = strpos($simple, '://');
+
+        return $afterScheme === false
+            ? 'token:<token>@'.$simple
+            : substr($simple, 0, $afterScheme + 3).'token:<token>@'.substr($simple, $afterScheme + 3);
     }
 
     /**

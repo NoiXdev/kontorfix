@@ -88,6 +88,41 @@ it('follows a custom domain into the python command', function () {
         ->toBe('pip install --index-url https://token:<token>@pakete.acme.test/simple/ kernmodul');
 });
 
+it('keeps the scheme and the port of an instance that is not https on :443', function () {
+    // F1. The URL used to be re-spelled as `'https://'.host().pathPrefix()`, which hardcoded
+    // the scheme and dropped the port (parse_url's PHP_URL_HOST has no port in it). On this
+    // very ordinary development instance the ONE response then carried three spellings of one
+    // registry: `https://…@localhost/…` here, `http://localhost:8099/…` in the pip.conf line
+    // of the setup tab beside it, and `localhost:8099/…` in the Docker command. Two of them
+    // point nowhere, and the reader has no way to tell which.
+    //
+    // Nothing else in this file covers it: beforeEach pins `https://reg.example.test`, where
+    // a hardcoded scheme and a dropped :443 are both invisible.
+    config(['app.url' => 'http://localhost:8099']);
+
+    expect(app(SetupSnippetBuilder::class)->installCommand($this->group, PackageType::Python, 'kernmodul'))
+        ->toBe('pip install --index-url http://token:<token>@localhost:8099/r/acme/intern/simple/ kernmodul');
+});
+
+it('spells that url exactly as the setup instructions beside it spell it', function () {
+    // The other half of F1, and the reason the two are one method: the pip.conf line and the
+    // package page's command have to name the same index. Asserted as whole strings, because
+    // the defect was a difference of scheme and port inside a URL that otherwise matched.
+    config(['app.url' => 'http://localhost:8099']);
+
+    $builder = app(SetupSnippetBuilder::class);
+
+    expect($builder->for($this->group)['pip'])->toBe(
+        "pip install --index-url http://token:<token>@localhost:8099/r/acme/intern/simple/ <paket>\n\n"
+        ."# oder dauerhaft — Token in ~/.netrc (chmod 600), nicht in pip.conf:\n"
+        ."# ~/.config/pip/pip.conf:\n[global]\nindex-url = http://localhost:8099/r/acme/intern/simple/\n\n"
+        ."# ~/.netrc:\nmachine localhost\n  login token\n  password <token>"
+    )->and($builder->installCommand($this->group, PackageType::Docker, 'meinapp', '1.0'))
+        // The Docker command already kept the port. It is listed here so the three spellings
+        // that used to disagree are pinned in one place.
+        ->toBe('docker pull localhost:8099/acme/intern/meinapp:1.0');
+});
+
 it('leaves composer and npm registry-less, because neither client takes a registry argument', function () {
     // Deliberate, not an omission: `composer require` and `npm install` are configured once
     // in composer.json/.npmrc, which is what the setup tab and the page's prerequisite line
@@ -149,7 +184,7 @@ it('names the registry host the package page will tell a reader to log in to', f
             ->etc());
 });
 
-it('pulls the newest pushed tag into the package pages docker command', function () {
+it('pulls the most recently re-pointed tag into the package pages docker command', function () {
     $package = installPackage($this->group, 'docker', 'meinapp');
     // Tags are `oci_tags` rows, never `package_versions` — the OCI push path writes no
     // version row at all, so a command derived from versions would print the untagged form
@@ -163,6 +198,92 @@ it('pulls the newest pushed tag into the package pages docker command', function
         ->assertInertia(fn ($p) => $p->component('portal/Package')
             ->where('install', 'docker pull reg.example.test/acme/intern/meinapp:1.4.0')
             ->etc());
+});
+
+it('prefers a tag literally named latest over a newer one, on both surfaces', function () {
+    // F5. The untagged form this command prints for an EMPTY repository is
+    // `docker pull <host>/<repo>`, which Docker resolves as `:latest`. A repository that has
+    // a `latest` and is nevertheless advertised as `:1.4.0` makes one page say two different
+    // things about the same default, for a reason no reader can see.
+    //
+    // `1.4.0` is the newer row here, so a pure `updated_at` ordering fails this outright.
+    $package = installPackage($this->group, 'docker', 'meinapp');
+    pushTag($package, 'latest', now()->subDay()->toDateTimeString());
+    pushTag($package, '1.4.0', now()->toDateTimeString());
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Package')
+            ->where('install', 'docker pull reg.example.test/acme/intern/meinapp:latest')
+            ->etc());
+
+    // The list resolves tags for every Docker row in one query, with the ordering mirrored so
+    // that last-row-wins lands on the same tag. Two implementations, so two assertions.
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Registry')
+            ->where('packages.0.install', 'docker pull reg.example.test/acme/intern/meinapp:latest')
+            ->etc());
+});
+
+it('breaks a tie between two tags written in the same second, on both surfaces', function () {
+    // F5, the inert half. Every other Docker fixture in this file gives its two tags DIFFERENT
+    // `updated_at` values, so `name` never decides anything and flipping its direction left
+    // the whole suite green. These two share a timestamp to the second — the ordinary outcome
+    // of one `docker push` of a multi-tag build — so `name` is the only clause left to answer,
+    // and the answer is pinned.
+    $sameSecond = now()->toDateTimeString();
+    $package = installPackage($this->group, 'docker', 'meinapp');
+    pushTag($package, '1.2.0', $sameSecond);
+    pushTag($package, '1.4.0', $sameSecond);
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Package')
+            ->where('install', 'docker pull reg.example.test/acme/intern/meinapp:1.4.0')
+            ->etc());
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Registry')
+            ->where('packages.0.install', 'docker pull reg.example.test/acme/intern/meinapp:1.4.0')
+            ->etc());
+});
+
+it('sends the package page a docker repository tags, because it has no versions to send', function () {
+    // F3. `package_versions` is EMPTY for every Docker repository — the OCI push path writes an
+    // `oci_tags` row and never a version row — so the page's list section rendered "Noch keine
+    // Versionen verfügbar." under every repository on the instance, however many tags it held.
+    // Plate 4 puts the tag table there instead.
+    $package = installPackage($this->group, 'docker', 'meinapp');
+    pushTag($package, '1.2.0', now()->subDay()->toDateTimeString());
+    pushTag($package, '1.4.0', now()->toDateTimeString());
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Package')
+            ->has('versions', 0)
+            // Newest first, so the tag the pull command above the table names is its first row.
+            ->has('tags', 2)
+            ->where('tags.0.name', '1.4.0')
+            ->where('tags.1.name', '1.2.0')
+            ->etc());
+});
+
+it('sends no tags for a type that cannot have any', function () {
+    // Empty rather than absent, so the page's own branch is the only thing deciding which list
+    // it renders — and a guaranteed-empty query is not run for the three types that have none.
+    $package = installPackage($this->group, 'python', 'kernmodul');
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Package')->has('tags', 0)->etc());
 });
 
 it('gives the package page of a lapsed assignment no command at all', function () {

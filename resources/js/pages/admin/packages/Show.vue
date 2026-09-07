@@ -104,6 +104,21 @@ const props = defineProps<{
     gitCredentials: { id: string; name: string; provider: string }[];
     groups: GroupRow[];
     sharedElsewhere: number;
+    /**
+     * The Installation tab's command, built by `SetupSnippetBuilder::installCommand()` from a
+     * real registry's address — never assembled here.
+     *
+     * It WAS assembled here, as `{composer: …, npm: …, python: `pip install ${name}`}`: the
+     * registry-less pip command that resolves against PyPI and installs a stranger's package
+     * of the same name, still being printed on the operator's side after the portal stopped.
+     * A command needs a registry, and only the server knows which of this package's registries
+     * it is (see PackageController::show()).
+     *
+     * Null when the package is in no registry this viewer can see — there is no address to
+     * build one from, and no command is the honest answer. Docker never arrives here: show()
+     * redirects a Docker repository to its own page.
+     */
+    install: string | null;
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
     // Whether the viewer holds the share-packages ability — passed from the server rather
@@ -123,12 +138,6 @@ const selectedVersion = ref<string>(props.versions[0]?.version ?? '');
 const currentVersion = computed(() => props.versions.find((v) => v.version === selectedVersion.value) ?? null);
 
 const versionOptions = computed(() => props.versions.map((v) => ({ value: v.version, label: v.version })));
-
-const installCommand = {
-    composer: `composer require ${props.package.name}`,
-    npm: `npm install ${props.package.name}`,
-    python: `pip install ${props.package.name}`,
-}[props.package.type];
 
 function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
@@ -362,8 +371,17 @@ useOperatorChannel({
                 <TabsContent value="installation">
                     <section class="flex flex-col gap-3">
                         <pre
+                            v-if="props.install !== null"
                             class="overflow-x-auto rounded-md border border-sidebar-border/70 bg-muted/50 px-4 py-3 font-mono text-sm dark:border-sidebar-border"
-                            >{{ installCommand }}</pre>
+                            >{{ props.install }}</pre>
+                        <!-- No registry this viewer can see means no address, and a command
+                             without one is what this tab was fixed to stop printing. -->
+                        <div
+                            v-else
+                            class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                        >
+                            Dieses Paket ist keiner Registry zugeordnet, daher gibt es keinen Installationsbefehl.
+                        </div>
                     </section>
                 </TabsContent>
 
@@ -635,8 +653,8 @@ useOperatorChannel({
                             <span>
                                 Für andere Organisationen freigeben
                                 <span class="block text-xs text-muted-foreground">
-                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der
-                                    besitzenden Organisation. Nur für Pakete der Betreiber-Organisation möglich.
+                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der besitzenden
+                                    Organisation. Nur für Pakete der Betreiber-Organisation möglich.
                                 </span>
                             </span>
                         </label>

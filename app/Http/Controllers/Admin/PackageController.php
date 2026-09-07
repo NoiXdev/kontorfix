@@ -22,6 +22,7 @@ use App\Services\Package\PackageDependencies;
 use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
+use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
@@ -161,7 +162,7 @@ class PackageController extends Controller
             ->all();
     }
 
-    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
+    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl, SetupSnippetBuilder $snippets): Response
     {
         $this->assertCanTouchPackage($package);
 
@@ -181,7 +182,11 @@ class PackageController extends Controller
         // below prints each registry's URL, and RegistryUrl reads the organization's slug for
         // the first segment. Without the relation this would be one lazy load per row; without
         // `slug` in it, a silent null and a /r//{groupSlug} on screen.
-        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug']);
+        // `groups.domains` on top: the install command below is built for one of these
+        // registries, and RegistryUrl reads the domain rows to decide whether that registry is
+        // addressed on its own host or on the instance host with a path prefix. Without the
+        // relation it would be one lazy load per group inside that decision.
+        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         // `assertCanTouchPackage()` asserts that the package's OWNER is in the active scope
@@ -196,6 +201,24 @@ class PackageController extends Controller
         $visibleGroups = $scope->spansAllOrganizations()
             ? $package->groups
             : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
+
+        // ONE SOURCE FOR THE COMMAND, ON THE OPERATOR'S SIDE TOO. This tab used to assemble
+        // `{composer: …, npm: …, python: `pip install ${name}`}` in the `.vue` file — the exact
+        // registry-less pip command this whole change removed from the portal, still being
+        // printed one page over. `pip install kernmodul` does not fail: it resolves against
+        // PyPI and installs whatever a stranger published under that name.
+        //
+        // A command needs a registry, and a package can be in several. The rule is
+        // showDocker()'s, so the two halves of this controller pick the same one: a registry
+        // with a custom domain first, because its address is the shorter one, then the first
+        // visible registry, addressed on the instance host. Deterministic either way —
+        // Collection::first() preserves the `groups` query's own order.
+        //
+        // Null when the package is in NO registry this viewer can see. There is no address to
+        // build a command from then, and the tab says so instead of printing a registry-less
+        // one. Docker never reaches this: show() redirects to showDocker() above.
+        $installGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
+            ?? $visibleGroups->first();
 
         // Python is file-centric (multiple dists per version), so its "versions" and stats
         // come from the python_dists table rather than package_versions.
@@ -256,6 +279,10 @@ class PackageController extends Controller
             ]),
             'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
             'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
+            // The Installation tab's whole content — see $installGroup above.
+            'install' => $installGroup === null
+                ? null
+                : $snippets->installCommand($installGroup, $package->type, $package->name),
             'stats' => $isPython ? [
                 'downloads' => (int) $dists->sum('download_count'),
                 'storage_bytes' => (int) $dists->sum('size'),

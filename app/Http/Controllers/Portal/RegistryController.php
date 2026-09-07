@@ -284,6 +284,27 @@ class RegistryController extends Controller
                 'released_at' => $v->released_at?->toDateString(),
                 'dependencies' => $this->dependencies->for($package->type, $v->metadata ?? []),
             ]),
+            // WHAT A DOCKER REPOSITORY HAS INSTEAD OF VERSIONS. `versions` above is empty for
+            // every one of them — the OCI push path writes an `oci_tags` row and never a
+            // `package_versions` one — so the page's list said "Noch keine Versionen verfügbar."
+            // under repositories with tags in them, permanently. It renders these instead
+            // (plate 4: "statt einer Versionsliste steht darunter die Tag-Tabelle").
+            //
+            // Empty, not queried at all, for the other three types: an `oci_tags` row cannot
+            // exist for them, so the query would be a guaranteed-empty round trip.
+            //
+            // Newest first, by the `updated_at` newestTag() reads — the tag named in the pull
+            // command above the table is therefore the table's first row, which is the one
+            // consistency a reader can check at a glance. The digest comes from the manifest
+            // relation, eager-loaded so a repository with many tags costs two queries.
+            'tags' => $package->type === PackageType::Docker
+                ? $package->ociTags()->with('manifest')->orderByDesc('updated_at')->orderByDesc('name')->get()
+                    ->map(fn (OciTag $t): array => [
+                        'name' => $t->name,
+                        'digest' => $t->manifest?->digest,
+                        'updated_at' => $t->updated_at?->diffForHumans(),
+                    ])->values()
+                : collect(),
             'install' => $install,
             // Whether this registry still serves the package. The page replaces the install
             // snippet with the explanation when it does not — offering a command that
@@ -302,10 +323,22 @@ class RegistryController extends Controller
      * writes a version row, so `$package->versions` is empty for every Docker repository and
      * asking it would silently produce the untagged form for a repository that has tags.
      *
-     * Newest by `updated_at` — a tag row is touched every time the tag is re-pointed, so this
-     * is the tag most recently pushed. `name` descending only breaks a tie, so that two tags
-     * written in the same transaction still order deterministically instead of by insertion
-     * order.
+     * `latest` FIRST, if the repository has one, and not by convention. The command printed
+     * for a repository with no tags at all is `docker pull <host>/<repo>` — the untagged form,
+     * which Docker itself resolves as `:latest`. Naming a different tag for the repository
+     * next to it would have one page say `:latest` for one repository and `:1.4.0` for
+     * another, for no reason the reader can see. The previous ordering already picked `latest`
+     * by accident whenever two pushes landed in the same second (`'latest' > '1.4.0'` under
+     * `name` descending); this states it.
+     *
+     * Then newest `updated_at` — a tag row is touched every time the tag is RE-POINTED, at a
+     * different manifest. Deliberately not called "most recently pushed": `ManifestStore::put()`
+     * writes the tag with `OciTag::updateOrCreate(..., ['manifest_id' => …])`, so re-pushing a
+     * tag that already points at the same manifest changes no attribute and moves no timestamp.
+     *
+     * `name` descending last, so two tags sharing a timestamp to the second — the ordinary
+     * outcome of one `docker push` of a multi-tag build — still order deterministically rather
+     * than by insertion order.
      */
     private function newestTag(Package $package): ?string
     {
@@ -313,14 +346,20 @@ class RegistryController extends Controller
             return null;
         }
 
-        return $package->ociTags()->orderByDesc('updated_at')->orderByDesc('name')->value('name');
+        return $package->ociTags()
+            ->orderByRaw('case when name = ? then 0 else 1 end', ['latest'])
+            ->orderByDesc('updated_at')
+            ->orderByDesc('name')
+            ->value('name');
     }
 
     /**
      * The same answer for a whole page of rows, in ONE query rather than one per row.
      *
-     * Ascending, then `pluck` keyed by package: a later row overwrites an earlier one, so
-     * what survives per package is the last — the newest, by the ordering newestTag() states.
+     * Ascending, then `pluck` keyed by package: a later row overwrites an earlier one, so what
+     * survives per package is the LAST. Every clause is therefore the exact mirror of
+     * newestTag()'s — `latest` sorts last here rather than first, and `updated_at`/`name`
+     * ascend — so that the last row standing is the one that method would have returned.
      * Restricted to the Docker rows, so a registry without any runs no query worth the name.
      *
      * @param  EloquentCollection<int, Package>  $packages
@@ -336,6 +375,7 @@ class RegistryController extends Controller
 
         return OciTag::query()
             ->whereIn('package_id', $dockerIds)
+            ->orderByRaw('case when name = ? then 1 else 0 end', ['latest'])
             ->orderBy('updated_at')
             ->orderBy('name')
             ->pluck('name', 'package_id');

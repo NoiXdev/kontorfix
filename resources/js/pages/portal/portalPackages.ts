@@ -145,18 +145,23 @@ export function lapsedNote(): string {
 }
 
 /**
- * What a lapsed assignment means ON A PAGE THAT SHOWS ONE REGISTRY — `portal/Registry.vue` and
- * `portal/Package.vue`, both of which are addressed by a single registry and hold a
- * REGISTRY-LOCAL `in_force`.
+ * What a lapsed assignment means ON A PAGE THAT SHOWS ONE REGISTRY — `portal/Package.vue`,
+ * which is addressed by a single registry and holds a REGISTRY-LOCAL `in_force`.
  *
- * A third sentence rather than reuse of `lapsedNote()`, which those two pages first borrowed.
+ * The package LIST of that same registry does not print this. Its Installation column holds
+ * one short sentence instead (`portalInstall.ts`, installCellLapsedNote()): three sentences in
+ * a cell sized for a command would set the height of the row to repeat what the row's own
+ * `abgelaufen` badge already says. This one is the full explanation, for the page the reader
+ * arrives at when they want it.
+ *
+ * A sentence of its own rather than reuse of `lapsedNote()`, which that page first borrowed.
  * That note opens "von keiner der hier gezeigten Registries" — a claim about every registry the
  * landing page lists — and only the landing page can make it, because only there is `in_force`
  * derived across all of them (see the TWO ANSWERS paragraph at the top of this module). On
  * a registry page the same words are measurably false the moment a second registry still
  * serves the package, which is precisely the mixed case `partlyLapsedNote()` exists for. It
  * also ends "Die betroffenen Registries sind oben markiert", pointing at per-registry markers
- * neither of these two pages renders.
+ * the package page does not render.
  *
  * So this one speaks only about the registry the reader is looking at: "Diese Registry",
  * "Builds, die hier auflösen". It makes no claim about the others, because the page it renders

@@ -10,7 +10,16 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
-import { installCardTitle, installHeading, prerequisiteNote, readmeFallbackNote, setupLinkLabel, type PortalPackageType } from './portalInstall';
+import {
+    installCardTitle,
+    installHeading,
+    prerequisiteNote,
+    readmeFallbackNote,
+    setupLinkLabel,
+    versionsEmptyNote,
+    versionsHeading,
+    type PortalPackageType,
+} from './portalInstall';
 import { registryLapsedNote } from './portalPackages';
 
 interface Registry {
@@ -38,6 +47,30 @@ interface VersionRow {
     dependencies: Dependencies;
 }
 
+/**
+ * One tag of a Docker repository — what stands in this page's list where the other three types
+ * have versions.
+ *
+ * A repository has NO `package_versions` rows at all: the OCI push path writes an `oci_tags`
+ * row and nothing else. `versions` is therefore empty for every Docker repository, which is why
+ * this list used to say "Noch keine Versionen verfügbar." under a repository with tags in it.
+ *
+ * `digest` is the immutable name of what the tag points at, and it is here because it is the
+ * only thing on this page a customer can pin a deployment to — a tag is a mutable pointer and
+ * can be moved under them. Null only for a tag whose manifest row is missing, which the table
+ * renders as a dash rather than guessing.
+ */
+interface TagRow {
+    name: string;
+    digest: string | null;
+    /**
+     * When the tag last CHANGED — relative, from `oci_tags.updated_at`. Deliberately not
+     * labelled "gepusht": `ManifestStore::put()` writes the tag with `updateOrCreate`, so
+     * re-pushing a tag that still points at the same manifest moves no timestamp at all.
+     */
+    updated_at: string | null;
+}
+
 const props = defineProps<{
     registry: Registry;
     package: {
@@ -58,6 +91,10 @@ const props = defineProps<{
         abandonment_reason: string | null;
     };
     versions: VersionRow[];
+    // Empty for every type but Docker, and the list below renders it INSTEAD of `versions`
+    // there — see TagRow, and plate 4: "statt einer Versionsliste steht darunter die
+    // Tag-Tabelle".
+    tags: TagRow[];
     /**
      * The whole command, built by `SetupSnippetBuilder::installCommand()` from THIS registry's
      * address — never assembled in the browser, and never from the package type alone.
@@ -79,6 +116,11 @@ const props = defineProps<{
 }>();
 
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
+
+// Which list stands under the command: the tag table, or the version selector with its
+// dependency tree. One reading of the type, so the heading, the empty state and the table
+// cannot end up branching on three different conditions.
+const isDocker = computed(() => props.package.type === 'docker');
 
 // The registry page opens on its Einrichtung tab, so its own address IS the setup address —
 // the prerequisite link needs no tab parameter, and inventing one would be a second way to
@@ -195,25 +237,69 @@ function depCount(deps: Record<string, string>): number {
                         <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ props.install }}</pre>
                     </div>
                 </template>
-                <!-- The command REPLACES nothing else on the page: the readme, the versions and
-                     the dependency tree stay, because they are what the customer came to check
-                     against. Only the one element that would not work is withheld — a snippet
+                <!-- The command REPLACES nothing else on the page: the readme, and the list
+                     under it (versions, or a Docker repository's tags), stay — they are what
+                     the customer came to check against. Only the one element that would not work is withheld — a snippet
                      that answers 404 is worse than none. The single-registry sentence, from
                      the tested module: this page knows only the registry it is addressed by,
-                     and the landing page's note claims none of them serve it. -->
-                <div v-else class="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
+                     and the landing page's note claims none of them serve it.
+
+                     `v-else-if`, not `v-else`, and the missing third branch is deliberate: an
+                     in-force assignment whose command is nevertheless null renders NOTHING here.
+                     It cannot happen today (installCommand() answers for every type), but the
+                     branch this used to fall into printed "Diese Registry liefert das Paket
+                     nicht mehr aus." over an assignment that is in force — a false statement
+                     about the one fact the section is there to convey. -->
+                <div v-else-if="!props.in_force" class="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm">
                     {{ registryLapsedNote() }}
                 </div>
             </section>
 
             <section class="flex flex-col gap-4">
-                <h2 class="text-lg font-medium">Versionen</h2>
+                <h2 class="text-lg font-medium">{{ versionsHeading(props.package.type) }}</h2>
+
+                <!-- A DOCKER REPOSITORY GETS ITS TAGS HERE, not a version list. It has no
+                     `package_versions` rows at all — an OCI push writes none — so this section
+                     was unbranched while `readmeFallbackNote()` above it was already type-aware,
+                     and it told the reader "Noch keine Versionen verfügbar." under every
+                     repository on the instance, however many tags it held. Plate 4: "statt einer
+                     Versionsliste steht darunter die Tag-Tabelle". -->
+                <div v-if="isDocker" class="overflow-x-auto rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                    <table class="w-full text-left text-sm">
+                        <thead class="border-b border-sidebar-border/70 bg-muted/50 dark:border-sidebar-border">
+                            <tr>
+                                <th class="px-4 py-3 font-medium">Tag</th>
+                                <th class="px-4 py-3 font-medium">Digest</th>
+                                <!-- "Aktualisiert", not "Gepusht": the column is `updated_at`,
+                                     and re-pushing a tag onto the manifest it already names
+                                     writes nothing and moves no timestamp. -->
+                                <th class="px-4 py-3 font-medium">Aktualisiert</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="tag in props.tags"
+                                :key="tag.name"
+                                class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
+                            >
+                                <td class="px-4 py-3 font-mono">{{ tag.name }}</td>
+                                <td class="px-4 py-3 font-mono text-xs break-all text-muted-foreground">{{ tag.digest ?? '—' }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ tag.updated_at ?? '—' }}</td>
+                            </tr>
+                            <tr v-if="props.tags.length === 0">
+                                <td colspan="3" class="px-4 py-8 text-center text-muted-foreground">
+                                    {{ versionsEmptyNote(props.package.type) }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
 
                 <div
-                    v-if="props.versions.length === 0"
+                    v-else-if="props.versions.length === 0"
                     class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
                 >
-                    Noch keine Versionen verfügbar.
+                    {{ versionsEmptyNote(props.package.type) }}
                 </div>
 
                 <template v-else>
