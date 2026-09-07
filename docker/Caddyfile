@@ -6,10 +6,7 @@
 # :8080` command: `php-server` has no way to configure any body-size limit at all, and
 # without one, PHP's own `post_max_size` is the only backstop — but that value has to be
 # effectively unlimited (see docker/php.ini) because a single OCI image layer legitimately
-# exceeds any sane fixed cap by a wide margin (Task 7's 500 MiB gate). Left with no limit
-# in front of it, an anonymous multipart POST to any unauthenticated route (`/login`,
-# `/forgot-password`, `/setup`) could make PHP buffer an arbitrarily large body onto disk
-# before Laravel is ever reachable to reject it on CSRF.
+# exceeds any sane fixed cap by a wide margin (Task 7's 500 MiB gate).
 #
 # What this does NOT use, and why: Caddy's own `request_body { max_size ... }` directive
 # looks like the obvious fit, but it does not protect a route handled by FrankenPHP's own
@@ -20,48 +17,70 @@
 # all, an oversized request still got a 200, because `request_body`'s `max_size` is a LAZY
 # check (Go's `http.MaxBytesReader`): it only errors once something actually reads past the
 # limit, and produces no rejection at all if nothing reads that far or if the reader it
-# wrapped is never the one the eventual handler reads through. Caddy's own directive
-# documentation does not warn that php_server is one of those cases, so this is recorded
-# here rather than assumed away the next time someone considers reaching for it again.
+# wrapped is never the one the eventual handler reads through.
 #
-# What IS used instead: three preflight checks, all answered by `respond` before any
-# handler — PHP included — ever touches the connection:
+# What IS used, and its one confirmed hole: a preflight check on the declared
+# `Content-Length` header — answered by `respond` before any handler, PHP included, ever
+# touches the connection — refuses a POST/PUT/PATCH outside `/v2/*` whose declared length
+# exceeds 256 MiB (see `@oversized` below). This is real admission control, not a lazy
+# reader: confirmed with the same probe used to rule out `request_body` above, a rejection
+# happens with zero bytes of the body consumed. The cap sits ABOVE every application-level
+# upload limit this instance configures (`config/kontorfix.php`'s `npm_max_tarball_bytes` =
+# 100 MiB, `python_max_dist_bytes` = 200 MiB — and matches `upload_max_filesize` in
+# docker/php.ini) on purpose: this exists to stop an absurd body from reaching PHP at all,
+# not to enforce the real per-ecosystem limits, which belong to the application and come
+# with a proper JSON error body — a bare 413 from Caddy has none.
 #
-#   - A POST/PUT/PATCH declaring `Transfer-Encoding: chunked` outside `/v2/*` is refused
-#     with 411. A request with NO Content-Length and NO chunked encoding — a genuinely
-#     bodyless POST, e.g. `POST /packages/{id}/resync` per docs/rest-api.md, which sends
-#     neither header at all — is NOT refused: absent Content-Length is treated as length
-#     zero, not as "unknown length", so it passes straight through to `php_server`. Only a
-#     chunked body has a genuinely unbounded, undeclared size; that is what this rule
-#     exists to stop, not the ordinary shape of a bodyless request.
-#   - A POST/PUT/PATCH outside `/v2/*` whose declared `Content-Length` exceeds the cap is
-#     refused with 413. The cap (256 MiB) sits ABOVE every application-level upload limit
-#     this instance configures (`config/kontorfix.php`'s `npm_max_tarball_bytes` = 100 MiB,
-#     `python_max_dist_bytes` = 200 MiB — and matches `upload_max_filesize` in
-#     docker/php.ini) on purpose: this gate exists to stop an absurdly large body from
-#     reaching PHP at all, not to enforce the real per-ecosystem limits, which belong to
-#     the application and come with a proper JSON error body — a bare 413 from Caddy has
-#     none. Getting this backwards (a cap BELOW an application limit) would mean Caddy
-#     silently pre-empts Laravel's own configured ceiling with a worse, contentless error;
-#     confirmed this is wrong the first time by having it happen to a 40 MiB npm publish.
-#   - A POST/PUT/PATCH under `/v2/*` whose Content-Type starts with `multipart/form-data`
-#     is refused with 415. An OCI blob or manifest is never sent as a multipart body — the
-#     distribution spec always uses a raw `application/octet-stream`/JSON payload — so this
-#     costs nothing real, and it closes the one gap the routes-registry.php exemption below
-#     otherwise leaves open: `registry.auth` (the token check) runs inside Laravel, after
-#     PHP has already read the body, so an ANONYMOUS multipart POST to
-#     `/v2/x/blobs/uploads/` would otherwise still make PHP buffer it to `/tmp` (bounded by
-#     `max_file_uploads` × `upload_max_filesize`, not unbounded, but still pre-auth) before
-#     ever being rejected.
+# `Content-Length` is the one signal a preflight check has, and a CHUNKED body declares no
+# length at all — this file previously carried a second rule trying to catch that case by
+# checking `{http.request.header.Transfer-Encoding}` for a chunked request. That rule could
+# never fire: Go's `net/http` server strips `Transfer-Encoding` from the parsed request's
+# header map once it has consumed the chunked framing, so the placeholder is always empty
+# by the time Caddy evaluates it — confirmed by sending a real chunked request over a raw
+# socket (not curl's own framing) and reading back what both a Caddy `respond` template and
+# PHP's own `$_SERVER` saw: neither ever contains it. Checked every registered Caddy
+# matcher module (`frankenphp list-modules | grep http.matchers`) for anything else that
+# might expose it — `client_ip`, `expression`, `file`, `header`, `header_regexp`, `host`,
+# `method`, `not`, `path`, `path_regexp`, `protocol`, `query`, `remote_ip`, `tls`, `vars`,
+# `vars_regexp` — none of them read anything but the same stripped header map or metadata
+# unrelated to transfer encoding. There is no Caddyfile-level way to detect a chunked body.
+# The rule was removed rather than left in place looking like protection it cannot provide.
 #
-# This is real admission control, not a lazy reader: confirmed with the identical probe
-# used to rule out `request_body` above, a rejection happens with zero bytes of the body
-# consumed and without ever invoking `php_server`. The one thing none of this can stop is a
-# client that declares an honest, small `Content-Length` and then sends more bytes than it
-# claimed — Go's HTTP server itself does not enforce that mismatch, so a truly adversarial
-# client could still attempt it; php.ini's `post_max_size = 0` no longer being the only
-# backstop for the ordinary case is what this file is for, not a claim that it closes every
-# conceivable variant.
+# What actually bounds an undeclared-length (chunked) body, verified against this image
+# rather than assumed, is PHP itself — NOT `post_max_size`, which was confirmed by the same
+# probes to only ever produce a warning for method POST and nothing at all for PUT/PATCH,
+# never truncating the read either way:
+#
+#   - `multipart/form-data` (the one real anonymous-adjacent upload shape in this app,
+#     twine's wheel/sdist) is parsed by PHP's own C multipart parser, which enforces
+#     `upload_max_filesize` DURING parsing regardless of chunking — confirmed by sending a
+#     30 MiB chunked multipart file against a 20 MiB cap and observing `$_FILES` report
+#     `UPLOAD_ERR_INI_SIZE`, size 0, nothing ever written to a temp file. `max_file_uploads`
+#     (docker/php.ini) is pinned to 1 for the same reason: nothing in this app sends more
+#     than one file per request, so there is no reason to let a client multiply that
+#     per-file cap by twenty.
+#   - `application/x-www-form-urlencoded` (a real login form's actual shape) is parsed into
+#     `$_POST` unconditionally during PHP's request bootstrap, before any Laravel code
+#     runs, chunked or not — confirmed by sending a 500 MiB chunked urlencoded body to a
+#     route that never once reads `$_POST` and getting a clean PHP Fatal (`Allowed memory
+#     size ... exhausted`) at exactly `memory_limit`, not at any post_max_size-related
+#     boundary. `memory_limit` is what actually bounds this, and docker/php.ini now pins it
+#     explicitly rather than leaving it at whatever the base image happens to compile in.
+#   - Any OTHER content type (raw JSON, `application/octet-stream`, …) is never read by PHP
+#     at all unless application code explicitly asks for it — confirmed by sending a 500
+#     MiB chunked body of such a type to a route that touches neither `$_POST` nor
+#     `php://input` and getting an instant, clean response; the bytes are never buffered
+#     anywhere. Under `/v2/*`, every controller action calls `ociWritableRepository()` /
+#     `ociRepository()` — which throws for an anonymous or invalid token — BEFORE it ever
+#     reads the request body, so an anonymous, non-multipart push never reaches the point
+#     where anything would read it either.
+#
+# `@ociMultipart` below closes the one gap that ordering does not: PHP's multipart parser
+# runs during request bootstrap, before `registry.auth` (a Laravel middleware) gets a
+# chance to run at all — so an anonymous multipart POST under `/v2/*` would otherwise still
+# make PHP write to a temp file pre-auth. An OCI blob or manifest is never sent as
+# multipart (the distribution spec always uses raw `application/octet-stream`/JSON), so
+# refusing that content type there costs nothing real.
 {
 	skip_install_trust
 
@@ -80,33 +99,22 @@
 
 	{$CADDY_SERVER_EXTRA_DIRECTIVES}
 
-	# `path_regexp`, not the bare `path` matcher, everywhere `/v2/` is excluded below:
-	# Caddy's `path` matcher is case-insensitive, so `path /v2/*` would let a request to
-	# `/V2/foo` slip past every rule here — it matches no Laravel route (routes/registry.php
-	# registers the lowercase form only), but it is a free bypass of the caps this file
-	# exists to enforce, for zero legitimate reason to allow it. `^/v2/` is anchored and
-	# case-sensitive by default (Go regex, no `(?i)` flag).
+	# `path_regexp`, not the bare `path` matcher, for every `/v2/` exclusion below: Caddy's
+	# `path` matcher is case-insensitive, so `path /v2/*` would let a request to `/V2/foo`
+	# skip both rules here — it matches no Laravel route (routes/registry.php registers the
+	# lowercase form only), but it is a free bypass of caps that exist for a reason.
+	# `^/v2/` is anchored and case-sensitive by default (Go regex, no `(?i)` flag).
 	#
 	# Scoped to POST/PUT/PATCH: a GET or HEAD (the healthcheck's `/up` among them) has no
-	# body and legitimately carries no Content-Length at all. Caught twice while verifying
-	# this file, not hypothetically:
-	#
-	#   1. A bare `method POST PUT PATCH` line as its own matcher key, sitting alongside an
-	#      `expression` key in the same matcher set, took `/up` down anyway — with a 500,
-	#      not even a clean 411. Caddy's matcher set does not short-circuit across matcher
-	#      TYPES: the `expression` matcher still gets evaluated for a GET with no
-	#      Content-Length, `int("")` panics inside CEL, and that panic surfaces as a 500
-	#      before "the method matcher would have said no" ever gets consulted.
-	#   2. Folding the method check into a leading `&&` term of the SAME expression (below)
-	#      is what actually fixes it: CEL's `&&` is specified to short-circuit, unlike
-	#      Caddy's own cross-matcher-type AND, so `int(...)` is never reached for a method
-	#      this rule was never meant to look at in the first place.
-	@chunkedBody {
-		not path_regexp ^/v2/
-		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Transfer-Encoding} != ""
-	}
-	respond @chunkedBody 411
-
+	# body and legitimately carries no Content-Length at all. Caught while verifying this
+	# file, not hypothetically: a bare `method POST PUT PATCH` line as its own matcher key,
+	# sitting alongside an `expression` key in the same matcher set, took `/up` down anyway
+	# — with a 500, not even a clean pass-through. Caddy's matcher set does not short-circuit
+	# across matcher TYPES: the `expression` matcher still gets evaluated for a GET with no
+	# Content-Length, `int("")` panics inside CEL, and that panic surfaces as a 500 before
+	# "the method matcher would have said no" ever gets consulted. Folding the method check
+	# into a leading `&&` term of the SAME expression (below) is what actually fixes it:
+	# CEL's `&&` is specified to short-circuit, unlike Caddy's own cross-matcher-type AND.
 	@oversized {
 		not path_regexp ^/v2/
 		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 268435456
