@@ -27,6 +27,9 @@ class ManifestController extends Controller
 {
     use ResolvesOciRepository;
 
+    /** See readManifestBody() for why this exists and why it is 4 MiB. */
+    private const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+
     public function __construct(
         private readonly RegistryAccessService $access,
         private readonly ManifestStore $manifests,
@@ -85,12 +88,61 @@ class ManifestController extends Controller
             throw OciException::unsupported('Der Content-Type ist zu lang.');
         }
 
-        $manifest = $this->manifests->put($package, $reference, $request->getContent(), $mediaType);
+        $manifest = $this->manifests->put($package, $reference, $this->readManifestBody($request), $mediaType);
 
         return response('', 201, [
             'Docker-Content-Digest' => $manifest->digest,
             'Location' => "/v2/{$name}/manifests/{$manifest->digest}",
         ]);
+    }
+
+    /**
+     * The manifest body, with the ONLY ceiling that stands between a `PUT .../manifests/`
+     * and `memory_limit`.
+     *
+     * Nothing else bounds it. `/v2/*` is deliberately exempt from Laravel's own
+     * post-size guard (App\Http\Middleware\ValidatePostSize — a blob legitimately exceeds
+     * `post_max_size` by design), `post_max_size` itself never gates a body application
+     * code reads for itself, and docker/Caddyfile's `@oversized` rule exempts `/v2/*`
+     * outright. The blob endpoints need exactly that freedom and are safe with it because
+     * they STREAM: `BlobStore::append()` takes a resource and never holds the payload. This
+     * one does not — a manifest has to be hashed and stored whole — so a plain
+     * `$request->getContent()` here was an unbounded read into a single PHP string,
+     * reachable by any publish token, bounded by nothing but the process's memory.
+     *
+     * 4 MiB is the same ceiling Docker's own registry applies, and it is three orders of
+     * magnitude above what a real manifest costs: an image manifest naming a hundred layers
+     * is a few kilobytes, and an index naming a dozen platforms is smaller still.
+     *
+     * Read as a STREAM with an explicit cap rather than checked against `Content-Length`:
+     * a chunked body carries no `Content-Length` at all (see docker/php.ini on why nothing
+     * upstream can see one either), so a header check alone would leave the one shape that
+     * cannot be refused earlier as the one shape that is not refused here. The declared
+     * length is still checked first, purely so an oversized declared body is refused before
+     * a single byte of it is read.
+     */
+    private function readManifestBody(Request $request): string
+    {
+        $declared = $request->headers->get('Content-Length');
+
+        if ($declared !== null && ctype_digit($declared) && (int) $declared > self::MAX_MANIFEST_BYTES) {
+            throw OciException::manifestTooLarge(self::MAX_MANIFEST_BYTES);
+        }
+
+        $stream = $request->getContent(asResource: true);
+
+        // One byte past the ceiling, so "exactly at the limit" and "over it" stay
+        // distinguishable — reading only MAX_MANIFEST_BYTES would silently truncate an
+        // oversized body into an accepted one whose digest then disagrees with the client's.
+        $payload = is_resource($stream)
+            ? (string) stream_get_contents($stream, self::MAX_MANIFEST_BYTES + 1)
+            : '';
+
+        if (strlen($payload) > self::MAX_MANIFEST_BYTES) {
+            throw OciException::manifestTooLarge(self::MAX_MANIFEST_BYTES);
+        }
+
+        return $payload;
     }
 
     /**

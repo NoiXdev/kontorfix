@@ -356,3 +356,54 @@ it('does not leak, or allow deleting, another repository\'s manifest by digest',
         ->get("http://images.test/v2/app/manifests/{$digest}")
         ->assertOk();
 });
+
+it('refuses a manifest above the size ceiling and stores nothing', function () {
+    // The ONLY ceiling between a manifest PUT and memory_limit. `/v2/*` is deliberately
+    // exempt from Laravel's post-size guard (a blob legitimately exceeds post_max_size),
+    // post_max_size never gates a body application code reads itself, and Caddy's
+    // @oversized rule exempts /v2/* outright — so a plain getContent() here was an
+    // unbounded read into one PHP string, reachable by any publish token.
+    $payload = '{"schemaVersion":2,"pad":"'.str_repeat('x', 4 * 1024 * 1024).'"}';
+
+    pushManifest($this->publish, '1.0', $payload)
+        ->assertStatus(413)
+        ->assertJsonPath('errors.0.code', 'MANIFEST_INVALID');
+
+    // Both halves: the refusal AND that nothing was written. A ceiling that rejects the
+    // response while the row lands anyway is not a ceiling.
+    expect(OciManifest::count())->toBe(0)
+        ->and(OciTag::count())->toBe(0);
+});
+
+it('refuses an oversized DECLARED length before reading a byte of the body', function () {
+    // The cheap half of the guard: a Content-Length above the ceiling is refused up front,
+    // so an oversized declared body never reaches the stream read at all. Proven by sending
+    // a TINY body under a lying header — if the header were ignored and only the read
+    // counted, this request would be accepted.
+    $payload = '{"schemaVersion":2,"layers":[]}';
+
+    test()->withServerVariables($this->publish + [
+        'CONTENT_TYPE' => 'application/vnd.oci.image.manifest.v1+json',
+        'CONTENT_LENGTH' => (string) (100 * 1024 * 1024),
+    ])->call('PUT', 'http://images.test/v2/app/manifests/1.0', content: $payload)
+        ->assertStatus(413)
+        ->assertJsonPath('errors.0.code', 'MANIFEST_INVALID');
+
+    expect(OciManifest::count())->toBe(0);
+});
+
+it('still accepts a manifest at exactly the ceiling', function () {
+    // The boundary itself, in the accepting direction — `> MAX` and `>= MAX` differ by
+    // exactly this case, and without it the ceiling could silently become one byte tighter
+    // than it documents. The payload is padded to 4 MiB on the nose.
+    $prefix = '{"schemaVersion":2,"pad":"';
+    $suffix = '"}';
+    $pad = str_repeat('x', 4 * 1024 * 1024 - strlen($prefix) - strlen($suffix));
+    $payload = $prefix.$pad.$suffix;
+
+    expect(strlen($payload))->toBe(4 * 1024 * 1024);
+
+    pushManifest($this->publish, '1.0', $payload)->assertStatus(201);
+
+    expect(OciManifest::sole()->size)->toBe(4 * 1024 * 1024);
+});

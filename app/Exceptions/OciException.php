@@ -66,6 +66,19 @@ final class OciException extends Exception
         return new self(400, 'DIGEST_INVALID', "Der hochgeladene Inhalt ergibt {$actual}, angekündigt war {$expected}.");
     }
 
+    /**
+     * A manifest body above ManifestController's own ceiling.
+     *
+     * 413 rather than 400: the request is well-formed and the caller is entitled to make
+     * it — only its size is refused — and 413 is the one status a client can act on
+     * without parsing the body. MANIFEST_INVALID is the OCI-registered code for a manifest
+     * this registry will not accept; the spec defines no code for "too large".
+     */
+    public static function manifestTooLarge(int $limit): self
+    {
+        return new self(413, 'MANIFEST_INVALID', "Das Manifest überschreitet die Obergrenze von {$limit} Bytes.");
+    }
+
     public static function unsupported(string $message): self
     {
         return new self(400, 'UNSUPPORTED', $message);
