@@ -23,7 +23,11 @@ it('has no git manifest file for docker, and says so with null', function () {
 
 it('gives docker an install hint that names the registry host placeholder', function () {
     expect(PackageType::Docker->installHint('meinapp'))->toContain('docker pull')
-        ->and(PackageType::Docker->installHint('meinapp'))->toContain('meinapp');
+        ->and(PackageType::Docker->installHint('meinapp'))->toContain('meinapp')
+        // The test's own name promises this: no host is known yet (the second parameter
+        // is omitted here), so the hint must name the `<registry-host>` placeholder
+        // instead of silently omitting the host segment or leaving it blank.
+        ->and(PackageType::Docker->installHint('meinapp'))->toContain('<registry-host>');
 });
 
 it('uses a real host in the docker install hint once one is known', function () {

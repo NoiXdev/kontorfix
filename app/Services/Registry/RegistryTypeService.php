@@ -7,9 +7,9 @@ use App\Models\Organization;
 use App\Models\SystemSetting;
 
 /**
- * Resolves which registry types (composer/npm/python) are active. The system setting is
- * the instance-wide ceiling; an organization may only restrict further within it (never
- * enable a type the instance has switched off).
+ * Resolves which registry types (composer/npm/python/docker) are active. The system
+ * setting is the instance-wide ceiling; an organization may only restrict further within
+ * it (never enable a type the instance has switched off).
  */
 class RegistryTypeService
 {

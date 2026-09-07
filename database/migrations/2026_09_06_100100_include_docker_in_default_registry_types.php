@@ -8,8 +8,9 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * `PackageType::Docker` (2026_09_02_?) added a fourth registry type, but the global
-     * ceiling this settings row governs (RegistryTypeService::globalTypes()) kept its old
+     * `PackageType::Docker` (added directly on the enum, not via its own migration — see
+     * `app/Enums/PackageType.php`) added a fourth registry type, but the global ceiling
+     * this settings row governs (RegistryTypeService::globalTypes()) kept its old
      * three-type default — so no organization could ever enable Docker, however it set its
      * own `enabled_registry_types`, since RegistryTypeService::effectiveFor() intersects an
      * org's choice with this ceiling.
