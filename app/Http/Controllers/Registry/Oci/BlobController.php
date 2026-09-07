@@ -180,19 +180,38 @@ class BlobController extends Controller
         // THE ONE EXCEPTION is the push shortcut: a client asks `HEAD .../blobs/<digest>`
         // to find out whether a layer is already here BEFORE it uploads it, and therefore
         // long before any manifest of this repository names it (see BlobUploadTest's
-        // "reports an existing blob by digest"). That caller always holds a PUBLISH token
-        // for this group — it is about to write — and a caller who may write into this
-        // organization's registry learns nothing from an existence probe it could not learn
-        // by pushing. So the exception is scoped to that ability rather than to the method:
-        // a HEAD from a read token is answered by the same rule as its GET, which is what
-        // keeps the two from disagreeing about what exists.
+        // "reports an existing blob by digest"). Such a caller is about to write, and a
+        // caller who may write into THIS organization's registry learns nothing from an
+        // existence probe it could not learn by pushing. So the exception is scoped to that
+        // ability rather than to the method: a HEAD from a read token is answered by the
+        // same rule as its GET, which is what keeps the two from disagreeing about what
+        // exists.
+        //
+        // "MAY WRITE" IS TWO CONDITIONS, NOT ONE, and stating only the second reopened the
+        // very leak the paragraph above closed. The bucket this method reads from is
+        // `$package->organization_id`; canPublishToGroup() answers about $group, the
+        // registry the caller ADDRESSED. For an ordinary repository those are the same
+        // organization. For a SHARED one they are not: the package belongs to the operator,
+        // the group to the customer — so an ordinary customer publish token satisfied
+        // canPublishToGroup() and was then served any blob the OPERATOR organization had
+        // ever stored, from any repository, shared or not. Confirmed live: 200 with the
+        // operator's private, manifested layer in the body.
+        //
+        // The organization comparison is therefore not a belt-and-braces addition, it is
+        // the half that makes "about to write" true. And on a shared repository the
+        // shortcut has no legitimate use to lose: ociWritableRepository() refuses every
+        // write to a shared package (sharing hands out reads, never writes), so a publish
+        // token addressing one is never about to write anything. Pinned by
+        // SharedRepositoryTenancyTest's PUBLISH-token case beside its read-token one.
         //
         // The cross-repository MOUNT feature (§3) needs no exception here at all: it is a
         // POST to `.../blobs/uploads/?mount=&from=`, handled by mountFrom() above, and never
         // reaches this method.
         /** @var RegistryToken|null $token */
         $token = $request->attributes->get('registryToken');
-        $mayPublish = $token !== null && $this->access->canPublishToGroup($token, $group);
+        $mayPublish = $token !== null
+            && $package->organization_id === $group->organization_id
+            && $this->access->canPublishToGroup($token, $group);
 
         if (! $mayPublish && ! $this->referencedByPackage($package, $digest)) {
             throw OciException::blobUnknown($digest);

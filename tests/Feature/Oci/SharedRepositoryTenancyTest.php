@@ -156,10 +156,10 @@ it('does not let a shared-repository read token pull a blob from an unshared sib
         ->call('POST', "http://operator.test/v2/private-app/blobs/uploads/?digest={$digest}", content: $bytes)
         ->assertStatus(201);
     // Reference it from a manifest too, so this is not merely testing the "not yet
-    // manifested" grace window (see BlobController::show()'s own comment on why the
-    // shared-package check only applies to shared packages) — the digest genuinely
-    // belongs to private-app's own content, manifested there, never anywhere the
-    // customer's registry serves.
+    // manifested" grace window (see BlobController::show()'s own comment on the push
+    // shortcut, the one exception to "the digest must be one THIS repository's manifests
+    // name") — the digest genuinely belongs to private-app's own content, manifested
+    // there, never anywhere the customer's registry serves.
     $manifest = json_encode(['schemaVersion' => 2, 'mediaType' => 'application/vnd.oci.image.manifest.v1+json', 'layers' => [['mediaType' => 'application/vnd.oci.image.layer.v1.tar', 'digest' => $digest, 'size' => strlen($bytes)]]]);
     $this->withServerVariables($operatorPublish)
         ->call('PUT', 'http://operator.test/v2/private-app/manifests/latest', content: $manifest)
@@ -175,6 +175,49 @@ it('does not let a shared-repository read token pull a blob from an unshared sib
         ->assertJsonPath('errors.0.code', 'BLOB_UNKNOWN');
 
     $this->withServerVariables($this->customerRead)
+        ->call('HEAD', "http://customer.test/v2/shared-base/blobs/{$digest}")
+        ->assertStatus(404);
+});
+
+it('does not let a shared-repository PUBLISH token pull a blob from an unshared sibling repository', function () {
+    // The SAME leak as the case above, through the one door that case leaves shut: the
+    // blob gate's push shortcut. It skips the "this repository's own manifests must name
+    // the digest" check for a caller who may publish into the addressed GROUP — the
+    // customer's own group here — while the blob bucket the digest is then looked up in
+    // is `$package->organization_id`, the OPERATOR's. The two are different organizations
+    // for a shared repository, so an ordinary customer publish token walked straight past
+    // the check and was served the operator's private layer, 200 OK.
+    //
+    // The shortcut has no legitimate use here at all: ociWritableRepository() refuses
+    // every write to a shared repository (the three cases at the top of this file), so
+    // a publish token addressing `shared-base` is never "about to write" — the premise
+    // the exception rests on.
+    $private = Package::factory()->for($this->operatorOrg)->create(['type' => PackageType::Docker, 'name' => 'private-app']);
+    $this->operatorGroup->packages()->attach($private);
+
+    $bytes = random_bytes(128);
+    $digest = Digest::of($bytes);
+    $operatorPublish = tenancyAuthServerVars($this->operatorGroup, TokenAbility::Publish);
+    $this->withServerVariables($operatorPublish)
+        ->call('POST', "http://operator.test/v2/private-app/blobs/uploads/?digest={$digest}", content: $bytes)
+        ->assertStatus(201);
+    $manifest = json_encode(['schemaVersion' => 2, 'mediaType' => 'application/vnd.oci.image.manifest.v1+json', 'layers' => [['mediaType' => 'application/vnd.oci.image.layer.v1.tar', 'digest' => $digest, 'size' => strlen($bytes)]]]);
+    $this->withServerVariables($operatorPublish)
+        ->call('PUT', 'http://operator.test/v2/private-app/manifests/latest', content: $manifest)
+        ->assertStatus(201);
+
+    $response = $this->withServerVariables($this->customerPublish)
+        ->call('GET', "http://customer.test/v2/shared-base/blobs/{$digest}")
+        ->assertStatus(404);
+
+    $response->assertJsonPath('errors.0.code', 'BLOB_UNKNOWN');
+
+    // The status alone would also be satisfied by a 404 that still streamed a body, so
+    // what actually has to be asserted is that no byte of the operator's layer left this
+    // application.
+    expect((string) $response->getContent())->not->toContain($bytes);
+
+    $this->withServerVariables($this->customerPublish)
         ->call('HEAD', "http://customer.test/v2/shared-base/blobs/{$digest}")
         ->assertStatus(404);
 });
