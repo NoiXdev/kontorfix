@@ -6,6 +6,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { OCI_AUTO_CREATE_LABEL } from '@/pages/admin/ociAutoCreate';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Trash2 } from 'lucide-vue-next';
@@ -382,7 +383,7 @@ function detachMember(userId: string) {
                     <InputError :message="settingsForm.errors.portal_enabled" />
 
                     <div class="flex flex-col gap-1.5">
-                        <span class="text-sm font-medium">Repositories beim Push anlegen</span>
+                        <span class="text-sm font-medium">{{ OCI_AUTO_CREATE_LABEL }}</span>
                         <p class="text-sm text-muted-foreground">
                             Ob ein <code>docker push</code> auf einen unbekannten Namen das Repository dieser Organisation anlegt. „Erben“ übernimmt
                             die Systemeinstellung (aktuell: <strong>{{ props.ociAutoCreate.global ? 'an' : 'aus' }}</strong

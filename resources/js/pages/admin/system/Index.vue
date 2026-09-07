@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { OCI_AUTO_CREATE_COST, OCI_AUTO_CREATE_LABEL } from '@/pages/admin/ociAutoCreate';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Database, Mail } from 'lucide-vue-next';
@@ -15,8 +16,8 @@ const props = defineProps<{
         registration_enabled: boolean;
         enabled_registry_types: string[];
         shared_package_role: string;
-        // The instance-wide ceiling for „Repositories beim Push anlegen“. An organization
-        // may only narrow within it, never switch on what this switches off.
+        // The instance-wide ceiling for OCI_AUTO_CREATE_LABEL. An organization may only
+        // narrow within it, never switch on what this switches off.
         oci_auto_create_repositories: boolean;
     };
     registryTypes: string[];
@@ -95,13 +96,14 @@ function save() {
                     <label class="flex items-start gap-2 text-sm">
                         <Switch v-model="form.oci_auto_create_repositories" class="mt-1" />
                         <span>
-                            Repositories beim Push anlegen
+                            {{ OCI_AUTO_CREATE_LABEL }}
                             <span class="block text-xs text-muted-foreground">
                                 Aus (Standard): Ein <code class="font-mono">docker push</code> auf einen unbekannten Namen wird mit
                                 <code class="font-mono">NAME_UNKNOWN</code> abgelehnt — das Repository muss vorher in der Verwaltung angelegt werden.
                                 An: Der Push legt das Repository in der adressierten Organisation an. Namen, die bereits einer anderen Organisation
                                 gehören, werden weiterhin abgelehnt.
                             </span>
+                            <span class="mt-1 block text-xs text-muted-foreground">{{ OCI_AUTO_CREATE_COST }}</span>
                         </span>
                     </label>
                     <InputError :message="form.errors.oci_auto_create_repositories" />
