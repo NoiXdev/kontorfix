@@ -84,6 +84,12 @@ class ResolveOciContext
         // (NAME_UNKNOWN). The two unresolved lookups below are plain 404s for the same
         // reason — an `errors[]` envelope there would confirm which half of the address was
         // the real one.
+        //
+        // BOTH halves of "three" are pinned, in PathAddressingTest: one segment (`meinapp`,
+        // which names no registry) and two (`3b/intern`, which names a real registry and no
+        // repository at all). The second is what a `< 2` mutant survives on — it would accept
+        // the address, rewrite `{name}` to the empty string, and answer NAME_UNKNOWN with a
+        // body, confirming both slugs to a caller who only guessed at them.
         abort_if(count($segments) < 3, 404);
 
         [$orgSlug, $groupSlug] = [array_shift($segments), array_shift($segments)];

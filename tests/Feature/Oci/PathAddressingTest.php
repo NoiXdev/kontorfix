@@ -186,6 +186,24 @@ it('answers a plain 404 when fewer than three segments were named on a non-domai
     expect($response->headers->get('Content-Type'))->toStartWith('text/html');
 });
 
+it('answers a plain 404 for a two-segment path even when both slugs resolve', function () {
+    // The OTHER half of "at least three segments", and the half the one-segment case above
+    // cannot reach: `3b/intern` names a real organization and a real registry and leaves NO
+    // repository name at all. Mutating ResolveOciContext's `count($segments) < 3` to `< 2`
+    // left every other OCI test green — the resolver would accept this, rewrite `{name}` to
+    // the empty string, and answer NAME_UNKNOWN with an `errors[]` envelope, confirming that
+    // `3b` and `intern` both exist to a caller who only guessed at them.
+    //
+    // So both halves are asserted: the status AND the absence of an OCI body, which is the
+    // whole distinction the plain 404 carries.
+    $response = $this->withServerVariables($this->read)
+        ->get(instanceAddress('/v2/3b/intern/manifests/1.0'))
+        ->assertNotFound();
+
+    expect($response->headers->get('Content-Type'))->toStartWith('text/html')
+        ->and((string) $response->getContent())->not->toContain('NAME_UNKNOWN');
+});
+
 it('refuses a foreign organization token exactly as domain mode does, and returns no bytes', function () {
     // Tenancy is unchanged by construction — both modes resolve to the same Group and every
     // existing check runs on it untouched — and this says so out loud, by asking the same
@@ -221,6 +239,37 @@ it('leaves a domain-addressed repository name whole and never splits it', functi
         ->get('http://images.test/v2/meinapp/manifests/1.0')
         ->assertOk()
         ->assertHeader('Docker-Content-Digest', $digest);
+});
+
+it('names the repository in `tags/list` the way the caller addressed it', function () {
+    // `tags/list` is the one responder that hands a repository NAME back in its BODY rather
+    // than in a header, and it is answering in the caller's address space or it is answering
+    // about a repository the caller cannot address: on this host `meinapp` alone is a 404
+    // (fewer than three segments), so `{"name":"meinapp"}` describes nothing reachable.
+    //
+    // Nothing found this because `docker` never calls this endpoint at all — `crane ls` and
+    // `skopeo list-tags` do — so bin/e2e stays green either way.
+    seedManifest($this->repo, '1.0', $this->payload);
+    seedManifest($this->repo, '2.0', $this->payload.' ');
+
+    $this->withServerVariables($this->read)
+        ->get(instanceAddress('/v2/3b/intern/meinapp/tags/list'))
+        ->assertOk()
+        ->assertExactJson(['name' => '3b/intern/meinapp', 'tags' => ['1.0', '2.0']]);
+});
+
+it('keeps `tags/list` bare in domain mode, exactly as it was before path addressing', function () {
+    // The other half, so the fix cannot be a prefix pasted on unconditionally: on a registry
+    // domain the addressed name IS the bare name, and a client that asked for `meinapp` must
+    // read `meinapp` back.
+    Domain::create(['group_id' => $this->group->id, 'hostname' => 'images.test']);
+
+    seedManifest($this->repo, '1.0', $this->payload);
+
+    $this->withServerVariables($this->read)
+        ->get('http://images.test/v2/meinapp/tags/list')
+        ->assertOk()
+        ->assertExactJson(['name' => 'meinapp', 'tags' => ['1.0']]);
 });
 
 it('hands back an upload session at an address the caller can actually follow', function () {

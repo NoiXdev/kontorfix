@@ -172,7 +172,18 @@ class ManifestController extends Controller
         return response('', 202);
     }
 
-    /** GET /v2/{name}/tags/list */
+    /**
+     * GET /v2/{name}/tags/list — the one responder that hands a repository NAME back in a
+     * body rather than in a header, and therefore the one that has to state it in the
+     * CALLER's address space just as every `Location` does (ResolvesOciRepository::
+     * ociAddressedName(), which exists for exactly this reason).
+     *
+     * `{name}` arrives bare — that is what every lookup is against — so answering with it
+     * verbatim told a client that asked `/v2/3b/intern/meinapp/tags/list` that the
+     * repository is called `meinapp`, which on the instance host names nothing: it is fewer
+     * than three segments and a plain 404. `docker` never calls this endpoint, so bin/e2e
+     * stayed green through it; `crane ls` and `skopeo list-tags` do.
+     */
     public function tags(Request $request, string $name): JsonResponse
     {
         $group = $this->ociGroup($request);
@@ -181,7 +192,7 @@ class ManifestController extends Controller
         $names = OciTag::where('package_id', $package->id)->orderBy('name')->pluck('name');
 
         return response()->json([
-            'name' => $name,
+            'name' => $this->ociAddressedName($request, $name),
             'tags' => $names,
         ]);
     }
