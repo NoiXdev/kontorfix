@@ -58,13 +58,24 @@ services:
     # The base image (dunglas/frankenphp) bakes a HEALTHCHECK that curls the Caddy admin
     # API on :2019. That is correct for the `app` role but this container execs
     # `php artisan horizon` instead (docker/entrypoint.sh) and never listens there, so the
-    # inherited check fails forever — `docker compose up --wait` waits on every container
-    # with a healthcheck, not just ones another service depends on, and exits non-zero the
-    # moment one is unhealthy. Disabling it here doesn't hide a real failure: nothing in
-    # this stack gates on the worker being "healthy", and Horizon's own liveness is what
-    # the client tests exercise indirectly by waiting on sync results.
+    # inherited check would fail forever, and `docker compose up --wait` exits non-zero the
+    # moment any container is unhealthy.
+    #
+    # REPLACED rather than disabled, and that is a correction: `healthcheck: {disable: true}`
+    # works locally but makes `up --wait` fail on the GitHub Actions runner with
+    # "container ... has no healthcheck configured" — a Compose version difference that only
+    # surfaced the first time this workflow actually ran in CI. A check that is true for what
+    # this container does is portable; an absent one is not.
+    #
+    # Horizon writes its supervisor state to Redis, so `horizon:status` asks the real
+    # question — is the queue worker running and accepting work — rather than whether a
+    # process exists.
     healthcheck:
-      disable: true
+      test: ['CMD-SHELL', 'php artisan horizon:status | grep -q running']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
     # The same volume the app serves artifacts from — SyncPackage writes the git mirror
     # and the built dist here.
     volumes:
