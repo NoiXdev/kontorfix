@@ -1,6 +1,6 @@
 # A trimmed copy of the base FrankenPHP image's own /etc/frankenphp/Caddyfile (same
-# structure, same env-var hooks), with one addition: rejecting an oversized request body
-# BEFORE PHP ever sees it, for every route except the OCI registry.
+# structure, same env-var hooks), with rules that reject a request body before PHP ever
+# sees it, for every route except the OCI registry.
 #
 # Why this file exists instead of the previous `frankenphp php-server -r public/ --listen
 # :8080` command: `php-server` has no way to configure any body-size limit at all, and
@@ -24,23 +24,44 @@
 # documentation does not warn that php_server is one of those cases, so this is recorded
 # here rather than assumed away the next time someone considers reaching for it again.
 #
-# What IS used instead: a preflight check purely on the declared `Content-Length` header,
-# answered by `respond` before any handler — PHP included — ever touches the connection.
-# Two rules, both scoped to exclude `/v2/*`:
+# What IS used instead: three preflight checks, all answered by `respond` before any
+# handler — PHP included — ever touches the connection:
 #
-#   - No `Content-Length` at all (a chunked-encoded body, which nothing outside `/v2/` in
-#     this app ever needs — every non-OCI multipart form and JSON API body carries one) is
-#     refused outright with 411, rather than let an unbounded chunked stream reach PHP with
-#     no size signal to check at all.
-#   - A declared `Content-Length` over the cap is refused with 413.
+#   - A POST/PUT/PATCH declaring `Transfer-Encoding: chunked` outside `/v2/*` is refused
+#     with 411. A request with NO Content-Length and NO chunked encoding — a genuinely
+#     bodyless POST, e.g. `POST /packages/{id}/resync` per docs/rest-api.md, which sends
+#     neither header at all — is NOT refused: absent Content-Length is treated as length
+#     zero, not as "unknown length", so it passes straight through to `php_server`. Only a
+#     chunked body has a genuinely unbounded, undeclared size; that is what this rule
+#     exists to stop, not the ordinary shape of a bodyless request.
+#   - A POST/PUT/PATCH outside `/v2/*` whose declared `Content-Length` exceeds the cap is
+#     refused with 413. The cap (256 MiB) sits ABOVE every application-level upload limit
+#     this instance configures (`config/kontorfix.php`'s `npm_max_tarball_bytes` = 100 MiB,
+#     `python_max_dist_bytes` = 200 MiB — and matches `upload_max_filesize` in
+#     docker/php.ini) on purpose: this gate exists to stop an absurdly large body from
+#     reaching PHP at all, not to enforce the real per-ecosystem limits, which belong to
+#     the application and come with a proper JSON error body — a bare 413 from Caddy has
+#     none. Getting this backwards (a cap BELOW an application limit) would mean Caddy
+#     silently pre-empts Laravel's own configured ceiling with a worse, contentless error;
+#     confirmed this is wrong the first time by having it happen to a 40 MiB npm publish.
+#   - A POST/PUT/PATCH under `/v2/*` whose Content-Type starts with `multipart/form-data`
+#     is refused with 415. An OCI blob or manifest is never sent as a multipart body — the
+#     distribution spec always uses a raw `application/octet-stream`/JSON payload — so this
+#     costs nothing real, and it closes the one gap the routes-registry.php exemption below
+#     otherwise leaves open: `registry.auth` (the token check) runs inside Laravel, after
+#     PHP has already read the body, so an ANONYMOUS multipart POST to
+#     `/v2/x/blobs/uploads/` would otherwise still make PHP buffer it to `/tmp` (bounded by
+#     `max_file_uploads` × `upload_max_filesize`, not unbounded, but still pre-auth) before
+#     ever being rejected.
 #
-# This is a real admission-control gate, not a lazy reader: confirmed with the identical
-# probe as above, both rejections happen with zero bytes of the body consumed and without
-# ever invoking `php_server`. The one thing it cannot stop is a client that declares an
-# honest, small `Content-Length` and then sends more bytes than it claimed — Go's HTTP
-# server itself does not enforce that mismatch, so a truly adversarial client could still
-# attempt it; php.ini's `post_max_size = 0` no longer being the only backstop is what this
-# file is for, not a claim that it closes every conceivable variant.
+# This is real admission control, not a lazy reader: confirmed with the identical probe
+# used to rule out `request_body` above, a rejection happens with zero bytes of the body
+# consumed and without ever invoking `php_server`. The one thing none of this can stop is a
+# client that declares an honest, small `Content-Length` and then sends more bytes than it
+# claimed — Go's HTTP server itself does not enforce that mismatch, so a truly adversarial
+# client could still attempt it; php.ini's `post_max_size = 0` no longer being the only
+# backstop for the ordinary case is what this file is for, not a claim that it closes every
+# conceivable variant.
 {
 	skip_install_trust
 
@@ -59,11 +80,18 @@
 
 	{$CADDY_SERVER_EXTRA_DIRECTIVES}
 
+	# `path_regexp`, not the bare `path` matcher, everywhere `/v2/` is excluded below:
+	# Caddy's `path` matcher is case-insensitive, so `path /v2/*` would let a request to
+	# `/V2/foo` slip past every rule here — it matches no Laravel route (routes/registry.php
+	# registers the lowercase form only), but it is a free bypass of the caps this file
+	# exists to enforce, for zero legitimate reason to allow it. `^/v2/` is anchored and
+	# case-sensitive by default (Go regex, no `(?i)` flag).
+	#
 	# Scoped to POST/PUT/PATCH: a GET or HEAD (the healthcheck's `/up` among them) has no
 	# body and legitimately carries no Content-Length at all. Caught twice while verifying
 	# this file, not hypothetically:
 	#
-	#   1. A bare `method POST PUT PATCH` line as its own matcher key, sitting alongside the
+	#   1. A bare `method POST PUT PATCH` line as its own matcher key, sitting alongside an
 	#      `expression` key in the same matcher set, took `/up` down anyway — with a 500,
 	#      not even a clean 411. Caddy's matcher set does not short-circuit across matcher
 	#      TYPES: the `expression` matcher still gets evaluated for a GET with no
@@ -73,17 +101,24 @@
 	#      is what actually fixes it: CEL's `&&` is specified to short-circuit, unlike
 	#      Caddy's own cross-matcher-type AND, so `int(...)` is never reached for a method
 	#      this rule was never meant to look at in the first place.
-	@missingLength {
-		not path /v2/*
-		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} == ""
+	@chunkedBody {
+		not path_regexp ^/v2/
+		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Transfer-Encoding} != ""
 	}
-	respond @missingLength 411
+	respond @chunkedBody 411
 
 	@oversized {
-		not path /v2/*
-		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 33554432
+		not path_regexp ^/v2/
+		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 268435456
 	}
 	respond @oversized 413
+
+	@ociMultipart {
+		path_regexp ^/v2/
+		method POST PUT PATCH
+		header Content-Type multipart/form-data*
+	}
+	respond @ociMultipart 415
 
 	php_server
 }

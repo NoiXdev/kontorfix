@@ -294,12 +294,12 @@ it('transfers no layer bytes when a second image shares a base layer', function 
  * default because building, pushing and pulling ~520 MiB of incompressible data is slow;
  * gated behind an environment flag exactly the way UpstreamTest.php gates its own tests,
  * with a stated skip reason so a silently vanished test cannot be confused with a deleted
- * one. Run it with `E2E_LARGE_LAYER=1 bin/e2e`.
+ * one. Run it with `bin/e2e --large-layer` (or `E2E_LARGE_LAYER=1 bin/e2e` directly).
  */
 it('pushes and pulls a layer above 500 MiB with the digest intact', function () {
     if (getenv('E2E_LARGE_LAYER') !== '1') {
         test()->markTestSkipped(
-            'E2E_LARGE_LAYER is not set — run `E2E_LARGE_LAYER=1 bin/e2e` to include the '
+            'E2E_LARGE_LAYER is not set — run `bin/e2e --large-layer` to include the '
             .'500 MiB layer gate (spec §4).'
         );
     }
@@ -446,5 +446,5 @@ it('pushes an image index carrying provenance and SBOM attestations, and it roun
     $pullProcess = E2eStack::exec('client-docker', $pullScript, 300);
 
     expect($pullProcess->isSuccessful())->toBeTrue($pullProcess->getErrorOutput())
-        ->and($pullProcess->getOutput())->toMatch('/Pull complete|Already exists/');
+        ->and($pullProcess->getOutput())->toMatch('/Pull complete|Download complete/');
 });
