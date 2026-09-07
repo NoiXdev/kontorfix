@@ -34,13 +34,28 @@ export function dockerStepTitle(): string {
 }
 
 /**
- * The `docker login` / `tag` / `push` / `pull` block.
+ * The `docker login` / `pull` / `tag` / `push` block, in the order plate 2 of the approved
+ * mockups puts them.
+ *
+ * THE ORDER IS PULL BEFORE PUSH, and it is the plate's choice rather than an accident:
+ * reading is what most customers ever do, and it is the half that needs no publish token —
+ * so the section that works with the token a reader already has comes first, and the one
+ * that does not is labelled with what it additionally requires.
+ *
+ * `-u token` is on the login line because the username genuinely is arbitrary here (the
+ * token is the password), so naming a fixed one spares the reader an interactive prompt
+ * they would otherwise have to answer with something they had to invent.
+ *
+ * The tag stays `<tag>`. The plate shows a concrete `1.4.0`, which is a mockup's licence to
+ * look real; a snippet the reader copies must not invent a version number that exists
+ * nowhere in their registry.
  *
  * `host` and `repositoryPrefix` are the registry's address as `RegistryUrl` computes it —
  * a custom domain with an empty prefix, or the instance host with `{organisation}/{registry}/`
  * in front of the repository name. They are two fields rather than one joined string
- * because the `docker login` line takes the host ALONE: a login against
- * `host/org/registry` is not a thing a Docker client can do.
+ * because the `docker login` line takes the host WITHOUT the namespace: a login against
+ * `host/org/registry` is not a thing a Docker client can do. (`-u token` follows the host
+ * on that line, but that is a username, not part of the address.)
  *
  * `exampleRepository` mirrors the convention `SetupSnippetBuilder::npmLines()` already
  * follows for npm's scope line: a real name drawn from what already exists in the registry
@@ -53,14 +68,14 @@ export function dockerSetupSnippet(host: string, repositoryPrefix: string, examp
 
     return [
         '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-        `docker login ${host}`,
-        '',
-        '# Hochladen',
-        `docker tag ${repository}:${TAG_PLACEHOLDER} ${image}`,
-        `docker push ${image}`,
+        `docker login ${host} -u token`,
         '',
         '# Herunterladen',
         `docker pull ${image}`,
+        '',
+        '# Hochladen — braucht ein Publish-Token',
+        `docker tag ${repository}:${TAG_PLACEHOLDER} ${image}`,
+        `docker push ${image}`,
     ].join('\n');
 }
 

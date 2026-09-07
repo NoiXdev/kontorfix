@@ -109,8 +109,13 @@ class RegistryUrl
      * segments of the repository name (see dockerRepositoryPrefix() below). A custom domain
      * is now the SHORTER address, not the price of entry.
      *
-     * The port is kept, unlike host(): an image reference is written host-and-port or not at
-     * all, and an instance published on a non-default port is the ordinary development case.
+     * On the instance-host branch the port is kept, unlike host(): an image reference is
+     * written host-and-port or not at all, and an instance published on a non-default port is
+     * the ordinary development case. The custom-domain branch delegates to host() and would
+     * therefore DROP a port — harmless only because the `domains` column holds a bare
+     * hostname with no port in it and base() hardcodes `https://`, so a custom domain is
+     * :443 by assumption. A domain row that ever carries a port would have to be handled
+     * here, not left to host().
      */
     public function dockerHost(Group $group): string
     {

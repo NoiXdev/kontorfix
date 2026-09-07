@@ -10,7 +10,7 @@ import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
 import { dockerDomainNote, dockerSetupSnippet, dockerStepTitle, type SetupAudience } from './dockerSetup';
-import { offersMinting, offersPublishing } from './registrySetup';
+import { noEcosystemMessage, offersMinting, offersPublishing, stepsForEcosystems } from './registrySetup';
 
 interface Snippets {
     composer: string;
@@ -48,8 +48,12 @@ const props = defineProps<{
     // registry. Both callers used to derive it from the package list, which meant an empty
     // registry showed no instructions at all; for images that is the normal first state,
     // because nobody pushes a first image into a registry whose address is written nowhere.
-    // Omitted → the three non-Docker ecosystems, the safe historical default.
-    types?: string[];
+    //
+    // REQUIRED, for the same reason `audience` below is: with the prop meaning "permitted"
+    // rather than "present", `[]` is a definite answer — this organization may serve
+    // nothing — and any default substituted for it prints instructions against endpoints
+    // that answer 404. See stepsForEcosystems() in registrySetup.ts.
+    types: string[];
     // Who is reading. It changes exactly one sentence — the note under the Docker snippet
     // on a registry with no custom domain — and it is REQUIRED rather than defaulted,
     // because the wrong default is not a cosmetic miss: the operator's version names
@@ -184,28 +188,24 @@ interface Step {
     note: string;
 }
 
-const steps = computed<Step[]>(() => {
-    const show = props.types && props.types.length ? props.types : ['composer', 'npm', 'python'];
+const steps = computed<Step[]>(() =>
+    stepsForEcosystems(stepDefs, props.types).map((s) => {
+        if (s.key === 'docker') {
+            return {
+                key: s.key,
+                title: s.title,
+                // Built from the raw facts rather than read out of `substituted`: this
+                // block carries no <token> to replace at all — `docker login` prompts
+                // for the password instead of taking it on a command line that lands
+                // in the shell history.
+                content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix, props.snippets.dockerExample),
+                note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
+            };
+        }
 
-    return stepDefs
-        .filter((s) => show.includes(s.eco))
-        .map((s) => {
-            if (s.key === 'docker') {
-                return {
-                    key: s.key,
-                    title: s.title,
-                    // Built from the raw facts rather than read out of `substituted`: this
-                    // block carries no <token> to replace at all — `docker login` prompts
-                    // for the password instead of taking it on a command line that lands
-                    // in the shell history.
-                    content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix, props.snippets.dockerExample),
-                    note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
-                };
-            }
-
-            return { key: s.key, title: s.title, content: substituted.value[s.key], note: '' };
-        });
-});
+        return { key: s.key, title: s.title, content: substituted.value[s.key], note: '' };
+    }),
+);
 
 const copiedKey = ref<string | null>(null);
 
@@ -281,6 +281,16 @@ function selectSession(value: string) {
         </div>
 
         <div class="grid gap-4">
+            <!-- The organization may serve nothing: `types` is empty, every registry
+                 endpoint answers 404, and there is no instruction here that would work. It
+                 says so rather than falling back to a set of ecosystems nobody enabled —
+                 see stepsForEcosystems() and noEcosystemMessage() in registrySetup.ts. -->
+            <p
+                v-if="!steps.length"
+                class="rounded-xl border border-sidebar-border/70 px-4 py-3 text-sm text-muted-foreground dark:border-sidebar-border"
+            >
+                {{ noEcosystemMessage() }}
+            </p>
             <div v-for="step in steps" :key="step.key" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                 <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                     <h3 class="font-medium">{{ step.title }}</h3>

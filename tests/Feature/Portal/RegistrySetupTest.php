@@ -95,6 +95,29 @@ it('does not offer a type the instance has switched off, even when the organizat
         ->assertInertia(fn ($page) => $page->where('types', ['composer', 'docker'])->etc());
 });
 
+it('sends an empty list for an organization that may serve nothing at all', function () {
+    // The boundary the two pages have to be able to render. `enabled_registry_types = []`
+    // is accepted by Admin\OrganizationController's `['present', 'array']` rule and stored,
+    // and effectiveFor() intersects the instance ceiling with it down to nothing — so this
+    // prop really can arrive empty, and every registry endpoint then answers 404
+    // (EnsureRegistryTypeEnabled). Pinned here so the server keeps SAYING so: while
+    // RegistrySetup.vue substituted a three-ecosystem default for an empty list, a page
+    // built on this prop offered Composer, npm and pip instructions against a registry
+    // that serves neither.
+    $org = Organization::factory()->create([
+        'slug' => 'acme',
+        'enabled_registry_types' => [],
+    ]);
+    $group = Group::factory()->for($org)->create(['slug' => 'intern']);
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    $this->actingAs($user)->get("/c/acme/registries/{$group->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('portal/Registry')
+            ->where('types', [])
+            ->etc());
+});
+
 // --- The Docker address, on a registry with no custom domain ---
 
 it('gives a customer registry without a domain a working docker address on the instance host', function () {

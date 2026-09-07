@@ -14,7 +14,7 @@ class SetupSnippetBuilder
      *
      * The Docker fields deliberately are NOT a finished snippet, unlike every field above
      * them. `dockerSetup.ts` (resources/js/components/kontorfix/) is what assembles the
-     * `docker login`/`tag`/`push`/`pull` block and the note that goes under it — this
+     * `docker login`/`pull`/`tag`/`push` block and the note that goes under it — this
      * method's job stops at supplying the facts, because that assembly is the one piece of
      * RegistrySetup's logic this project can actually unit test (no component runner here),
      * and duplicating the German copy on this side would only give it a second place to

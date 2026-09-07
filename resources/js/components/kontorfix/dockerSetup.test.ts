@@ -8,21 +8,23 @@ describe('dockerStepTitle', () => {
 });
 
 describe('dockerSetupSnippet', () => {
-    it('builds the whole login/tag/push/pull block on a custom domain, with a real example repository', () => {
+    it('builds the whole login/pull/tag/push block on a custom domain, with a real example repository', () => {
         // toBe, not toContain: the point of this module is that every word here is pinned,
         // not merely "some substring survived". A mutation that drops the blank line
-        // between sections, or swaps `push` and `pull`, must turn this red.
+        // between sections, or reorders the two sections, must turn this red — the plate
+        // puts Herunterladen before Hochladen deliberately, because reading is what most
+        // customers ever do and it is the half that needs no publish token.
         expect(dockerSetupSnippet('images.3b.de', '', 'meinapp')).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-                'docker login images.3b.de',
-                '',
-                '# Hochladen',
-                'docker tag meinapp:<tag> images.3b.de/meinapp:<tag>',
-                'docker push images.3b.de/meinapp:<tag>',
+                'docker login images.3b.de -u token',
                 '',
                 '# Herunterladen',
                 'docker pull images.3b.de/meinapp:<tag>',
+                '',
+                '# Hochladen — braucht ein Publish-Token',
+                'docker tag meinapp:<tag> images.3b.de/meinapp:<tag>',
+                'docker push images.3b.de/meinapp:<tag>',
             ].join('\n'),
         );
     });
@@ -31,21 +33,22 @@ describe('dockerSetupSnippet', () => {
         // The case the whole task exists for. Two properties, both of which a bare
         // toContain on one line would miss:
         //
-        // 1. the namespace goes into the IMAGE reference, on all three of tag/push/pull;
-        // 2. `docker login` gets the host ALONE — a login against
+        // 1. the namespace goes into the IMAGE reference, on all three of pull/tag/push;
+        // 2. `docker login` gets the host WITHOUT the namespace — a login against
         //    `registry.3b.de/3b/intern` is not something a Docker client can do, and the
-        //    local `docker tag` source keeps its bare name too.
+        //    local `docker tag` source keeps its bare name too. Only `-u token` follows the
+        //    host, and that is a username, not part of the address.
         expect(dockerSetupSnippet('registry.3b.de', '3b/intern/', 'meinapp')).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-                'docker login registry.3b.de',
-                '',
-                '# Hochladen',
-                'docker tag meinapp:<tag> registry.3b.de/3b/intern/meinapp:<tag>',
-                'docker push registry.3b.de/3b/intern/meinapp:<tag>',
+                'docker login registry.3b.de -u token',
                 '',
                 '# Herunterladen',
                 'docker pull registry.3b.de/3b/intern/meinapp:<tag>',
+                '',
+                '# Hochladen — braucht ein Publish-Token',
+                'docker tag meinapp:<tag> registry.3b.de/3b/intern/meinapp:<tag>',
+                'docker push registry.3b.de/3b/intern/meinapp:<tag>',
             ].join('\n'),
         );
     });
@@ -54,14 +57,14 @@ describe('dockerSetupSnippet', () => {
         expect(dockerSetupSnippet('localhost:8099', 'kunde/acme/', null)).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-                'docker login localhost:8099',
-                '',
-                '# Hochladen',
-                'docker tag <repository>:<tag> localhost:8099/kunde/acme/<repository>:<tag>',
-                'docker push localhost:8099/kunde/acme/<repository>:<tag>',
+                'docker login localhost:8099 -u token',
                 '',
                 '# Herunterladen',
                 'docker pull localhost:8099/kunde/acme/<repository>:<tag>',
+                '',
+                '# Hochladen — braucht ein Publish-Token',
+                'docker tag <repository>:<tag> localhost:8099/kunde/acme/<repository>:<tag>',
+                'docker push localhost:8099/kunde/acme/<repository>:<tag>',
             ].join('\n'),
         );
     });
@@ -70,14 +73,14 @@ describe('dockerSetupSnippet', () => {
         expect(dockerSetupSnippet('images.3b.de', '', null)).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-                'docker login images.3b.de',
-                '',
-                '# Hochladen',
-                'docker tag <repository>:<tag> images.3b.de/<repository>:<tag>',
-                'docker push images.3b.de/<repository>:<tag>',
+                'docker login images.3b.de -u token',
                 '',
                 '# Herunterladen',
                 'docker pull images.3b.de/<repository>:<tag>',
+                '',
+                '# Hochladen — braucht ein Publish-Token',
+                'docker tag <repository>:<tag> images.3b.de/<repository>:<tag>',
+                'docker push images.3b.de/<repository>:<tag>',
             ].join('\n'),
         );
     });
@@ -91,14 +94,14 @@ describe('dockerSetupSnippet', () => {
         expect(dockerSetupSnippet('images.3b.de', '', '')).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
-                'docker login images.3b.de',
-                '',
-                '# Hochladen',
-                'docker tag <repository>:<tag> images.3b.de/<repository>:<tag>',
-                'docker push images.3b.de/<repository>:<tag>',
+                'docker login images.3b.de -u token',
                 '',
                 '# Herunterladen',
                 'docker pull images.3b.de/<repository>:<tag>',
+                '',
+                '# Hochladen — braucht ein Publish-Token',
+                'docker tag <repository>:<tag> images.3b.de/<repository>:<tag>',
+                'docker push images.3b.de/<repository>:<tag>',
             ].join('\n'),
         );
     });

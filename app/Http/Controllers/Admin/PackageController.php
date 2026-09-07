@@ -309,8 +309,10 @@ class PackageController extends Controller
      */
     private function showDocker(Request $request, Package $package, RegistryUrl $registryUrl): Response
     {
-        // `groups.domains`: the access panel below needs to know which of this package's
-        // registries (if any) can actually address it — see the comment on `$dockerGroup`.
+        // `groups.domains`: since ResolveOciContext every one of this package's registries
+        // can address it, so the panel below asks a narrower question — which of them has a
+        // hostname of its own, because that is the SHORTER address and the absence of one is
+        // what puts the note under the snippet. See the comment on `$dockerGroup`.
         $package->load(['groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
 
         // Same visibility rule show() applies above: a cross-organization row for a shared
