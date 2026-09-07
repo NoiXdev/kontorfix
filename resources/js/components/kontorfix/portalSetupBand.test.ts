@@ -1,18 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { offersRegistryPicker, offersSetupBand, selectedRegistry, SETUP_STEPS, setupBand, type PortalSetupRegistry } from './portalSetupBand';
+import {
+    offersRegistryPicker,
+    offersSetupBand,
+    REGISTRY_PICKER_LABEL,
+    selectedRegistry,
+    setupBand,
+    setupSteps,
+    type PortalSetupRegistry,
+} from './portalSetupBand';
 
 const INTERN: PortalSetupRegistry = { id: 'reg-1', name: 'Intern', url: 'https://registry.example.test/r/3b/intern' };
 const IMAGES: PortalSetupRegistry = { id: 'reg-2', name: 'Images', url: 'https://images.3b.de' };
 
 describe('setupBand', () => {
-    it('asks for the first token when the organization has none', () => {
+    it('asks for a token when the organization has no valid one', () => {
         // Asserted WHOLE, the rule this directory's tests already follow: a `toContain('Token')`
         // survives every rewrite that keeps the word, and the word is not the claim.
+        //
+        // "derzeit kein gültiges", NOT "noch kein": the server sends `none` for an EXISTING
+        // token that was revoked or has expired as well (PortalSetupBandTest pins both), so a
+        // sentence claiming the organization never had one is false for exactly the customer
+        // whose build has just started failing. And "Ihre Organisation", not "Sie": the state
+        // is organization-wide while the setup page's token list is filtered by user, so a
+        // colleague reading "Sie haben" would be told something the next page contradicts.
         expect(setupBand('none', null)).toEqual({
             collapsed: false,
             title: 'Zugang einrichten',
             lead: 'Einmal pro Rechner. Danach installieren Sie aus dieser Registry wie aus jeder anderen.',
-            note: 'Sie haben noch kein Zugriffstoken.',
+            note: 'Ihre Organisation hat derzeit kein gültiges Zugriffstoken.',
             action: 'Einrichtung öffnen',
         });
     });
@@ -25,7 +40,7 @@ describe('setupBand', () => {
             collapsed: false,
             title: 'Zugang einrichten',
             lead: 'Einmal pro Rechner. Danach installieren Sie aus dieser Registry wie aus jeder anderen.',
-            note: 'Sie haben bereits ein Zugriffstoken, es wurde aber noch nicht benutzt.',
+            note: 'Ihre Organisation hat bereits ein Zugriffstoken, es wurde aber noch nicht benutzt.',
             action: 'Einrichtung öffnen',
         });
     });
@@ -37,7 +52,7 @@ describe('setupBand', () => {
         // and the note, not the sentence alone.
         expect(setupBand('used', { name: 'ci-token', used_at: 'vor 2 Stunden' })).toEqual({
             collapsed: true,
-            title: 'Zugang eingerichtet · ci-token zuletzt genutzt vor 2 Stunden',
+            title: 'Zugang eingerichtet · Ihre Organisation hat ci-token zuletzt vor 2 Stunden genutzt',
             lead: null,
             note: null,
             action: 'Einrichtung ansehen',
@@ -48,22 +63,9 @@ describe('setupBand', () => {
         // The interpolation's absent case: the assertion above is equally satisfied by a
         // constant with `ci-token` typed into it, which would name the wrong credential on
         // every other portal — and the name is the only part of that line a customer can act on.
-        expect(setupBand('used', { name: 'laptop', used_at: 'vor 3 Tagen' }).title).toBe('Zugang eingerichtet · laptop zuletzt genutzt vor 3 Tagen');
-    });
-
-    it('still collapses when the token behind the state is missing', () => {
-        // `setupState` and `lastUsedToken` travel as two fields, so a payload can be
-        // inconsistent — a partial reload, or a future caller that sends the state alone.
-        // The state is the SERVER's answer and is followed either way; what drops is the
-        // half of the sentence there is no data for, rather than the sentence acquiring an
-        // `undefined` in the middle of it.
-        expect(setupBand('used', null)).toEqual({
-            collapsed: true,
-            title: 'Zugang eingerichtet',
-            lead: null,
-            note: null,
-            action: 'Einrichtung ansehen',
-        });
+        expect(setupBand('used', { name: 'laptop', used_at: 'vor 3 Tagen' }).title).toBe(
+            'Zugang eingerichtet · Ihre Organisation hat laptop zuletzt vor 3 Tagen genutzt',
+        );
     });
 
     it('does not re-derive the state from the token', () => {
@@ -77,16 +79,53 @@ describe('setupBand', () => {
     });
 });
 
-describe('SETUP_STEPS', () => {
-    it('names the three steps in order, with what each one means', () => {
+describe('setupSteps', () => {
+    it('names the three steps in order, over the ecosystems the organization may serve', () => {
         // The steps are five German sentences with no other home. Asserted whole and in
         // ORDER: they are a route ("create, configure, install") and a reordering would
         // describe a sequence that does not work.
-        expect(SETUP_STEPS).toEqual([
+        expect(setupSteps(['Composer', 'npm', 'Python', 'Docker'])).toEqual([
             { title: 'Token erstellen', detail: 'Ein Lese-Token genügt zum Installieren.' },
-            { title: 'Werkzeug konfigurieren', detail: 'Composer, npm, pip oder Docker — je nachdem, was diese Registry führt.' },
+            { title: 'Werkzeug konfigurieren', detail: 'Für Composer, npm, Python oder Docker — je nachdem, was diese Registry führt.' },
             { title: 'Paket installieren', detail: 'Der Befehl steht auf jeder Paketseite.' },
         ]);
+    });
+
+    it('names only what a narrowed organization may serve', () => {
+        // The finding this function exists for: the second step used to name all four
+        // ecosystems from plate 1, and its button leads to the Einrichtung tab — which since
+        // task 3 shows only the permitted ones. Naming four and then showing two is the same
+        // false claim that task removed, one page earlier.
+        expect(setupSteps(['Composer', 'Docker'])[1].detail).toBe('Für Composer oder Docker — je nachdem, was diese Registry führt.');
+    });
+
+    it('does not offer a choice when only one ecosystem is enabled', () => {
+        // "je nachdem" is a false promise with one type: there is nothing to choose between.
+        expect(setupSteps(['Docker'])[1].detail).toBe('Für Docker — den einzigen Paket-Typ, den Ihre Organisation nutzen darf.');
+    });
+
+    it('says so when the organization may serve nothing at all', () => {
+        // `enabled_registry_types = []` is a state the console accepts and stores, and the
+        // page this band leads to answers it with `noEcosystemMessage()`. A list joined out
+        // of zero names would be "Für  — je nachdem", a sentence with a hole in it.
+        expect(setupSteps([])[1].detail).toBe('Für Ihre Organisation ist derzeit kein Paket-Typ freigeschaltet.');
+    });
+
+    it('keeps the other two steps free of the ecosystem list', () => {
+        // The first and third step are the same sentence whatever is enabled — the boundary
+        // that catches a detail builder wired into the wrong index.
+        const steps = setupSteps([]);
+
+        expect(steps[0].detail).toBe('Ein Lese-Token genügt zum Installieren.');
+        expect(steps[2].detail).toBe('Der Befehl steht auf jeder Paketseite.');
+    });
+});
+
+describe('REGISTRY_PICKER_LABEL', () => {
+    it('captions the registry picker', () => {
+        // Copy, and therefore here: the band's one remaining inline string used to sit in the
+        // template, where nothing in this project can read it.
+        expect(REGISTRY_PICKER_LABEL).toBe('Registry');
     });
 });
 

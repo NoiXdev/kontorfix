@@ -47,6 +47,12 @@ const props = defineProps<{
     registries: PortalSetupRegistry[];
     setupState: PortalSetupState;
     lastUsedToken: PortalLastUsedToken | null;
+    // The ecosystems this organization may serve — `RegistryTypeService::effectiveFor()`,
+    // the same answer portal/Registry.vue's Einrichtung tab is built from. Named
+    // `setupTypes` and not `types` because this page already carries a `type` per package
+    // row, and the two answer different questions: what is IN the registry, and what the
+    // organization is PERMITTED to serve.
+    setupTypes: string[];
 }>();
 
 // The PackageType enum's own labels, shared from the backend. Not a table here: the console
@@ -90,6 +96,13 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
         <div class="flex flex-1 flex-col gap-4 p-4">
             <PortalHeader />
 
+            <!-- The page's h1 comes FIRST, before the band's own h2. It used to follow it,
+                 which opened this landing page at heading level 2 and left the h1 below a
+                 section it does not head — the one heading order a screen reader's outline
+                 cannot repair. Every other portal page puts its h1 at the top of the content
+                 for the same reason. -->
+            <h1 class="text-xl font-semibold">Pakete</h1>
+
             <!-- ABOVE the list, because setting up a tool is due before installing anything
                  from it — and because the customer arrives here, not on a page of its own.
                  It shrinks to one line once a token of this organization has been used. -->
@@ -98,9 +111,8 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                 :registries="props.registries"
                 :setup-state="props.setupState"
                 :last-used-token="props.lastUsedToken"
+                :types="props.setupTypes"
             />
-
-            <h1 class="text-xl font-semibold">Pakete</h1>
 
             <DataTable :columns="columns" :state="table" empty-message="Noch keine Pakete verfügbar." search-placeholder="Name suchen…">
                 <template #filters>

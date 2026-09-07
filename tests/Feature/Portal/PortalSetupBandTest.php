@@ -15,6 +15,7 @@ use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
+use App\Models\SystemSetting;
 use App\Models\User;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
@@ -161,6 +162,59 @@ it('names the most recently used token when several have been used', function ()
             ->etc());
 });
 
+it('picks the same token twice when two were used in the same second', function () {
+    [$org, $group, $user] = bandFixture();
+    // FROZEN, so both rows really do carry one `created_at`. That is not a contrivance: the
+    // column is `timestamp(0)` — what `$table->timestamps()` writes — so any two tokens minted
+    // in one request are tied on it, and the ordering has nothing left to say unless a column
+    // the schema can distinguish breaks the tie.
+    $this->freezeTime();
+    $usedAt = now()->subHours(2);
+
+    // The LARGER id is inserted FIRST, so insertion order and id order disagree: without the
+    // `id` tie-break the scan hands back `zzz` and the customer reads a different name than
+    // they did on their last reload. Ids are assigned explicitly rather than left to
+    // HasUuids, because a random pair would make this assertion a coin toss.
+    $later = RegistryToken::factory()->for($org)->make(['name' => 'zzz', 'last_used_at' => $usedAt]);
+    $later->id = '00000000-0000-4000-8000-000000000002';
+    $later->save();
+
+    $earlier = RegistryToken::factory()->for($org)->make(['name' => 'aaa', 'last_used_at' => $usedAt]);
+    $earlier->id = '00000000-0000-4000-8000-000000000001';
+    $earlier->save();
+
+    // An arbitrary pick between two equals, but a STABLE one — which is the whole claim the
+    // ordering makes.
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('lastUsedToken.name', 'aaa')->etc());
+});
+
+it('names the ecosystems the organization may serve, and no others', function () {
+    [$org, $group, $user] = bandFixture();
+    // The instance permits three; this organization is narrowed to two of them. The band's
+    // second step names what its own button then leads to — RegistryController::show() builds
+    // the Einrichtung tab from this same call — so the two pages cannot name different tools.
+    SystemSetting::current()->update(['enabled_registry_types' => ['composer', 'npm', 'docker']]);
+    $org->update(['enabled_registry_types' => ['composer', 'docker', 'python']]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page
+            // Intersected, not unioned: `python` is off instance-wide and must not reappear
+            // because the organization asked for it.
+            ->where('setupTypes', ['composer', 'docker'])
+            ->etc());
+});
+
+it('sends an empty ecosystem list for an organization that may serve nothing', function () {
+    [$org, $group, $user] = bandFixture();
+    // A state the console accepts and stores. The band says so rather than naming four
+    // ecosystems and sending the customer to a page that answers `noEcosystemMessage()`.
+    $org->update(['enabled_registry_types' => []]);
+
+    $this->actingAs($user)->get('/c/acme')
+        ->assertInertia(fn ($page) => $page->where('setupTypes', [])->etc());
+});
+
 it('prefers a used token over an unused one whatever order the rows are in', function () {
     [$org, $group, $user] = bandFixture();
     // The unused token is created LAST, so a plain `latest()` — or PostgreSQL's default
@@ -229,4 +283,33 @@ it('asks for the token state once, however many registries the portal shows', fu
     // registry for its own tokens is the shape this pins shut: it reads identically on a
     // fixture with one registry, and grows with the customer.
     expect($queries)->toHaveCount(1);
+});
+
+it('does not re-fetch the organization it already holds', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    foreach (['a', 'b', 'c'] as $slug) {
+        Group::factory()->for($org)->create(['name' => $slug, 'slug' => $slug, 'portal_enabled' => true]);
+    }
+
+    $user = User::factory()->create(['organization_id' => $org->id]);
+
+    /** @var list<string> $eagerLoads */
+    $eagerLoads = [];
+    DB::listen(function (QueryExecuted $query) use (&$eagerLoads) {
+        // The shape an eager load of a belongsTo makes, and nothing else: the middleware's own
+        // `where "slug" = ?` lookup and the membership joins are this page's legitimate reads
+        // of the table.
+        if (str_contains($query->sql, 'from "organizations"') && str_contains($query->sql, '"organizations"."id" in')) {
+            $eagerLoads[] = $query->sql;
+        }
+    });
+
+    $this->actingAs($user)->get('/c/acme')->assertOk();
+
+    // RegistryUrl::base() reads `$group->organization` for the canonical path, and the
+    // organization is the row PortalContext already handed this action. The controller sets
+    // the relation instead of eager-loading it — the trick ResolveRegistryContext states for
+    // the same call — so the statement is not issued at all.
+    expect($eagerLoads)->toBe([]);
 });

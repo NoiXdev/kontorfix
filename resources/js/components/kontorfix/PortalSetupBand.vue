@@ -18,12 +18,14 @@ import { Button } from '@/components/ui/button';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Link } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import {
     offersRegistryPicker,
     offersSetupBand,
+    REGISTRY_PICKER_LABEL,
     selectedRegistry,
     setupBand,
-    SETUP_STEPS,
+    setupSteps,
     type PortalLastUsedToken,
     type PortalSetupRegistry,
     type PortalSetupState,
@@ -41,11 +43,23 @@ const props = defineProps<{
     setupState: PortalSetupState;
     // Display payload for the collapsed line; null unless a token has actually been used.
     lastUsedToken: PortalLastUsedToken | null;
+    // The ecosystems this organization MAY serve (`RegistryTypeService::effectiveFor()`), as
+    // type values. The second step names them, because the button below leads to the
+    // Einrichtung tab — which shows exactly these and nothing else. Required, not defaulted:
+    // `[]` is a definite answer (this organization may serve nothing), and any list
+    // substituted for it is the false claim this prop was added to remove.
+    types: string[];
 }>();
 
 const visible = computed(() => offersSetupBand(props.registries));
 const offersPicker = computed(() => offersRegistryPicker(props.registries));
 const band = computed(() => setupBand(props.setupState, props.lastUsedToken));
+
+// The PackageType enum's own labels, shared from the backend — the console spells every
+// ecosystem in one place ("npm" lowercase, "Python" rather than "pip"), and the module writes
+// the sentence out of whatever it is handed.
+const { label: typeLabel } = useRegistryTypes();
+const steps = computed(() => setupSteps(props.types.map(typeLabel)));
 
 // The picked registry, as browser state. It starts on the first — the alphabetically first,
 // since the server orders by name — which is also what the collapsed line points at, where
@@ -85,12 +99,14 @@ const registryOptions = computed(() => props.registries.map((registry) => ({ val
         >
             <div class="flex flex-wrap items-start justify-between gap-4">
                 <div>
+                    <!-- h2, under the page's own `Pakete` h1 — which portal/Packages.vue
+                         renders ABOVE this band for exactly that reason. -->
                     <h2 class="text-base font-semibold">{{ band.title }}</h2>
                     <p class="mt-1 text-sm text-muted-foreground">{{ band.lead }}</p>
                 </div>
 
                 <div class="flex min-w-56 flex-col gap-1">
-                    <span class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Registry</span>
+                    <span class="text-xs font-medium tracking-wide text-muted-foreground uppercase">{{ REGISTRY_PICKER_LABEL }}</span>
                     <!-- One registry is not a choice: it is named rather than offered as a
                          picker that changes nothing. The same rule the portal header's
                          organization switcher follows. -->
@@ -105,7 +121,7 @@ const registryOptions = computed(() => props.registries.map((registry) => ({ val
             </div>
 
             <ol class="mt-4 grid gap-4 sm:grid-cols-3">
-                <li v-for="(step, index) in SETUP_STEPS" :key="step.title" class="flex items-start gap-3">
+                <li v-for="(step, index) in steps" :key="step.title" class="flex items-start gap-3">
                     <span
                         class="flex size-6 shrink-0 items-center justify-center rounded-full border border-verdigris font-mono text-xs text-verdigris"
                     >

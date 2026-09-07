@@ -8,6 +8,7 @@ use App\Models\RegistryToken;
 use App\Services\Portal\PortalContext;
 use App\Services\Portal\PortalPackages;
 use App\Services\Portal\PortalRegistryAssignment;
+use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
@@ -23,6 +24,11 @@ class PackageController extends Controller
         // surface that shows one asks here — a second way to assemble it is how an operator
         // and their customer end up reading two spellings of one URL.
         private readonly RegistryUrl $url,
+        // Which ecosystems the entry band's second step may name. The instance-wide ceiling
+        // intersected with the organization's own restriction — the same answer
+        // Portal\RegistryController::show() builds the Einrichtung tab from, so the band and
+        // the page its button leads to name one set of tools rather than two.
+        private readonly RegistryTypeService $types,
     ) {}
 
     /**
@@ -71,14 +77,19 @@ class PackageController extends Controller
         // button on the portal's own landing page, which GroupPolicy::view() would then answer
         // 403 to. Ordered by name, so the band's default pick and the registries page agree.
         //
-        // `domains` and `organization` eager-loaded because RegistryUrl::base() reads both and
-        // this is a loop: the first for the custom-domain branch, the second for the slug in
-        // the canonical path.
+        // `domains` eager-loaded because RegistryUrl::base() reads it in the custom-domain
+        // branch and this is a loop. `organization` is NOT loaded: base() also reads it, for
+        // the slug in the canonical path, and it is the row already in hand — so the relation
+        // is set rather than fetched a second time, the trick ResolveRegistryContext states
+        // for the same call and the same reason. The relation is genuinely this object; these
+        // groups came out of the organization's own hasMany.
         $registries = $organization->groups()
             ->where('portal_enabled', true)
-            ->with(['domains', 'organization'])
+            ->with('domains')
             ->orderBy('name')
             ->get();
+
+        $registries->each(fn (Group $g) => $g->setRelation('organization', $organization));
 
         // THE COLLAPSE RULE, IN ONE QUERY AND ONE ROW — never one query per registry, which is
         // what asking each registry for its own tokens would have made of it.
@@ -91,7 +102,15 @@ class PackageController extends Controller
         // The row is the organization's most recently used token, and the three states fall out
         // of it without a second query: no row at all is `none`, a row whose `last_used_at` is
         // null is `unused` (nulls sort last, so if the first row has none, none do), and
-        // anything else is `used`. `created_at` breaks a tie so the pick is stable.
+        // anything else is `used`.
+        //
+        // THREE ORDERING CLAUSES, and the last one is what makes the pick reproducible.
+        // `created_at` separates tokens minted on different SECONDS and no finer — the column
+        // is `timestamp(0)`, which is what `$table->timestamps()` writes — so two tokens minted
+        // in one request are tied on it, and the row PostgreSQL then hands back is whichever
+        // the scan reached first. `id` is unique and the schema can distinguish it, so the
+        // customer reads the same name on every reload instead of a name that changes under
+        // them. It is an arbitrary pick between equals, but a STABLE one.
         //
         // NOT REVOKED AND NOT EXPIRED — the liveness predicate findByPlainText() resolves by,
         // minus the entitlement check it can only make in PHP. The band asks whether the
@@ -104,6 +123,7 @@ class PackageController extends Controller
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->orderByRaw('last_used_at desc nulls last')
             ->orderByDesc('created_at')
+            ->orderBy('id')
             ->first();
 
         $lastUsedAt = $token?->last_used_at;
@@ -117,6 +137,11 @@ class PackageController extends Controller
                 'name' => $g->name,
                 'url' => $this->url->base($g),
             ])->values(),
+            // The ecosystems the band's second step may name. It used to name all four from
+            // plate 1 whatever the organization was permitted to use, and then sent the
+            // customer to a page that shows only the permitted ones — or says none are
+            // enabled. Naming four and showing one is the claim task 3 existed to remove.
+            'setupTypes' => $this->types->effectiveFor($organization),
             // Sent finished rather than as the raw column, so the browser holds no second
             // statement of what a used token is. portalSetupBand.ts maps this onto the band
             // and deliberately does not re-derive it from `lastUsedToken` below.

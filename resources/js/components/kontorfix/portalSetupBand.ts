@@ -70,19 +70,61 @@ export interface PortalSetupBand {
 }
 
 /**
- * The three steps, in order. A constant rather than markup, because they are five German
- * sentences and this module is where German becomes checkable.
+ * The three steps, in order, for the ecosystems the organization MAY serve
+ * (`RegistryTypeService::effectiveFor()`, as the labels of those types).
  *
- * They describe the ROUTE, not any one ecosystem: which tool applies is the second step's
- * own answer, and naming all four there is what keeps this band from needing to know the
- * organization's enabled types. `RegistrySetup` already asks that question, on the page
- * this band's button leads to.
+ * A FUNCTION rather than a constant, and that is the whole of finding F3: the second step
+ * used to name "Composer, npm, pip oder Docker" from plate 1 whatever the organization was
+ * permitted to use, and its button then leads to the Einrichtung tab — which since task 3
+ * shows only the permitted ecosystems, or `noEcosystemMessage()` when there are none.
+ * Naming four ecosystems and then showing one is the same false claim that task existed to
+ * remove, one page earlier.
+ *
+ * It takes LABELS, not type values: `PackageType` owns the spelling of every ecosystem
+ * ("npm" lowercase, "Python" not "pip"), the console reads it through `useRegistryTypes()`,
+ * and a second table of names here is how two surfaces end up spelling one ecosystem two
+ * ways. The caller maps; this module only writes the sentence.
  */
-export const SETUP_STEPS: readonly PortalSetupStep[] = [
-    { title: 'Token erstellen', detail: 'Ein Lese-Token genügt zum Installieren.' },
-    { title: 'Werkzeug konfigurieren', detail: 'Composer, npm, pip oder Docker — je nachdem, was diese Registry führt.' },
-    { title: 'Paket installieren', detail: 'Der Befehl steht auf jeder Paketseite.' },
-];
+export function setupSteps(ecosystems: readonly string[]): PortalSetupStep[] {
+    return [
+        { title: 'Token erstellen', detail: 'Ein Lese-Token genügt zum Installieren.' },
+        { title: 'Werkzeug konfigurieren', detail: toolDetail(ecosystems) },
+        { title: 'Paket installieren', detail: 'Der Befehl steht auf jeder Paketseite.' },
+    ];
+}
+
+/**
+ * The second step's sentence, over the ecosystems the organization may serve.
+ *
+ * Three shapes, because two of them are claims the general one would get wrong. With
+ * NOTHING permitted there is no tool to configure at all — the same state
+ * `noEcosystemMessage()` answers on the page this band leads to, and a list of zero names
+ * joined into "Für  — je nachdem" would be a sentence with a hole in it. With ONE the
+ * "je nachdem" is false: there is nothing to choose between, and saying so is the more
+ * useful answer than naming a single ecosystem as if it were a menu.
+ */
+function toolDetail(ecosystems: readonly string[]): string {
+    if (ecosystems.length === 0) {
+        return 'Für Ihre Organisation ist derzeit kein Paket-Typ freigeschaltet.';
+    }
+
+    if (ecosystems.length === 1) {
+        return `Für ${ecosystems[0]} — den einzigen Paket-Typ, den Ihre Organisation nutzen darf.`;
+    }
+
+    const list = `${ecosystems.slice(0, -1).join(', ')} oder ${ecosystems[ecosystems.length - 1]}`;
+
+    return `Für ${list} — je nachdem, was diese Registry führt.`;
+}
+
+/**
+ * The caption above the registry picker.
+ *
+ * Here rather than inline in the template, for the reason every other string in this band is
+ * here: a sentence left in a `.vue` file is a sentence nothing in this project can read, and
+ * one string kept out of the module means the file has two rules about where copy lives.
+ */
+export const REGISTRY_PICKER_LABEL = 'Registry';
 
 /** The heading and lead of the expanded band, stated once for both of its states. */
 const TITLE = 'Zugang einrichten';
@@ -91,25 +133,34 @@ const LEAD = 'Einmal pro Rechner. Danach installieren Sie aus dieser Registry wi
 /**
  * The band, for a state and the token behind it.
  *
- * The `none` and `unused` notes are ORGANIZATION-WIDE — "Sie haben noch kein Zugriffstoken",
- * never "Für Intern haben Sie noch kein Token". The state is decided across every token of
- * the organization (spec §3.1: "a token of this organization has been used"), and a
- * per-registry sentence over an organization-wide answer would be a false claim the moment a
- * customer with two registries holds a token for one of them.
+ * EVERY SENTENCE IS ABOUT THE ORGANIZATION, never about the reader — "Ihre Organisation
+ * hat …", not "Sie haben …". The state is decided across every token of the organization
+ * (spec §3.1: "a token of this organization has been used"), while `Portal\RegistryController
+ * ::show()` filters the setup page's token list by `user_id`. A colleague who holds no token
+ * of their own is therefore inside the `used` state, and "Sie haben ein Zugriffstoken" would
+ * tell that person something the very next page contradicts: an empty token list that does
+ * not know the named token at all. Naming the owner keeps the two pages saying one thing.
+ *
+ * `none` says "kein gültiges" and not "noch kein": the server maps an EXISTING token that was
+ * revoked or has expired to `none` too (PortalSetupBandTest pins both), so a sentence claiming
+ * the organization never had one is false for exactly the customer whose build has just
+ * started failing.
  *
  * `used` names the token and when it was last used, because that is what makes the collapsed
- * line worth its one line: it is the customer's confirmation that the credential their CI
- * runs on is still alive, and the name is the only part of it they can act on. The pieces are
- * optional all the same — `lastUsed` is a wire value, and a band that dropped to a bare
- * `undefined` in the middle of a sentence would be worse than one that says less.
+ * line worth its one line: it is the confirmation that the credential the organization's CI
+ * runs on is still alive, and the name is the only part of it anyone can act on.
  */
 export function setupBand(state: PortalSetupState, lastUsed: PortalLastUsedToken | null): PortalSetupBand {
-    if (state === 'used') {
-        const suffix = lastUsed === null ? '' : ` · ${lastUsed.name} zuletzt genutzt ${lastUsed.used_at}`;
-
+    // `lastUsed !== null` is TypeScript's half of this condition, not a second state:
+    // `PackageController::index()` derives both fields from one row and sends `used` exactly
+    // when the token is populated, so there is no payload the two halves disagree about. It
+    // is written as a guard rather than a non-null assertion because an assertion would be a
+    // claim about the wire that nothing checks; the fall-through — the band asking for setup
+    // — is the safe answer if that ever stopped holding.
+    if (state === 'used' && lastUsed !== null) {
         return {
             collapsed: true,
-            title: `Zugang eingerichtet${suffix}`,
+            title: `Zugang eingerichtet · Ihre Organisation hat ${lastUsed.name} zuletzt ${lastUsed.used_at} genutzt`,
             lead: null,
             note: null,
             // "ansehen", not "öffnen": nothing here is outstanding any more, and a verb that
@@ -124,11 +175,11 @@ export function setupBand(state: PortalSetupState, lastUsed: PortalLastUsedToken
         lead: LEAD,
         note:
             state === 'none'
-                ? 'Sie haben noch kein Zugriffstoken.'
+                ? 'Ihre Organisation hat derzeit kein gültiges Zugriffstoken.'
                 : // The `unused` note does NOT name the token. The state is organization-wide,
-                  // so a customer can hold several unused ones, and naming whichever the server
-                  // happened to return would read as "this one" about an arbitrary pick.
-                  'Sie haben bereits ein Zugriffstoken, es wurde aber noch nicht benutzt.',
+                  // so an organization can hold several unused ones, and naming whichever the
+                  // server happened to return would read as "this one" about an arbitrary pick.
+                  'Ihre Organisation hat bereits ein Zugriffstoken, es wurde aber noch nicht benutzt.',
         action: 'Einrichtung öffnen',
     };
 }
