@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Registry\Oci;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Exceptions\OciException;
 use App\Models\Group;
 use App\Models\Package;
 use App\Models\RegistryToken;
+use App\Services\Registry\OciSettings;
 use App\Services\RegistryAccessService;
 use Illuminate\Http\Request;
 
@@ -96,9 +98,13 @@ trait ResolvesOciRepository
      * readable registry is not publicly writable, the same rule NpmController::respondPublish
      * states for npm.
      *
-     * The repository must already exist. kontorfix does not create one on push, for the same
-     * reason NpmController and PypiController refuse an unknown package: a publish token must
-     * not be able to invent names in a registry. The operator registers the repository first.
+     * The repository must already exist, unless an operator has switched push-time creation
+     * on (`oci_auto_create_repositories`, off by default). Refusing an unknown name is the
+     * same rule NpmController and PypiController enforce — a publish token must not invent
+     * names in a registry — but Harbor creates the repository on first push, so the setting
+     * exists for an instance that wants that habit. Even when it is on, a name held by
+     * ANOTHER organization stays NAME_UNKNOWN: the alternative is a publish token
+     * discovering foreign repository names by response code.
      *
      * Resolved strictly within the addressed registry's OWN organization — never through
      * $group->packages(), which carries every package assigned to the group regardless of
@@ -134,9 +140,51 @@ trait ResolvesOciRepository
             ->where('organization_id', $group->organization_id)
             ->first();
 
-        if ($package === null || ! $this->access()->packageBelongsToGroup($group, $package)) {
+        if ($package === null) {
+            return $this->ociCreateRepository($group, $name);
+        }
+
+        if (! $this->access()->packageBelongsToGroup($group, $package)) {
             throw OciException::nameUnknown($name);
         }
+
+        return $package;
+    }
+
+    /**
+     * Push-time creation of a repository nobody registered, behind the operator's setting.
+     *
+     * Off — the default — refuses with NAME_UNKNOWN, the protocol code a client expects,
+     * but with a message that names the setting: an operator who has just pointed a Harbor
+     * habit at kontorfix otherwise goes to the logs for a decision that is one checkbox away.
+     *
+     * A name already held by another organization is refused too, and the setting is
+     * consulted FIRST so that a switched-off instance answers every unresolvable name with
+     * one identical message: were the foreign-name refusal worded differently, a publish
+     * token could tell "somebody else has this name" from "nobody has it" by reading the
+     * body, which is a leak the old unconditional NAME_UNKNOWN did not have.
+     */
+    private function ociCreateRepository(Group $group, string $name): Package
+    {
+        if (! app(OciSettings::class)->autoCreateEnabledFor($group->organization)) {
+            throw OciException::nameUnknownAutoCreateDisabled($name);
+        }
+
+        if (Package::where('type', PackageType::Docker)->where('name', $name)->exists()) {
+            throw OciException::nameUnknown($name);
+        }
+
+        $package = Package::create([
+            'organization_id' => $group->organization_id,
+            'type' => PackageType::Docker,
+            // Stated rather than left to the column default. A Docker repository receives
+            // its versions by being pushed to; a row that ends up git-sourced is never
+            // synced and says so only by staying empty.
+            'source_mode' => PackageSourceMode::Publish,
+            'name' => $name,
+        ]);
+
+        $group->packages()->attach($package);
 
         return $package;
     }

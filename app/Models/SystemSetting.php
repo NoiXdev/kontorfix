@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
  * @property bool $registration_enabled
  * @property list<string> $enabled_registry_types
  * @property SharedPackageRole $shared_package_role
+ * @property bool $oci_auto_create_repositories
  */
 class SystemSetting extends Model
 {
@@ -22,12 +23,17 @@ class SystemSetting extends Model
         'registration_enabled',
         'enabled_registry_types',
         'shared_package_role',
+        'oci_auto_create_repositories',
     ];
 
     protected $attributes = [
         'registration_enabled' => false,
         'enabled_registry_types' => '["composer","npm","python","docker"]',
         'shared_package_role' => 'super_admin',
+        // Off: the instance keeps refusing a `docker push` to a name nobody registered
+        // until an operator opts in. A raw DB string like its neighbours above, because
+        // $attributes holds pre-cast values.
+        'oci_auto_create_repositories' => false,
     ];
 
     /**
@@ -39,6 +45,7 @@ class SystemSetting extends Model
             'registration_enabled' => 'bool',
             'enabled_registry_types' => 'array',
             'shared_package_role' => SharedPackageRole::class,
+            'oci_auto_create_repositories' => 'bool',
         ];
     }
 

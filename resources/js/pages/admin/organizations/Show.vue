@@ -55,6 +55,11 @@ const props = defineProps<{
         // which only hides one card inside an open portal.
         portal_enabled: boolean;
         notification_cadence: string;
+        // Drei Zustände: null = instanzweite Einstellung erben, true/false = eigene
+        // Antwort dieser Organisation. Bewusst kein boolean — ein Zwei-Zustands-Schalter
+        // könnte „erben“ nicht ausdrücken und würde beim ersten Speichern ein explizites
+        // false schreiben.
+        oci_auto_create_repositories: boolean | null;
         // How many registries this organization owns — every one of them changes URL when
         // the organization slug changes, since it is the first segment of each address.
         // Supplied so the confirmation dialog can name the count rather than guess it from
@@ -71,6 +76,10 @@ const props = defineProps<{
     // than assembling that path itself. See oldPortalPath/newPortalPath below.
     portalPathTemplate: string;
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
+    // `global` ist die instanzweite Obergrenze, `effective` das Ergebnis aus Obergrenze UND
+    // Wahl dieser Organisation — beides von PHP, damit die Seite die Schnittmenge nicht ein
+    // zweites Mal (und womöglich anders) bildet.
+    ociAutoCreate: { global: boolean; effective: boolean };
     registries: RegistryRow[];
     users: UserRow[];
     members: MemberRow[];
@@ -102,12 +111,28 @@ const cadenceOptions = [
 // Name, slug, cadence and the portal switch all live on the same `update()` route, so
 // every field travels along on each submit rather than the form clobbering the others
 // with an empty value.
-const settingsForm = useForm<{ name: string; slug: string; notification_cadence: string; portal_enabled: boolean }>({
+const settingsForm = useForm<{
+    name: string;
+    slug: string;
+    notification_cadence: string;
+    portal_enabled: boolean;
+    oci_auto_create_repositories: boolean | null;
+}>({
     name: props.organization.name,
     slug: props.organization.slug,
     notification_cadence: props.organization.notification_cadence,
     portal_enabled: props.organization.portal_enabled,
+    oci_auto_create_repositories: props.organization.oci_auto_create_repositories,
 });
+
+// Die drei Zustände des Push-Anlegens als Radio-Gruppe. `value: null` ist der Erb-Zustand
+// und wird als echtes null übertragen, nicht als leerer String — genau darauf beruht die
+// Regel ['sometimes','nullable','boolean'] in UpdateOrganizationRequest.
+const autoCreateChoices: { value: boolean | null; label: string }[] = [
+    { value: null, label: 'Erben' },
+    { value: true, label: 'An' },
+    { value: false, label: 'Aus' },
+];
 
 const slugChanged = computed(() => settingsForm.slug !== props.organization.slug);
 
@@ -352,6 +377,30 @@ function detachMember(userId: string) {
                         </div>
                     </div>
                     <InputError :message="settingsForm.errors.portal_enabled" />
+
+                    <div class="flex flex-col gap-1.5">
+                        <span class="text-sm font-medium">Repositories beim Push anlegen</span>
+                        <p class="text-sm text-muted-foreground">
+                            Ob ein <code>docker push</code> auf einen unbekannten Namen das Repository dieser Organisation anlegt. „Erben“ übernimmt
+                            die Systemeinstellung (aktuell: <strong>{{ props.ociAutoCreate.global ? 'an' : 'aus' }}</strong
+                            >). Eine Organisation kann nur einschränken — ist es instanzweit aus, bleibt „An“ hier wirkungslos. Aktuell gilt für diese
+                            Organisation: <strong>{{ props.ociAutoCreate.effective ? 'an' : 'aus' }}</strong
+                            >.
+                        </p>
+                        <div class="flex flex-wrap gap-4">
+                            <label v-for="choice in autoCreateChoices" :key="String(choice.value)" class="flex items-center gap-2 text-sm">
+                                <input
+                                    v-model="settingsForm.oci_auto_create_repositories"
+                                    type="radio"
+                                    name="oci_auto_create_repositories"
+                                    class="size-4 border-input"
+                                    :value="choice.value"
+                                />
+                                <span>{{ choice.label }}</span>
+                            </label>
+                        </div>
+                        <InputError :message="settingsForm.errors.oci_auto_create_repositories" />
+                    </div>
 
                     <div>
                         <Button type="submit" :disabled="settingsForm.processing">Speichern</Button>

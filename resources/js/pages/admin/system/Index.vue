@@ -15,6 +15,9 @@ const props = defineProps<{
         registration_enabled: boolean;
         enabled_registry_types: string[];
         shared_package_role: string;
+        // Instanzweite Obergrenze für „Repositories beim Push anlegen“. Eine Organisation
+        // kann nur weiter einschränken, nie darüber hinaus aktivieren.
+        oci_auto_create_repositories: boolean;
     };
     registryTypes: string[];
     // Both values with their German labels, from App\Enums\SharedPackageRole::options().
@@ -28,6 +31,7 @@ const form = useForm({
     registration_enabled: props.settings.registration_enabled,
     enabled_registry_types: [...props.settings.enabled_registry_types],
     shared_package_role: props.settings.shared_package_role,
+    oci_auto_create_repositories: props.settings.oci_auto_create_repositories,
 });
 
 function toggleType(type: string, on: boolean) {
@@ -81,6 +85,26 @@ function save() {
                             <span class="font-mono">{{ type }}</span>
                         </label>
                     </div>
+                </div>
+
+                <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                    <h2 class="text-sm font-medium">Container-Registry</h2>
+                    <p class="mb-3 text-xs text-muted-foreground">
+                        Instanzweite Obergrenze: Organisationen können das für sich abschalten, aber nicht aktivieren, solange es hier aus ist.
+                    </p>
+                    <label class="flex items-start gap-2 text-sm">
+                        <Switch v-model="form.oci_auto_create_repositories" class="mt-1" />
+                        <span>
+                            Repositories beim Push anlegen
+                            <span class="block text-xs text-muted-foreground">
+                                Aus (Standard): Ein <code class="font-mono">docker push</code> auf einen unbekannten Namen wird mit
+                                <code class="font-mono">NAME_UNKNOWN</code> abgelehnt — das Repository muss vorher in der Verwaltung angelegt werden.
+                                An: Der Push legt das Repository in der adressierten Organisation an. Namen, die bereits einer anderen Organisation
+                                gehören, werden weiterhin abgelehnt.
+                            </span>
+                        </span>
+                    </label>
+                    <InputError :message="form.errors.oci_auto_create_repositories" />
                 </div>
 
                 <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">

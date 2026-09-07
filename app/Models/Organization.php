@@ -32,7 +32,7 @@ class Organization extends Model
      * compose and neither is derived from the other: turning every registry off still leaves
      * an open portal showing an empty package list.
      */
-    protected $fillable = ['name', 'slug', 'is_operator', 'portal_enabled', 'enabled_registry_types', 'notification_cadence', 'last_digest_sent_at'];
+    protected $fillable = ['name', 'slug', 'is_operator', 'portal_enabled', 'enabled_registry_types', 'oci_auto_create_repositories', 'notification_cadence', 'last_digest_sent_at'];
 
     protected $attributes = [
         'portal_enabled' => true,
@@ -45,6 +45,11 @@ class Organization extends Model
             'portal_enabled' => 'bool',
             // Null = inherit the instance-wide set; otherwise a restriction within it.
             'enabled_registry_types' => 'array',
+            // Three states, not two: null = inherit the instance-wide setting, true/false =
+            // this organization's own answer. Eloquent's primitive casts return null
+            // untouched, so `bool` here does NOT flatten the inherit state into false —
+            // App\Services\Registry\OciSettings depends on that distinction surviving.
+            'oci_auto_create_repositories' => 'bool',
             'last_digest_sent_at' => 'datetime',
         ];
     }

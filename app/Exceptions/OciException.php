@@ -51,6 +51,21 @@ final class OciException extends Exception
         return new self(404, 'NAME_UNKNOWN', "Das Repository {$name} gibt es in dieser Registry nicht.");
     }
 
+    /**
+     * The same refusal, on the push path, when `oci_auto_create_repositories` is off.
+     *
+     * The CODE stays NAME_UNKNOWN — it is protocol, a client branches on it, and nothing
+     * about the situation differs from an unknown name. Only the human half changes, and
+     * it names the setting: without that, the one person who can fix this in a checkbox
+     * reads "gibt es nicht" and goes looking in the logs instead.
+     */
+    public static function nameUnknownAutoCreateDisabled(string $name): self
+    {
+        return new self(404, 'NAME_UNKNOWN', "Das Repository {$name} gibt es in dieser Registry nicht. "
+            .'Neue Repositories beim Push anzulegen ist deaktiviert — legen Sie das Repository in der '
+            .'Verwaltung an, oder aktivieren Sie „Repositories beim Push anlegen“ in den Systemeinstellungen.');
+    }
+
     public static function manifestUnknown(string $reference): self
     {
         return new self(404, 'MANIFEST_UNKNOWN', "Weder Tag noch Digest {$reference} sind bekannt.");

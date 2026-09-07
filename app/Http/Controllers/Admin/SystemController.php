@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Enums\SharedPackageRole;
 use App\Http\Controllers\Controller;
 use App\Models\SystemSetting;
+use App\Services\Registry\OciSettings;
 use App\Services\Registry\RegistryTypeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -15,7 +16,7 @@ use Inertia\Response;
 
 class SystemController extends Controller
 {
-    public function show(RegistryTypeService $types): Response
+    public function show(RegistryTypeService $types, OciSettings $oci): Response
     {
         return Inertia::render('admin/system/Index', [
             'settings' => [
@@ -23,6 +24,9 @@ class SystemController extends Controller
                 'enabled_registry_types' => $types->globalTypes(),
                 // The enum's backing value, not the case: the select below binds to it.
                 'shared_package_role' => SystemSetting::current()->shared_package_role->value,
+                // The instance-wide ceiling for push-time repository creation; an
+                // organization may narrow it on its own page, never widen it.
+                'oci_auto_create_repositories' => $oci->autoCreateGloballyEnabled(),
             ],
             // All selectable registry types, for rendering the toggles.
             'registryTypes' => $types->allTypes(),
@@ -45,6 +49,9 @@ class SystemController extends Controller
             // Omission cannot widen anything — it leaves the stored value untouched — and
             // the settings page always submits the whole form.
             'shared_package_role' => ['sometimes', Rule::enum(SharedPackageRole::class)],
+            // `sometimes` for the same reason as the two above: the partial callers must
+            // not become 422s, and an omitted field leaves the stored value alone.
+            'oci_auto_create_repositories' => ['sometimes', 'boolean'],
         ]);
 
         $update = ['registration_enabled' => $data['registration_enabled']];
@@ -56,6 +63,9 @@ class SystemController extends Controller
         // the `super` middleware: nobody below that tier can grant it to themselves.
         if (array_key_exists('shared_package_role', $data)) {
             $update['shared_package_role'] = $data['shared_package_role'];
+        }
+        if (array_key_exists('oci_auto_create_repositories', $data)) {
+            $update['oci_auto_create_repositories'] = $data['oci_auto_create_repositories'];
         }
 
         SystemSetting::current()->update($update);
