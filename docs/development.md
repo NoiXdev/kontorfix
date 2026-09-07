@@ -1068,6 +1068,87 @@ judged to cost more than the stale bookmarks do. The console's slug confirmation
 addresses, before and after, and says that neither old one keeps answering. Tell the customer, or
 send them the new link.
 
+### Container registry (OCI): the two addressing modes
+
+A Docker/OCI registry is reachable at **two** addresses, and both resolve to the same
+`Group`, run the same authorization and serve the same content. Which one a request used is
+decided in exactly one place, `App\Http\Middleware\ResolveOciContext`, from the `Host`
+header alone.
+
+- **Custom domain.** The operator attaches a hostname to the registry (`domains.hostname`),
+  and the registry sits at that host's root:
+
+  ```
+  docker pull images.example.com/meinapp:1.4.0
+  ```
+
+  Everything after the host is the repository name, exactly as it is on Docker Hub. This is
+  the mode to give a customer when the image reference should carry no kontorfix-internal
+  structure at all.
+
+- **Path namespace on the instance host.** No extra DNS record and no extra certificate:
+
+  ```
+  docker pull registry.example.com/3b/intern/meinapp:1.4.0
+  ```
+
+  The first two segments are the organization slug and the registry slug — the same pair
+  `/r/{orgSlug}/{groupSlug}` uses for Composer/npm/PyPI — and everything after them is the
+  repository name. **At least three segments are required.** `registry.example.com/meinapp`
+  names no registry and answers a plain 404 with no body, and so does `3b/intern` with no
+  repository after it: an OCI `errors[]` envelope there would confirm to a caller who merely
+  guessed that the organization or the registry exists.
+
+Why one resolver rather than two route groups: a path-mode URL *is* a valid domain-mode URL
+whose repository name happens to contain slashes, so the router cannot tell them apart —
+whichever group registered first would match on every host and the second would be dead code.
+The `/v2/{name}/…` routes are therefore registered once and the middleware decides what
+`{name}` means, rewriting it to the bare repository name before any controller sees it.
+
+**A repository name may itself contain slashes** (`team/app`), so `3b/intern/team/app` means
+organization `3b`, registry `intern`, repository `team/app` — the split takes the *first* two
+segments, never "everything up to the last one".
+
+**Both slugs become path components of an image reference**, which is why a new slug may not
+begin or end with a hyphen (`App\Rules\AddressableSlug`; see the next section). It is also
+why every URL the registry hands *back* — an upload session's `Location`, a finished blob's,
+and the `name` in `GET /v2/{name}/tags/list` — is expressed in the address space the caller
+used. A `Location` that dropped the `3b/intern/` namespace pointed at a URL that is a 404 on
+the instance host, and a client follows an upload `Location` without asking, so the push died
+on the very next request.
+
+### Push-time repository creation (`oci_auto_create_repositories`)
+
+**Off by default.** With it off, a `docker push` to a repository name that is not registered
+is refused with `NAME_UNKNOWN`, and the German message names this switch so the operator does
+not go looking in the logs. The repository has to be created in the console and assigned to
+the registry first — the same rule npm and PyPI publishing already follow, where a publish
+token may not invent names in a registry.
+
+With it on, the first push creates the repository inside the addressed organization and
+assigns it to the addressed registry, which is the habit Harbor and Docker Hub have taught
+every client. Registration lives in the **system settings page**, not in `.env`: it is a
+system setting (`system_settings.oci_auto_create_repositories`) with a per-organization
+narrowing beside it (`organizations.oci_auto_create_repositories`, `null` = inherit). The two
+INTERSECT — the instance-wide value is a ceiling and an organization may only restrict within
+it, never switch on what the instance has switched off.
+
+What it does not weaken:
+
+- A name **another organization** already holds stays `NAME_UNKNOWN`. Otherwise a publish
+  token could discover foreign repository names by response code.
+- A name **this organization** holds but has not assigned to this registry is never
+  auto-attached — assigning it is a console decision.
+- A **shared** repository is still not writable through a customer's registry. Sharing hands
+  out reads, never writes.
+
+What it costs, and it is worth knowing before switching it on: **the repository row is created
+at the first upload request**, `POST /v2/{name}/blobs/uploads/`, long before a layer — let
+alone a manifest — has arrived. A client that opens upload sessions and never finishes them
+therefore leaves permanently empty `packages` rows behind, and nothing reclaims them: they
+appear in package lists, in counts and in the customer portal, and are removed by hand. The
+system settings page states this beside the switch.
+
 ### Organization-scoped registry slugs
 
 The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is
