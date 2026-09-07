@@ -2,11 +2,53 @@
 
 namespace App\Services\Registry;
 
+use App\Enums\PackageType;
 use App\Models\Group;
 
 class SetupSnippetBuilder
 {
     public function __construct(private RegistryUrl $url) {}
+
+    /**
+     * The command a consumer runs for ONE package in THIS registry — the whole of what the
+     * portal's package page and its package list print, and the only place any of them is
+     * assembled.
+     *
+     * IT REPLACES `PackageType::installHint()`, WHICH IS GONE, and the removal is the point
+     * of the method rather than a tidy-up alongside it. That hint built a registry-less
+     * command for every ecosystem and the portal rendered it. For Composer and npm the
+     * result merely fails in an unconfigured project, visibly and at once. For Python it does
+     * NOT fail: `pip install kernmodul` without `--index-url` resolves against PyPI, and if a
+     * package of that name exists there, pip installs THAT — into a customer's build, with no
+     * error anywhere. A command that silently fetches a stranger's code is not a rough edge,
+     * and leaving the generator in place "unused" is how it comes back.
+     *
+     * Only pip and Docker carry the address, and that is deliberate rather than an omission:
+     * `composer require` and `npm install` take no registry argument at all — their registry
+     * is configured once, in `composer.json`/`.npmrc`, which is exactly what the setup tab
+     * above them is for and what the package page's prerequisite line names. Printing a flag
+     * those two clients do not have would be a command that cannot be copied.
+     *
+     * `$tag` is Docker-only and optional. A real tag when the repository has one (the plate's
+     * `docker pull images.3b.de/meinapp:1.4.0`), and NOTHING when it has none — never a
+     * `<tag>` placeholder here, unlike `dockerSetup.ts`, which prints one because its snippet
+     * describes a repository that may not exist yet. This command names a repository the
+     * reader is looking at, so `docker pull <host>/<repo>` is both true and runnable (Docker
+     * resolves it as `:latest`), where a placeholder would be neither.
+     */
+    public function installCommand(Group $group, PackageType $type, string $name, ?string $tag = null): string
+    {
+        return match ($type) {
+            PackageType::Composer => "composer require {$name}",
+            PackageType::Npm => "npm install {$name}",
+            // The same URL the `pip` setup snippet's one-liner uses, from the same private
+            // method — inline credentials because pip accepts no other shape on the command
+            // line (see simpleAuthUrl()).
+            PackageType::Python => 'pip install --index-url '.$this->simpleAuthUrl($group)." {$name}",
+            PackageType::Docker => 'docker pull '.$this->url->dockerImagePrefix($group).'/'.$name
+                .($tag === null ? '' : ':'.$tag),
+        };
+    }
 
     /**
      * Copy-paste setup snippets per client. Composer/npm/auth as before, plus pip and
@@ -32,13 +74,7 @@ class SetupSnippetBuilder
         // npm lines address the host including the path prefix; terminated with a slash.
         $npmBase = $host.$prefix.'/';
         $simple = $base.'/simple/';
-        // The same URL with inline credentials. pip understands no other shape on the
-        // command line, so the one-liner keeps it — but see the pip.conf block below: a
-        // credential belongs in ~/.netrc (mode 600, never committed), not in a config
-        // file that tends to end up in a repository. Inline credentials in a URL are also
-        // what leads operators to put a mirror password into an upstream URL, where the
-        // application then has to withhold it from readers (see App\Support\CredentialUrl).
-        $simpleAuth = 'https://token:<token>@'.$host.$prefix.'/simple/';
+        $simpleAuth = $this->simpleAuthUrl($group);
 
         return [
             'composer' => json_encode([
@@ -93,6 +129,24 @@ class SetupSnippetBuilder
             // placeholder for that case, the same way it fills in <token> to be replaced.
             'dockerExample' => $group->packages()->where('type', 'docker')->orderBy('name')->value('name'),
         ];
+    }
+
+    /**
+     * The `/simple/` index URL with inline credentials — the one statement of it, read both
+     * by the setup tab's pip one-liner and by `installCommand()`'s Python case. Two spellings
+     * of this URL is exactly how a package page ends up offering a command that points
+     * somewhere the setup instructions do not.
+     *
+     * pip understands no other shape on the command line, so the one-liner keeps the inline
+     * credential — but see the pip.conf block in for(): a credential belongs in ~/.netrc
+     * (mode 600, never committed), not in a config file that tends to end up in a repository.
+     * Inline credentials in a URL are also what leads operators to put a mirror password into
+     * an upstream URL, where the application then has to withhold it from readers (see
+     * App\Support\CredentialUrl).
+     */
+    private function simpleAuthUrl(Group $group): string
+    {
+        return 'https://token:<token>@'.$this->url->host($group).$this->url->pathPrefix($group).'/simple/';
     }
 
     /**

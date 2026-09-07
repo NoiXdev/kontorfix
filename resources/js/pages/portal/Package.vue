@@ -7,9 +7,10 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head } from '@inertiajs/vue3';
+import { Head, Link } from '@inertiajs/vue3';
 import { Check, Copy } from 'lucide-vue-next';
 import { computed, ref } from 'vue';
+import { installCardTitle, installHeading, prerequisiteNote, readmeFallbackNote, setupLinkLabel, type PortalPackageType } from './portalInstall';
 import { registryLapsedNote } from './portalPackages';
 
 interface Registry {
@@ -17,6 +18,13 @@ interface Registry {
     name: string;
     slug: string;
     url: string;
+    /**
+     * What a `docker login` addresses — `RegistryUrl::dockerHost()`, host and port with no
+     * scheme and no namespace. Named by the Docker prerequisite line; deliberately not `url`,
+     * which carries `https://` and, on the instance host, the `/r/{org}/{registry}` path that
+     * no Docker client accepts.
+     */
+    docker_host: string;
 }
 
 interface Dependencies {
@@ -34,7 +42,13 @@ const props = defineProps<{
     registry: Registry;
     package: {
         id: string;
-        type: 'composer' | 'npm';
+        /**
+         * The real `PackageType` set. This was `'composer' | 'npm'` while Python packages
+         * were already being served through this page, so the one branch that mattered — the
+         * pip command that silently resolved against PyPI — was the branch nothing
+         * type-checked. Docker joins it here rather than becoming the next omission.
+         */
+        type: PortalPackageType;
         name: string;
         description: string | null;
         readme_html: string | null;
@@ -44,7 +58,15 @@ const props = defineProps<{
         abandonment_reason: string | null;
     };
     versions: VersionRow[];
-    install: string;
+    /**
+     * The whole command, built by `SetupSnippetBuilder::installCommand()` from THIS registry's
+     * address — never assembled in the browser, and never from the package type alone.
+     *
+     * Null when the registry no longer serves the assignment. The server withholds it rather
+     * than leaving it to this page to hide: a command that answers 404 should not be in the
+     * payload at all.
+     */
+    install: string | null;
     // REGISTRY-LOCAL: whether THIS registry still serves the assignment — this page is
     // addressed by one registry and says nothing about the others. Decided by
     // RegistryAccessService (expiry AND own-or-shared), the predicate the registry endpoints
@@ -57,6 +79,11 @@ const props = defineProps<{
 }>();
 
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
+
+// The registry page opens on its Einrichtung tab, so its own address IS the setup address —
+// the prerequisite link needs no tab parameter, and inventing one would be a second way to
+// address a page that has one.
+const setupHref = `/c/${props.orgSlug}/registries/${props.registry.id}`;
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Registries', href: `/c/${props.orgSlug}/registries` },
@@ -76,6 +103,10 @@ const versionOptions = computed(() => props.versions.map((v) => ({ value: v.vers
 const copied = ref(false);
 
 async function copyInstall() {
+    if (props.install === null) {
+        return;
+    }
+
     try {
         await navigator.clipboard.writeText(props.install);
         copied.value = true;
@@ -134,22 +165,36 @@ function depCount(deps: Record<string, string>): number {
                     v-if="!props.package.readme_html"
                     class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
                 >
-                    Für dieses Paket liegt keine README vor. Installationsbefehle stehen unten, die Versionshistorie darunter.
+                    {{ readmeFallbackNote(props.package.type) }}
                 </div>
             </section>
 
             <section class="flex flex-col gap-3">
-                <h2 class="text-lg font-medium">Installation</h2>
-                <div v-if="props.in_force" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
-                    <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
-                        <h3 class="font-medium">Paket installieren</h3>
-                        <Button variant="outline" size="sm" @click="copyInstall">
-                            <component :is="copied ? Check : Copy" class="size-4" />
-                            {{ copied ? 'Kopiert!' : 'Kopieren' }}
-                        </Button>
+                <h2 class="text-lg font-medium">{{ installHeading(props.package.type) }}</h2>
+                <template v-if="props.in_force && props.install !== null">
+                    <!-- Plate 4's prerequisite line. A command without its precondition is a
+                         trap: the reader copies it, it fails (or, for pip, quietly succeeds
+                         against PyPI), and the explanation sits in a tab they have not seen.
+                         Both halves come from the tested module — the sentence, which names
+                         the login host for Docker, and the label, which names the registry so
+                         a customer with several cannot configure the wrong one. -->
+                    <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                        <span>{{ prerequisiteNote(props.package.type, props.registry.docker_host) }}</span>
+                        <Link :href="setupHref" class="font-medium text-copper-hi hover:underline">
+                            {{ setupLinkLabel(props.registry.name) }}
+                        </Link>
+                    </p>
+                    <div class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
+                        <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
+                            <h3 class="font-medium">{{ installCardTitle(props.package.type) }}</h3>
+                            <Button variant="outline" size="sm" @click="copyInstall">
+                                <component :is="copied ? Check : Copy" class="size-4" />
+                                {{ copied ? 'Kopiert!' : 'Kopieren' }}
+                            </Button>
+                        </div>
+                        <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ props.install }}</pre>
                     </div>
-                    <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ props.install }}</pre>
-                </div>
+                </template>
                 <!-- The command REPLACES nothing else on the page: the readme, the versions and
                      the dependency tree stay, because they are what the customer came to check
                      against. Only the one element that would not work is withheld — a snippet

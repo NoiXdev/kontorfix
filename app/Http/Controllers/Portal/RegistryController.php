@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Portal;
 
+use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\OciTag;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
@@ -14,7 +16,9 @@ use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\RegistryAccessService;
 use App\Support\VersionOrder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -154,6 +158,8 @@ class RegistryController extends Controller
             ->orderBy('packages.name')
             ->get();
 
+        $dockerTags = $this->newestTags($packages);
+
         return Inertia::render('portal/Registry', [
             'orgSlug' => $organization->slug,
             'registry' => [
@@ -181,6 +187,18 @@ class RegistryController extends Controller
                 // through the same module rather than a second copy of the rule.
                 'shared' => $p->shared,
                 'in_force' => $inForce->has($p->id),
+                // The Installation column (plate 5), addressed at THIS registry — the same
+                // SetupSnippetBuilder the Einrichtung tab above it is built from, so the two
+                // tabs of one page cannot point a customer at different addresses.
+                //
+                // NULL FOR A LAPSED ASSIGNMENT, and null on the server rather than merely
+                // hidden in the template: the command that would be printed there answers
+                // 404, and a payload that carries it is one careless `v-if` away from being
+                // rendered. The row shows the reason instead — the rule portal/Package.vue
+                // has followed since lapsed assignments became visible at all.
+                'install' => $inForce->has($p->id)
+                    ? $this->snippets->installCommand($group, $p->type, $p->name, $dockerTags[$p->id] ?? null)
+                    : null,
             ]),
             'tokens' => $group->tokens()->where('user_id', $request->user()->id)->latest()->get()->map(fn (RegistryToken $t) => [
                 'id' => $t->id,
@@ -219,17 +237,21 @@ class RegistryController extends Controller
         $package->load('versions');
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
-        // Ignored by every type but Docker (see PackageType::installHint()'s doc comment) —
-        // loaded here rather than assumed present, since this action (unlike show()) never
-        // eager-loads the group's domains itself. `organization` too: the path address is
-        // built from its slug.
+        // The registry's address is read below (and by SetupSnippetBuilder) from `domains`
+        // and `organization` — loaded here rather than assumed present, since this action
+        // (unlike show()) never eager-loads them itself.
         $group->loadMissing(['domains', 'organization']);
-        // Never null any more. This used to pass the host only when the registry carried a
-        // domain and null otherwise, which rendered `docker pull <registry-host>/meinapp`
-        // to a customer whose registry was in fact perfectly pullable — see
-        // RegistryUrl::dockerHost(). One source for the address: the same two methods
-        // SetupSnippetBuilder's Docker fields come from.
-        $install = $package->type->installHint($package->name, $this->url->dockerImagePrefix($group));
+        // ONE SOURCE. This used to come from PackageType::installHint(), which knew the
+        // ecosystem and nothing about the registry serving it, so the customer was handed
+        // `pip install kernmodul` — a command that does not fail, it fetches whatever PyPI
+        // has under that name. The builder that already computes this registry's address for
+        // the Einrichtung tab computes the command too.
+        //
+        // Withheld entirely when the registry no longer serves the assignment: the page
+        // prints the reason in its place, and a command that answers 404 is worse than none.
+        $install = $inForce
+            ? $this->snippets->installCommand($group, $package->type, $package->name, $this->newestTag($package))
+            : null;
 
         return Inertia::render('portal/Package', [
             'orgSlug' => $organization->slug,
@@ -238,6 +260,11 @@ class RegistryController extends Controller
                 'name' => $group->name,
                 'slug' => $group->slug,
                 'url' => $this->url->base($group),
+                // What a `docker login` addresses — named by the prerequisite line above a
+                // Docker repository's pull command (plate 4). RegistryUrl::dockerHost(), the
+                // same method the Einrichtung tab's Docker step is built from; never the
+                // `url` above, which is a scheme-carrying base URL no Docker client accepts.
+                'docker_host' => $this->url->dockerHost($group),
             ],
             'package' => [
                 // The page's breadcrumb links to the package's own address, so it needs the
@@ -263,5 +290,54 @@ class RegistryController extends Controller
             // answers 404 is worse than saying nothing.
             'in_force' => $inForce,
         ]);
+    }
+
+    /**
+     * The tag a `docker pull` should name for one repository, or null.
+     *
+     * Null for every type but Docker, and null for a Docker repository nothing has been
+     * pushed to yet — `installCommand()` then prints `docker pull <host>/<repo>`, which is a
+     * real command (Docker reads it as `:latest`) rather than a placeholder the reader has to
+     * edit. Tags are `oci_tags` rows and NOT `package_versions`: the OCI push path never
+     * writes a version row, so `$package->versions` is empty for every Docker repository and
+     * asking it would silently produce the untagged form for a repository that has tags.
+     *
+     * Newest by `updated_at` — a tag row is touched every time the tag is re-pointed, so this
+     * is the tag most recently pushed. `name` descending only breaks a tie, so that two tags
+     * written in the same transaction still order deterministically instead of by insertion
+     * order.
+     */
+    private function newestTag(Package $package): ?string
+    {
+        if ($package->type !== PackageType::Docker) {
+            return null;
+        }
+
+        return $package->ociTags()->orderByDesc('updated_at')->orderByDesc('name')->value('name');
+    }
+
+    /**
+     * The same answer for a whole page of rows, in ONE query rather than one per row.
+     *
+     * Ascending, then `pluck` keyed by package: a later row overwrites an earlier one, so
+     * what survives per package is the last — the newest, by the ordering newestTag() states.
+     * Restricted to the Docker rows, so a registry without any runs no query worth the name.
+     *
+     * @param  EloquentCollection<int, Package>  $packages
+     * @return Collection<string, string>
+     */
+    private function newestTags(EloquentCollection $packages): Collection
+    {
+        $dockerIds = $packages->where('type', PackageType::Docker)->pluck('id');
+
+        if ($dockerIds->isEmpty()) {
+            return collect();
+        }
+
+        return OciTag::query()
+            ->whereIn('package_id', $dockerIds)
+            ->orderBy('updated_at')
+            ->orderBy('name')
+            ->pluck('name', 'package_id');
     }
 }

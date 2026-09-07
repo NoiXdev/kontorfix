@@ -143,7 +143,7 @@ class RegistryUrl
     /**
      * Everything a `docker pull` writes before the repository name, without a trailing
      * slash — host and namespace as one string, for the callers that only ever concatenate
-     * the two (PackageType::installHint() among them).
+     * the two (SetupSnippetBuilder::installCommand() among them).
      */
     public function dockerImagePrefix(Group $group): string
     {

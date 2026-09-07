@@ -4,10 +4,13 @@ namespace App\Enums;
 
 /**
  * The registry types the instance can host. This enum is the single source of truth for
- * per-type behaviour (labels, whether it is publish-based, its manifest file, its name
- * format, and the install hint). The metadata is shared to the frontend via Inertia
- * (`registryTypeMeta`) so dropdowns, filters and install snippets are all driven from
- * here — adding a type means editing this file, not chasing hardcoded lists.
+ * per-type behaviour (labels, whether it is publish-based, its manifest file, and its name
+ * format). The metadata is shared to the frontend via Inertia (`registryTypeMeta`) so
+ * dropdowns and filters are all driven from here — adding a type means editing this file,
+ * not chasing hardcoded lists.
+ *
+ * INSTALL COMMANDS ARE NOT HERE, and the block where installHint() used to sit says why: a
+ * command needs the address of the registry serving it, which no enum case can know.
  */
 enum PackageType: string
 {
@@ -54,31 +57,21 @@ enum PackageType: string
         };
     }
 
-    /**
-     * Install command shown to consumers.
+    /*
+     * THERE IS DELIBERATELY NO installHint() HERE ANY MORE.
      *
-     * `$dockerRegistry` is Docker-only and optional: every other case ignores it outright,
-     * so every existing caller stays correct unchanged. It is everything an image reference
-     * writes BEFORE the repository name — host, plus the `{organisation}/{registry}`
-     * namespace when the registry is addressed on the instance host — and there is exactly
-     * one place that computes it: RegistryUrl::dockerImagePrefix().
+     * This enum used to build the install command for each type, and the portal rendered
+     * what it returned. It could only ever build a REGISTRY-LESS one — an enum case knows
+     * its ecosystem and nothing about the registry serving it — and for Python that is not a
+     * missing convenience but a live defect: `pip install kernmodul` without `--index-url`
+     * resolves against PyPI, so a package of that name on the public index is installed into
+     * the customer's build instead, silently. Composer and npm at least fail visibly.
      *
-     * The parameter used to be a bare host, supplied only when the registry carried a
-     * domain, on the reasoning that a registry without one had no address a Docker client
-     * could reach. ResolveOciContext made that false: every registry has one. So a caller
-     * holding a Group always has a real value to pass, and the `<registry-host>` fallback
-     * below now means only "this caller has no registry in hand" — never "this registry has
-     * no address".
+     * The command belongs where the registry's address already lives, and there is exactly
+     * one such place: App\Services\Registry\SetupSnippetBuilder::installCommand(), built on
+     * RegistryUrl. The method was removed rather than deprecated, because an unused generator
+     * of a wrong command is an invitation to the next caller.
      */
-    public function installHint(string $name, ?string $dockerRegistry = null): string
-    {
-        return match ($this) {
-            self::Composer => "composer require {$name}",
-            self::Npm => "npm install {$name}",
-            self::Python => "pip install {$name}",
-            self::Docker => 'docker pull '.($dockerRegistry ?? '<registry-host>')."/{$name}",
-        };
-    }
 
     /** Validation regex for a package name of this type. */
     public function nameRegex(): string
@@ -96,7 +89,7 @@ enum PackageType: string
 
     /**
      * Static metadata for every type — shared to the frontend so it can render type
-     * pickers/labels/install hints without hardcoding.
+     * pickers, labels and filter options without hardcoding a case list.
      *
      * @return list<array{value:string, label:string, publish_based:bool}>
      */

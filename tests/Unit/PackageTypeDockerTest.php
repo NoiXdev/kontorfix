@@ -21,29 +21,14 @@ it('has no git manifest file for docker, and says so with null', function () {
         ->and(PackageType::Python->manifestFile())->toBe('pyproject.toml');
 });
 
-it('gives docker an install hint that names the registry host placeholder', function () {
-    expect(PackageType::Docker->installHint('meinapp'))->toContain('docker pull')
-        ->and(PackageType::Docker->installHint('meinapp'))->toContain('meinapp')
-        // The test's own name promises this: the caller passed no registry at all (the
-        // second parameter is omitted here), so the hint must name the `<registry-host>`
-        // placeholder instead of silently omitting the host segment or leaving it blank.
-        // Since path addressing this is the ONLY reason the placeholder is ever reached —
-        // there is no registry left that lacks an address.
-        ->and(PackageType::Docker->installHint('meinapp'))->toContain('<registry-host>');
-});
-
-it('uses the registry address in the docker install hint once one is known', function () {
-    // The parameter is everything an image reference writes before the repository name:
-    // a bare host on a custom domain, host plus `{organisation}/{registry}` on the instance
-    // host. Both come from RegistryUrl::dockerImagePrefix(), and both shapes are pinned here
-    // because a hint that dropped the namespace would pull from a repository that does not
-    // exist — with a 404 as the only symptom.
-    expect(PackageType::Docker->installHint('meinapp', 'images.3b.de'))
-        ->toBe('docker pull images.3b.de/meinapp')
-        ->and(PackageType::Docker->installHint('meinapp', 'registry.3b.de/3b/intern'))
-        ->toBe('docker pull registry.3b.de/3b/intern/meinapp')
-        ->and(PackageType::Docker->installHint('meinapp', null))
-        ->toBe('docker pull <registry-host>/meinapp')
-        ->and(PackageType::Composer->installHint('acme/widget', 'images.3b.de'))
-        ->toBe('composer require acme/widget');
-});
+/*
+ * The install command is NOT tested here any more, and not because the coverage was dropped:
+ * `PackageType::installHint()` no longer exists. An enum case knows its ecosystem and nothing
+ * about the registry serving a package, so every command it could build was registry-less —
+ * harmless-looking for Composer and npm, and for Python a `pip install <name>` that resolves
+ * against PyPI instead of failing. The command is built from the registry's own address now,
+ * by App\Services\Registry\SetupSnippetBuilder::installCommand(), and both Docker shapes
+ * this file used to pin (bare host on a custom domain, host plus `{organisation}/{registry}`
+ * on the instance host) are asserted against real registries in
+ * tests/Feature/Portal/InstallCommandTest.php.
+ */

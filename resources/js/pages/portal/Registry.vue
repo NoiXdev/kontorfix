@@ -9,13 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import { useTableState, type ColumnDef } from '@/composables/useTableState';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
-import { Copy, Plus, Trash2 } from 'lucide-vue-next';
+import { Check, Copy, Plus, Trash2 } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
-import { badgesFor, registryLapsedNote, SHARED_BADGE_TITLE } from './portalPackages';
+import { installCell, type PortalPackageType } from './portalInstall';
+import { badgesFor, SHARED_BADGE_TITLE } from './portalPackages';
 
 interface Registry {
     id: string;
@@ -42,9 +44,18 @@ interface Snippets {
 interface PackageRow {
     id: string;
     name: string;
-    type: string;
+    type: PortalPackageType;
     description: string | null;
     latest_version: string | null;
+    /**
+     * The whole command for THIS registry, built by `SetupSnippetBuilder::installCommand()` —
+     * one source with the Einrichtung tab beside it, so the two tabs of one page cannot point
+     * a customer at two different addresses.
+     *
+     * Null for a lapsed assignment. The server withholds it rather than sending a command the
+     * page is trusted to hide; `installCell()` turns the null into the reason.
+     */
+    install: string | null;
     /** The package is owned by the operator organization and shared into this registry. */
     shared: boolean;
     /**
@@ -86,11 +97,16 @@ const props = defineProps<{
     tokens: TokenRow[];
 }>();
 
-const typeOptions = [
-    { value: 'composer', label: 'composer' },
-    { value: 'npm', label: 'npm' },
-    { value: 'python', label: 'python' },
-];
+// The enum-driven type list (PackageType::metadata(), shared as `registryTypeMeta`), not a
+// hardcoded array. The hardcoded one listed composer/npm/python, so a Docker repository in
+// this registry could not be filtered for at all — the same defect PackagePicker's quick-add
+// carried, and the same reason PackageType's own docblock gives for the enum existing.
+//
+// Every type the instance knows, deliberately, rather than `props.types`: that prop is what
+// this organization MAY serve now, and a registry can hold a package of a type the operator
+// has since switched off. A filter that hid those rows' own type would be a filter that
+// cannot find a row the table is displaying.
+const typeOptions = useRegistryTypes().options();
 
 // Packages and tokens each get their own useTableState instance with a distinct
 // prefix ('pkg' / 'tok') — without it both tables would read and write the same
@@ -100,6 +116,9 @@ const packageColumns: ColumnDef<PackageRow>[] = [
     { key: 'type', label: 'Typ' },
     { key: 'latest_version', label: 'Letzte Version' },
     { key: 'description', label: 'Beschreibung' },
+    // Plate 5. Unsortable: the column holds a command for most rows and an explanation for
+    // the rest, and sorting a mixed column alphabetically orders nothing a reader asked for.
+    { key: 'install', label: 'Installation', sortable: false },
 ];
 
 const packageTable = useTableState<PackageRow>({
@@ -225,14 +244,42 @@ function destroyToken(id: string) {
 }
 
 /**
- * The note a row carries here: the single-registry sentence, or nothing.
+ * The Installation cell of one row: the command, abbreviated for the column, or the reason
+ * there is none. Both decisions live in the tested module — including the choice of the
+ * single-registry sentence, which is the only one this page may make (see portalPackages.ts,
+ * TWO ANSWERS: the landing page's note speaks about every registry, and this page knows one).
  *
- * NOT `noteFor()`. That function chooses between two notes that both speak about the
- * customer's registries as a set — which this page does not have, and whose `in_force` is
- * registry-local. `registryLapsedNote()` is the sentence for exactly this shape.
+ * The reason used to render as a second, full-width row under the package. It renders IN the
+ * column now, where the command would have been: printing both would say one sentence twice
+ * on one row, and the column a reader is scanning for "how do I get this" is where the answer
+ * that they cannot belongs.
  */
-function noteForRow(pkg: PackageRow): string | null {
-    return pkg.in_force ? null : registryLapsedNote();
+function cellFor(pkg: PackageRow) {
+    return installCell(pkg);
+}
+
+// Which row's command was last copied, so the confirmation lands on that row rather than on
+// every button in the column. Null once it times out.
+const copiedId = ref<string | null>(null);
+
+async function copyInstall(pkg: PackageRow) {
+    const command = cellFor(pkg).command;
+
+    // The WHOLE command, never the abbreviated cell text: `pip install --index-url … kernmodul`
+    // pasted into a terminal fails, and a reader who repairs it by deleting the flag is back
+    // to installing from PyPI — the defect this column exists to close.
+    if (command === null) {
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(command);
+        copiedId.value = pkg.id;
+        setTimeout(() => (copiedId.value = null), 2000);
+    } catch {
+        // Clipboard API not available (insecure context) — the command can be selected manually.
+        copiedId.value = null;
+    }
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -292,50 +339,63 @@ const breadcrumbs: BreadcrumbItem[] = [
                         </template>
 
                         <template #default="{ rows }">
-                            <template v-for="pkg in rows" :key="pkg.id">
-                                <!-- The separator belongs to the LAST row of this package's block,
-                                     so the main row gives it up whenever the note follows it —
-                                     the same rule portal/Packages.vue and admin/groups/Show.vue
-                                     follow: an outage warning below a separator reads as belonging
-                                     to the next package. -->
-                                <tr :class="noteForRow(pkg) ? '' : 'border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border'">
-                                    <td class="px-4 py-3 font-mono">
-                                        <div class="flex items-center gap-2">
-                                            <!-- The name of a lapsed assignment stays LINKED, as it
+                            <!-- One <tr> per package. The block used to be a <template> wrapping
+                                 two rows, the second carrying the lapsed explanation full-width;
+                                 that explanation lives in the Installation cell now, so the
+                                 separator no longer has to be handed from one row to the next. -->
+                            <tr v-for="pkg in rows" :key="pkg.id" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
+                                <td class="px-4 py-3 font-mono">
+                                    <div class="flex items-center gap-2">
+                                        <!-- The name of a lapsed assignment stays LINKED, as it
                                                  does on portal/Packages.vue: the detail page serves
                                                  it with the explanation instead of 404ing, so this
                                                  is no longer a dead end on either page. -->
-                                            <Link
-                                                :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])"
-                                                class="hover:underline"
-                                            >
-                                                {{ pkg.name }}
-                                            </Link>
-                                            <!-- One decision, in the tested module: which markers
+                                        <Link
+                                            :href="route('portal.registries.package', [props.orgSlug, props.registry.id, pkg.id])"
+                                            class="hover:underline"
+                                        >
+                                            {{ pkg.name }}
+                                        </Link>
+                                        <!-- One decision, in the tested module: which markers
                                                  this row carries and in what order. -->
-                                            <template v-for="badge in badgesFor(pkg)" :key="badge">
-                                                <SharedBadge v-if="badge === 'geteilt'" :title="SHARED_BADGE_TITLE" />
-                                                <!-- v-else-if, not v-else: a catch-all would render
+                                        <template v-for="badge in badgesFor(pkg)" :key="badge">
+                                            <SharedBadge v-if="badge === 'geteilt'" :title="SHARED_BADGE_TITLE" />
+                                            <!-- v-else-if, not v-else: a catch-all would render
                                                      any badge added later in destructive red, which
                                                      is the wrong default for a marker that is not a
                                                      fault. -->
-                                                <span
-                                                    v-else-if="badge === 'abgelaufen'"
-                                                    class="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-sans text-xs font-medium text-destructive"
-                                                >
-                                                    {{ badge }}
-                                                </span>
-                                            </template>
-                                        </div>
-                                    </td>
-                                    <td class="px-4 py-3">{{ pkg.type }}</td>
-                                    <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
-                                    <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
-                                </tr>
-                                <tr v-if="noteForRow(pkg)" class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border">
-                                    <td colspan="4" class="px-4 pb-3 text-xs text-destructive">{{ noteForRow(pkg) }}</td>
-                                </tr>
-                            </template>
+                                            <span
+                                                v-else-if="badge === 'abgelaufen'"
+                                                class="inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 font-sans text-xs font-medium text-destructive"
+                                            >
+                                                {{ badge }}
+                                            </span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3">{{ pkg.type }}</td>
+                                <td class="px-4 py-3 font-mono text-muted-foreground">{{ pkg.latest_version ?? '—' }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ pkg.description ?? '—' }}</td>
+                                <td class="px-4 py-3">
+                                    <!-- The command, abbreviated in the cell and whole in the
+                                             clipboard — or, for a lapsed assignment, the reason
+                                             there is none and no button to copy one. -->
+                                    <div v-if="cellFor(pkg).command" class="flex items-center gap-2">
+                                        <span class="font-mono text-xs break-all">{{ cellFor(pkg).text }}</span>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            class="h-6 shrink-0 px-2 text-xs"
+                                            aria-label="Installationsbefehl kopieren"
+                                            @click="copyInstall(pkg)"
+                                        >
+                                            <component :is="copiedId === pkg.id ? Check : Copy" class="size-3" />
+                                            {{ copiedId === pkg.id ? 'Kopiert!' : 'Kopieren' }}
+                                        </Button>
+                                    </div>
+                                    <span v-else class="text-xs text-destructive">{{ cellFor(pkg).text }}</span>
+                                </td>
+                            </tr>
                         </template>
                     </DataTable>
                 </TabsContent>
