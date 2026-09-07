@@ -10,6 +10,7 @@ use App\Models\OciBlob;
 use App\Models\OciBlobUpload;
 use App\Models\OciManifest;
 use App\Models\Package;
+use App\Models\RegistryToken;
 use App\Services\Oci\BlobStore;
 use App\Services\Oci\Digest;
 use App\Services\RegistryAccessService;
@@ -153,21 +154,41 @@ class BlobController extends Controller
             throw OciException::blobUnknown($digest);
         }
 
-        // The extra check is scoped to SHARED packages only, deliberately, not applied to
-        // every pull: for an ordinary (non-shared) repository, every reader of it is
-        // already a member of the SAME organization the blob belongs to — there is no
-        // OTHER tenant to disclose it to, so requiring the digest to already be named by
-        // one of $package's own manifests would only break two things this endpoint is
-        // supposed to support: `HEAD .../blobs/<digest>` checked right after this repo's
-        // OWN blob upload, before any manifest references it yet (the ordinary "is this
-        // layer already here" shortcut a push makes BEFORE writing its manifest — see
-        // BlobUploadTest's "reports an existing blob by digest" and BlobDownloadTest's
-        // streaming/redirect/HEAD cases, none of which push a manifest at all), and the
-        // cross-repository MOUNT feature (§3), which deliberately makes one organization's
-        // blob available to a second repository of that SAME organization without either
-        // one's manifest naming it first. Both are legitimate same-tenant sharing; neither
-        // is the leak this method exists to close.
-        if ($package->shared && ! $this->referencedByPackage($package, $digest)) {
+        // The digest must be one THIS repository's own manifests name — with exactly one
+        // exception, and the exception is defined by what the CALLER may do, not by a flag
+        // on the package.
+        //
+        // THIS GATE USED TO READ `$package->shared`, and that was wrong in a way no shared
+        // package was involved in. The premise written here was "for an ordinary
+        // (non-shared) repository, every reader of it is already a member of the SAME
+        // organization the blob belongs to — there is no OTHER tenant to disclose it to".
+        // A reader of a PUBLIC group is not a member of anything: `ociRepository()` lets an
+        // anonymous caller through for a public group, exactly as npm/composer/pypi do. So
+        // for one public Docker repository, an anonymous caller with no token at all could
+        // ask this endpoint for any digest the owning organization had ever stored — every
+        // layer of every PRIVATE repository of that organization, in any other registry —
+        // and be served it, 200 OK. Confirmed live before this change. `shared` was never
+        // the property that mattered; "may this caller be handed bytes this repository does
+        // not name" is.
+        //
+        // THE ONE EXCEPTION is the push shortcut: a client asks `HEAD .../blobs/<digest>`
+        // to find out whether a layer is already here BEFORE it uploads it, and therefore
+        // long before any manifest of this repository names it (see BlobUploadTest's
+        // "reports an existing blob by digest"). That caller always holds a PUBLISH token
+        // for this group — it is about to write — and a caller who may write into this
+        // organization's registry learns nothing from an existence probe it could not learn
+        // by pushing. So the exception is scoped to that ability rather than to the method:
+        // a HEAD from a read token is answered by the same rule as its GET, which is what
+        // keeps the two from disagreeing about what exists.
+        //
+        // The cross-repository MOUNT feature (§3) needs no exception here at all: it is a
+        // POST to `.../blobs/uploads/?mount=&from=`, handled by mountFrom() above, and never
+        // reaches this method.
+        /** @var RegistryToken|null $token */
+        $token = $request->attributes->get('registryToken');
+        $mayPublish = $token !== null && $this->access->canPublishToGroup($token, $group);
+
+        if (! $mayPublish && ! $this->referencedByPackage($package, $digest)) {
             throw OciException::blobUnknown($digest);
         }
 

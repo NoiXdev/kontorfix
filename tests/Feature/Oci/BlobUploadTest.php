@@ -180,7 +180,15 @@ it('reports an existing blob by HEAD so the client skips re-uploading it', funct
     $this->withServerVariables($this->publish)
         ->call('POST', "http://images.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes);
 
-    $this->withServerVariables($this->read)
+    // The PUBLISH token, not the read one this case used to probe with, and the difference
+    // is the point rather than a detail: this HEAD is a step of a PUSH — the client asks
+    // whether it can skip uploading a layer it is about to upload — so the credential it
+    // carries is the one the push already holds. No manifest names this digest yet, and
+    // BlobController::show() serves an unreferenced blob only to a caller who may publish
+    // here; a read token gets the same BLOB_UNKNOWN it gets for any digest this repository
+    // does not name (BlobDownloadTest covers both sides). Probing with a read token was
+    // this file's own invention, not a shape any client produces.
+    $this->withServerVariables($this->publish)
         ->head("http://images.test/v2/app/blobs/{$digest}")
         ->assertOk()
         ->assertHeader('Content-Length', '1024')

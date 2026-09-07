@@ -73,9 +73,17 @@ function useRemoteArtifactsDisk(): void
 }
 
 /**
- * Pushes $bytes as a monolithic blob to repository "app" over HTTP and returns its digest.
+ * Pushes $bytes as a monolithic blob to repository "app" over HTTP, THEN publishes a
+ * manifest of "app" that names the digest as a layer, and returns the digest.
  *
- * @param  array<string, string>  $serverVars
+ * The manifest is not decoration. BlobController::show() serves a blob to a READ token
+ * only when one of this repository's own manifests names it — the repository's own
+ * boundary, since oci_blobs deduplicates per organization and carries none of its own.
+ * A real `docker pull` always fetches the manifest first and only then the blobs it names,
+ * so this helper reproduces the state a pull actually finds. Without it these tests pushed
+ * a blob no manifest referenced and then pulled it, a shape no client produces.
+ *
+ * @param  array<string, string>  $serverVars  a PUBLISH token's — both requests write
  */
 function pushBlobToApp(array $serverVars, string $bytes): string
 {
@@ -85,7 +93,30 @@ function pushBlobToApp(array $serverVars, string $bytes): string
         ->call('POST', "http://images.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes)
         ->assertStatus(201);
 
+    referenceBlobFromManifest($serverVars, $digest);
+
     return $digest;
+}
+
+/**
+ * Publishes a manifest of repository "app" naming $digest as its single layer.
+ *
+ * The tag is derived from the digest so that two blobs pushed in one test do not overwrite
+ * each other's manifest — each blob gets its own, and both stay referenced.
+ *
+ * @param  array<string, string>  $serverVars  a PUBLISH token's
+ */
+function referenceBlobFromManifest(array $serverVars, string $digest): void
+{
+    $payload = json_encode([
+        'schemaVersion' => 2,
+        'mediaType' => 'application/vnd.oci.image.manifest.v1+json',
+        'layers' => [['mediaType' => 'application/vnd.oci.image.layer.v1.tar', 'digest' => $digest, 'size' => 1]],
+    ]);
+
+    test()->withServerVariables($serverVars + ['CONTENT_TYPE' => 'application/vnd.oci.image.manifest.v1+json'])
+        ->call('PUT', 'http://images.test/v2/app/manifests/t'.substr($digest, 7, 12), content: (string) $payload)
+        ->assertStatus(201);
 }
 
 beforeEach(function () {
@@ -200,6 +231,13 @@ it('404s a blob belonging to another organization', function () {
     $digest = Digest::of($bytes);
     uploadBlobToOtherOrganization($bytes);
 
+    // Named by a manifest of THIS repository, so the org boundary is the only thing left
+    // that can refuse the request. Without this the test would pass even if find() were
+    // replaced by a global digest lookup, because the second gate in show() — "one of this
+    // repository's own manifests names it" — would refuse an unreferenced digest anyway.
+    // The point of this case is the FIRST gate, so the second one is satisfied on purpose.
+    referenceBlobFromManifest($this->publish, $digest);
+
     // Load-bearing: uploadBlobToOtherOrganization() leaves the FOREIGN organization's
     // publish token attached to $this (see its own docblock) — this call resets to
     // $this->read, this organization's own read token, before the request below. Without
@@ -224,4 +262,86 @@ it('refuses an anonymous read with 401 and the basic challenge', function () {
         ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
         ->assertStatus(401)
         ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"');
+});
+
+it('does not serve an unreferenced blob of the same organization to an anonymous caller on a public registry', function () {
+    // THE REGRESSION THIS CASE EXISTS FOR. show()'s second gate used to be scoped to
+    // `$package->shared`, on the premise that every reader of an ordinary repository is a
+    // member of the blob's own organization and so there is no other tenant to disclose it
+    // to. A reader of a PUBLIC group is a member of nothing: ociRepository() waves an
+    // anonymous caller through for a public group, exactly as npm/composer/pypi do. With
+    // the gate skipped, `blobs->find($package->organization_id, $digest)` was the only
+    // check left — and it is satisfied by every blob the organization owns, including the
+    // layers of PRIVATE repositories in OTHER registries. No shared package was needed,
+    // and no token at all.
+    $this->group->update(['public' => true]);
+
+    // A second, non-public registry of the SAME organization, with its own repository and
+    // its own layer. Nothing about it is shared with anyone.
+    $secret = Group::factory()->for($this->org)->create(['public' => false]);
+    Domain::create(['group_id' => $secret->id, 'hostname' => 'secret.test']);
+    $secretPkg = Package::factory()->inOrgOf($secret)->create(['type' => PackageType::Docker, 'name' => 'internal']);
+    $secret->packages()->attach($secretPkg);
+
+    $bytes = random_bytes(2048);
+    $digest = Digest::of($bytes);
+    $this->withServerVariables(blobDownloadAuthServerVars($secret, TokenAbility::Publish))
+        ->call('POST', "http://secret.test/v2/internal/blobs/uploads/?digest={$digest}", content: $bytes)
+        ->assertStatus(201);
+
+    // Anonymous — withServerVariables() mutates the test case, so the publish token above
+    // stays attached to every later call() until it is explicitly cleared.
+    $this->withServerVariables([])
+        ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'BLOB_UNKNOWN');
+});
+
+it('does not serve an unreferenced blob of the same organization to a read token', function () {
+    // The same rule for the ordinary, authenticated case: holding a read token for one
+    // repository is not entitlement to every layer the organization has ever stored. This
+    // is the non-public sibling of the case above, and it is what makes the gate a property
+    // of the repository rather than a special case for anonymous callers.
+    $secret = Group::factory()->for($this->org)->create();
+    Domain::create(['group_id' => $secret->id, 'hostname' => 'secret.test']);
+    $secretPkg = Package::factory()->inOrgOf($secret)->create(['type' => PackageType::Docker, 'name' => 'internal']);
+    $secret->packages()->attach($secretPkg);
+
+    $bytes = random_bytes(2048);
+    $digest = Digest::of($bytes);
+    $this->withServerVariables(blobDownloadAuthServerVars($secret, TokenAbility::Publish))
+        ->call('POST', "http://secret.test/v2/internal/blobs/uploads/?digest={$digest}", content: $bytes)
+        ->assertStatus(201);
+
+    $this->withServerVariables($this->read)
+        ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'BLOB_UNKNOWN');
+});
+
+it('still answers a publish token probing an unreferenced blob, which is what a push does', function () {
+    // The one legitimate caller for a blob no manifest names yet: a client asking whether
+    // a layer is already here BEFORE it uploads it, and therefore long before it writes the
+    // manifest that will name it. That caller always holds a publish token, and a caller
+    // who may write into this registry learns nothing from an existence probe it could not
+    // learn by pushing. If this case turns red, `docker push` re-uploads every layer it
+    // already has — a silent, expensive regression no other test would catch.
+    $bytes = random_bytes(512);
+    $digest = Digest::of($bytes);
+
+    $this->withServerVariables($this->publish)
+        ->call('POST', "http://images.test/v2/app/blobs/uploads/?digest={$digest}", content: $bytes)
+        ->assertStatus(201);
+
+    // Deliberately NO manifest: this is exactly the window the exception exists for.
+    $this->withServerVariables($this->publish)
+        ->call('HEAD', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertStatus(200)
+        ->assertHeader('Docker-Content-Digest', $digest);
+
+    // And the same token's GET, so the exception is not accidentally HEAD-only — the two
+    // must agree about what exists.
+    $this->withServerVariables($this->publish)
+        ->call('GET', "http://images.test/v2/app/blobs/{$digest}")
+        ->assertOk();
 });
