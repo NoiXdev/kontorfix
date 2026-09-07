@@ -13,6 +13,7 @@ use App\Http\Middleware\RequireSetup;
 use App\Http\Middleware\ResolvePortalContext;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\ValidatePostSize;
 use App\Services\Http\TrustedHosts;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -69,6 +70,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // health endpoint needs. `trustHosts()` above still configures it — TrustHosts::at()
         // writes a static declared on the parent, which the subclass shares.
         $middleware->replace(TrustHosts::class, App\Http\Middleware\TrustHosts::class);
+
+        // The framework class rejects any request whose Content-Length exceeds
+        // post_max_size — global, every route, every method. Correct everywhere except
+        // `/v2/*` (the OCI distribution API), which legitimately carries request bodies
+        // far larger than post_max_size on purpose (spec §4) and never reads them through
+        // the mechanism post_max_size actually bounds ($_POST/$_FILES). See the subclass's
+        // own comment for what reproducibly broke without this exemption once
+        // post_max_size became a real, finite number (docker/php.ini's DoS fix) instead of
+        // 0 — a `docker push` of any layer above it, not merely the 500 MiB gate.
+        $middleware->replace(
+            Illuminate\Http\Middleware\ValidatePostSize::class,
+            ValidatePostSize::class,
+        );
 
         // Deployment runs behind a reverse proxy (Traefik/Portainer). Without this,
         // getSchemeAndHttpHost() would return the internal host and the generated
