@@ -75,15 +75,20 @@ class UpdateOrganizationRequest extends FormRequest
             // (inherit the instance setting), true, false. `nullable` is what carries the
             // inherit state through validation — without it a null would be rejected as a
             // non-boolean and the console could never hand an organization back to the
-            // ceiling. `sometimes` keeps a payload that never mentions the field from
-            // being turned into an explicit null, which is a different intention.
+            // ceiling.
+            //
+            // No `sometimes`, for the same reason `portal_enabled` above carries none: it
+            // would be a modifier no mutation can redden. An absent field is skipped by
+            // `boolean` and omitted by `validated()` on its own, so a payload that never
+            // mentions the switch already leaves the stored value alone — which is what
+            // OrganizationAutoCreateTest's omitted-field case asserts.
             //
             // No clamping here: an organization storing `true` under a globally disabled
             // setting is inert, because OciSettings::autoCreateEnabledFor() intersects the
             // two rather than preferring the organization's value. Clamping on write would
             // additionally erase the organization's choice the moment an operator switched
             // the ceiling off and back on.
-            'oci_auto_create_repositories' => ['sometimes', 'nullable', 'boolean'],
+            'oci_auto_create_repositories' => ['nullable', 'boolean'],
         ];
     }
 }

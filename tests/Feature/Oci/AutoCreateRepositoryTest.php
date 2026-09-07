@@ -10,7 +10,9 @@ use App\Models\Package;
 use App\Models\SystemSetting;
 use App\Services\Oci\Digest;
 use App\Services\Registry\OciSettings;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
 
@@ -67,8 +69,20 @@ beforeEach(function () {
  */
 function pushBlobIntoNeu(array $publish, string $bytes): TestResponse
 {
+    return pushBlobIntoRepository($publish, 'neu', $bytes);
+}
+
+/**
+ * The same request aimed at an arbitrary repository name, for the cases that have to compare
+ * two names' answers against each other.
+ *
+ * @param  array<string, string>  $publish
+ * @return TestResponse<Response>
+ */
+function pushBlobIntoRepository(array $publish, string $name, string $bytes): TestResponse
+{
     return test()->withServerVariables($publish)
-        ->call('POST', 'http://push.test/v2/neu/blobs/uploads/?digest='.Digest::of($bytes), content: $bytes);
+        ->call('POST', "http://push.test/v2/{$name}/blobs/uploads/?digest=".Digest::of($bytes), content: $bytes);
 }
 
 it('intersects the global setting with the organization rather than coalescing', function (bool $global, ?bool $org, bool $effective) {
@@ -198,5 +212,191 @@ it('creates the repository through the path address too', function () {
         // In the caller's own address space, or the client follows the Location into a 404.
         ->assertHeader('Location', "/v2/kunde/intern/neu/blobs/{$this->blobDigest}");
 
-    expect(Package::where('name', 'neu')->sole()->organization_id)->toBe($this->org->id);
+    $created = Package::where('name', 'neu')->sole();
+
+    expect($created->organization_id)->toBe($this->org->id)
+        // …and attached to the registry the path named, which domain mode proves separately
+        // but this mode resolves the group through ResolveOciContext rather than a Domain row.
+        ->and($this->group->packages()->whereKey($created->id)->exists())->toBeTrue();
+});
+
+/**
+ * Plants a competing repository row exactly where a concurrent request's would land: after
+ * this request's own "does anybody hold this name" lookups, before its INSERT.
+ *
+ * That gap is the concurrency the protocol produces on its own. A `docker push` uploads
+ * layers CONCURRENTLY — `--max-concurrent-uploads`, 5 by default — so on a FIRST push
+ * several `POST /v2/{name}/blobs/uploads/` requests run this resolution at the same time,
+ * and `packages`' unique `(organization_id, type, name)` is what turns the loser into an
+ * error rather than a duplicate row.
+ *
+ * Neither a second thread nor a second connection can stand in for that here: Pest runs one
+ * thread, and RefreshDatabase keeps every fixture inside an uncommitted transaction, so a row
+ * written over a second connection would have no organization to point its foreign key at.
+ * The competitor is therefore written from a QUERY LISTENER rather than from a model event.
+ * The listener fires on the last lookup before the write, which keeps the competitor on this
+ * connection but OUTSIDE the transaction the write opens — which is what a real competitor's
+ * committed row is. Written from `Package::creating` instead it would sit inside that
+ * transaction and the savepoint rollback would take it away again, leaving nothing to have
+ * collided with.
+ *
+ * @return callable(): ?Package the planted row, once the push has run
+ */
+function plantCompetingRepository(string $name, Group $into): callable
+{
+    $planted = null;
+
+    DB::listen(function (QueryExecuted $query) use ($name, $into, &$planted): void {
+        // "Does any organization hold this name" — the last query ResolvesOciRepository runs
+        // before it opens the transaction that inserts.
+        $isTheGap = str_contains($query->sql, 'exists') && in_array($name, $query->bindings, true);
+
+        if ($planted !== null || ! $isTheGap) {
+            return;
+        }
+
+        // Built and assigned BEFORE it is written, so the plant's own INSERTs find the guard
+        // above already closed and cannot re-enter this listener.
+        $planted = Package::factory()->inOrgOf($into)->make([
+            'type' => PackageType::Docker,
+            'source_mode' => PackageSourceMode::Publish,
+            'name' => $name,
+        ]);
+
+        $planted->save();
+        $into->packages()->attach($planted);
+    });
+
+    // A by-reference closure, not an arrow function: an arrow function would capture
+    // `$planted` by value — as the null it still is at this point — and every assertion
+    // written against it would pass without ever seeing the planted row.
+    return function () use (&$planted): ?Package {
+        return $planted;
+    };
+}
+
+it('resolves to the winner when a competing insert lands between its own lookup and its own insert', function () {
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $winner = plantCompetingRepository('neu', $this->group);
+
+    // Unguarded, this is the 500 with an HTML body — not an OCI error document — that aborts
+    // a real first push.
+    pushBlobIntoNeu($this->publish, $this->bytes)
+        ->assertStatus(201)
+        ->assertHeader('Docker-Content-Digest', $this->blobDigest);
+
+    // `sole()` is half the assertion: the loser must not have written a second row either.
+    expect(Package::where('name', 'neu')->sole()->id)->toBe($winner()?->id);
+});
+
+it('still answers NAME_UNKNOWN when the winner is a sibling registry of the same organization', function () {
+    // The other outcome of the same collision, and the reason losing the race may not simply
+    // hand back whatever row won it: a concurrent push into a SIBLING registry of this
+    // organization creates and attaches the name there. `(organization_id, type, name)` is
+    // unique, so this push's INSERT still collides — but the winner is a repository this
+    // caller may not write to, never having been assigned to the registry it addressed.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $sibling = Group::factory()->for($this->org)->create(['slug' => 'anderes']);
+    $winner = plantCompetingRepository('neu', $sibling);
+
+    pushBlobIntoNeu($this->publish, $this->bytes)
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'NAME_UNKNOWN');
+
+    // Not pulled into the addressed registry as a consolation prize.
+    expect($this->group->packages()->whereKey($winner()?->id)->exists())->toBeFalse();
+});
+
+it('is not blocked by a competing insert in another organization, which cannot collide', function () {
+    // The scope of the constraint, stated as a test because the fix leans on it: uniqueness
+    // is `(organization_id, type, name)`, so a creator in ANOTHER organization is not a winner
+    // to defer to — organizations may legitimately share a name since
+    // 2026_09_02_110000_enforce_package_organization.php. This push creates its own row, and
+    // its 201 says nothing about the other organization a free name would not have said.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $foreign = Organization::factory()->create(['enabled_registry_types' => ['docker']]);
+    $foreignGroup = Group::factory()->for($foreign)->create();
+    $planted = plantCompetingRepository('neu', $foreignGroup);
+
+    pushBlobIntoNeu($this->publish, $this->bytes)->assertStatus(201);
+
+    $mine = Package::where('name', 'neu')->where('organization_id', $this->org->id)->sole();
+
+    expect($mine->id)->not->toBe($planted()?->id)
+        ->and($this->group->packages()->whereKey($mine->id)->exists())->toBeTrue();
+});
+
+it('inserts and attaches the created repository inside one transaction', function () {
+    // The second window: a concurrent request whose lookup landed between the winner's
+    // INSERT and its attach would find the package, fail the membership check and answer
+    // NAME_UNKNOWN for a repository that exists. What closes it is that no other connection
+    // ever observes that state — the INSERT and the attach commit together.
+    //
+    // A second connection cannot be used to prove that here (RefreshDatabase keeps this
+    // test's fixtures in an uncommitted transaction of its own), so the two halves are
+    // asserted from inside the gap instead: the state IS reached, and it is reached inside a
+    // transaction this request opened.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $ambientTransactionLevel = DB::transactionLevel();
+    $insideTheGap = null;
+
+    Package::created(function (Package $package) use (&$insideTheGap) {
+        $insideTheGap = [
+            'level' => DB::transactionLevel(),
+            'attached' => $this->group->packages()->whereKey($package->id)->exists(),
+        ];
+    });
+
+    pushBlobIntoNeu($this->publish, $this->bytes)->assertStatus(201);
+
+    expect($insideTheGap['attached'])->toBeFalse()
+        ->and($insideTheGap['level'])->toBeGreaterThan($ambientTransactionLevel);
+});
+
+it('answers every unresolvable name identically while the setting is off', function () {
+    // The claim the ordering of the two refusals exists to make true. With the setting off
+    // there are three shapes of unresolvable name, and a publish token must not be able to
+    // tell them apart by reading the body:
+    //
+    //   `neu`      — free, nobody holds it;
+    //   `anderswo` — held by the CALLER'S OWN organization, not assigned to this registry;
+    //   `fremd`    — held by another organization.
+    //
+    // The second one is the intra-organization channel: without the setting check running
+    // first it answers with the plain "gibt es nicht" while a free name names the setting.
+    expect(SystemSetting::current()->oci_auto_create_repositories)->toBeFalse();
+
+    $ownedElsewhere = Package::factory()->inOrgOf($this->group)->create([
+        'type' => PackageType::Docker,
+        'source_mode' => PackageSourceMode::Publish,
+        'name' => 'anderswo',
+    ]);
+    // Deliberately NOT attached to $this->group.
+    expect($this->group->packages()->whereKey($ownedElsewhere->id)->exists())->toBeFalse();
+
+    $foreign = Organization::factory()->create(['enabled_registry_types' => ['docker']]);
+    $foreignGroup = Group::factory()->for($foreign)->create();
+    $held = Package::factory()->inOrgOf($foreignGroup)->create([
+        'type' => PackageType::Docker,
+        'source_mode' => PackageSourceMode::Publish,
+        'name' => 'fremd',
+    ]);
+    $foreignGroup->packages()->attach($held);
+
+    // The repository name is in the message, so it is normalised out — the point is that
+    // nothing ELSE differs.
+    $answer = fn (string $name): array => (function (TestResponse $response) use ($name): array {
+        return [
+            'status' => $response->status(),
+            'code' => $response->json('errors.0.code'),
+            'message' => str_replace($name, '{name}', (string) $response->json('errors.0.message')),
+        ];
+    })(pushBlobIntoRepository($this->publish, $name, $this->bytes));
+
+    expect($answer('anderswo'))->toBe($answer('neu'))
+        ->and($answer('fremd'))->toBe($answer('neu'));
 });

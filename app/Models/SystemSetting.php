@@ -31,8 +31,9 @@ class SystemSetting extends Model
         'enabled_registry_types' => '["composer","npm","python","docker"]',
         'shared_package_role' => 'super_admin',
         // Off: the instance keeps refusing a `docker push` to a name nobody registered
-        // until an operator opts in. A raw DB string like its neighbours above, because
-        // $attributes holds pre-cast values.
+        // until an operator opts in. Stated here as well as in the migration's column
+        // default, so `::current()` creates a truthful row rather than one whose flag is
+        // null until it has been read back from the database.
         'oci_auto_create_repositories' => false,
     ];
 

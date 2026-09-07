@@ -10,7 +10,9 @@ use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Registry\OciSettings;
 use App\Services\RegistryAccessService;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 trait ResolvesOciRepository
 {
@@ -104,7 +106,9 @@ trait ResolvesOciRepository
      * names in a registry — but Harbor creates the repository on first push, so the setting
      * exists for an instance that wants that habit. Even when it is on, a name held by
      * ANOTHER organization stays NAME_UNKNOWN: the alternative is a publish token
-     * discovering foreign repository names by response code.
+     * discovering foreign repository names by response code. Everything that lookup cannot
+     * answer — including that refusal, and the setting — is ociUnresolvedRepository() below,
+     * which states why the order of those checks is the order it is.
      *
      * Resolved strictly within the addressed registry's OWN organization — never through
      * $group->packages(), which carries every package assigned to the group regardless of
@@ -140,52 +144,135 @@ trait ResolvesOciRepository
             ->where('organization_id', $group->organization_id)
             ->first();
 
-        if ($package === null) {
-            return $this->ociCreateRepository($group, $name);
+        if ($package !== null && $this->access()->packageBelongsToGroup($group, $package)) {
+            return $package;
         }
 
-        if (! $this->access()->packageBelongsToGroup($group, $package)) {
-            throw OciException::nameUnknown($name);
-        }
-
-        return $package;
+        return $this->ociUnresolvedRepository($group, $name, $package);
     }
 
     /**
-     * Push-time creation of a repository nobody registered, behind the operator's setting.
+     * Everything the lookup above could not answer, which is three different shapes:
      *
-     * Off — the default — refuses with NAME_UNKNOWN, the protocol code a client expects,
-     * but with a message that names the setting: an operator who has just pointed a Harbor
-     * habit at kontorfix otherwise goes to the logs for a decision that is one checkbox away.
+     *   1. nobody holds the name;
+     *   2. the CALLER'S OWN organization holds it, but has not assigned it to this registry
+     *      (or the assignment's `available_until` has lapsed);
+     *   3. another organization holds it.
      *
-     * A name already held by another organization is refused too, and the setting is
-     * consulted FIRST so that a switched-off instance answers every unresolvable name with
-     * one identical message: were the foreign-name refusal worded differently, a publish
-     * token could tell "somebody else has this name" from "nobody has it" by reading the
-     * body, which is a leak the old unconditional NAME_UNKNOWN did not have.
+     * The setting is consulted before any of the three is distinguished, so a switched-off
+     * instance really does answer all three with one identical message. That claim used to
+     * be made only in a comment while the code checked membership first, which meant shape 2
+     * got the plain `nameUnknown()` and shape 1 got the setting-naming one: a publish token
+     * could read the body and tell "this name exists somewhere in my organization" from
+     * "this name is free". That channel is intra-organization rather than cross-tenant, and
+     * so milder than the cross-tenant one — but it did not exist before push-time creation
+     * was added, and the same rule that closed the cross-tenant one closes it: decide the
+     * setting first, distinguish afterwards.
+     *
+     * The price is that shape 2's refusal now also offers the setting as a remedy, which for
+     * shape 2 would not help — assigning the repository to this registry is what helps. The
+     * message names that remedy first, and naming both is what keeps the three
+     * indistinguishable.
+     *
+     * With the setting ON the shapes are distinguishable by response code (201 vs 404), and
+     * deliberately so: the brief's rationale for refusing a foreign name is that a publish
+     * token would otherwise discover foreign names, not that the two are indistinguishable.
+     *
+     * @param  Package|null  $ownedElsewhere  the shape-2 row, if the lookup found one — passed
+     *                                        in rather than looked up again so this method
+     *                                        cannot disagree with its caller about which
+     *                                        shape this is.
      */
-    private function ociCreateRepository(Group $group, string $name): Package
+    private function ociUnresolvedRepository(Group $group, string $name, ?Package $ownedElsewhere): Package
     {
         if (! app(OciSettings::class)->autoCreateEnabledFor($group->organization)) {
             throw OciException::nameUnknownAutoCreateDisabled($name);
         }
 
+        // Shape 2. Never auto-attached: a publish token must not be able to pull an existing
+        // repository into a registry it was not assigned to.
+        if ($ownedElsewhere !== null) {
+            throw OciException::nameUnknown($name);
+        }
+
+        // Shape 3.
         if (Package::where('type', PackageType::Docker)->where('name', $name)->exists()) {
             throw OciException::nameUnknown($name);
         }
 
-        $package = Package::create([
-            'organization_id' => $group->organization_id,
-            'type' => PackageType::Docker,
-            // Stated rather than left to the column default. A Docker repository receives
-            // its versions by being pushed to; a row that ends up git-sourced is never
-            // synced and says so only by staying empty.
-            'source_mode' => PackageSourceMode::Publish,
-            'name' => $name,
-        ]);
+        return $this->ociCreateRepository($group, $name);
+    }
 
-        $group->packages()->attach($package);
+    /**
+     * Push-time creation of a repository nobody registered — the writing half, once
+     * ociUnresolvedRepository() has decided that creating is what should happen.
+     *
+     * A real first `docker push` races itself here. The client uploads layers CONCURRENTLY
+     * (`--max-concurrent-uploads`, 5 by default), so several `POST /v2/{name}/blobs/uploads/`
+     * requests reach this method for the same brand-new name at the same time. Two windows
+     * follow from that, and both are closed here rather than by hoping the requests arrive in
+     * order:
+     *
+     *   - Two of them INSERT. `packages` is unique on `(organization_id, type, name)`, so the
+     *     second insert raises a unique violation, which unguarded is an HTTP 500 with an HTML
+     *     body — not an OCI error document — and a client that aborts the push. The loser
+     *     therefore catches it and re-resolves through the SAME refusals the uncontended path
+     *     applies, so losing a race can never hand back a repository the caller may not write
+     *     to. Note the constraint's scope: a creator in ANOTHER organization does not collide
+     *     at all (organizations may legitimately share a name since
+     *     2026_09_02_110000_enforce_package_organization.php), so such a racer is not a winner
+     *     to defer to — this push creates its own row, and its 201 says nothing about the
+     *     other organization that a free name would not have said.
+     *
+     *   - One of them INSERTs and another looks the name up before the attach. It would find
+     *     a package, fail packageBelongsToGroup(), and answer NAME_UNKNOWN for a repository
+     *     that exists. The insert and the attach are therefore one transaction, so no other
+     *     connection ever observes the half-built state.
+     *
+     * NOT SlugClaimGuard's `pg_advisory_xact_lock` shape, deliberately, even though this is
+     * the same kind of create-race. That class has to synthesise serialization because its
+     * invariant spans two tables — "this slug names no organization AND no registry" is
+     * something no index can hold, so without an advisory lock nothing would serialize the two
+     * writers at all. Here the invariant IS an index, and PostgreSQL already serializes on it:
+     * the second inserter blocks on the unique index until the first commits or rolls back,
+     * and then either fails or succeeds correctly. An advisory lock on top would be a second,
+     * weaker mechanism for something the database already does properly, and its only visible
+     * effect would be to make the collision below rarer — so removing it would redden no test,
+     * which is a poor thing to have guarding a Critical.
+     */
+    private function ociCreateRepository(Group $group, string $name): Package
+    {
+        try {
+            return DB::transaction(function () use ($group, $name): Package {
+                $package = Package::create([
+                    'organization_id' => $group->organization_id,
+                    'type' => PackageType::Docker,
+                    // Stated rather than left to the column default. A Docker repository
+                    // receives its versions by being pushed to; a row that ends up
+                    // git-sourced is never synced and says so only by staying empty.
+                    'source_mode' => PackageSourceMode::Publish,
+                    'name' => $name,
+                ]);
 
-        return $package;
+                $group->packages()->attach($package);
+
+                return $package;
+            });
+        } catch (UniqueConstraintViolationException) {
+            // Somebody in this organization won. Re-resolve exactly as ociWritableRepository()
+            // does: the winner counts only if it is also assigned to THIS registry — a
+            // concurrent push into a sibling registry of the same organization is a winner
+            // whose repository this caller still may not write to.
+            $winner = Package::where('type', PackageType::Docker)
+                ->where('name', $name)
+                ->where('organization_id', $group->organization_id)
+                ->first();
+
+            if ($winner === null || ! $this->access()->packageBelongsToGroup($group, $winner)) {
+                throw OciException::nameUnknown($name);
+            }
+
+            return $winner;
+        }
     }
 }

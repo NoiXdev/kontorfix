@@ -15,8 +15,8 @@ const props = defineProps<{
         registration_enabled: boolean;
         enabled_registry_types: string[];
         shared_package_role: string;
-        // Instanzweite Obergrenze für „Repositories beim Push anlegen“. Eine Organisation
-        // kann nur weiter einschränken, nie darüber hinaus aktivieren.
+        // The instance-wide ceiling for „Repositories beim Push anlegen“. An organization
+        // may only narrow within it, never switch on what this switches off.
         oci_auto_create_repositories: boolean;
     };
     registryTypes: string[];

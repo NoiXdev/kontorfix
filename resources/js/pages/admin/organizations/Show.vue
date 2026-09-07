@@ -55,10 +55,10 @@ const props = defineProps<{
         // which only hides one card inside an open portal.
         portal_enabled: boolean;
         notification_cadence: string;
-        // Drei Zustände: null = instanzweite Einstellung erben, true/false = eigene
-        // Antwort dieser Organisation. Bewusst kein boolean — ein Zwei-Zustands-Schalter
-        // könnte „erben“ nicht ausdrücken und würde beim ersten Speichern ein explizites
-        // false schreiben.
+        // Three states: null inherits the instance setting („Erben“), true/false are this
+        // organization's own answer. Deliberately not a plain boolean — a two-state switch
+        // cannot express "inherit" and would write an explicit false for every organization
+        // the first time anyone saved this form.
         oci_auto_create_repositories: boolean | null;
         // How many registries this organization owns — every one of them changes URL when
         // the organization slug changes, since it is the first segment of each address.
@@ -76,9 +76,10 @@ const props = defineProps<{
     // than assembling that path itself. See oldPortalPath/newPortalPath below.
     portalPathTemplate: string;
     registryTypes: { global: string[]; effective: string[]; overridden: boolean };
-    // `global` ist die instanzweite Obergrenze, `effective` das Ergebnis aus Obergrenze UND
-    // Wahl dieser Organisation — beides von PHP, damit die Seite die Schnittmenge nicht ein
-    // zweites Mal (und womöglich anders) bildet.
+    // `global` is the instance-wide ceiling, `effective` the intersection of that ceiling
+    // AND this organization's own choice. Both come from PHP so the page never forms that
+    // intersection a second time — and possibly differently. Same reason
+    // `registryTypes.effective` is computed there.
     ociAutoCreate: { global: boolean; effective: boolean };
     registries: RegistryRow[];
     users: UserRow[];
@@ -125,9 +126,11 @@ const settingsForm = useForm<{
     oci_auto_create_repositories: props.organization.oci_auto_create_repositories,
 });
 
-// Die drei Zustände des Push-Anlegens als Radio-Gruppe. `value: null` ist der Erb-Zustand
-// und wird als echtes null übertragen, nicht als leerer String — genau darauf beruht die
-// Regel ['sometimes','nullable','boolean'] in UpdateOrganizationRequest.
+// The three states of push-time creation, as a radio group. „Erben“ carries `value: null`
+// and travels as a real JSON null rather than an empty string, which is what
+// UpdateOrganizationRequest's `nullable` rule is written for. A SearchableSelect binds
+// string values and would send "true"/"false"/"" instead, defeating `boolean` and
+// `nullable` alike.
 const autoCreateChoices: { value: boolean | null; label: string }[] = [
     { value: null, label: 'Erben' },
     { value: true, label: 'An' },
