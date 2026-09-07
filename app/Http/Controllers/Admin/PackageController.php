@@ -71,7 +71,12 @@ class PackageController extends Controller
         $packages = $this->scopePackageQuery(Package::query())
             ->withCount('groups')
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
-            ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('type', $type))
+            // PackageType::tryFrom(), not a hardcoded list: the enum's own docblock
+            // promises that adding a type means editing PackageType, not chasing every
+            // hardcoded copy of its case list — this one silently left Docker unfilterable
+            // (selecting it in the enum-driven dropdown returned the UNFILTERED list,
+            // rather than an empty or Docker-only one) until it was found.
+            ->when(is_string($type) && PackageType::tryFrom($type) !== null, fn ($query) => $query->where('type', $type))
             ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
             // `group` is a plain query-string value on a route with no throttle, and it
             // lands on a Postgres `uuid` comparison: a malformed one raised
@@ -269,14 +274,38 @@ class PackageController extends Controller
      * with its own size composition, plus the same ownership/assignment/sharing/activity
      * surfaces every other package type gets from show() above.
      *
-     * The size composition is the point of this method, not an afterthought. Two tags can
-     * point at the same manifest (a `latest` alias next to the version it currently means),
-     * and a manifest is counted once regardless of how many tags name it — an occupied
-     * total that counted every tag's manifest in full would sum to a number the disk will
-     * never hold. `shared_bytes` is the subset of `occupied_bytes` that belongs to a
-     * manifest more than one tag points at; a tag on such a manifest reports `size_bytes`
-     * null (never a share of the total, which would be inventing a number the template
-     * cannot state a source for) and the template renders that as "geteilt".
+     * The size composition is the point of this method, not an afterthought, and it
+     * measures actual DISK bytes — the blobs (layers and config) a manifest references —
+     * never the manifest DOCUMENT's own byte size. `OciManifest::size` is
+     * `strlen($payload)`: the JSON that names a layer, typically a few hundred bytes,
+     * regardless of whether that layer is 4 KiB or 800 MiB. Summing THAT into an "occupied"
+     * total (an earlier version of this method did exactly that) displays a
+     * multi-hundred-megabyte image as a few hundred bytes — wrong by six orders of
+     * magnitude, not a rounding difference.
+     *
+     * Two tags can point at the same manifest (a `latest` alias next to the version it
+     * currently means), and a manifest is counted once regardless of how many tags name
+     * it — an occupied total that counted every tag's manifest in full would double real
+     * disk usage for every alias. `shared_bytes` is the subset of `occupied_bytes` that
+     * belongs to a manifest more than one tag points at (the SAME manifest under two
+     * names) — deliberately narrower than "any blob two different images happen to share",
+     * which `occupied_bytes` itself already dedupes away (see reachableBlobDigests()) but
+     * which no single tag ROW could sensibly be credited or blamed for. A tag on such a
+     * manifest reports `size_bytes` null (never a share of the total, which would be
+     * inventing a number the template cannot state a source for) and the template renders
+     * that as "geteilt".
+     *
+     * A manifest no tag points to directly — the per-platform child manifests of a
+     * multi-arch index, which buildx pushes BY DIGEST, never by tag (spec §2) — is still
+     * counted, but only when it is reachable from a manifest that IS tagged:
+     * reachableBlobDigests() walks an index's own `manifests[]` entries to the child
+     * OciManifest rows they name, so an index's real multi-platform disk footprint is
+     * counted under the ONE tag that names the index, not left out because the children
+     * themselves carry no tag of their own. A manifest reachable from NO tag at all — a
+     * fully orphaned digest push, or an index whose own tag was later moved elsewhere — is
+     * not counted anywhere on this page, the same as before this fix: "occupied" here means
+     * what this repository's tags currently serve, not an audit of everything the database
+     * still holds a row for. That is the blob sweeper's job (Plan B), not this page's.
      */
     private function showDocker(Request $request, Package $package, RegistryUrl $registryUrl): Response
     {
@@ -300,12 +329,41 @@ class PackageController extends Controller
         // Each manifest counted once, by id, however many tags name it — not once per tag.
         $uniqueManifests = $tags->pluck('manifest')->filter()->unique('id');
 
-        $occupiedBytes = (int) $uniqueManifests->sum('size');
+        $blobStore = app(BlobStore::class);
+        $organizationId = (string) $package->organization_id;
+
+        // One BlobStore lookup per DISTINCT digest referenced by any tagged manifest,
+        // memoized so a base layer shared across many tags/manifests costs one query, not
+        // one per reference — the same read-count discipline platformFor() below already
+        // applies to config blobs (Task 8's own fix round: platform used to be read once
+        // per TAG rather than once per unique manifest).
+        $blobSizeCache = [];
+        $sizeOf = function (string $digest) use (&$blobSizeCache, $blobStore, $organizationId): int {
+            if (! array_key_exists($digest, $blobSizeCache)) {
+                $blob = $blobStore->find($organizationId, $digest);
+                $blobSizeCache[$digest] = $blob === null ? 0 : $blob->size;
+            }
+
+            return $blobSizeCache[$digest];
+        };
+
+        $digestsByManifest = $uniqueManifests->mapWithKeys(
+            fn (OciManifest $m): array => [$m->id => array_values(array_unique($this->reachableBlobDigests($m, $package)))]
+        );
+        $bytesByManifest = $digestsByManifest->map(
+            fn (array $digests): int => array_sum(array_map($sizeOf, $digests))
+        );
+
+        // Repository-wide total: every distinct blob digest reachable from ANY tagged
+        // manifest, counted once — not the sum of $bytesByManifest, which would
+        // double-count a base layer two DIFFERENT (non-aliased) tags both build on. The
+        // real disk holds one copy of that layer regardless of how many images reference
+        // it, so the total does too.
+        $occupiedBytes = (int) $digestsByManifest->flatten()->unique()->sum($sizeOf);
+
         $sharedBytes = (int) $uniqueManifests
             ->filter(fn (OciManifest $m): bool => ($tagsPerManifest->get($m->id) ?? 0) > 1)
-            ->sum('size');
-
-        $blobStore = app(BlobStore::class);
+            ->sum(fn (OciManifest $m): int => $bytesByManifest->get($m->id) ?? 0);
 
         // Computed once per UNIQUE manifest (over `$uniqueManifests`, the same collection
         // the size composition above already deduplicated to), never once per tag. Two
@@ -314,10 +372,10 @@ class PackageController extends Controller
         // config blob, not two: the read count scales with distinct manifests, not with how
         // many names point at them.
         $platformByManifest = $uniqueManifests->mapWithKeys(
-            fn (OciManifest $m): array => [$m->id => $this->platformFor($m, (string) $package->organization_id, $blobStore)]
+            fn (OciManifest $m): array => [$m->id => $this->platformFor($m, $organizationId, $blobStore)]
         );
 
-        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest): array {
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest): array {
             $manifest = $tag->manifest;
             $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
 
@@ -328,7 +386,7 @@ class PackageController extends Controller
                 // Null exactly when the manifest is shared — never the manifest's full size
                 // repeated for every tag that names it, and never a fabricated fraction of
                 // it either (see this method's doc comment).
-                'size_bytes' => $shared ? null : $manifest?->size,
+                'size_bytes' => $shared || $manifest === null ? null : $bytesByManifest->get($manifest->id),
                 'shared' => $shared,
                 'pushed_at' => $tag->updated_at?->diffForHumans(),
             ];
@@ -376,6 +434,65 @@ class PackageController extends Controller
             ],
             'activities' => ActivityPresenter::recentFor($package),
         ]);
+    }
+
+    /**
+     * Every blob digest reachable from $manifest within $package: its own config and
+     * layer digests for an image manifest, plus — recursively — the same for every
+     * per-platform CHILD manifest a multi-arch index names, matched by digest against
+     * this package's own oci_manifests rows (buildx pushes each platform's manifest by
+     * digest, untagged, before the index itself — see showDocker()'s own doc comment on
+     * why an untagged child still counts here even though it counts nowhere as its OWN
+     * top-level row). A child digest with no matching row (never pushed, or a database
+     * restore older than the manifest) is skipped rather than guessed at, the same
+     * "display nicety, not an audit" stance platformFor() below takes.
+     *
+     * $visited guards a pathological index naming itself, or a cycle across two indexes
+     * naming each other, as one of its own children — neither is valid OCI, but this
+     * method must not infinite-loop on a malformed payload a client managed to push.
+     *
+     * @param  array<string, true>  $visited
+     * @return list<string>
+     */
+    private function reachableBlobDigests(OciManifest $manifest, Package $package, array &$visited = []): array
+    {
+        if (isset($visited[$manifest->id])) {
+            return [];
+        }
+        $visited[$manifest->id] = true;
+
+        $payload = json_decode($manifest->payload, true);
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $digests = [];
+
+        $configDigest = $payload['config']['digest'] ?? null;
+        if (is_string($configDigest)) {
+            $digests[] = $configDigest;
+        }
+
+        foreach ($payload['layers'] ?? [] as $layer) {
+            $layerDigest = is_array($layer) ? ($layer['digest'] ?? null) : null;
+            if (is_string($layerDigest)) {
+                $digests[] = $layerDigest;
+            }
+        }
+
+        foreach ($payload['manifests'] ?? [] as $child) {
+            $childDigest = is_array($child) ? ($child['digest'] ?? null) : null;
+            if (! is_string($childDigest)) {
+                continue;
+            }
+
+            $childManifest = OciManifest::where('package_id', $package->id)->where('digest', $childDigest)->first();
+            if ($childManifest !== null) {
+                array_push($digests, ...$this->reachableBlobDigests($childManifest, $package, $visited));
+            }
+        }
+
+        return $digests;
     }
 
     /**
