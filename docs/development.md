@@ -10,9 +10,11 @@ README stays deliberately technology-neutral).
 - **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
 - **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
   Scheduler (periodic re-sync + cleanup).
-- **Registry protocols:** Composer v2 (`packages.json`, `p2/*.json`, dist download) and
-  npm (packument, tarball, publish). Plus a REST management API under `/api/v1` with
-  auto-generated, interactive documentation at `/docs/api` (operator admins only).
+- **Registry protocols:** Composer v2 (`packages.json`, `p2/*.json`, dist download), npm
+  (packument, tarball, publish), the PyPI "simple" index (PEP 503/691) plus twine upload,
+  and the OCI Distribution Specification (`/v2/`) for Docker/OCI image push and pull. Plus
+  a REST management API under `/api/v1` with auto-generated, interactive documentation at
+  `/docs/api` (operator admins only).
 
 Registry and webhook endpoints run deliberately **stateless** (outside the `web` middleware
 group, without cookies/CSRF) and are secured solely by token or signature verification.
@@ -75,12 +77,16 @@ Two consequences worth knowing:
 
 ## End-to-end registry tests
 
-`tests/Feature/Registry/` proves the registry answers the requests we believe a client makes.
-This suite proves that `composer`, `npm` and `pip` — the actual binaries — agree.
+`tests/Feature/Registry/` and `tests/Feature/Oci/` prove the registry answers the requests
+we believe a client makes. This suite proves that `composer`, `npm`, `pip` and `docker` —
+the actual binaries — agree.
 
 ```bash
-bin/e2e              # the default run: publish, install and refusal, per ecosystem
-bin/e2e --upstream   # additionally the fallthrough to Packagist, npmjs and PyPI
+bin/e2e                # the default run: publish, install and refusal, per ecosystem
+bin/e2e --upstream     # additionally the fallthrough to Packagist, npmjs and PyPI
+bin/e2e --large-layer  # additionally builds, pushes and pulls a layer above 500 MiB —
+                        # the acceptance gate for the OCI registry (spec §4): if PHP
+                        # buffers a chunked PATCH body anywhere, this is what catches it
 ```
 
 It builds the production image from `docker/Dockerfile` and runs it beside Postgres, Redis, a
