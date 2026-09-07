@@ -46,7 +46,22 @@ describe('dockerSetupSnippet', () => {
     it('also falls back on an empty-string example, not only on null/undefined', () => {
         // A caller passing through a possibly-empty server value (rather than explicitly
         // null) must not produce `docker tag :<tag> host/:<tag>` — a blank repository name.
-        expect(dockerSetupSnippet('images.3b.de', '')).toContain('<repository>:<tag>');
+        // toBe, not toContain: the output here is byte-identical to the null case above, so
+        // pinning the whole string was free — and toContain would still pass if the blank
+        // repository name leaked into a part of the block this assertion did not check.
+        expect(dockerSetupSnippet('images.3b.de', '')).toBe(
+            [
+                '# Anmelden — Benutzername beliebig, Passwort ist das Token',
+                'docker login images.3b.de',
+                '',
+                '# Hochladen',
+                'docker tag <repository>:<tag> images.3b.de/<repository>:<tag>',
+                'docker push images.3b.de/<repository>:<tag>',
+                '',
+                '# Herunterladen',
+                'docker pull images.3b.de/<repository>:<tag>',
+            ].join('\n'),
+        );
     });
 });
 

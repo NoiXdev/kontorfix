@@ -307,16 +307,24 @@ class PackageController extends Controller
 
         $blobStore = app(BlobStore::class);
 
-        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $blobStore, $package): array {
+        // Computed once per UNIQUE manifest (over `$uniqueManifests`, the same collection
+        // the size composition above already deduplicated to), never once per tag. Two
+        // tags aliasing one manifest — `latest` next to the version it currently means, the
+        // exact shape the shared-bytes test below sets up — share one BlobStore read of the
+        // config blob, not two: the read count scales with distinct manifests, not with how
+        // many names point at them.
+        $platformByManifest = $uniqueManifests->mapWithKeys(
+            fn (OciManifest $m): array => [$m->id => $this->platformFor($m, (string) $package->organization_id, $blobStore)]
+        );
+
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest): array {
             $manifest = $tag->manifest;
             $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
 
             return [
                 'name' => $tag->name,
                 'digest' => $manifest?->digest,
-                'platform' => $manifest !== null
-                    ? $this->platformFor($manifest, (string) $package->organization_id, $blobStore)
-                    : null,
+                'platform' => $manifest !== null ? $platformByManifest->get($manifest->id) : null,
                 // Null exactly when the manifest is shared — never the manifest's full size
                 // repeated for every tag that names it, and never a fabricated fraction of
                 // it either (see this method's doc comment).
