@@ -92,6 +92,12 @@ it('serves a manifest by digest as well as by tag', function () {
     $byTag->assertOk();
     $byDigest->assertOk()->assertHeader('Docker-Content-Digest', $digest);
 
+    // containerd reads exactly the announced Content-Length's worth of bytes — the blob
+    // path (BlobController::show()) already asserts this; the manifest path did not,
+    // so a wrong `size` written at push time (or read back wrong) would only ever surface
+    // as a client-side truncation/hang, never a test failure here.
+    $byDigest->assertHeader('Content-Length', (string) strlen($payload));
+
     expect($byDigest->getContent())->toBe($payload)
         ->and($byDigest->getContent())->toBe($byTag->getContent());
 });
@@ -210,10 +216,23 @@ it('lists tags', function () {
     pushManifest($this->publish, '2.0', '{"schemaVersion":2,"a":2}')->assertStatus(201);
     pushManifest($this->publish, 'latest', '{"schemaVersion":2,"a":3}')->assertStatus(201);
 
+    // A tag genuinely belonging to a DIFFERENT repository of this same registry — without
+    // one actually present in the fixture, removing `where('package_id')` from
+    // ManifestController::tags() left every test in this file green (68 passed): the
+    // comment below claiming assertExactJson protects this was true only for what the
+    // exact set was ASKED to be, never tested against a real foreign row that mutant
+    // would have appended. Named to sort after 'latest' (orderBy('name') is alphabetic),
+    // so its absence from the list is a distinct, visible failure, not a coincidence of
+    // ordering.
+    $other = Package::factory()->inOrgOf($this->group)->create(['type' => PackageType::Docker, 'name' => 'other']);
+    $this->group->packages()->attach($other);
+    $this->withServerVariables($this->publish + ['CONTENT_TYPE' => 'application/vnd.oci.image.manifest.v1+json'])
+        ->call('PUT', 'http://images.test/v2/other/manifests/zzz-foreign', content: '{"schemaVersion":2,"owner":"other"}')
+        ->assertStatus(201);
+
     // assertExactJson rather than assertJson: assertJson is a subset check, so it would
-    // stay green even if tags() lost its package_id filter and appended foreign tags after
-    // these three — it would still find the three expected entries and never notice the
-    // extras.
+    // stay green even if tags() appended a foreign tag after these three — it would still
+    // find the three expected entries and never notice the extra.
     $this->withServerVariables($this->read)
         ->get('http://images.test/v2/app/tags/list')
         ->assertOk()
@@ -272,6 +291,18 @@ it('404s an unknown reference with MANIFEST_UNKNOWN', function () {
         ->assertJsonPath('errors.0.code', 'MANIFEST_UNKNOWN');
 });
 
+it('refuses an absurdly long Content-Type with an OCI error, rather than a Postgres overflow', function () {
+    // `oci_manifests.media_type` is a plain `varchar(255)`; a client Content-Type longer
+    // than that used to reach it unchecked and raise Postgres' "value too long for type
+    // character varying(255)" as a raw, uncaught QueryException — a 500 with a stack
+    // trace, not an OCI errors[] body.
+    pushManifest($this->publish, '1.0', '{"schemaVersion":2}', str_repeat('a', 300))
+        ->assertStatus(400)
+        ->assertJsonPath('errors.0.code', 'UNSUPPORTED');
+
+    expect(OciManifest::count())->toBe(0);
+});
+
 it('refuses a manifest write from a read-only token', function () {
     pushManifest($this->read, '1.0', '{"schemaVersion":2}')
         ->assertStatus(403)
@@ -295,4 +326,33 @@ it('does not leak another repository\'s manifest under the same tag name', funct
         ->get('http://images.test/v2/other/manifests/shared-name')
         ->assertStatus(404)
         ->assertJsonPath('errors.0.code', 'MANIFEST_UNKNOWN');
+});
+
+it('does not leak, or allow deleting, another repository\'s manifest by digest', function () {
+    // The digest half of ManifestStore::find() — the test above only ever covers the TAG
+    // branch. Deleting `where('package_id')` from the digest branch left 68 tests green:
+    // no test in this file asks a repository that does NOT hold a digest to resolve or
+    // delete it, so an unscoped `OciManifest::where('digest', $reference)->first()` found
+    // the same row regardless of which repository's endpoint asked.
+    $other = Package::factory()->inOrgOf($this->group)->create(['type' => PackageType::Docker, 'name' => 'other']);
+    $this->group->packages()->attach($other);
+
+    $payload = '{"schemaVersion":2,"owner":"app-by-digest"}';
+    $digest = Digest::of($payload);
+    pushManifest($this->publish, $digest, $payload)->assertStatus(201);
+
+    $this->withServerVariables($this->read)
+        ->get("http://images.test/v2/other/manifests/{$digest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'MANIFEST_UNKNOWN');
+
+    $this->withServerVariables($this->publish)
+        ->call('DELETE', "http://images.test/v2/other/manifests/{$digest}")
+        ->assertStatus(404)
+        ->assertJsonPath('errors.0.code', 'MANIFEST_UNKNOWN');
+
+    // Untouched: still resolvable through the repository that actually holds it.
+    $this->withServerVariables($this->read)
+        ->get("http://images.test/v2/app/manifests/{$digest}")
+        ->assertOk();
 });

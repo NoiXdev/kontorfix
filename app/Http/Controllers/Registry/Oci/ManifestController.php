@@ -73,6 +73,18 @@ class ManifestController extends Controller
 
         $mediaType = $request->header('Content-Type') ?? 'application/vnd.oci.image.manifest.v1+json';
 
+        // `oci_manifests.media_type` is a plain `varchar(255)` (see the create-tables
+        // migration) — an unbounded client-supplied Content-Type reaching it as a bound
+        // parameter raises Postgres' "value too long for type character varying(255)" as
+        // an uncaught QueryException: a 500 with a stack trace instead of an OCI error
+        // body, for a header no real OCI client would ever send this long (the spec's own
+        // media types top out well under 100 characters). Refused here, before the write,
+        // with the same error code Digest::assertValid() uses for a value this endpoint
+        // does not recognise as valid input.
+        if (strlen($mediaType) > 255) {
+            throw OciException::unsupported('Der Content-Type ist zu lang.');
+        }
+
         $manifest = $this->manifests->put($package, $reference, $request->getContent(), $mediaType);
 
         return response('', 201, [
