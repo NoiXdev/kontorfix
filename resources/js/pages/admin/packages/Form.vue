@@ -54,9 +54,9 @@ const { options: typeOptionsFor } = useRegistryTypes();
 const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
 // `typeOptionsFor()` is generically `{ value: string; label: string }[]` (it's shared across
 // call sites with different literal-union needs); `form.type` is the narrower
-// `'composer' | 'npm' | 'python'`. This asserts the already-true invariant — the options
-// always come from the registry-type enum — so `SearchableSelect`'s `v-model` lines up.
-const packageTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python'; label: string }[]);
+// `'composer' | 'npm' | 'python' | 'docker'`. This asserts the already-true invariant — the
+// options always come from the registry-type enum — so `SearchableSelect`'s `v-model` lines up.
+const packageTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python' | 'docker'; label: string }[]);
 
 const modesForType = computed(() => modesFor(props.sourceModes, form.type));
 // Same reasoning as `packageTypeOptions` above.
@@ -212,7 +212,7 @@ function toggleGroup(groupId: string, checked: boolean) {
         <Input
             id="name"
             v-model="form.name"
-            :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname' }[form.type]"
+            :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname', docker: 'meinapp' }[form.type]"
             autocomplete="off"
         />
         <p v-if="isGitMode" class="text-xs text-muted-foreground">Wird beim „Prüfen" automatisch aus dem Repository übernommen.</p>
@@ -223,7 +223,7 @@ function toggleGroup(groupId: string, checked: boolean) {
          arrive with each upload. -->
     <p v-if="!isGitMode" class="text-xs text-muted-foreground">
         Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten entstehen beim Upload (<code>{{
-            form.type === 'npm' ? 'npm publish' : 'twine upload'
+            form.type === 'npm' ? 'npm publish' : form.type === 'docker' ? 'docker push' : 'twine upload'
         }}</code
         >) — kein Repository nötig.
     </p>

@@ -160,7 +160,8 @@ function save() {
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
-const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python'; shared: boolean }[]>([]);
+// Must match PackagePicker.vue's own local `Pkg` — same reasoning as GroupSheet.vue's copy.
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' | 'docker'; shared: boolean }[]>([]);
 
 // Which ecosystems this registry actually hosts — drives the setup snippets shown.
 const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);

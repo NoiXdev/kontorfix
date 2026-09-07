@@ -2,7 +2,7 @@ import type { InertiaForm } from '@inertiajs/vue3';
 import type { InjectionKey } from 'vue';
 
 export interface PackageFormData {
-    type: 'composer' | 'npm' | 'python';
+    type: 'composer' | 'npm' | 'python' | 'docker';
     source_mode: 'publish' | 'git';
     name: string;
     repository_url: string;
