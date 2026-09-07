@@ -47,9 +47,25 @@ class ValidatePostSize extends Base
 {
     public function handle($request, Closure $next)
     {
-        $path = $request->getPathInfo();
-
-        if ($path === '/v2' || str_starts_with($path, '/v2/')) {
+        // A REAL SEGMENT after `/v2/` is required, and that is the whole condition — the
+        // exemption used to also cover the bare `/v2` and, through it, a route that has
+        // nothing to do with OCI.
+        //
+        // `/v2` and `/v2/` are the version endpoint, which is GET-only and carries no body,
+        // so exempting them protects nothing. What they DO reach on another method is npm's
+        // bare publish route: `PUT /{package}` (routes/registry.php) constrains {package} to
+        // `[a-z0-9._-]+`, which "v2" satisfies, and no OCI route answers PUT at that path.
+        // So `PUT /v2` — matched by path here, exempted, and then routed to
+        // NpmController::publish() — arrived at a controller that reads the entire body into
+        // a string, with the framework's post-size guard deliberately switched off for it.
+        // The one route the exemption exists to protect could not be reached that way at
+        // all; the one it accidentally opened had no defence of its own.
+        //
+        // Every body-carrying OCI endpoint is `/v2/{name}/…`, so none of them lose the
+        // exemption: `blobs/uploads/`, its PATCH/PUT continuations, and `manifests/{ref}`
+        // all have a segment after the prefix. A large body PUT to some other `/v2/…` path
+        // stays exempt and is harmless — no route matches it, so nothing ever reads it.
+        if (preg_match('#^/v2/.+#', $request->getPathInfo()) === 1) {
             return $next($request);
         }
 
