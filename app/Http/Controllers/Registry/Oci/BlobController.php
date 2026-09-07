@@ -60,11 +60,17 @@ class BlobController extends Controller
         $mount = $request->query('mount');
         $from = $request->query('from');
 
-        if (is_string($mount) && $mount !== '' && is_string($from) && $from !== '') {
-            $mounted = $this->mountFrom($group, $package, $mount, $from);
+        // `from` arrives in the caller's own address space — namespaced in path mode — so
+        // it is translated back to a bare repository name before it is looked up. A value
+        // naming another registry's namespace yields null and falls through to a normal
+        // upload, the protocol's own defined behaviour for an unmountable source.
+        $source = is_string($from) && $from !== '' ? $this->ociBareName($request, $from) : null;
+
+        if (is_string($mount) && $mount !== '' && $source !== null && $source !== '') {
+            $mounted = $this->mountFrom($group, $package, $mount, $source);
 
             if ($mounted !== null) {
-                return $this->blobCompletedResponse($name, $mounted);
+                return $this->blobCompletedResponse($request, $name, $mounted);
             }
         }
 
@@ -77,12 +83,12 @@ class BlobController extends Controller
             $this->blobs->append($upload, $request->getContent(asResource: true));
             $blob = $this->blobs->finish($upload, $digest);
 
-            return $this->blobCompletedResponse($name, $blob);
+            return $this->blobCompletedResponse($request, $name, $blob);
         }
 
         $upload = $this->blobs->begin($package);
 
-        return $this->sessionResponse($name, $upload);
+        return $this->sessionResponse($request, $name, $upload);
     }
 
     /** PATCH /v2/{name}/blobs/uploads/{uploadId} — appends one chunk. */
@@ -96,7 +102,7 @@ class BlobController extends Controller
         // so the model already reflects the new offset here — no extra query needed.
         $this->blobs->append($upload, $request->getContent(asResource: true));
 
-        return $this->sessionResponse($name, $upload);
+        return $this->sessionResponse($request, $name, $upload);
     }
 
     /** PUT /v2/{name}/blobs/uploads/{uploadId}?digest=... — the final chunk (optional) plus verification. */
@@ -115,7 +121,7 @@ class BlobController extends Controller
 
         $blob = $this->blobs->finish($upload, $digest);
 
-        return $this->blobCompletedResponse($name, $blob);
+        return $this->blobCompletedResponse($request, $name, $blob);
     }
 
     /**
@@ -391,10 +397,12 @@ class BlobController extends Controller
         return $upload;
     }
 
-    private function sessionResponse(string $name, OciBlobUpload $upload): Response
+    private function sessionResponse(Request $request, string $name, OciBlobUpload $upload): Response
     {
+        $addressed = $this->ociAddressedName($request, $name);
+
         $headers = [
-            'Location' => "/v2/{$name}/blobs/uploads/{$upload->id}",
+            'Location' => "/v2/{$addressed}/blobs/uploads/{$upload->id}",
             'Docker-Upload-UUID' => $upload->id,
         ];
 
@@ -408,11 +416,13 @@ class BlobController extends Controller
         return response('', 202, $headers);
     }
 
-    private function blobCompletedResponse(string $name, OciBlob $blob): Response
+    private function blobCompletedResponse(Request $request, string $name, OciBlob $blob): Response
     {
+        $addressed = $this->ociAddressedName($request, $name);
+
         return response('', 201, [
             'Docker-Content-Digest' => $blob->digest,
-            'Location' => "/v2/{$name}/blobs/{$blob->digest}",
+            'Location' => "/v2/{$addressed}/blobs/{$blob->digest}",
         ]);
     }
 }

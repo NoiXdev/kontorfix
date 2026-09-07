@@ -21,13 +21,21 @@ use Tests\E2E\Support\E2eStack;
  * down this compose project, never the shared daemon's image store) — the afterAll() below
  * removes only the specific tags this file creates.
  *
- * Obstacle #2 (a Docker client sends `Host: 127.0.0.1:8099`, but `/v2/` is registered only
- * in the domain-access route group — routes/registry.php) turned out to need no code
- * change: `Illuminate\Http\Request::getHost()` (Symfony underneath) already strips a
- * trailing `:<port>` before ResolveRegistryContext looks the value up, so the seeded
- * `domains` row carries the bare hostname `127.0.0.1`. See E2eSeeder's own comment on that
- * row, and tests/Feature/Registry/CustomDomainTest.php for the normal-suite Pest test that
- * pins the stripping behaviour directly.
+ * Obstacle #2 (a Docker client sends `Host: 127.0.0.1:8099`, and the domain-mode tests here
+ * need that host to resolve to a registry) turned out to need no code change:
+ * `Illuminate\Http\Request::getHost()` (Symfony underneath) already strips a trailing
+ * `:<port>` before the resolver looks the value up, so the seeded `domains` row carries the
+ * bare hostname `127.0.0.1`. See E2eSeeder's own comment on that row, and
+ * tests/Feature/Registry/CustomDomainTest.php for the normal-suite Pest test that pins the
+ * stripping behaviour directly.
+ *
+ * Both addressing modes are exercised here, and neither substitutes for the other: the
+ * domain-mode tests below reach the registry at `127.0.0.1:8099` (the seeded `domains`
+ * row), and the path-mode test reaches the SAME registry at
+ * `localhost:8099/e2e-customer/e2e-registry/…`, where no `domains` row exists and
+ * ResolveOciContext has to split the organization and registry slugs off the repository
+ * name instead. Two different strings for one loopback address, deliberately — see
+ * E2eSeeder's comment on `docker_path_host`.
  *
  * `--provenance=false --sbom=false` appears on exactly one test below (the shared-layer
  * dedup test), not on all of them: it exists there ONLY because that test needs an exact
@@ -46,6 +54,17 @@ function dockerRef(string $tag): string
     $context = E2eStack::context();
 
     return "{$context['docker_host']}/{$context['docker_repository']}:{$tag}";
+}
+
+/**
+ * The same repository, addressed by PATH namespace instead of by the registered domain:
+ * `<host>/<org>/<registry>/<repo>` on a host with no `domains` row of its own.
+ */
+function dockerPathRef(string $tag): string
+{
+    $context = E2eStack::context();
+
+    return "{$context['docker_path_host']}/{$context['docker_path_repository']}:{$tag}";
 }
 
 /**
@@ -87,6 +106,10 @@ afterAll(function () {
     $refs = implode(' ', array_map('dockerRef', ['v1', 'dedup-a', 'dedup-b', 'big', 'attest']));
 
     E2eStack::exec('client-docker', "docker rmi -f {$refs} >/dev/null 2>&1 || true", 60);
+
+    // The path-addressed tag carries a different host string, so it is a different local
+    // image reference and the sweep above does not cover it.
+    E2eStack::exec('client-docker', 'docker rmi -f '.dockerPathRef('pathmode').' >/dev/null 2>&1 || true', 60);
 
     // Safety net, not the primary cleanup path: the attested-push test removes its own
     // buildx builder (and the sibling buildkit container backing it) in its own body once
@@ -447,4 +470,73 @@ it('pushes an image index carrying provenance and SBOM attestations, and it roun
 
     expect($pullProcess->isSuccessful())->toBeTrue($pullProcess->getErrorOutput())
         ->and($pullProcess->getOutput())->toMatch('/Pull complete|Download complete/');
+});
+
+/**
+ * The path-namespaced address, driven by the real client rather than by curl.
+ *
+ * Domain mode is covered by every other test in this file and neither mode substitutes for
+ * the other: they differ in exactly the thing that can break — whether `{name}` reaches the
+ * controller as `kontorfix-e2e-demo` or as `e2e-customer/e2e-registry/kontorfix-e2e-demo`.
+ * A Pest feature test can assert the resolver's output; only a real `docker push`/`docker
+ * pull` establishes that a client actually accepts an address of this shape, sends `/v2/`
+ * at the host root with the namespace folded into the repository name, and round-trips an
+ * image through it.
+ *
+ * `--provenance=false --sbom=false` is deliberately NOT set here, matching the plain push
+ * test above: a real buildx default push (in practice an image INDEX carrying a provenance
+ * attestation) is the ambient client behaviour worth covering, and the assertions below
+ * compare digests rather than count blobs, so the shape does not matter to them.
+ */
+it('pushes and pulls through the path address rather than the registered domain', function () {
+    $context = E2eStack::context();
+    $ref = dockerPathRef('pathmode');
+    $config = dockerConfigDir('pathmode');
+
+    $script = <<<SH
+        set -e
+        rm -rf /work/pathmode && mkdir -p /work/pathmode && cd /work/pathmode
+        cp /fixtures/docker-image/Dockerfile.solo Dockerfile
+        dd if=/dev/urandom of=payload.bin bs=1024 count=64 2>/dev/null
+
+        mkdir -p {$config}
+        echo '{$context['publish_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_path_host']} -u x --password-stdin
+
+        DOCKER_CONFIG={$config} docker build -t {$ref} .
+        DOCKER_CONFIG={$config} docker push {$ref}
+
+        # A clean local store, same reasoning as the plain pull test: without this the pull
+        # resolves against the image the build just left behind and fetches nothing.
+        docker rmi -f {$ref}
+        DOCKER_CONFIG={$config} docker pull {$ref}
+        SH;
+
+    $process = E2eStack::exec('client-docker', $script, 300);
+
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput())
+        ->and($process->getOutput())->toMatch('/Pull complete|Download complete/');
+
+    preg_match_all('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
+
+    // Two digest lines — one from the push, one from the pull — and they must agree.
+    expect($matches[1])->toHaveCount(2)
+        ->and($matches[1][0])->toBe($matches[1][1]);
+
+    // The registry's own answer through the path address, not merely what the client printed.
+    expect(E2eStack::ociManifestDigest(
+        $context['docker_path_repository'],
+        'pathmode',
+        $context['read_token'],
+        E2eStack::pathHostRoot(),
+    ))->toBe($matches[1][0]);
+
+    // And the same image under the DOMAIN address's short name: a path-mode address is a
+    // second door to one registry, not a second registry. This is the assertion that would
+    // fail if the resolver had written the pushed manifest into anything but the registry
+    // the two slugs name.
+    expect(E2eStack::ociManifestDigest(
+        $context['docker_repository'],
+        'pathmode',
+        $context['read_token'],
+    ))->toBe($matches[1][0]);
 });

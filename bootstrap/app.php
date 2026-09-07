@@ -10,6 +10,7 @@ use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\PinUrlRoot;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
+use App\Http\Middleware\ResolveOciContext;
 use App\Http\Middleware\ResolvePortalContext;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
@@ -139,6 +140,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'registry.auth' => AuthenticateRegistry::class,
             'registry.context' => ResolveRegistryContext::class,
+            // The OCI protocol's own resolver: it decides between domain and path
+            // addressing from the Host, which registry.context cannot do because a
+            // path-mode /v2 URL is indistinguishable from a domain-mode one at the router.
+            // See ResolveOciContext.
+            'oci.context' => ResolveOciContext::class,
             'registry.type' => EnsureRegistryTypeEnabled::class,
             'portal.context' => ResolvePortalContext::class,
             'operator' => EnsureOperator::class,

@@ -1,9 +1,13 @@
 <?php
 
 use App\Enums\TokenAbility;
+use App\Http\Controllers\Registry\Oci\ManifestController;
+use App\Http\Controllers\Registry\Oci\VersionController;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 beforeEach(function () {
     $org = Organization::factory()->create([
@@ -91,4 +95,37 @@ it('answers a method mismatch under /v2 with 405, not the fallback 404', functio
         ->post('http://images.test/v2/app/manifests/1.0')
         ->assertStatus(405)
         ->assertHeader('Allow', 'GET, HEAD, PUT');
+});
+
+it('resolves /v2 to the OCI routes on either host kind, never to the npm packument catch-all', function () {
+    // routes/registry.php's own header records this trap being sprung once: npm's bare
+    // `/{package}` catch-all (`(?!packages\.json$)[a-z0-9._-]+`) matches "v2" as a package
+    // name, so a `/v2` group registered after `$registryEndpoints()` is dead code. The
+    // registration point MOVED with path addressing — the OCI group left the domain-access
+    // group and now sits at the top of the file — so the property has to be re-established,
+    // not inherited. Asserted the way that comment says it was verified: against the route
+    // collection directly, rather than by reading the file.
+    foreach ([
+        'http://images.test/v2/app/manifests/1.0',
+        rtrim((string) config('app.url'), '/').'/v2/3b/intern/app/manifests/1.0',
+    ] as $url) {
+        expect(Route::getRoutes()->match(Request::create($url, 'GET'))->getActionName())
+            ->toStartWith(ManifestController::class);
+    }
+
+    expect(Route::getRoutes()->match(Request::create('http://images.test/v2/', 'GET'))->getActionName())
+        ->toStartWith(VersionController::class);
+});
+
+it('answers a routing miss under /v2 on the instance host with the same bare JSON 404', function () {
+    // The `/v2` Route::fallback() sits inside the same group the resolver runs on, and it
+    // carries no `{name}` parameter at all — so on a non-domain host there is nothing for
+    // ResolveOciContext to split, and it must pass the request through rather than abort on
+    // "fewer than three segments". Otherwise a routing miss on the instance host would
+    // answer Laravel's HTML error page while the identical miss on a registry domain
+    // answered the bare JSON envelope this fallback exists to produce.
+    $this->withHeaders($this->auth)
+        ->get(rtrim((string) config('app.url'), '/').'/v2/Team/App/manifests/1.0')
+        ->assertNotFound()
+        ->assertJsonMissingPath('errors');
 });

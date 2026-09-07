@@ -126,13 +126,14 @@ final class E2eStack
     }
 
     /**
-     * Like get(), but against the domain-access root rather than the slug-prefixed
-     * registry path — what tests/E2E/DockerTest.php needs, since `/v2/` is registered only
-     * at the domain-access root (routes/registry.php) and the Docker client has no way to
-     * address a path-prefixed registry at all. `AuthenticateRegistry` accepts a Bearer
-     * token the same way for every registry protocol regardless of what a real client of
-     * that protocol actually sends on the wire (Docker itself speaks HTTP Basic — see
-     * DockerTest.php), so this can reuse the exact same Authorization header get() does.
+     * Like get(), but against the host root rather than the slug-prefixed registry path —
+     * what tests/E2E/DockerTest.php needs, since `/v2/` is registered at the host root
+     * (routes/registry.php) and never under `/r/{org}/{registry}`: a Docker client reads
+     * everything after the host as the repository name, so it cannot address a
+     * path-PREFIXED registry at all. `AuthenticateRegistry` accepts a Bearer token the same
+     * way for every registry protocol regardless of what a real client of that protocol
+     * actually sends on the wire (Docker itself speaks HTTP Basic — see DockerTest.php), so
+     * this can reuse the exact same Authorization header get() does.
      *
      * @return array{status: int, body: string}
      */
@@ -151,6 +152,16 @@ final class E2eStack
     }
 
     /**
+     * Scheme+host(+port) for the PATH-namespaced address — the host that has no `domains`
+     * row, on which a registry is named by `/v2/<org>/<registry>/<repo>` instead of by the
+     * hostname itself. See E2eSeeder for why the two hostnames must differ as strings.
+     */
+    public static function pathHostRoot(): string
+    {
+        return 'http://'.self::context()['docker_path_host'];
+    }
+
+    /**
      * The registry's own answer for a manifest's digest, read off the
      * `Docker-Content-Digest` response header — the same header ManifestController::show()
      * sets and a real Docker client trusts, rather than a value hashed client-side. Used to
@@ -160,12 +171,15 @@ final class E2eStack
      *
      * Null on anything other than 200 (unknown reference, wrong repository, …): the caller
      * decides what an absent digest means for the assertion at hand.
+     *
+     * `$base` defaults to the registered custom-domain root; pass pathHostRoot() to ask the
+     * same question through the path-namespaced address instead.
      */
-    public static function ociManifestDigest(string $repository, string $reference, ?string $token = null): ?string
+    public static function ociManifestDigest(string $repository, string $reference, ?string $token = null, ?string $base = null): ?string
     {
         $client = new Client(['http_errors' => false, 'timeout' => 30]);
 
-        $response = $client->get(self::hostRoot()."/v2/{$repository}/manifests/{$reference}", [
+        $response = $client->get(($base ?? self::hostRoot())."/v2/{$repository}/manifests/{$reference}", [
             'headers' => $token !== null ? ['Authorization' => 'Bearer '.$token] : [],
         ]);
 

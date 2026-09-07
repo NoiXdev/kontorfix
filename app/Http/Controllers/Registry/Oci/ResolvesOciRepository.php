@@ -23,6 +23,48 @@ trait ResolvesOciRepository
     }
 
     /**
+     * The repository name as the CLIENT addressed it: the bare name on a registry domain,
+     * and `<org>/<registry>/` plus the bare name when the registry was addressed by path
+     * namespace (ResolveOciContext).
+     *
+     * Every URL this registry hands back — an upload session's `Location`, a finished
+     * blob's, a stored manifest's — has to be expressed in the caller's own address space.
+     * `{name}` reaches a controller as the BARE name, deliberately, because that is what
+     * every lookup is against; a `Location` built from it points at
+     * `/v2/meinapp/blobs/uploads/<id>`, which on the instance host names no organization
+     * and no registry and is therefore a 404. A client follows an upload Location without
+     * asking, so the push simply dies there: `unexpected status from PUT request … 404 Not
+     * Found`, which is exactly how this was found — a real `docker push` in bin/e2e, not a
+     * reading of the controllers.
+     */
+    protected function ociAddressedName(Request $request, string $name): string
+    {
+        return ((string) $request->attributes->get('registryOciNamePrefix')).$name;
+    }
+
+    /**
+     * The inverse, for a repository name the CLIENT supplied in a request rather than in
+     * the path — today only the cross-repository mount's `from=`, which a client writes in
+     * the same address space it writes an image reference in.
+     *
+     * Null when the value names something outside the address this request came in on (a
+     * different registry's namespace, or no namespace at all in path mode). The caller
+     * treats that exactly as it treats an unknown source repository, which the OCI spec
+     * already defines as a fall-through to a normal upload rather than an error — so this
+     * cannot be used to probe which namespaces exist.
+     */
+    protected function ociBareName(Request $request, string $addressed): ?string
+    {
+        $prefix = (string) $request->attributes->get('registryOciNamePrefix');
+
+        if ($prefix === '') {
+            return $addressed;
+        }
+
+        return str_starts_with($addressed, $prefix) ? substr($addressed, strlen($prefix)) : null;
+    }
+
+    /**
      * The read path. An anonymous caller gets 401 so the client knows to authenticate —
      * UNLESS the group is public, in which case `RegistryAccessService::canAccessGroup()`
      * short-circuits true for a null token and the anonymous caller proceeds to package

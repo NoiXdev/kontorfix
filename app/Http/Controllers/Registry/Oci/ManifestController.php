@@ -90,9 +90,14 @@ class ManifestController extends Controller
 
         $manifest = $this->manifests->put($package, $reference, $this->readManifestBody($request), $mediaType);
 
+        // Addressed name, not the bare one: on a path-namespaced address a Location built
+        // from `{name}` alone points at a URL that names no registry. See
+        // ResolvesOciRepository::ociAddressedName().
+        $addressed = $this->ociAddressedName($request, $name);
+
         return response('', 201, [
             'Docker-Content-Digest' => $manifest->digest,
-            'Location' => "/v2/{$name}/manifests/{$manifest->digest}",
+            'Location' => "/v2/{$addressed}/manifests/{$manifest->digest}",
         ]);
     }
 

@@ -172,10 +172,14 @@ class E2eSeeder extends Seeder
 
         $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id, $dockerPackage->id]);
 
-        // The `/v2/` OCI routes exist ONLY at the domain-access root (routes/registry.php
-        // registers them outside the `/r/{orgSlug}/{groupSlug}` prefix group — a real Docker
-        // client cannot address a path-prefixed registry), so this group needs a `domains`
-        // row, unlike Composer/npm/Python which are reachable at the slug path already.
+        // The `/v2/` OCI routes sit at the host root, never under `/r/{orgSlug}/{groupSlug}`
+        // (routes/registry.php) — a Docker client cannot address a path-PREFIXED registry,
+        // because it treats everything after the host as the repository name. A registry is
+        // therefore reachable either at a hostname of its own, which is what this row
+        // provides, or by path NAMESPACE on any other host this instance answers to, which
+        // is what `docker_path_host` below exercises. Both are seeded: the two addressing
+        // modes resolve in one place (ResolveOciContext) and neither substitutes for the
+        // other in the end-to-end run.
         //
         // The hostname is bare `127.0.0.1`, with NO port, even though the Docker client
         // reaches this stack at `127.0.0.1:8099` (docker/compose.e2e.yaml's published
@@ -221,6 +225,20 @@ class E2eSeeder extends Seeder
             'python_module' => 'kontorfix_e2e_demo',
             'docker_repository' => 'kontorfix-e2e-demo',
             'docker_host' => '127.0.0.1:8099',
+            // The SAME registry, addressed by path namespace instead of by the `domains`
+            // row above: `<host>/<org>/<registry>/<repository>` (see ResolveOciContext).
+            //
+            // `localhost`, not `127.0.0.1`, and the difference is the whole point — the
+            // seeded `domains` row carries the literal string `127.0.0.1`, so a request
+            // with that Host resolves in DOMAIN mode and never reaches the path split at
+            // all. `localhost` is a different string, has no `domains` row, and is
+            // nevertheless (a) allowlisted by App\Services\Http\TrustedHosts, which lists
+            // the loopback names unconditionally, and (b) one of the two addresses every
+            // Docker daemon hardcodes as a plaintext-HTTP exception — the same property
+            // tests/E2E/DockerTest.php's docblock relies on for `127.0.0.1:8099`. Both
+            // names reach the identical published port (docker/compose.e2e.yaml).
+            'docker_path_host' => 'localhost:8099',
+            'docker_path_repository' => 'e2e-customer/e2e-registry/kontorfix-e2e-demo',
             'version' => '1.0.0',
         ], JSON_THROW_ON_ERROR));
     }

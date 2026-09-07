@@ -33,7 +33,8 @@ it('creates the fixture world and prints a parsable context line', function () {
         ->and(array_keys($context))->toEqualCanonicalizing([
             'base_url', 'host_base_url', 'read_token', 'publish_token',
             'composer_package', 'npm_package', 'python_package', 'python_module',
-            'docker_repository', 'docker_host', 'version',
+            'docker_repository', 'docker_host', 'docker_path_host', 'docker_path_repository',
+            'version',
         ])
         ->and($context['base_url'])->toBe('http://app:8080/r/e2e-customer/e2e-registry')
         ->and($context['host_base_url'])->toBe('http://127.0.0.1:8099/r/e2e-customer/e2e-registry')
@@ -46,6 +47,15 @@ it('creates the fixture world and prints a parsable context line', function () {
         ->and($context['python_module'])->toBe('kontorfix_e2e_demo')
         ->and($context['docker_repository'])->toBe('kontorfix-e2e-demo')
         ->and($context['docker_host'])->toBe('127.0.0.1:8099')
+        // The path-namespaced address of the SAME registry. `localhost`, not `127.0.0.1`:
+        // the seeded `domains` row carries the literal `127.0.0.1`, so that host resolves in
+        // domain mode and would never exercise the path split at all. Pinned here because
+        // the two values looking interchangeable is exactly what would make a future edit
+        // collapse them and silently turn the path-mode E2E test back into a second
+        // domain-mode one. See E2eSeeder's own comment on this key.
+        ->and($context['docker_path_host'])->toBe('localhost:8099')
+        ->and($context['docker_path_host'])->not->toBe($context['docker_host'])
+        ->and($context['docker_path_repository'])->toBe('e2e-customer/e2e-registry/kontorfix-e2e-demo')
         ->and($context['version'])->toBe('1.0.0');
 
     $customer = Organization::where('slug', 'e2e-customer')->firstOrFail();
