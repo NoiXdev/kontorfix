@@ -27,6 +27,7 @@ use App\Models\Group;
 use App\Models\OciTag;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Support\Str;
@@ -311,6 +312,40 @@ it('names one and the same tag in the pull command and in the table\'s first row
 
     expect($commandTag)->not->toBeNull();
     expect($props['tags'][0]['name'])->toBe($commandTag);
+});
+
+it('renders both of the registry pages relative timestamps in German', function () {
+    // The two surfaces `Portal\RegistryController` adds — the Docker tag table's `updated_at`
+    // and the token list's `last_used_at` — call `diffForHumans()`, and `app.locale` is `en`,
+    // so both rendered "3 days ago" and "2 hours ago" inside a German page. The fix is not at
+    // these two call sites: Carbon's locale is set to `de` once in `AppServiceProvider`, for
+    // the ~18 call sites across the console that were all wrong for the same reason.
+    //
+    // Pinned as whole values rather than as "contains 'vor'", so a locale reverted to `en`
+    // reddens here rather than degrading quietly on a page nobody asserts.
+    $package = installPackage($this->group, 'docker', 'meinapp');
+    pushTag($package, '1.4.0', now()->subDays(3)->toDateTimeString());
+
+    RegistryToken::factory()->for($this->org)->for($this->group)->create([
+        'name' => 'ci-token',
+        'user_id' => $this->member->id,
+        'last_used_at' => now()->subHours(2),
+    ]);
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}/packages/{$package->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p->component('portal/Package')
+            ->where('tags.0.updated_at', 'vor 3 Tagen')
+            ->etc());
+
+    $this->actingAs($this->member)
+        ->get("/c/acme/registries/{$this->group->id}")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p
+            ->where('tokens.0.name', 'ci-token')
+            ->where('tokens.0.last_used_at', 'vor 2 Stunden')
+            ->etc());
 });
 
 it('sends no tags for a type that cannot have any', function () {

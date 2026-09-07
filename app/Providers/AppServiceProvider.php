@@ -23,6 +23,7 @@ use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -78,6 +79,22 @@ class AppServiceProvider extends ServiceProvider
         // attached to a registry, and pinning both made the second unusable. Console and
         // queue processes have no request and keep the framework's own APP_URL-derived
         // root (SetRequestForConsole).
+
+        // Every relative timestamp this application renders is read by a German-speaking
+        // operator or customer, so Carbon answers in German — set once here rather than at
+        // each of the ~18 `diffForHumans()` call sites, which is how "vor 3 Tagen" and
+        // "3 days ago" ended up side by side on the same page: Portal\PackageController
+        // pinned `->locale('de')` explicitly while Portal\RegistryController's tag table
+        // and token list, written in the same range, did not.
+        //
+        // NOT `config('app.locale')`, which is `en` and stays `en`: it selects the
+        // framework's own translation files, and this application ships no `de` message
+        // catalogue — pointing it at one would replace Laravel's validation messages with
+        // untranslated keys. Carbon's locale is a separate axis with its own bundled
+        // translations, which is precisely why it can be set independently. Laravel never
+        // syncs the two on its own (no `Carbon::setLocale()` anywhere in the framework), so
+        // nothing later in a request undoes this.
+        Carbon::setLocale('de');
 
         // One listener serves two event types — auto-discovery matches based on the
         // typed `handle` parameter and would therefore not reliably wire up both

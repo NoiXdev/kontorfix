@@ -29,9 +29,10 @@ export type PortalSetupState = 'none' | 'unused' | 'used';
 export interface PortalLastUsedToken {
     name: string;
     /**
-     * Relative and ALREADY GERMAN — `Carbon::diffForHumans()` with an explicit `de` locale
-     * on the server. It is pinned there rather than left to `app.locale`, which is `en` on
-     * this instance and produced "2 hours ago" in the middle of a German sentence.
+     * Relative and ALREADY GERMAN — `Carbon::diffForHumans()` on the server, with Carbon's
+     * locale pinned to `de` application-wide in `AppServiceProvider`. It is pinned there
+     * rather than left to `app.locale`, which is `en` on this instance and produced
+     * "2 hours ago" in the middle of a German sentence.
      */
     used_at: string;
 }

@@ -154,12 +154,14 @@ class PackageController extends Controller
             // is the only part of that line the customer can act on — it says WHICH credential
             // their build is running on, not merely that one exists.
             //
-            // `locale('de')` explicitly, not the application's: `app.locale` is `en` on this
-            // instance, and diffForHumans() then puts "2 hours ago" in the middle of a German
-            // sentence. The console is German throughout whatever the framework's locale is.
+            // `used_at` is relative AND German. The German half is not stated here: Carbon's
+            // locale is set to `de` once for the whole application in AppServiceProvider,
+            // which is what keeps this line and the ~18 other `diffForHumans()` call sites
+            // from disagreeing — a per-call `->locale('de')` here was exactly how the tag
+            // table in Portal\RegistryController came to render "3 days ago" beside it.
             'lastUsedToken' => $token === null || $lastUsedAt === null ? null : [
                 'name' => $token->name,
-                'used_at' => $lastUsedAt->locale('de')->diffForHumans(),
+                'used_at' => $lastUsedAt->diffForHumans(),
             ],
             'packages' => $rows->map(fn (array $row): array => [
                 'id' => $row['package']->id,

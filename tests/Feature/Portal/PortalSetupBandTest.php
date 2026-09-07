@@ -72,9 +72,9 @@ it('collapses once a token of the organization has been used', function () {
             ->where('setupState', 'used')
             ->where('lastUsedToken.name', 'ci-token')
             // German, and pinned as a value rather than as "some string": `app.locale` is
-            // `en` on this instance, so an unqualified diffForHumans() renders "2 hours ago"
-            // inside a German sentence. The controller sets the locale explicitly and this
-            // is what measures that it did.
+            // `en` on this instance, so without Carbon's own locale being set diffForHumans()
+            // renders "2 hours ago" inside a German sentence. AppServiceProvider sets it once
+            // for the whole application and this is what measures that it did.
             ->where('lastUsedToken.used_at', 'vor 2 Stunden')
             ->etc());
 });
