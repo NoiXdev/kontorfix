@@ -6,6 +6,7 @@ use App\Models\MailSetting;
 use App\Models\Organization;
 use App\Models\StorageSetting;
 use App\Models\User;
+use App\Rules\AddressableSlug;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Setup\SetupToken;
 use Illuminate\Support\Facades\DB;
@@ -285,4 +286,18 @@ it('leaves the health check reachable during setup', function () {
     // The container healthcheck hits /up — a redirect there would make a fresh,
     // not-yet-configured deployment look unhealthy and get restart-looped.
     $this->get('/up')->assertOk();
+});
+
+it('refuses a registry slug that no Docker client could address', function () {
+    // The wizard is the third writer of a registry slug (the two /admin form requests are the
+    // others, pinned in tests/Feature/Admin/SlugAddressabilityTest.php) and the only one that
+    // runs before an instance has an operator — so an unaddressable slug typed here would make
+    // the instance's very first registry unreachable by path address from minute one.
+    // `interne-pakete-` is a legal slug under the old `^[a-z0-9-]+$` and matches no `/v2`
+    // route at all, because the OCI name grammar admits a hyphen only between alphanumerics.
+    $this->post('/setup', setupPayload(['registry_slug' => 'interne-pakete-']))
+        ->assertSessionHasErrors(['registry_slug' => AddressableSlug::HYPHEN_AT_EDGE]);
+
+    expect(User::count())->toBe(0)
+        ->and(Group::count())->toBe(0);
 });

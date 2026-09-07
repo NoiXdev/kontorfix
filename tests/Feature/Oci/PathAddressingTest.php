@@ -4,6 +4,8 @@ use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Models\Domain;
 use App\Models\Group;
+use App\Models\OciBlob;
+use App\Models\OciBlobUpload;
 use App\Models\OciManifest;
 use App\Models\OciTag;
 use App\Models\Organization;
@@ -265,4 +267,117 @@ it('keeps a domain-addressed Location bare, exactly as it was before path addres
         ->call('POST', "http://images.test/v2/meinapp/blobs/uploads/?digest={$digest}", content: $bytes)
         ->assertStatus(201)
         ->assertHeader('Location', "/v2/meinapp/blobs/{$digest}");
+});
+
+it('mounts a blob across repositories when `from` is written in the path address space', function () {
+    // The inverse of the Location fix, and the only thing that exercises
+    // ResolvesOciRepository::ociBareName(): `from=` is a repository name the CLIENT supplies,
+    // and a client writes it in the same address space it writes an image reference in — so
+    // in path mode it arrives as `3b/intern/quelle`, namespace and all, while every lookup
+    // inside this application is against the bare `quelle`.
+    //
+    // The whole body of ociBareName() could be replaced with `return $addressed;` and the
+    // entire suite stayed green before this case existed: the mount simply misses, and the
+    // OCI spec's own fall-through turns it into a full re-upload — no error, no failed push,
+    // just every layer transferred again. This is what makes that regression visible, which
+    // is why it asserts the 201 AND that nothing new landed on disk. Domain mode's identical
+    // case lives in tests/Feature/Oci/BlobUploadTest.php.
+    $quelle = Package::factory()->inOrgOf($this->group)->create([
+        'type' => PackageType::Docker,
+        'name' => 'quelle',
+    ]);
+    $this->group->packages()->attach($quelle);
+
+    $bytes = random_bytes(2048);
+    $digest = Digest::of($bytes);
+
+    $this->withServerVariables($this->publish)
+        ->call('POST', instanceAddress("/v2/3b/intern/quelle/blobs/uploads/?digest={$digest}"), content: $bytes)
+        ->assertStatus(201);
+
+    $filesBeforeMount = Storage::disk('artifacts')->allFiles('docker');
+
+    $this->withServerVariables($this->publish)
+        ->post(instanceAddress("/v2/3b/intern/meinapp/blobs/uploads/?mount={$digest}&from=3b/intern/quelle"))
+        ->assertStatus(201)
+        ->assertHeader('Docker-Content-Digest', $digest)
+        ->assertHeader('Location', "/v2/3b/intern/meinapp/blobs/{$digest}");
+
+    // 201 alone would also be produced by a re-upload, so "without transferring it" is what
+    // actually has to be asserted: nothing changed on disk, the blob row was not duplicated,
+    // and no upload session was left open.
+    expect(Storage::disk('artifacts')->allFiles('docker'))->toBe($filesBeforeMount)
+        ->and(OciBlob::count())->toBe(1)
+        ->and(OciBlobUpload::count())->toBe(0);
+});
+
+it('falls back to a normal upload when `from` names a namespace this request did not come in on', function () {
+    // The other half of ociBareName(): a `from` that does not carry THIS request's namespace
+    // yields null, and begin() then opens an ordinary upload session — the OCI spec's own
+    // behaviour for an unmountable source. 202, not an error, so the miss cannot be used to
+    // probe which namespaces exist.
+    $quelle = Package::factory()->inOrgOf($this->group)->create([
+        'type' => PackageType::Docker,
+        'name' => 'quelle',
+    ]);
+    $this->group->packages()->attach($quelle);
+
+    $bytes = random_bytes(512);
+    $digest = Digest::of($bytes);
+
+    $this->withServerVariables($this->publish)
+        ->call('POST', instanceAddress("/v2/3b/intern/quelle/blobs/uploads/?digest={$digest}"), content: $bytes)
+        ->assertStatus(201);
+
+    // The bare name, as a domain-mode client would have written it — correct there, and
+    // meaningless here.
+    $this->withServerVariables($this->publish)
+        ->post(instanceAddress("/v2/3b/intern/meinapp/blobs/uploads/?mount={$digest}&from=quelle"))
+        ->assertStatus(202)
+        ->assertHeader('Docker-Upload-UUID');
+});
+
+it('404s a path-addressed registry whose organization has not enabled the docker type', function () {
+    // The gate is one middleware entry shared by both addressing modes, but it reads the
+    // `registryGroup` that ResolveOciContext resolves and silently no-ops without one — so
+    // "it works in domain mode" is not evidence it fires here. OciAuthTest pins the domain
+    // door; this pins the path door.
+    $this->org->update(['enabled_registry_types' => ['composer']]);
+
+    $response = $this->withServerVariables($this->read)
+        ->get(instanceAddress('/v2/3b/intern/meinapp/manifests/1.0'))
+        ->assertNotFound();
+
+    // A plain 404, exactly as in domain mode: a disabled type behaves as if the registry does
+    // not exist, so there is no `errors[]` envelope to confirm that it does.
+    expect($response->headers->get('Content-Type'))->toStartWith('text/html');
+});
+
+it('refuses a write from a foreign publish token through the path address and stores nothing', function () {
+    // Write refusals were pinned in domain mode only (SharedRepositoryTenancyTest). Path mode
+    // resolves the same Group and runs the same canPublishToGroup() check, but nothing said
+    // so — and both halves matter: the status AND the absence of any row, since a 403 handed
+    // back after the bytes were already written would be no protection at all.
+    $foreignOrg = Organization::factory()->create(['enabled_registry_types' => ['docker']]);
+    $foreignGroup = Group::factory()->for($foreignOrg)->create();
+    $foreign = pathAuth($foreignGroup, TokenAbility::Publish);
+
+    $bytes = 'fremder-layer';
+    $blobDigest = Digest::of($bytes);
+
+    $this->withServerVariables($foreign)
+        ->call('POST', instanceAddress("/v2/3b/intern/meinapp/blobs/uploads/?digest={$blobDigest}"), content: $bytes)
+        ->assertStatus(403)
+        ->assertJsonPath('errors.0.code', 'DENIED');
+
+    $this->withServerVariables($foreign + ['CONTENT_TYPE' => 'application/vnd.oci.image.manifest.v1+json'])
+        ->call('PUT', instanceAddress('/v2/3b/intern/meinapp/manifests/1.0'), content: $this->payload)
+        ->assertStatus(403)
+        ->assertJsonPath('errors.0.code', 'DENIED');
+
+    expect(OciBlob::count())->toBe(0)
+        ->and(OciBlobUpload::count())->toBe(0)
+        ->and(OciManifest::count())->toBe(0)
+        ->and(OciTag::count())->toBe(0)
+        ->and(Storage::disk('artifacts')->allFiles('docker'))->toBe([]);
 });

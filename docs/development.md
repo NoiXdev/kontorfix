@@ -1088,6 +1088,18 @@ organization slug — the two share one namespace in the URL, and the rule runs 
 there is no API route to update an organization, so that half is console-only by having
 nothing else to cover.
 
+**A new slug may not begin or end with a hyphen** — `App\Rules\AddressableSlug`, wired into
+the same four requests plus `StoreSetupRequest`. `[a-z0-9-]+` is the constraint in the
+registry URL, but under OCI path addressing both slugs also become path components of a
+Docker repository name (`<instance>/v2/{orgSlug}/{groupSlug}/{repo}`), and the OCI name
+grammar — `$ociName` in `routes/registry.php`, and every real client's own reference parser —
+admits a hyphen only *between* alphanumerics. So `acme-` validated fine and then matched no
+`/v2` route at all, answering the fallback's bare `{}` 404. Hyphens *inside* a slug,
+consecutive ones included, stay legal. Existing slugs are neither migrated nor rewritten: the
+update requests pass the row's current slug through as `$unchanged`, so a registry created
+before this rule can still be saved without renaming itself — only a new value has to be
+addressable.
+
 **Old one-segment `/r/{slug}/…` URLs answer with a 301** (308 for a write — see below), so
 existing `composer.json`, `.npmrc` and `pip.conf` keep working unchanged. The redirect is
 `App\Http\Controllers\Registry\LegacySlugRedirectController`, registered last in

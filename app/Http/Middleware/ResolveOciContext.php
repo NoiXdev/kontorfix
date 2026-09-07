@@ -65,9 +65,18 @@ class ResolveOciContext
         $segments = explode('/', (string) $name);
 
         // Three at minimum: an organization slug, a registry slug, and at least one segment
-        // of repository name. Both slugs are single-segment by their own pattern, so this
-        // split stays unambiguous for a repository name that itself contains slashes
-        // (`3b/intern/team/app` → org `3b`, registry `intern`, repository `team/app`).
+        // of repository name. Both slugs are single-segment by their own pattern (no slash in
+        // `[a-z0-9-]`), so this split stays unambiguous for a repository name that itself
+        // contains slashes (`3b/intern/team/app` → org `3b`, registry `intern`, repository
+        // `team/app`).
+        //
+        // Being single-segment is NOT the same as being addressable, and the slug pattern is
+        // the narrower of the two constraints only since App\Rules\AddressableSlug: a slug
+        // ending or starting in a hyphen is a legal segment that routes/registry.php's
+        // `$ociName` refuses outright, so `acme-/intern/meinapp` never matches a `/v2` route
+        // and never reaches this resolver at all — it falls to the `/v2` fallback's bare
+        // `{}` 404. That is fixed at the writing end, where new slugs are refused; slugs
+        // predating that rule are left alone and stay reachable by their `/r/` URL.
         //
         // Fewer than three is a plain 404 and NOT an OciException: the caller named nothing
         // that could exist, which is the same distinction ResolvesOciRepository already

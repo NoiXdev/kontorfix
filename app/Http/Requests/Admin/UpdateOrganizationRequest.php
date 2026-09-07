@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Rules\AddressableSlug;
 use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -43,7 +44,11 @@ class UpdateOrganizationRequest extends FormRequest
             // Globally unique: the organization slug is the top level of the registry
             // namespace and the first segment of every registry URL it owns.
             'slug' => [
-                'required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/',
+                // The row's CURRENT slug is passed through as `$unchanged`, so an organization
+                // created before AddressableSlug existed can still be edited without being
+                // forced to rename itself; only a NEW value has to be OCI-addressable. See
+                // that class for why the rule is narrower than routes/registry.php's $ociName.
+                'required', 'string', 'max:190', new AddressableSlug($this->route('organization')?->slug),
                 Rule::unique('organizations', 'slug')->ignore($this->route('organization')?->id),
                 // …and never equal to a registry slug: the two share one namespace in the
                 // registry URL. StoreOrganizationRequest guards the create path; this is the

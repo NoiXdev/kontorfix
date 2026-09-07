@@ -32,20 +32,26 @@ use Illuminate\Http\Request;
  * documented model instead of the reverse: canAccessGroup() decides, exactly as it does
  * for ociRepository() and every other ecosystem's read path.
  *
- * TWO branches, because the endpoint answers two different questions depending on how the
- * instance was addressed (see ResolveOciContext):
+ * TWO questions, asked in this order, because the endpoint answers to two audiences:
  *
- *  - **A registry was named** (domain mode: the host itself identifies one). canAccessGroup()
- *    decides, unchanged — the paragraph above is entirely about this branch.
- *  - **No registry was named** (path mode: the bare `/v2/` on the instance's own host
- *    carries no `{org}/{registry}` yet). There is no group for canAccessGroup() to ask
- *    about, so the credential alone decides: anonymous is 200, a valid token is 200, and
- *    credentials that resolved to no token are 401 with the Basic challenge. Anonymous must
- *    be 200 or a public registry is unpullable by every real client — the bug this
- *    docblock records having shipped once. Bad credentials must be 401 or `docker login`
- *    reports success for a wrong password, which is worse than a refusal because the
- *    failure then surfaces later, on the push, with no hint that the credential was the
- *    cause.
+ *  1. **Were credentials sent that resolved to nothing?** Then 401, whatever else is true —
+ *     including on a PUBLIC registry's own domain. This is not an access decision, it is a
+ *     failed login: `docker login` reports success on whatever this endpoint answers 200 to,
+ *     so a wrong password answered with 200 tells the user they are logged in and only fails
+ *     much later, on the push, with nothing pointing at the credential. That was the case
+ *     for a public group until this check moved ABOVE the group branch — canAccessGroup()
+ *     short-circuits true for a null token there, which makes a wrong password
+ *     indistinguishable from an anonymous caller. Anonymous callers send nothing at all and
+ *     never reach this, which is what keeps a public registry pullable.
+ *  2. **May this caller see the registry that was named?** canAccessGroup() decides,
+ *     unchanged — the paragraph above is entirely about this. Only asked when a registry was
+ *     named at all: in path mode the bare `/v2/` on the instance's own host carries no
+ *     `{org}/{registry}` yet (see ResolveOciContext), so there is no group to ask about and
+ *     the credential from step 1 is the whole answer.
+ *
+ * The resulting table is the same in both addressing modes: anonymous is 200 unless a named
+ * private registry refuses it, a valid token is 200 unless the named registry refuses it,
+ * and a credential that resolves to nothing is always 401 with the Basic challenge.
  */
 class VersionController extends Controller
 {
@@ -58,20 +64,23 @@ class VersionController extends Controller
 
         $group = $request->attributes->get('registryGroup');
 
-        if ($group instanceof Group) {
-            if (! $this->access->canAccessGroup($token, $group)) {
-                throw OciException::unauthorized();
-            }
-
-            return $this->acknowledge();
-        }
-
         // AuthenticateRegistry sets `registryToken` to null for "sent nothing" and for
         // "sent something that resolved to no token" alike, so the request itself is what
         // separates the two: `getUser()` covers HTTP Basic (what docker actually sends,
         // and what `docker login` verifies against this very endpoint) and `bearerToken()`
         // the header every other client of this registry uses.
+        //
+        // ABOVE the group check deliberately, and not inside the no-group branch where it
+        // started: on a public registry's domain canAccessGroup(null, $group) is true, so a
+        // wrong password would otherwise be answered 200 and `docker login` would report a
+        // success the user only discovers was false on the next push.
         if ($token === null && ($request->getUser() !== null || $request->bearerToken() !== null)) {
+            throw OciException::unauthorized();
+        }
+
+        // Only when a registry was actually named. Without a group there is nothing to ask
+        // about and the credential above was the whole question.
+        if ($group instanceof Group && ! $this->access->canAccessGroup($token, $group)) {
             throw OciException::unauthorized();
         }
 

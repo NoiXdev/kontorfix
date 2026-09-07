@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Rules\AddressableSlug;
 use App\Rules\UnclaimedSlug;
 use App\Services\Scope\OrgScope;
 use Illuminate\Foundation\Http\FormRequest;
@@ -42,7 +43,11 @@ class StoreGroupRequest extends FormRequest
                 'required',
                 'string',
                 'max:190',
-                'regex:/^[a-z0-9-]+$/',
+                // Narrower than routes/registry.php's `$ociName` on purpose — a registry slug
+                // is a path component of an OCI repository name under path addressing, and
+                // the OCI grammar admits a hyphen only between alphanumerics. See
+                // App\Rules\AddressableSlug.
+                new AddressableSlug,
                 Rule::unique('groups', 'slug')->where(function ($query) {
                     $owner = $this->ownerOrganizationId();
 

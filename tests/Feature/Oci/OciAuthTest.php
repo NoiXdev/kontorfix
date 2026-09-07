@@ -168,3 +168,54 @@ it('still challenges an anonymous client for a NON-public registry, even though 
         ->assertStatus(401)
         ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"');
 });
+
+it('challenges a wrong password on a PUBLIC registry domain instead of reporting a login success', function () {
+    // The asymmetry this closes: `canAccessGroup(null, $publicGroup)` is true, so on a public
+    // registry a credential that resolved to NO token used to be indistinguishable from an
+    // anonymous caller and got the same 200 — which is precisely what `docker login` reports
+    // to the user as a successful login. The failure then surfaced on the next push, with
+    // nothing pointing at the password. VersionController's own docblock argued why this must
+    // not happen while three lines above it the domain branch did it anyway.
+    $publicGroup = Group::factory()->for($this->org)->create(['public' => true]);
+    Domain::create(['group_id' => $publicGroup->id, 'hostname' => 'pub.test']);
+
+    // State one: no credentials at all — still 200, or a public registry is unpullable by
+    // every real client. The fix must not be "always 401 for a null token".
+    $this->get('http://pub.test/v2/')
+        ->assertOk()
+        ->assertHeader('Docker-Distribution-Api-Version', 'registry/2.0');
+
+    // State two: a credential that resolves.
+    $this->withHeaders(['Authorization' => 'Basic '.base64_encode('x:'.tokenPlainTextFor($publicGroup))])
+        ->get('http://pub.test/v2/')
+        ->assertOk();
+
+    // State three: a credential that resolves to nothing — the finding.
+    $this->withHeaders(['Authorization' => 'Basic '.base64_encode('x:nope')])
+        ->get('http://pub.test/v2/')
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"')
+        ->assertJsonPath('errors.0.code', 'UNAUTHORIZED');
+
+    // …and the Bearer form, which every non-Docker client of this registry sends.
+    $this->withHeaders(['Authorization' => 'Bearer nope'])
+        ->get('http://pub.test/v2/')
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"');
+});
+
+it('answers the same three credential states on a PRIVATE registry domain', function () {
+    // The private half of the table, stated beside the public one so the two cannot drift.
+    // Anonymous is the one row that differs, and it differs because the GROUP refuses it,
+    // not because a credential failed.
+    $this->get('http://images.test/v2/')->assertStatus(401);
+
+    $this->withHeaders(['Authorization' => 'Basic '.base64_encode('x:'.tokenPlainTextFor($this->group))])
+        ->get('http://images.test/v2/')
+        ->assertOk();
+
+    $this->withHeaders(['Authorization' => 'Basic '.base64_encode('x:nope')])
+        ->get('http://images.test/v2/')
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"');
+});
