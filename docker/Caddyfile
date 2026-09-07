@@ -1,0 +1,89 @@
+# A trimmed copy of the base FrankenPHP image's own /etc/frankenphp/Caddyfile (same
+# structure, same env-var hooks), with one addition: rejecting an oversized request body
+# BEFORE PHP ever sees it, for every route except the OCI registry.
+#
+# Why this file exists instead of the previous `frankenphp php-server -r public/ --listen
+# :8080` command: `php-server` has no way to configure any body-size limit at all, and
+# without one, PHP's own `post_max_size` is the only backstop — but that value has to be
+# effectively unlimited (see docker/php.ini) because a single OCI image layer legitimately
+# exceeds any sane fixed cap by a wide margin (Task 7's 500 MiB gate). Left with no limit
+# in front of it, an anonymous multipart POST to any unauthenticated route (`/login`,
+# `/forgot-password`, `/setup`) could make PHP buffer an arbitrarily large body onto disk
+# before Laravel is ever reachable to reject it on CSRF.
+#
+# What this does NOT use, and why: Caddy's own `request_body { max_size ... }` directive
+# looks like the obvious fit, but it does not protect a route handled by FrankenPHP's own
+# `php`/`php_server` handler. Verified directly, twice, against this exact image: (1) with
+# `request_body { max_size 10 }` in front of `php_server`, a 140-byte POST to `/login`
+# still reached Laravel and got a normal Laravel response — the ten-byte cap had zero
+# effect; (2) even against a trivial `respond "ok"` handler that never reads the body at
+# all, an oversized request still got a 200, because `request_body`'s `max_size` is a LAZY
+# check (Go's `http.MaxBytesReader`): it only errors once something actually reads past the
+# limit, and produces no rejection at all if nothing reads that far or if the reader it
+# wrapped is never the one the eventual handler reads through. Caddy's own directive
+# documentation does not warn that php_server is one of those cases, so this is recorded
+# here rather than assumed away the next time someone considers reaching for it again.
+#
+# What IS used instead: a preflight check purely on the declared `Content-Length` header,
+# answered by `respond` before any handler — PHP included — ever touches the connection.
+# Two rules, both scoped to exclude `/v2/*`:
+#
+#   - No `Content-Length` at all (a chunked-encoded body, which nothing outside `/v2/` in
+#     this app ever needs — every non-OCI multipart form and JSON API body carries one) is
+#     refused outright with 411, rather than let an unbounded chunked stream reach PHP with
+#     no size signal to check at all.
+#   - A declared `Content-Length` over the cap is refused with 413.
+#
+# This is a real admission-control gate, not a lazy reader: confirmed with the identical
+# probe as above, both rejections happen with zero bytes of the body consumed and without
+# ever invoking `php_server`. The one thing it cannot stop is a client that declares an
+# honest, small `Content-Length` and then sends more bytes than it claimed — Go's HTTP
+# server itself does not enforce that mismatch, so a truly adversarial client could still
+# attempt it; php.ini's `post_max_size = 0` no longer being the only backstop is what this
+# file is for, not a claim that it closes every conceivable variant.
+{
+	skip_install_trust
+
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp {
+		{$FRANKENPHP_CONFIG}
+	}
+}
+
+{$CADDY_EXTRA_CONFIG}
+
+{$SERVER_NAME:localhost} {
+	root {$SERVER_ROOT:public/}
+	encode zstd br gzip
+
+	{$CADDY_SERVER_EXTRA_DIRECTIVES}
+
+	# Scoped to POST/PUT/PATCH: a GET or HEAD (the healthcheck's `/up` among them) has no
+	# body and legitimately carries no Content-Length at all. Caught twice while verifying
+	# this file, not hypothetically:
+	#
+	#   1. A bare `method POST PUT PATCH` line as its own matcher key, sitting alongside the
+	#      `expression` key in the same matcher set, took `/up` down anyway — with a 500,
+	#      not even a clean 411. Caddy's matcher set does not short-circuit across matcher
+	#      TYPES: the `expression` matcher still gets evaluated for a GET with no
+	#      Content-Length, `int("")` panics inside CEL, and that panic surfaces as a 500
+	#      before "the method matcher would have said no" ever gets consulted.
+	#   2. Folding the method check into a leading `&&` term of the SAME expression (below)
+	#      is what actually fixes it: CEL's `&&` is specified to short-circuit, unlike
+	#      Caddy's own cross-matcher-type AND, so `int(...)` is never reached for a method
+	#      this rule was never meant to look at in the first place.
+	@missingLength {
+		not path /v2/*
+		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} == ""
+	}
+	respond @missingLength 411
+
+	@oversized {
+		not path /v2/*
+		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 33554432
+	}
+	respond @oversized 413
+
+	php_server
+}

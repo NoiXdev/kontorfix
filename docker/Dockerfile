@@ -71,4 +71,10 @@ EXPOSE 8080
 # survives restarts, since the entrypoint recompiles bootstrap/cache on every boot.
 USER www-data
 ENTRYPOINT ["docker/entrypoint.sh"]
-CMD ["frankenphp", "php-server", "-r", "public/", "--listen", ":8080"]
+# `frankenphp run`, not `php-server`: `php-server` builds its own Caddy config
+# on the fly and has no way to attach the request-body limit docker/Caddyfile sets
+# (see that file's own comment for what it protects and why php.ini alone cannot).
+# `--config` is relative to WORKDIR (/app), where `COPY . .` above already placed
+# docker/Caddyfile — no separate COPY needed, unlike docker/php.ini, which has to
+# land at an absolute system path COPY . . would never reach.
+CMD ["frankenphp", "run", "--config", "docker/Caddyfile"]

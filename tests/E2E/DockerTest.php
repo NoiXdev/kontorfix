@@ -28,6 +28,18 @@ use Tests\E2E\Support\E2eStack;
  * `domains` row carries the bare hostname `127.0.0.1`. See E2eSeeder's own comment on that
  * row, and tests/Feature/Registry/CustomDomainTest.php for the normal-suite Pest test that
  * pins the stripping behaviour directly.
+ *
+ * `--provenance=false --sbom=false` appears on exactly one test below (the shared-layer
+ * dedup test), not on all of them: it exists there ONLY because that test needs an exact
+ * blob-count delta, and a real buildx push attaches a provenance attestation as its own
+ * extra manifest+blob by default — confirmed directly, since the dedup test failed with
+ * one blob more than expected per image until those flags were added there. Everywhere
+ * else in this file, a real buildx push is left to do whatever it does by default (in
+ * practice, push an image INDEX carrying a provenance attestation), because that ambient
+ * shape is real client behaviour worth covering, not an artifact to suppress. The last
+ * test in this file goes further and FORCES an index with both provenance and an SBOM,
+ * matching this project's own release workflow — gated behind E2E_ATTESTED_PUSH; see that
+ * test's own docblock for why.
  */
 function dockerRef(string $tag): string
 {
@@ -72,9 +84,18 @@ function dockerBlobCount(): int
 }
 
 afterAll(function () {
-    $refs = implode(' ', array_map('dockerRef', ['v1', 'dedup-a', 'dedup-b', 'big']));
+    $refs = implode(' ', array_map('dockerRef', ['v1', 'dedup-a', 'dedup-b', 'big', 'attest']));
 
     E2eStack::exec('client-docker', "docker rmi -f {$refs} >/dev/null 2>&1 || true", 60);
+
+    // Safety net, not the primary cleanup path: the attested-push test removes its own
+    // buildx builder (and the sibling buildkit container backing it) in its own body once
+    // the build succeeds, but a failure partway through that test's script would leave
+    // `e2e-attest-builder` — and the running `buildx_buildkit_e2e-attest-builder0`
+    // container it owns — behind on the shared host daemon otherwise. A no-op when the
+    // builder was never created (E2E_ATTESTED_PUSH unset, or the test never got far enough
+    // to create it), same as the `docker rmi` above.
+    E2eStack::exec('client-docker', 'docker buildx rm e2e-attest-builder >/dev/null 2>&1 || true', 60);
 });
 
 it('pushes an image with the real docker client', function () {
@@ -85,6 +106,18 @@ it('pushes an image with the real docker client', function () {
     // scratch + a single freshly generated random file: no base image to pull, so this
     // depends on nothing outside the stack (see UpstreamTest.php's docblock for why that
     // property matters to the default run of every ecosystem here).
+    //
+    // No --provenance=false/--sbom=false here, unlike the dedup test below: this is the
+    // one place a real buildx push is left to do whatever it does by default, which in
+    // practice attaches a provenance attestation and pushes an image INDEX, not a bare
+    // manifest — the same shape this project's own release workflow pushes
+    // (`provenance: mode=max`, `sbom: true`). ManifestTest.php already covers a
+    // hand-written index payload; that proves ManifestController stores arbitrary bytes
+    // under a digest, not that a real client's index-shaped push and a real pull actually
+    // round-trip one. The assertions below don't care whether the pushed reference is a
+    // plain manifest or an index — digest-in equals digest-out either way — so this test
+    // stays green regardless of exactly what buildx's ambient default turns out to be on
+    // any given Docker version, while still exercising whatever that default actually is.
     $script = <<<SH
         set -e
         rm -rf /work/push && mkdir -p /work/push && cd /work/push
@@ -94,7 +127,7 @@ it('pushes an image with the real docker client', function () {
         mkdir -p {$config}
         echo '{$context['publish_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
 
-        DOCKER_CONFIG={$config} docker build --provenance=false --sbom=false -t {$ref} .
+        DOCKER_CONFIG={$config} docker build -t {$ref} .
         DOCKER_CONFIG={$config} docker push {$ref}
         SH;
 
@@ -138,6 +171,21 @@ it('pulls it back into a clean local store and the digest matches', function () 
     $process = E2eStack::exec('client-docker', $script, 300);
 
     expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
+
+    // A matching digest alone is not proof that any bytes actually came off the registry:
+    // `docker rmi -f` drops the image's tag reference, but not necessarily every layer's
+    // content from the daemon's underlying (containerd-snapshotter) store, so a manifest
+    // resolve followed by "every layer already exists" would still print a correct,
+    // matching `Digest:` line even if `BlobController::show()` answered every blob request
+    // with a 500 — pull would report each layer already present and never notice. "Pull
+    // complete" (or "Download complete", printed just before it once bytes have actually
+    // been received) only appears once a layer is genuinely fetched, which is exactly the
+    // case here: the tag was removed immediately above, so the pull has nothing to resolve
+    // against locally and must actually fetch. Verified by deliberately breaking
+    // BlobController::show() to return 500 for every request: this test (and the 500 MiB
+    // one below, which removes the local image the same way) both went red, rather than
+    // quietly missing the regression the way an "always exists" pull would have.
+    expect($process->getOutput())->toMatch('/Pull complete|Download complete/');
 
     preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
 
@@ -272,7 +320,7 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
         mkdir -p {$config}
         echo '{$context['publish_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
 
-        DOCKER_CONFIG={$config} docker build --provenance=false --sbom=false -t {$ref} .
+        DOCKER_CONFIG={$config} docker build -t {$ref} .
         DOCKER_CONFIG={$config} docker push {$ref}
         docker rmi -f {$ref}
         DOCKER_CONFIG={$config} docker pull {$ref}
@@ -282,9 +330,121 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
 
     expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
 
+    // Same reasoning as the plain pull test above: a matching digest is not proof the 520
+    // MiB layer's bytes were actually served, only that resolving the manifest and
+    // whatever layers WERE fetched agree with what was pushed. The local image is removed
+    // before this pull (same as the plain pull test), so the layer has nothing to resolve
+    // against locally and this line only appears once it is genuinely re-downloaded.
+    expect($process->getOutput())->toMatch('/Pull complete|Download complete/');
+
     preg_match_all('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
 
     // Two digest lines — one from the push, one from the pull — and they must agree.
     expect($matches[1])->toHaveCount(2)
         ->and($matches[1][0])->toBe($matches[1][1]);
+});
+
+/**
+ * Real-client coverage for an image INDEX carrying attestations — the shape this
+ * project's own release workflow actually pushes (`provenance: mode=max`, `sbom: true`),
+ * and the whole justification, per spec, for a registry supporting index media types at
+ * all. ManifestTest.php's hand-written index payloads prove ManifestController stores and
+ * serves arbitrary digest-addressed bytes; they do not prove a real `docker buildx` push
+ * sequence that actually GENERATES an index (base image manifest + attestation manifest,
+ * wrapped in an index) round-trips through this registry with a real `docker pull`.
+ *
+ * Gated behind E2E_ATTESTED_PUSH, for two honestly-stated reasons rather than one:
+ *
+ *   1. `--sbom=true` makes buildx pull `docker/buildkit-syft-scanner` from Docker Hub to
+ *      generate the SBOM attestation — an external dependency the rest of this file's
+ *      default run deliberately has none of (see UpstreamTest.php's own docblock on why
+ *      the default run must depend on nothing outside the stack).
+ *   2. Forcing a deterministic index+attestation shape needs the `docker-container` buildx
+ *      driver with `--driver-opt network=host` (the default "docker" driver's ambient
+ *      attestation behaviour — exercised unconditionally by the plain push/pull/large-layer
+ *      tests above, deliberately left alone rather than disabled — is not something this
+ *      test can rely on for a GUARANTEED index, since it is an implementation default that
+ *      could change or differ between Docker versions). This was verified working
+ *      end-to-end against this exact stack on a Docker Desktop daemon (see
+ *      task-7-report.md), but this session had no way to confirm the identical
+ *      `docker-container` + `network=host` combination behaves the same on the
+ *      `ubuntu-latest` runner `.github/workflows/e2e.yml` actually runs on — both are
+ *      native Linux Docker Engines and there is no structural reason to expect a
+ *      difference, but "no reason to expect a difference" is not the same as having
+ *      measured it there. Gated rather than asserted as certain.
+ *
+ * The buildx builder this test creates (`e2e-attest-builder`) runs as its own sibling
+ * container (`buildx_buildkit_e2e-attest-builder0`) on the shared host daemon — another
+ * host artifact in the same sense DockerTest.php's own docblock already flags for the
+ * images this file builds and pulls. Removed in this test's own body (not deferred to
+ * afterAll, since nothing else in this file depends on it existing).
+ */
+it('pushes an image index carrying provenance and SBOM attestations, and it round-trips', function () {
+    if (getenv('E2E_ATTESTED_PUSH') !== '1') {
+        test()->markTestSkipped(
+            'E2E_ATTESTED_PUSH is not set — run `E2E_ATTESTED_PUSH=1 bin/e2e` to include the '
+            .'attested-index push/pull test. Off by default: it pulls '
+            .'docker/buildkit-syft-scanner from Docker Hub for the SBOM attestation (an '
+            .'external dependency the rest of this file deliberately has none of), and it '
+            .'has only been verified on a Docker Desktop daemon, not on the ubuntu-latest '
+            .'runner this repository\'s CI actually uses — see this test\'s own docblock.'
+        );
+    }
+
+    $context = E2eStack::context();
+    $ref = dockerRef('attest');
+    $config = dockerConfigDir('attest');
+    $builder = 'e2e-attest-builder';
+
+    $script = <<<SH
+        set -e
+        rm -rf /work/attest && mkdir -p /work/attest && cd /work/attest
+        cp /fixtures/docker-image/Dockerfile.solo Dockerfile
+        dd if=/dev/urandom of=payload.bin bs=1024 count=64 2>/dev/null
+
+        mkdir -p {$config}
+        export DOCKER_CONFIG={$config}
+        echo '{$context['publish_token']}' | docker login {$context['docker_host']} -u x --password-stdin
+
+        # docker-container, not the default "docker" driver: only the containerized
+        # driver supports emitting attestations as a real image index at all.
+        # network=host: the driver's OWN buildkit container is a separate sibling
+        # container with its own network namespace by default — without this,
+        # `127.0.0.1:8099` inside it is that container's own loopback, not the host's,
+        # and the push fails with "connection refused" (confirmed directly: this is
+        # exactly obstacle #1 from this file's own docblock, one layer further down).
+        docker buildx create --driver docker-container --driver-opt network=host --name {$builder} --use
+
+        docker buildx build --builder {$builder} --provenance=true --sbom=true -t {$ref} --push .
+
+        docker buildx rm {$builder}
+        SH;
+
+    $process = E2eStack::exec('client-docker', $script, 300);
+
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
+
+    // The registry's own answer, not an assumption about what buildx just did: a real
+    // client pushed an index, and GET on that reference must serve it back with the index
+    // media type, not the single-platform manifest media type.
+    $manifest = E2eStack::getAtHostRoot(
+        "/v2/{$context['docker_repository']}/manifests/attest",
+        $context['read_token'],
+    );
+    expect($manifest['status'])->toBe(200);
+
+    $doc = json_decode($manifest['body'], true);
+    expect($doc['mediaType'] ?? null)->toBe('application/vnd.oci.image.index.v1+json');
+
+    // And a real client can still pull it back.
+    $pullScript = <<<SH
+        set -e
+        docker rmi -f {$ref} >/dev/null 2>&1 || true
+        DOCKER_CONFIG={$config} docker pull {$ref}
+        SH;
+
+    $pullProcess = E2eStack::exec('client-docker', $pullScript, 300);
+
+    expect($pullProcess->isSuccessful())->toBeTrue($pullProcess->getErrorOutput())
+        ->and($pullProcess->getOutput())->toMatch('/Pull complete|Already exists/');
 });
