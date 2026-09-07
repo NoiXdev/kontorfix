@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dockerEmptyStateMessage, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
+import { dockerDomainNote, dockerNoRegistryMessage, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
 
 describe('dockerStepTitle', () => {
     it('names the step', () => {
@@ -8,11 +8,11 @@ describe('dockerStepTitle', () => {
 });
 
 describe('dockerSetupSnippet', () => {
-    it('builds the whole login/tag/push/pull block from the host, with a real example repository', () => {
+    it('builds the whole login/tag/push/pull block on a custom domain, with a real example repository', () => {
         // toBe, not toContain: the point of this module is that every word here is pinned,
         // not merely "some substring survived". A mutation that drops the blank line
         // between sections, or swaps `push` and `pull`, must turn this red.
-        expect(dockerSetupSnippet('images.3b.de', 'meinapp')).toBe(
+        expect(dockerSetupSnippet('images.3b.de', '', 'meinapp')).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
                 'docker login images.3b.de',
@@ -27,8 +27,47 @@ describe('dockerSetupSnippet', () => {
         );
     });
 
+    it('addresses the instance host and the two slugs when the registry has no domain', () => {
+        // The case the whole task exists for. Two properties, both of which a bare
+        // toContain on one line would miss:
+        //
+        // 1. the namespace goes into the IMAGE reference, on all three of tag/push/pull;
+        // 2. `docker login` gets the host ALONE — a login against
+        //    `registry.3b.de/3b/intern` is not something a Docker client can do, and the
+        //    local `docker tag` source keeps its bare name too.
+        expect(dockerSetupSnippet('registry.3b.de', '3b/intern/', 'meinapp')).toBe(
+            [
+                '# Anmelden — Benutzername beliebig, Passwort ist das Token',
+                'docker login registry.3b.de',
+                '',
+                '# Hochladen',
+                'docker tag meinapp:<tag> registry.3b.de/3b/intern/meinapp:<tag>',
+                'docker push registry.3b.de/3b/intern/meinapp:<tag>',
+                '',
+                '# Herunterladen',
+                'docker pull registry.3b.de/3b/intern/meinapp:<tag>',
+            ].join('\n'),
+        );
+    });
+
+    it('keeps the port in the host, which is the ordinary shape of a development instance', () => {
+        expect(dockerSetupSnippet('localhost:8099', 'kunde/acme/', null)).toBe(
+            [
+                '# Anmelden — Benutzername beliebig, Passwort ist das Token',
+                'docker login localhost:8099',
+                '',
+                '# Hochladen',
+                'docker tag <repository>:<tag> localhost:8099/kunde/acme/<repository>:<tag>',
+                'docker push localhost:8099/kunde/acme/<repository>:<tag>',
+                '',
+                '# Herunterladen',
+                'docker pull localhost:8099/kunde/acme/<repository>:<tag>',
+            ].join('\n'),
+        );
+    });
+
     it('falls back to a placeholder repository when the registry has no docker package yet', () => {
-        expect(dockerSetupSnippet('images.3b.de', null)).toBe(
+        expect(dockerSetupSnippet('images.3b.de', '', null)).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
                 'docker login images.3b.de',
@@ -49,7 +88,7 @@ describe('dockerSetupSnippet', () => {
         // toBe, not toContain: the output here is byte-identical to the null case above, so
         // pinning the whole string was free — and toContain would still pass if the blank
         // repository name leaked into a part of the block this assertion did not check.
-        expect(dockerSetupSnippet('images.3b.de', '')).toBe(
+        expect(dockerSetupSnippet('images.3b.de', '', '')).toBe(
             [
                 '# Anmelden — Benutzername beliebig, Passwort ist das Token',
                 'docker login images.3b.de',
@@ -65,12 +104,47 @@ describe('dockerSetupSnippet', () => {
     });
 });
 
-describe('dockerEmptyStateMessage', () => {
-    it('names the reachable path and says a Docker client cannot use it', () => {
-        expect(dockerEmptyStateMessage('/r/3b/intern')).toBe(
-            'Ohne eigene Domain kein Image-Betrieb. Diese Registry ist unter /r/3b/intern erreichbar — ' +
-                'das genügt für Composer, npm und Python, aber ein Docker-Client kann sie so nicht ansprechen. ' +
-                'Hostnamen unter Registry → Domains hinzufügen.',
+describe('dockerDomainNote', () => {
+    it('tells the operator where a hostname is added', () => {
+        expect(dockerDomainNote('operator')).toBe(
+            'Diese Registry hat noch keinen eigenen Hostnamen. Die Befehle oben funktionieren unverändert — ' +
+                'ein eigener Hostname verkürzt die Adresse lediglich, weil Organisation und Registry dann nicht mehr ' +
+                'im Repository-Namen stehen. Hostnamen unter Registry → Domains hinzufügen.',
+        );
+    });
+
+    it('sends the customer to their contact instead, and names no page they cannot open', () => {
+        expect(dockerDomainNote('customer')).toBe(
+            'Diese Registry hat noch keinen eigenen Hostnamen. Die Befehle oben funktionieren unverändert — ' +
+                'ein eigener Hostname verkürzt die Adresse lediglich, weil Organisation und Registry dann nicht mehr ' +
+                'im Repository-Namen stehen. Einen eigenen Hostnamen richtet Ihr Ansprechpartner ein.',
+        );
+    });
+
+    it('never points the customer at the console', () => {
+        // The one property the two whole-string assertions above state only implicitly, and
+        // the reason this function takes an audience at all: /admin is a URL space a portal
+        // account gets 403 from, and "Registry → Domains" is a page it has no route to.
+        expect(dockerDomainNote('customer')).not.toContain('Domains');
+        expect(dockerDomainNote('customer')).not.toContain('Registry →');
+    });
+
+    it('says nothing about images being impossible without a domain', () => {
+        // The sentence this module used to carry ("Ohne eigene Domain kein Image-Betrieb")
+        // became false with path addressing. Pinned as an absence so it cannot be
+        // reintroduced by someone restoring the old copy from git history.
+        for (const audience of ['operator', 'customer'] as const) {
+            expect(dockerDomainNote(audience)).not.toContain('kein Image-Betrieb');
+            expect(dockerDomainNote(audience)).not.toContain('nicht ansprechen');
+        }
+    });
+});
+
+describe('dockerNoRegistryMessage', () => {
+    it('explains the one case that genuinely has no address', () => {
+        expect(dockerNoRegistryMessage()).toBe(
+            'Dieses Repository ist keiner sichtbaren Registry zugeordnet. Erst die Zuordnung zu einer Registry ' +
+                'gibt ihm eine Adresse, unter der ein Docker-Client es ansprechen kann.',
         );
     });
 });

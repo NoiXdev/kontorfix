@@ -57,22 +57,26 @@ enum PackageType: string
     /**
      * Install command shown to consumers.
      *
-     * `$dockerHost` is Docker-only and optional: every other case ignores it outright, so
-     * every existing caller stays correct unchanged. It exists because a Docker repository's
-     * real host IS knowable once its registry carries a domain — RegistryUrl::host() reads
-     * exactly the same `domains` row this class's own empty state (see SetupSnippetBuilder)
-     * warns is missing — so a caller that has that Group in hand can hand over a working
-     * command instead of the `<registry-host>` placeholder. Omitted (or a registry with no
-     * domain), the placeholder stands: unlike Composer/npm/Python, no address a Docker
-     * client can reach exists to fall back on.
+     * `$dockerRegistry` is Docker-only and optional: every other case ignores it outright,
+     * so every existing caller stays correct unchanged. It is everything an image reference
+     * writes BEFORE the repository name — host, plus the `{organisation}/{registry}`
+     * namespace when the registry is addressed on the instance host — and there is exactly
+     * one place that computes it: RegistryUrl::dockerImagePrefix().
+     *
+     * The parameter used to be a bare host, supplied only when the registry carried a
+     * domain, on the reasoning that a registry without one had no address a Docker client
+     * could reach. ResolveOciContext made that false: every registry has one. So a caller
+     * holding a Group always has a real value to pass, and the `<registry-host>` fallback
+     * below now means only "this caller has no registry in hand" — never "this registry has
+     * no address".
      */
-    public function installHint(string $name, ?string $dockerHost = null): string
+    public function installHint(string $name, ?string $dockerRegistry = null): string
     {
         return match ($this) {
             self::Composer => "composer require {$name}",
             self::Npm => "npm install {$name}",
             self::Python => "pip install {$name}",
-            self::Docker => 'docker pull '.($dockerHost ?? '<registry-host>')."/{$name}",
+            self::Docker => 'docker pull '.($dockerRegistry ?? '<registry-host>')."/{$name}",
         };
     }
 

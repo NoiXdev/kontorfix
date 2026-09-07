@@ -9,7 +9,7 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
-import { dockerEmptyStateMessage, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
+import { dockerDomainNote, dockerSetupSnippet, dockerStepTitle, type SetupAudience } from './dockerSetup';
 import { offersMinting, offersPublishing } from './registrySetup';
 
 interface Snippets {
@@ -19,13 +19,13 @@ interface Snippets {
     pip: string;
     twine: string;
     // Docker's raw facts, not a finished snippet — see SetupSnippetBuilder::for()'s doc
-    // comment. Optional so the callers' own (older) local `Snippets` copies stay
-    // assignable without editing them: portal/Registry.vue and admin/groups/Show.vue both
-    // just forward whatever SetupSnippetBuilder returned, so the fields ARE there at
-    // runtime the moment the server is updated — only the type needs to tolerate a caller
-    // that has not been told about them.
-    dockerHost?: string | null;
-    dockerPath?: string;
+    // comment. Required, not optional: `dockerHost` stopped being nullable when
+    // ResolveOciContext gave every registry a working address on the instance host, and an
+    // optional field here would let a caller silently forward a payload that no longer
+    // carries them.
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+    dockerHasDomain: boolean;
     dockerExample?: string | null;
 }
 
@@ -43,8 +43,18 @@ const props = defineProps<{
     storeRouteParams?: ParameterValue;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
-    // Which ecosystems to show setup steps for. Omitted → all.
+    // Which ecosystems to show setup steps for — the types the organization MAY serve
+    // (RegistryTypeService::effectiveFor()), never the types of the packages already in the
+    // registry. Both callers used to derive it from the package list, which meant an empty
+    // registry showed no instructions at all; for images that is the normal first state,
+    // because nobody pushes a first image into a registry whose address is written nowhere.
+    // Omitted → the three non-Docker ecosystems, the safe historical default.
     types?: string[];
+    // Who is reading. It changes exactly one sentence — the note under the Docker snippet
+    // on a registry with no custom domain — and it is REQUIRED rather than defaulted,
+    // because the wrong default is not a cosmetic miss: the operator's version names
+    // Registry → Domains, a console page a portal account cannot open at all.
+    audience: SetupAudience;
     // Whether to offer minting at all. Omitted → yes, which is the console's case: every
     // caller there is already an admin or maintainer of the organization. The portal passes
     // the shared `portal.may_mint_tokens`, so an operator standing in a customer's portal is
@@ -132,7 +142,16 @@ function createAndInsert() {
     });
 }
 
-const substituted = computed<Snippets>(() => {
+/**
+ * The five snippets a minted token gets substituted into. Deliberately NOT `Snippets`: the
+ * Docker step's fields are raw facts rather than text, they carry no `<token>` at all
+ * (`docker login` prompts for the password instead of taking it on a command line that
+ * lands in the shell history), and typing this as the whole payload would force four fields
+ * to be copied through a map that has nothing to do with them.
+ */
+type TextSnippetKey = 'composer' | 'auth' | 'npm' | 'pip' | 'twine';
+
+const substituted = computed<Record<TextSnippetKey, string>>(() => {
     const t = activeToken.value;
     const sub = (s: string) => (t ? s.split(PLACEHOLDER).join(t) : s);
     return {
@@ -157,12 +176,12 @@ const stepDefs = [
 interface Step {
     key: string;
     title: string;
-    /** The copyable block. Empty and unused when `empty` is true. */
+    /** The copyable block. Every step has one — there is no address-less state left. */
     content: string;
-    /** True only for the Docker step on a registry with no row in `domains` (plate 1's
-     *  empty state) — the one step this component can render without a code block at all. */
-    empty: boolean;
-    emptyMessage: string;
+    /** A sentence under the block, or '' for none. Today only the Docker step sets it, on a
+     *  registry with no custom domain: the commands above work as they stand, and this says
+     *  what a hostname of its own would change. */
+    note: string;
 }
 
 const steps = computed<Step[]>(() => {
@@ -172,17 +191,19 @@ const steps = computed<Step[]>(() => {
         .filter((s) => show.includes(s.eco))
         .map((s) => {
             if (s.key === 'docker') {
-                const host = props.snippets.dockerHost ?? null;
                 return {
                     key: s.key,
                     title: s.title,
-                    content: host ? dockerSetupSnippet(host, props.snippets.dockerExample) : '',
-                    empty: host === null,
-                    emptyMessage: host === null ? dockerEmptyStateMessage(props.snippets.dockerPath ?? '') : '',
+                    // Built from the raw facts rather than read out of `substituted`: this
+                    // block carries no <token> to replace at all — `docker login` prompts
+                    // for the password instead of taking it on a command line that lands
+                    // in the shell history.
+                    content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix, props.snippets.dockerExample),
+                    note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
                 };
             }
 
-            return { key: s.key, title: s.title, content: substituted.value[s.key], empty: false, emptyMessage: '' };
+            return { key: s.key, title: s.title, content: substituted.value[s.key], note: '' };
         });
 });
 
@@ -263,18 +284,18 @@ function selectSession(value: string) {
             <div v-for="step in steps" :key="step.key" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                 <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                     <h3 class="font-medium">{{ step.title }}</h3>
-                    <Button v-if="!step.empty" variant="outline" size="sm" @click="copy(step.content, step.key)">
+                    <Button variant="outline" size="sm" @click="copy(step.content, step.key)">
                         <component :is="copiedKey === step.key ? Check : Copy" class="size-4" />
                         {{ copiedKey === step.key ? 'Kopiert!' : 'Kopieren' }}
                     </Button>
                 </div>
-                <pre v-if="!step.empty" class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content }}</pre>
-                <!-- Plate 1's empty state: a registry with no row in `domains` cannot serve
-                     images at all, however it addresses Composer, npm and Python — see
-                     dockerSetup.ts's dockerEmptyStateMessage(). No copy button above: there
-                     is nothing here to paste into a shell. -->
-                <p v-else class="px-4 py-3 text-sm text-muted-foreground">
-                    {{ step.emptyMessage }}
+                <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content }}</pre>
+                <!-- Plate 3, rewritten: a registry without its own hostname is no longer a
+                     dead end — the commands above address it on the instance host — so this
+                     sits UNDER the block as a note rather than replacing it. Its wording
+                     differs by audience; see dockerSetup.ts's dockerDomainNote(). -->
+                <p v-if="step.note" class="border-t border-sidebar-border/70 px-4 py-3 text-sm text-muted-foreground dark:border-sidebar-border">
+                    {{ step.note }}
                 </p>
             </div>
         </div>

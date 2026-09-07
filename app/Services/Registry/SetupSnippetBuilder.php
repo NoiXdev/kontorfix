@@ -10,18 +10,19 @@ class SetupSnippetBuilder
 
     /**
      * Copy-paste setup snippets per client. Composer/npm/auth as before, plus pip and
-     * twine for the Python registry, and three raw facts for the Docker step.
+     * twine for the Python registry, and four raw facts for the Docker step.
      *
      * The Docker fields deliberately are NOT a finished snippet, unlike every field above
      * them. `dockerSetup.ts` (resources/js/components/kontorfix/) is what assembles the
-     * `docker login`/`tag`/`push`/`pull` block or the empty-state message — this method's
-     * job stops at supplying the facts that decide between them, because that assembly is
-     * the one piece of RegistrySetup's logic this project can actually unit test (no
-     * component runner here), and duplicating the German copy on this side would only give
-     * it a second place to drift from.
+     * `docker login`/`tag`/`push`/`pull` block and the note that goes under it — this
+     * method's job stops at supplying the facts, because that assembly is the one piece of
+     * RegistrySetup's logic this project can actually unit test (no component runner here),
+     * and duplicating the German copy on this side would only give it a second place to
+     * drift from.
      *
      * @return array{composer: string, auth: string, npm: string, pip: string, twine: string,
-     *     dockerHost: ?string, dockerPath: string, dockerExample: ?string}
+     *     dockerHost: string, dockerRepositoryPrefix: string, dockerHasDomain: bool,
+     *     dockerExample: ?string}
      */
     public function for(Group $group): array
     {
@@ -64,18 +65,26 @@ class SetupSnippetBuilder
             // twine: a ~/.pypirc block pointing publishes at this registry.
             'twine' => "[distutils]\nindex-servers = kontorfix\n\n[kontorfix]\nrepository = {$base}/\nusername = token\npassword = <token>",
 
-            // Docker refuses a path prefix as part of the registry host — the OCI
-            // Distribution Spec requires `/v2/` at the root — so only a registry that
-            // actually carries a domain gets a usable host here. Null is not "unknown", it
-            // is the fact itself: this registry cannot serve images at all, and
-            // dockerSetup.ts's empty-state message is what says so, addressed at
-            // `dockerPath` below rather than at a host it does not have.
-            'dockerHost' => $group->domains->isNotEmpty() ? $host : null,
+            // The host a `docker login` addresses, and the namespace a repository name
+            // carries in front of it there. Both come from RegistryUrl, which is the one
+            // place a registry's address is computed — never assembled here and never a
+            // second time in Vue.
+            //
+            // `dockerHost` used to be nullable, because the OCI Distribution Spec puts
+            // `/v2/` at the root of a host and a registry without a domain of its own had
+            // nowhere to put it. ResolveOciContext ended that: the instance's own host
+            // serves `/v2/` as well, with the two slugs as the leading segments of the
+            // repository name. There is no registry left that cannot serve images, so
+            // there is no null left to hand out.
+            'dockerHost' => $this->url->dockerHost($group),
+            'dockerRepositoryPrefix' => $this->url->dockerRepositoryPrefix($group),
 
-            // Always present, unlike the host above: the empty state needs the path this
-            // registry IS reachable at (Composer/npm/Python all work there) to explain
-            // what a Docker client specifically cannot do with it.
-            'dockerPath' => $this->url->path($group),
+            // Not derived from the prefix being empty on the reading end: what the note
+            // under the snippet says is a statement about the DOMAIN, and a boolean that
+            // says so directly cannot be misread as "this address is shorter for some
+            // other reason". dockerSetup.ts turns it into the one sentence that differs
+            // between the operator and the customer.
+            'dockerHasDomain' => $group->domains->isNotEmpty(),
 
             // The same "derive from what already exists" rule npm's scope line follows
             // (see npmLines() below): a real repository name when this registry already

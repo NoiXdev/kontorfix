@@ -76,6 +76,13 @@ interface Setup {
     npm: string;
     pip: string;
     twine: string;
+    // Docker's raw facts, forwarded verbatim to RegistrySetup — see SetupSnippetBuilder.
+    // Named here rather than left off: this interface used to omit them, which let the page
+    // forward a payload whose Docker half it did not describe at all.
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+    dockerHasDomain: boolean;
+    dockerExample: string | null;
 }
 
 interface ActivityRow {
@@ -98,6 +105,11 @@ const props = defineProps<{
     upstreams: UpstreamRow[];
     tokens: TokenRow[];
     setup: Setup;
+    // What this organization MAY serve (RegistryTypeService::effectiveFor()), not what is
+    // already in the registry. This used to be `[...new Set(packages.map(p => p.type))]`
+    // computed in this file, and a registry with no packages therefore showed no setup
+    // instructions at all — the state every registry is in on the day it is created.
+    types: string[];
     stats: { downloads: number; storage_bytes: number; packages: number };
     activities: ActivityRow[];
     // The application's own calendar day (`YYYY-MM-DD`), from the controller. Not derived
@@ -162,9 +174,6 @@ function save() {
 // --- Package assignment (add existing/quick-created packages to this registry) ---
 // Must match PackagePicker.vue's own local `Pkg` — same reasoning as GroupSheet.vue's copy.
 const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' | 'docker'; shared: boolean }[]>([]);
-
-// Which ecosystems this registry actually hosts — drives the setup snippets shown.
-const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
 
 function addPackages() {
     if (packagesToAdd.value.length === 0) {
@@ -874,7 +883,8 @@ async function copyToken() {
                 <TabsContent value="einrichtung">
                     <RegistrySetup
                         :snippets="props.setup"
-                        :types="registryTypes"
+                        :types="props.types"
+                        audience="operator"
                         store-route="admin.tokens.store"
                         :store-payload="{ organization_id: props.group.organization_id, group_id: props.group.id }"
                         :personal-tokens="props.tokens"

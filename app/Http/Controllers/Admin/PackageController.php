@@ -392,16 +392,20 @@ class PackageController extends Controller
             ];
         });
 
-        // A Docker repository can be assigned to more than one registry; the one a
-        // `docker pull` for THIS image would actually use is whichever of them carries a
-        // domain — see dockerSetup.ts / SetupSnippetBuilder for the same rule applied to
-        // the registry-level Einrichtung tab. The first with a domain, deterministically
-        // (Collection::first() preserves the `groups` query's own order), stands in for
-        // "the" registry when more than one qualifies; a repository shared across several
-        // domained registries is a real but rare shape this page does not need to
-        // disambiguate further.
-        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty());
-        $pathGroup = $dockerGroup ?? $visibleGroups->first();
+        // A Docker repository can be assigned to more than one registry, and since
+        // ResolveOciContext every one of them is a working `docker pull` address — so this
+        // is a choice between addresses, not between an address and nothing. A registry with
+        // a custom domain is preferred because its reference is the shorter one; failing
+        // that, the first visible registry, addressed on the instance host. Deterministic
+        // either way (Collection::first() preserves the `groups` query's own order); a
+        // repository shared across several domained registries is a real but rare shape this
+        // page does not need to disambiguate further.
+        //
+        // Null only when the repository is in NO registry this viewer can see — the one
+        // remaining case with no address at all, which dockerSetup.ts's
+        // dockerNoRegistryMessage() states.
+        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
+            ?? $visibleGroups->first();
 
         return Inertia::render('admin/packages/DockerTags', [
             'package' => [
@@ -417,14 +421,19 @@ class PackageController extends Controller
             'canSharePackages' => (bool) $request->user()?->can('share-packages'),
             'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
             'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
-            // Plate 1's access panel, package-scoped: whether THIS repository is reachable
-            // by a Docker client right now, and from where. `host` null is the same fact
-            // SetupSnippetBuilder's `dockerHost` states for the registry-level tab — not
-            // "unknown", but "no domain, so no address a docker client can use" — and the
-            // page renders the identical empty-state message for it via dockerSetup.ts.
+            // Plate 1's access panel, package-scoped: where a Docker client reaches THIS
+            // repository. The same three facts SetupSnippetBuilder states for the
+            // registry-level tab, from the same two RegistryUrl methods, so the two surfaces
+            // cannot disagree about one registry's address.
+            //
+            // `host` used to be null for a registry without a domain, and the page rendered
+            // an empty state saying images were impossible there. Both were made false by
+            // path addressing. Null now means only "this repository is in no registry this
+            // viewer can see", which is the one case with genuinely nothing to print.
             'access' => [
-                'host' => $dockerGroup !== null ? $registryUrl->host($dockerGroup) : null,
-                'registry_path' => $pathGroup !== null ? $registryUrl->path($pathGroup) : null,
+                'host' => $dockerGroup !== null ? $registryUrl->dockerHost($dockerGroup) : null,
+                'repository_prefix' => $dockerGroup !== null ? $registryUrl->dockerRepositoryPrefix($dockerGroup) : null,
+                'has_domain' => $dockerGroup !== null && $dockerGroup->domains->isNotEmpty(),
             ],
             'tags' => $tagRows->values(),
             'stats' => [

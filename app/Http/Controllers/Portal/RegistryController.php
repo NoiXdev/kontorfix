@@ -9,6 +9,7 @@ use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Services\Package\PackageDependencies;
 use App\Services\Portal\PortalContext;
+use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\RegistryAccessService;
@@ -30,6 +31,10 @@ class RegistryController extends Controller
         // and in force for the other — two pages of one portal disagreeing about what the
         // registry serves, which is the exact defect `in_force` exists to prevent.
         private RegistryAccessService $access,
+        // Which ecosystems the Einrichtung tab offers. The instance-wide ceiling
+        // intersected with the organization's own restriction — what this registry MAY
+        // serve, never what its packages happen to be.
+        private RegistryTypeService $types,
     ) {}
 
     public function index(Request $request): Response
@@ -158,6 +163,13 @@ class RegistryController extends Controller
                 'url' => $this->url->base($group),
             ],
             'snippets' => $this->snippets->for($group),
+            // The setup steps the page offers. Derived from the ORGANIZATION's effective
+            // types, not from `$packages` — the page used to compute
+            // `[...new Set(packages.map(p => p.type))]` for itself, so a registry with no
+            // packages showed no instructions at all. For images that is the normal first
+            // state: nobody pushes a first image into a registry whose address is written
+            // nowhere.
+            'types' => $this->types->effectiveFor($organization),
             'packages' => $packages->map(fn (Package $p) => [
                 'id' => $p->id,
                 'name' => $p->name,
@@ -209,12 +221,15 @@ class RegistryController extends Controller
 
         // Ignored by every type but Docker (see PackageType::installHint()'s doc comment) —
         // loaded here rather than assumed present, since this action (unlike show()) never
-        // eager-loads the group's domains itself.
-        $group->loadMissing('domains');
-        $install = $package->type->installHint(
-            $package->name,
-            $group->domains->isNotEmpty() ? $this->url->host($group) : null,
-        );
+        // eager-loads the group's domains itself. `organization` too: the path address is
+        // built from its slug.
+        $group->loadMissing(['domains', 'organization']);
+        // Never null any more. This used to pass the host only when the registry carried a
+        // domain and null otherwise, which rendered `docker pull <registry-host>/meinapp`
+        // to a customer whose registry was in fact perfectly pullable — see
+        // RegistryUrl::dockerHost(). One source for the address: the same two methods
+        // SetupSnippetBuilder's Docker fields come from.
+        $install = $package->type->installHint($package->name, $this->url->dockerImagePrefix($group));
 
         return Inertia::render('portal/Package', [
             'orgSlug' => $organization->slug,

@@ -17,6 +17,7 @@ use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Package\PackageNameKey;
 use App\Services\Package\SharedAssignment;
+use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
@@ -69,7 +70,7 @@ class GroupController extends Controller
         ]);
     }
 
-    public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url): Response
+    public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url, RegistryTypeService $types): Response
     {
         $this->assertAdministersGroup($group);
 
@@ -119,6 +120,11 @@ class GroupController extends Controller
             'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => CredentialUrl::redact($u->url), 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
             'setup' => $snippets->for($group),
+            // Which ecosystems the Einrichtung tab offers: what this organization MAY serve,
+            // never what its packages happen to be. The page derived it from the package
+            // list, so a registry with no packages — the state every registry is in on the
+            // day it is created — showed no setup instructions at all.
+            'types' => $types->effectiveFor($group->organization),
             'stats' => $this->groupStats($group),
             'activities' => ActivityPresenter::recentFor($group),
         ]);

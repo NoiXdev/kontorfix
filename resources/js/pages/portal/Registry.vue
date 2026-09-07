@@ -30,6 +30,13 @@ interface Snippets {
     npm: string;
     pip: string;
     twine: string;
+    // Docker's raw facts, forwarded verbatim to RegistrySetup — see SetupSnippetBuilder.
+    // Named here rather than left off: this interface used to omit them, which let the page
+    // forward a payload whose Docker half it did not describe at all.
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+    dockerHasDomain: boolean;
+    dockerExample: string | null;
 }
 
 interface PackageRow {
@@ -69,12 +76,15 @@ const props = defineProps<{
     orgSlug: string;
     registry: Registry;
     snippets: Snippets;
+    // What this organization MAY serve (RegistryTypeService::effectiveFor()), not what is
+    // already in the registry. This used to be `[...new Set(packages.map(p => p.type))]`
+    // computed right here, and an empty registry therefore showed no instructions at all —
+    // which for images is the normal FIRST state, because nobody pushes a first image into
+    // a registry whose address is written nowhere. The server answers it now.
+    types: string[];
     packages: PackageRow[];
     tokens: TokenRow[];
 }>();
-
-// Ecosystems present in this registry — drives which setup snippets are shown.
-const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
 
 const typeOptions = [
     { value: 'composer', label: 'composer' },
@@ -253,7 +263,8 @@ const breadcrumbs: BreadcrumbItem[] = [
                 <TabsContent value="einrichtung">
                     <RegistrySetup
                         :snippets="props.snippets"
-                        :types="registryTypes"
+                        :types="props.types"
+                        audience="customer"
                         store-route="portal.tokens.store"
                         :store-route-params="props.orgSlug"
                         :store-payload="{ group_id: props.registry.id }"

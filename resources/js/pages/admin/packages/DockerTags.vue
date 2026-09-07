@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
-import { dockerEmptyStateMessage, dockerSetupSnippet } from '@/components/kontorfix/dockerSetup';
+import { dockerDomainNote, dockerNoRegistryMessage, dockerSetupSnippet } from '@/components/kontorfix/dockerSetup';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
@@ -62,9 +62,11 @@ const props = defineProps<{
     canSharePackages: boolean;
     groups: GroupRow[];
     sharedElsewhere: number;
-    // Whether THIS repository is reachable by a Docker client right now, and from where —
-    // package-scoped twin of SetupSnippetBuilder's registry-level `dockerHost`/`dockerPath`.
-    access: { host: string | null; registry_path: string | null };
+    // Where a Docker client reaches THIS repository — the package-scoped twin of
+    // SetupSnippetBuilder's registry-level Docker fields. `host` is null only when the
+    // repository is in no registry this viewer can see; a registry without a custom domain
+    // is addressed on the instance host, with `repository_prefix` in front of the name.
+    access: { host: string | null; repository_prefix: string | null; has_domain: boolean };
     tags: TagRow[];
     stats: { tag_count: number; occupied_bytes: number; shared_bytes: number };
     activities: ActivityRow[];
@@ -103,11 +105,18 @@ function abbreviateDigest(digest: string | null): string {
     return `${algorithm}:${hex.slice(0, 6)}…${hex.slice(-4)}`;
 }
 
-// The setup commands or the empty state — the exact same choice RegistrySetup.vue makes
-// for the registry-level Einrichtung tab, and the same two functions from dockerSetup.ts,
-// so the wording cannot drift between the two surfaces that both explain this constraint.
-const accessSnippet = computed(() => (props.access.host ? dockerSetupSnippet(props.access.host, props.package.name) : null));
-const accessEmptyMessage = computed(() => (props.access.host ? null : dockerEmptyStateMessage(props.access.registry_path ?? '')));
+// The same commands and the same note RegistrySetup.vue renders for the registry-level
+// Einrichtung tab, out of the same module — so the wording cannot drift between the two
+// surfaces that both describe one registry's address.
+const accessSnippet = computed(() =>
+    props.access.host ? dockerSetupSnippet(props.access.host, props.access.repository_prefix ?? '', props.package.name) : null,
+);
+// Only when a registry was found and it has no custom domain: the commands above work as
+// they stand, and this says what a hostname of its own would change. 'operator' — this page
+// lives in /admin, and Registry → Domains is a page its readers can actually open.
+const accessNote = computed(() => (props.access.host && !props.access.has_domain ? dockerDomainNote('operator') : null));
+// The one case with no address at all.
+const accessMissingMessage = computed(() => (props.access.host ? null : dockerNoRegistryMessage()));
 
 // --- Abandonment ---
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
@@ -250,7 +259,13 @@ function saveShared() {
                     <div class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                         <div class="border-b border-sidebar-border/70 px-4 py-3 font-medium dark:border-sidebar-border">Docker einrichten</div>
                         <pre v-if="accessSnippet" class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ accessSnippet }}</pre>
-                        <p v-else class="px-4 py-3 text-sm text-muted-foreground">{{ accessEmptyMessage }}</p>
+                        <p
+                            v-if="accessNote"
+                            class="border-t border-sidebar-border/70 px-4 py-3 text-sm text-muted-foreground dark:border-sidebar-border"
+                        >
+                            {{ accessNote }}
+                        </p>
+                        <p v-if="accessMissingMessage" class="px-4 py-3 text-sm text-muted-foreground">{{ accessMissingMessage }}</p>
                     </div>
                 </TabsContent>
 

@@ -52,18 +52,22 @@ function dockerManifestWithBlobs(Package $pkg, int $totalBytes): OciManifest
 
 // --- Plate 1: the registry-level Einrichtung tab (RegistrySetup.vue / SetupSnippetBuilder) ---
 
-it('shows the docker empty state on the registry setup page when the registry has no domain', function () {
+it('addresses docker on the instance host on the registry setup page when the registry has no domain', function () {
+    config(['app.url' => 'https://reg.example.test']);
     $group = Group::factory()->for(Organization::factory()->create(['slug' => 'dritte-b']))->create(['slug' => 'intern']);
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => 'docker', 'name' => 'meinapp']);
     $group->packages()->attach($pkg);
 
     $this->actingAs($this->admin)->get(route('admin.groups.show', $group->id))
         ->assertOk()
-        // Asserting the PROP, not rendered HTML: null is the fact itself (no domain, so no
-        // host a Docker client could use), not a placeholder string to sniff for.
+        // Asserting the PROPS, not rendered HTML. `dockerHost` was null here until
+        // ResolveOciContext gave every registry an address on the instance host; the page
+        // rendered "images are impossible without a domain" off that null, which is the
+        // statement this case now refuses to let come back.
         ->assertInertia(fn ($page) => $page->component('admin/groups/Show')
-            ->where('setup.dockerHost', null)
-            ->where('setup.dockerPath', '/r/dritte-b/intern'));
+            ->where('setup.dockerHost', 'reg.example.test')
+            ->where('setup.dockerRepositoryPrefix', 'dritte-b/intern/')
+            ->where('setup.dockerHasDomain', false));
 });
 
 it('shows the docker host in the registry setup page once a domain is attached', function () {
@@ -76,6 +80,10 @@ it('shows the docker host in the registry setup page once a domain is attached',
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/groups/Show')
             ->where('setup.dockerHost', 'images.3b.de')
+            // Empty rather than `dritte-b/intern/` — the assertion that keeps the two
+            // addressing modes from collapsing into one string.
+            ->where('setup.dockerRepositoryPrefix', '')
+            ->where('setup.dockerHasDomain', true)
             ->where('setup.dockerExample', 'meinapp'));
 });
 
@@ -184,7 +192,8 @@ it('counts a base layer shared across two DIFFERENT (non-aliased) tags once in t
             ->where('tags.1.shared', false));
 });
 
-it('shows no docker access on the package page when its registries have no domain', function () {
+it('addresses the package page on the instance host when its registries have no domain', function () {
+    config(['app.url' => 'https://reg.example.test']);
     $group = Group::factory()->for(Organization::factory())->create();
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => 'docker', 'name' => 'meinapp']);
     $group->packages()->attach($pkg);
@@ -192,8 +201,25 @@ it('shows no docker access on the package page when its registries have no domai
     $this->actingAs($this->admin)->get("/admin/packages/{$pkg->id}")
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/packages/DockerTags')
+            // `host` null used to be this case's whole point; it now means only "in no
+            // registry this viewer can see", which is not the situation here.
+            ->where('access.host', 'reg.example.test')
+            ->where('access.repository_prefix', $group->organization->slug.'/'.$group->slug.'/')
+            ->where('access.has_domain', false));
+});
+
+it('gives the package page no docker address when the repository is in no visible registry', function () {
+    // The one case with genuinely nothing to print, and the only null `host` left. Without
+    // it the "no address" branch of DockerTags.vue would be unreachable from any test, and
+    // the page would be free to crash on it.
+    $pkg = Package::factory()->for(Organization::factory())->create(['type' => 'docker', 'name' => 'meinapp']);
+
+    $this->actingAs($this->admin)->get("/admin/packages/{$pkg->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('admin/packages/DockerTags')
             ->where('access.host', null)
-            ->where('access.registry_path', '/r/'.$group->organization->slug.'/'.$group->slug));
+            ->where('access.repository_prefix', null)
+            ->where('access.has_domain', false));
 });
 
 it('shows the real docker host on the package page once its registry has a domain', function () {
@@ -210,7 +236,8 @@ it('shows the real docker host on the package page once its registry has a domai
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('admin/packages/DockerTags')
             ->where('access.host', 'images.3b.de')
-            ->where('access.registry_path', '/r/dritte-b/intern'));
+            ->where('access.repository_prefix', '')
+            ->where('access.has_domain', true));
 });
 
 // --- Platform, one of the five columns the brief names — none of the composition tests
