@@ -3,10 +3,17 @@
 # sees it, for every route except the OCI registry.
 #
 # Why this file exists instead of the previous `frankenphp php-server -r public/ --listen
-# :8080` command: `php-server` has no way to configure any body-size limit at all, and
-# without one, PHP's own `post_max_size` is the only backstop — but that value has to be
-# effectively unlimited (see docker/php.ini) because a single OCI image layer legitimately
-# exceeds any sane fixed cap by a wide margin (Task 7's 500 MiB gate).
+# :8080` command: `php-server` has no way to configure any body-size limit at all, and this
+# file is what draws the line Caddy CAN draw — a declared-length cap in front of every
+# route except the OCI registry — before request bodies ever reach PHP at all. It does NOT
+# lean on `post_max_size` for that: docker/php.ini pins it well BELOW `memory_limit`
+# instead, specifically so PHP itself never buffers a body large enough to matter — see
+# that file's own comment for why "raise post_max_size to cover a 500 MiB OCI layer" is
+# exactly the mistake this project shipped once already (a Critical review finding, not a
+# hypothetical). Either way, post_max_size never gates an OCI blob: confirmed directly,
+# both the monolithic POST and the chunked PATCH read their body via `php://input`/
+# `getContent(asResource: true)`, which post_max_size does not touch — it only ever governs
+# whether PHP auto-populates `$_POST`/`$_FILES`.
 #
 # What this does NOT use, and why: Caddy's own `request_body { max_size ... }` directive
 # looks like the obvious fit, but it does not protect a route handled by FrankenPHP's own
@@ -59,13 +66,18 @@
 #     (docker/php.ini) is pinned to 1 for the same reason: nothing in this app sends more
 #     than one file per request, so there is no reason to let a client multiply that
 #     per-file cap by twenty.
-#   - `application/x-www-form-urlencoded` (a real login form's actual shape) is parsed into
-#     `$_POST` unconditionally during PHP's request bootstrap, before any Laravel code
-#     runs, chunked or not — confirmed by sending a 500 MiB chunked urlencoded body to a
-#     route that never once reads `$_POST` and getting a clean PHP Fatal (`Allowed memory
-#     size ... exhausted`) at exactly `memory_limit`, not at any post_max_size-related
-#     boundary. `memory_limit` is what actually bounds this, and docker/php.ini now pins it
-#     explicitly rather than leaving it at whatever the base image happens to compile in.
+#   - `application/x-www-form-urlencoded` (a real login form's actual shape) is a route
+#     THIS FILE cannot see the length of when it is chunked, but `post_max_size` in
+#     docker/php.ini can: it is a request-startup check against whatever length PHP has
+#     actually received so far, not against the `Content-Length` header this file's own
+#     `@oversized` rule is limited to, so it catches an undeclared-length body too —
+#     confirmed by sending a 500 MiB CHUNKED urlencoded body against a low post_max_size
+#     and seeing PHP refuse to populate `$_POST` at all, the same as it does for a declared
+#     body of the same size. `memory_limit` (docker/php.ini) is the backstop behind that,
+#     not the primary guard: it is what a request UNDER post_max_size but still large
+#     enough to matter would eventually hit while PHP builds `$_POST` from it, and
+#     docker/php.ini's own comment has the full account, including the shape that guard
+#     failed in before post_max_size was corrected to sit below it.
 #   - Any OTHER content type (raw JSON, `application/octet-stream`, …) is never read by PHP
 #     at all unless application code explicitly asks for it — confirmed by sending a 500
 #     MiB chunked body of such a type to a route that touches neither `$_POST` nor
@@ -105,19 +117,25 @@
 	# lowercase form only), but it is a free bypass of caps that exist for a reason.
 	# `^/v2/` is anchored and case-sensitive by default (Go regex, no `(?i)` flag).
 	#
-	# Scoped to POST/PUT/PATCH: a GET or HEAD (the healthcheck's `/up` among them) has no
-	# body and legitimately carries no Content-Length at all. Caught while verifying this
-	# file, not hypothetically: a bare `method POST PUT PATCH` line as its own matcher key,
-	# sitting alongside an `expression` key in the same matcher set, took `/up` down anyway
-	# — with a 500, not even a clean pass-through. Caddy's matcher set does not short-circuit
-	# across matcher TYPES: the `expression` matcher still gets evaluated for a GET with no
-	# Content-Length, `int("")` panics inside CEL, and that panic surfaces as a 500 before
-	# "the method matcher would have said no" ever gets consulted. Folding the method check
-	# into a leading `&&` term of the SAME expression (below) is what actually fixes it:
-	# CEL's `&&` is specified to short-circuit, unlike Caddy's own cross-matcher-type AND.
+	# Scoped to methods that can legitimately carry a body: a GET or HEAD (the healthcheck's
+	# `/up` among them) has none and legitimately carries no Content-Length at all. Caught
+	# while verifying this file, not hypothetically: a bare `method POST PUT PATCH` line as
+	# its own matcher key, sitting alongside an `expression` key in the same matcher set,
+	# took `/up` down anyway — with a 500, not even a clean pass-through. Caddy's matcher set
+	# does not short-circuit across matcher TYPES: the `expression` matcher still gets
+	# evaluated for a GET with no Content-Length, `int("")` panics inside CEL, and that panic
+	# surfaces as a 500 before "the method matcher would have said no" ever gets consulted.
+	# Folding the method check into a leading `&&` term of the SAME expression (below) is
+	# what actually fixes it: CEL's `&&` is specified to short-circuit, unlike Caddy's own
+	# cross-matcher-type AND.
+	#
+	# DELETE and OPTIONS are listed alongside POST/PUT/PATCH, not left out: nothing in this
+	# app sends a body on either, but a client-supplied one is not this preflight's business
+	# to assume away — the same declared-Content-Length admission control applies to any
+	# method capable of carrying one, not only the methods this app happens to use today.
 	@oversized {
 		not path_regexp ^/v2/
-		expression {http.request.method} in ["POST", "PUT", "PATCH"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 268435456
+		expression {http.request.method} in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 268435456
 	}
 	respond @oversized 413
 
@@ -130,3 +148,10 @@
 
 	php_server
 }
+
+# Restored from the base FrankenPHP image's own Caddyfile (see `docker run --rm
+# dunglas/frankenphp:1-php8.4 cat /etc/frankenphp/Caddyfile`), silently dropped when this
+# file was trimmed down to add the OCI-aware directives above: an operator extension point
+# for site config that does not belong inside this project's own Caddyfile — dropped
+# `.caddyfile` files under Caddyfile.d/ are picked up with no further edit here needed.
+import Caddyfile.d/*.caddyfile
