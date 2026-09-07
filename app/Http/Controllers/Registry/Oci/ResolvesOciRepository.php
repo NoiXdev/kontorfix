@@ -57,6 +57,22 @@ trait ResolvesOciRepository
      * The repository must already exist. kontorfix does not create one on push, for the same
      * reason NpmController and PypiController refuse an unknown package: a publish token must
      * not be able to invent names in a registry. The operator registers the repository first.
+     *
+     * Resolved strictly within the addressed registry's OWN organization — never through
+     * $group->packages(), which carries every package assigned to the group regardless of
+     * who owns it, shared ones included, and applies no expiry predicate at all. Sharing
+     * hands out reads, never writes (docs/development.md, "Shared packages"; the identical
+     * rule NpmController::respondPublish() and PypiController::upload() already enforce): a
+     * customer's publish token must not be answered for the operator's shared repository —
+     * push, overwrite, or delete an image inside the operator's own organization — nor for
+     * an assignment whose `available_until` has lapsed. This was a Critical: unfixed, a
+     * publish token for any group a shared Docker repository is assigned to got 201 on
+     * `POST .../blobs/uploads/`, 201 on `PUT .../manifests/<ref>` and 202 on
+     * `DELETE .../manifests/<digest>` inside the operator's namespace — every other
+     * customer assigned that repository then pulls whatever was pushed. A shared name (or
+     * an expired one) is now answered exactly like an unknown one, matching
+     * NpmController::respondPublish()'s own "own-organization only" resolution and
+     * RegistryAccessService::packageBelongsToGroup()'s expiry check.
      */
     protected function ociWritableRepository(Request $request, Group $group, string $name): Package
     {
@@ -71,12 +87,12 @@ trait ResolvesOciRepository
             throw OciException::denied();
         }
 
-        $package = $group->packages()
-            ->where('packages.type', PackageType::Docker)
-            ->where('packages.name', $name)
+        $package = Package::where('type', PackageType::Docker)
+            ->where('name', $name)
+            ->where('organization_id', $group->organization_id)
             ->first();
 
-        if ($package === null) {
+        if ($package === null || ! $this->access()->packageBelongsToGroup($group, $package)) {
             throw OciException::nameUnknown($name);
         }
 

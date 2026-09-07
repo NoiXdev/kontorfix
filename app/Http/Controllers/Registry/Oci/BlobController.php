@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\OciBlob;
 use App\Models\OciBlobUpload;
+use App\Models\OciManifest;
 use App\Models\Package;
 use App\Services\Oci\BlobStore;
 use App\Services\Oci\Digest;
@@ -138,9 +139,35 @@ class BlobController extends Controller
 
         // Scoped to this package's own organization — never by digest alone — so a token
         // cannot use this endpoint to probe whether some OTHER tenant holds a given layer.
+        // NOT sufficient on its own for a SHARED package, though: oci_blobs deduplicates
+        // per organization (spec §2), so $package->organization_id for a shared repository
+        // is the OPERATOR's organization, and every OTHER Docker repository that operator
+        // owns — shared or not — stores its blobs under that same organization_id. A plain
+        // read token on ONE shared repository could otherwise pull ANY blob the operator
+        // organization has ever stored, including from a repository never shared with
+        // anyone: the org boundary is real, but it is not this repository's boundary once
+        // more than one repository shares it.
         $blob = $this->blobs->find((string) $package->organization_id, $digest);
 
         if ($blob === null) {
+            throw OciException::blobUnknown($digest);
+        }
+
+        // The extra check is scoped to SHARED packages only, deliberately, not applied to
+        // every pull: for an ordinary (non-shared) repository, every reader of it is
+        // already a member of the SAME organization the blob belongs to — there is no
+        // OTHER tenant to disclose it to, so requiring the digest to already be named by
+        // one of $package's own manifests would only break two things this endpoint is
+        // supposed to support: `HEAD .../blobs/<digest>` checked right after this repo's
+        // OWN blob upload, before any manifest references it yet (the ordinary "is this
+        // layer already here" shortcut a push makes BEFORE writing its manifest — see
+        // BlobUploadTest's "reports an existing blob by digest" and BlobDownloadTest's
+        // streaming/redirect/HEAD cases, none of which push a manifest at all), and the
+        // cross-repository MOUNT feature (§3), which deliberately makes one organization's
+        // blob available to a second repository of that SAME organization without either
+        // one's manifest naming it first. Both are legitimate same-tenant sharing; neither
+        // is the leak this method exists to close.
+        if ($package->shared && ! $this->referencedByPackage($package, $digest)) {
             throw OciException::blobUnknown($digest);
         }
 
@@ -179,11 +206,13 @@ class BlobController extends Controller
             while (! feof($stream)) {
                 echo fread($stream, 1024 * 1024);
                 // @ob_flush() before flush(), matching Symfony's own StreamedResponse::
-                // sendContent() — harmless today (the FrankenPHP base image ships no
-                // php.ini, so output_buffering is off and there is no userland buffer to
-                // flush), but without it, an ini that turns output buffering on would
-                // accumulate the whole blob in that buffer regardless of this chunk loop,
-                // which is exactly the memory blowup streaming exists to avoid.
+                // sendContent() — harmless today (docker/php.ini ships with this project
+                // now, but it does not set output_buffering, so PHP's own compiled default
+                // of Off still applies — confirmed via `php -i`, not assumed — and there is
+                // no userland buffer to flush), but without it, an ini that turns output
+                // buffering on would accumulate the whole blob in that buffer regardless of
+                // this chunk loop, which is exactly the memory blowup streaming exists to
+                // avoid.
                 @ob_flush();
                 flush();
             }
@@ -243,6 +272,69 @@ class BlobController extends Controller
     }
 
     /**
+     * Whether $digest is a blob $package's OWN manifests actually name — its own boundary
+     * of "belongs to this repository", since oci_blobs itself carries none (blobs
+     * deduplicate per ORGANIZATION, never per repository — spec §2). Without this, show()
+     * would serve any blob the owning organization has ever stored to a holder of any ONE
+     * of that organization's repositories, shared or not; see show()'s own comment for the
+     * full account.
+     *
+     * Walks every manifest of $package, including ones no tag currently names (an index's
+     * per-platform children are pushed by digest alone — see the `manifests` case in
+     * childManifestDigests()) — a real `docker pull` always resolves the manifest for THIS
+     * repository first and only then asks for the blobs it names, so nothing legitimate is
+     * ever excluded by scoping to $package rather than to what happens to be tagged.
+     */
+    private function referencedByPackage(Package $package, string $digest): bool
+    {
+        $manifests = OciManifest::where('package_id', $package->id)->get(['id', 'payload']);
+
+        foreach ($manifests as $manifest) {
+            if (in_array($digest, $this->referencedDigests($manifest), true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The digests one manifest names directly: its config blob and every layer for an
+     * image manifest, or the per-platform child manifest digests for an index — those
+     * children are OciManifest rows of their own (see referencedByPackage()'s own
+     * comment), never blobs directly, so they are matched here too rather than only
+     * layers/config, exactly as `docker pull` itself would walk an index before ever
+     * asking for a blob.
+     *
+     * @return list<string>
+     */
+    private function referencedDigests(OciManifest $manifest): array
+    {
+        $payload = json_decode($manifest->payload, true);
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $digests = [];
+
+        $configDigest = $payload['config']['digest'] ?? null;
+        if (is_string($configDigest)) {
+            $digests[] = $configDigest;
+        }
+
+        foreach (['layers', 'manifests'] as $key) {
+            foreach ($payload[$key] ?? [] as $entry) {
+                $entryDigest = is_array($entry) ? ($entry['digest'] ?? null) : null;
+                if (is_string($entryDigest)) {
+                    $digests[] = $entryDigest;
+                }
+            }
+        }
+
+        return $digests;
+    }
+
+    /**
      * `digest` as a plain query string value. `PUT .../uploads/{id}?digest[]=x` sends it as
      * an array instead — `(string) $array` is an uncaught `Array to string conversion`
      * TypeError/warning that would escape the OCI JSON error contract as a bare 500.
@@ -269,8 +361,9 @@ class BlobController extends Controller
             // Not part of the OCI error-body protocol: an unknown/expired upload session
             // is not a case any test in this task exercises, and the OCI distribution spec
             // has no error code of its own for it distinct from BLOB_UPLOAD_UNKNOWN, which
-            // this codebase's OciException does not yet define. A plain 404 is refused
-            // rather than guessed at here.
+            // this codebase's OciException does not yet define. A plain 404 (Laravel's own
+            // shape, not an errors[] envelope) is thrown deliberately here rather than
+            // guessing at a JSON body the spec does not define.
             throw new NotFoundHttpException;
         }
 

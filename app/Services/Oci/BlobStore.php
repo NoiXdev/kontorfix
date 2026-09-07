@@ -322,9 +322,14 @@ final class BlobStore
     }
 
     /**
-     * Assembles the parts into the final destination in one pass — the ONE point in this
-     * class where the full content is streamed as a whole, and it happens exactly once per
-     * upload (at promotion), never once per chunk.
+     * Assembles the parts into the final destination in one pass — NOT the one point in
+     * this class where the full content is streamed as a whole; hashRemoteParts() just
+     * above does the identical full-content streaming pass immediately before this one
+     * runs, to compute the digest finish() verifies before ever calling this method. What
+     * IS true of both: each happens exactly once per upload, at promotion, never once per
+     * chunk — the two full passes are unavoidable (the digest must be checked before
+     * promotion, and PHP cannot carry a hash context across the parts finish() did not
+     * write itself), not a sign either one is doing more work than it needs to.
      */
     private function promoteRemoteParts(OciBlobUpload $upload, string $destination): void
     {
