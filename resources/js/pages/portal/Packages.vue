@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import DataTable from '@/components/kontorfix/DataTable.vue';
 import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
+import PortalSetupBand from '@/components/kontorfix/PortalSetupBand.vue';
+import type { PortalLastUsedToken, PortalSetupRegistry, PortalSetupState } from '@/components/kontorfix/portalSetupBand';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
@@ -39,6 +41,12 @@ const props = defineProps<{
     // customer's portal has to keep navigating inside that customer's portal.
     orgSlug: string;
     packages: PackageRow[];
+    // The entry band's payload. It is NOT derived from `packages`: the band has to render for
+    // a customer whose package list is empty — a registry handed over before anything is
+    // assigned to it — and that is exactly the moment the portal exists for.
+    registries: PortalSetupRegistry[];
+    setupState: PortalSetupState;
+    lastUsedToken: PortalLastUsedToken | null;
 }>();
 
 // The PackageType enum's own labels, shared from the backend. Not a table here: the console
@@ -81,6 +89,16 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
     <AppLayout :breadcrumbs="breadcrumbs">
         <div class="flex flex-1 flex-col gap-4 p-4">
             <PortalHeader />
+
+            <!-- ABOVE the list, because setting up a tool is due before installing anything
+                 from it — and because the customer arrives here, not on a page of its own.
+                 It shrinks to one line once a token of this organization has been used. -->
+            <PortalSetupBand
+                :org-slug="props.orgSlug"
+                :registries="props.registries"
+                :setup-state="props.setupState"
+                :last-used-token="props.lastUsedToken"
+            />
 
             <h1 class="text-xl font-semibold">Pakete</h1>
 

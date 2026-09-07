@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
+use App\Models\Group;
+use App\Models\RegistryToken;
 use App\Services\Portal\PortalContext;
 use App\Services\Portal\PortalPackages;
 use App\Services\Portal\PortalRegistryAssignment;
+use App\Services\Registry\RegistryUrl;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,7 +17,13 @@ use Inertia\Response;
 
 class PackageController extends Controller
 {
-    public function __construct(private readonly PortalPackages $packages) {}
+    public function __construct(
+        private readonly PortalPackages $packages,
+        // The one source for a registry's address. The entry band names it, and every other
+        // surface that shows one asks here — a second way to assemble it is how an operator
+        // and their customer end up reading two spellings of one URL.
+        private readonly RegistryUrl $url,
+    ) {}
 
     /**
      * The portal's landing page: the packages the addressed organization can install.
@@ -35,6 +44,10 @@ class PackageController extends Controller
      * silently another registry's assignment. PortalPackages unsets the relation for that
      * reason, so the mistake is now a null rather than a plausible wrong day — but the entry is
      * still the only place to ask.
+     *
+     * It also carries the ENTRY BAND's payload — the registries with their addresses and the
+     * organization's token state — because the band sits above this list on this page. See the
+     * two blocks below it for why the state is a server answer and why it is one query.
      */
     public function index(Request $request): Response
     {
@@ -52,10 +65,77 @@ class PackageController extends Controller
         // one that silently stops matching when the relation's own order changes.
         (new EloquentCollection($rows->pluck('package')->all()))->load('versions');
 
+        // The registries the entry band picks from, with their addresses. `portal_enabled` is
+        // the same per-registry predicate PortalPackages and Portal\RegistryController::index()
+        // ask of the same column — a registry the portal hides must not become the target of a
+        // button on the portal's own landing page, which GroupPolicy::view() would then answer
+        // 403 to. Ordered by name, so the band's default pick and the registries page agree.
+        //
+        // `domains` and `organization` eager-loaded because RegistryUrl::base() reads both and
+        // this is a loop: the first for the custom-domain branch, the second for the slug in
+        // the canonical path.
+        $registries = $organization->groups()
+            ->where('portal_enabled', true)
+            ->with(['domains', 'organization'])
+            ->orderBy('name')
+            ->get();
+
+        // THE COLLAPSE RULE, IN ONE QUERY AND ONE ROW — never one query per registry, which is
+        // what asking each registry for its own tokens would have made of it.
+        //
+        // The band collapses once a token OF THIS ORGANIZATION has been used (spec §3.1). Read
+        // from `last_used_at` and never from a dismissal flag in browser storage: a per-browser
+        // flag disagrees between the customer's laptop and their CI machine, and the question
+        // "is this customer connected" has one answer for both.
+        //
+        // The row is the organization's most recently used token, and the three states fall out
+        // of it without a second query: no row at all is `none`, a row whose `last_used_at` is
+        // null is `unused` (nulls sort last, so if the first row has none, none do), and
+        // anything else is `used`. `created_at` breaks a tie so the pick is stable.
+        //
+        // NOT REVOKED AND NOT EXPIRED — the liveness predicate findByPlainText() resolves by,
+        // minus the entitlement check it can only make in PHP. The band asks whether the
+        // customer can reach their packages right now, and a credential the registry refuses
+        // does not answer yes: an organization whose only token was revoked is shown the way to
+        // a new one rather than a line telling it everything is set up.
+        $token = RegistryToken::query()
+            ->where('organization_id', $organization->id)
+            ->notRevoked()
+            ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
+            ->orderByRaw('last_used_at desc nulls last')
+            ->orderByDesc('created_at')
+            ->first();
+
+        $lastUsedAt = $token?->last_used_at;
+
         return Inertia::render('portal/Packages', [
             // The addressed organization, not the viewer's own: an operator looking at a
             // customer's portal must navigate inside that customer's portal.
             'orgSlug' => $organization->slug,
+            'registries' => $registries->map(fn (Group $g): array => [
+                'id' => $g->id,
+                'name' => $g->name,
+                'url' => $this->url->base($g),
+            ])->values(),
+            // Sent finished rather than as the raw column, so the browser holds no second
+            // statement of what a used token is. portalSetupBand.ts maps this onto the band
+            // and deliberately does not re-derive it from `lastUsedToken` below.
+            'setupState' => match (true) {
+                $token === null => 'none',
+                $lastUsedAt === null => 'unused',
+                default => 'used',
+            },
+            // Display payload for the collapsed line, null in the other two states. The name
+            // is the only part of that line the customer can act on — it says WHICH credential
+            // their build is running on, not merely that one exists.
+            //
+            // `locale('de')` explicitly, not the application's: `app.locale` is `en` on this
+            // instance, and diffForHumans() then puts "2 hours ago" in the middle of a German
+            // sentence. The console is German throughout whatever the framework's locale is.
+            'lastUsedToken' => $token === null || $lastUsedAt === null ? null : [
+                'name' => $token->name,
+                'used_at' => $lastUsedAt->locale('de')->diffForHumans(),
+            ],
             'packages' => $rows->map(fn (array $row): array => [
                 'id' => $row['package']->id,
                 'name' => $row['package']->name,
