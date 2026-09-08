@@ -25,6 +25,7 @@ import {
     LayoutGrid,
     Mail as MailIcon,
     Package,
+    Recycle,
     ScrollText,
     Settings as SettingsIcon,
     Users,
@@ -107,6 +108,7 @@ const navSections = computed<NavSection[]>(() => {
             label: 'System',
             items: [
                 { title: 'System', href: '/admin/system', icon: SettingsIcon },
+                { title: 'Speicherbereinigung', href: '/admin/oci/sweeper', icon: Recycle },
                 { title: 'Aktivität', href: '/admin/activity', icon: ScrollText },
                 { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
                 { title: 'Storage', href: '/admin/storage', icon: Database },

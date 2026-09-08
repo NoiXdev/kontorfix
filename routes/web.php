@@ -159,6 +159,12 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::post('retention-policies/{retention_policy}/apply', [Admin\RetentionPolicyController::class, 'apply'])
         ->name('retention-policies.apply');
 
+    // The storage sweeper's view and its manual trigger. Instance-wide like the sweep
+    // itself: the reachability graph spans organizations, so no per-organization slice of
+    // this page would mean anything.
+    Route::get('oci/sweeper', [Admin\OciSweeperController::class, 'show'])->name('oci.sweeper');
+    Route::post('oci/sweeper', [Admin\OciSweeperController::class, 'run'])->name('oci.sweeper.run');
+
     // Global audit log (Spatie activitylog). Scoped views are reached via query params.
     Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');
 
