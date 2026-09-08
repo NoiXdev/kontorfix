@@ -215,3 +215,20 @@ it('spares a tag re-pushed between evaluation and deletion', function () {
         // The re-pushed tag survived; without the pushed_at guard on the delete it is gone.
         ->and($package->ociTags()->pluck('name')->sort()->values()->all())->toBe(['alt', 'neu']);
 });
+
+it('excludes inline-ruled packages from a policy\'s governed set', function () {
+    $default = RetentionPolicy::factory()->create();
+    SystemSetting::current()->update(['retention_policy_id' => $default->id]);
+
+    $governedByDefault = Package::factory()->docker()->create();
+    // Inline rules are tier 0: this package is governed by THEM, and the policy's dry run
+    // must not list a package whose report would be computed from someone else's rules.
+    $inlineRuled = Package::factory()->docker()->create([
+        'retention_rules' => [['type' => 'keep_last', 'count' => 1]],
+    ]);
+
+    $governed = app(RetentionRunner::class)->packagesFor($default)->pluck('id');
+
+    expect($governed)->toContain($governedByDefault->id)
+        ->and($governed)->not->toContain($inlineRuled->id);
+});

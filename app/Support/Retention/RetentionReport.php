@@ -3,7 +3,6 @@
 namespace App\Support\Retention;
 
 use App\Models\Package;
-use App\Models\RetentionPolicy;
 
 /**
  * What a policy would do, or did, to one package. The one shape the dry-run pages, the
@@ -15,14 +14,14 @@ final readonly class RetentionReport
     /** @param list<RetentionDecision> $decisions */
     private function __construct(
         public Package $package,
-        public RetentionPolicy $policy,
+        public ResolvedRetention $resolution,
         public array $decisions,
     ) {}
 
     /** @param list<RetentionDecision> $decisions */
-    public static function for(Package $package, RetentionPolicy $policy, array $decisions): self
+    public static function for(Package $package, ResolvedRetention $resolution, array $decisions): self
     {
-        return new self($package, $policy, $decisions);
+        return new self($package, $resolution, $decisions);
     }
 
     /** @return list<RetentionDecision> */
@@ -54,7 +53,13 @@ final readonly class RetentionReport
     {
         return [
             'package' => ['id' => $this->package->id, 'name' => $this->package->name],
-            'policy' => ['id' => $this->policy->id, 'name' => $this->policy->name],
+            // The tier and the label, never a bare policy: an inline rule set has no
+            // policy row, and label() is what keeps it from rendering as a nameless hole.
+            'source' => [
+                'tier' => $this->resolution->tier,
+                'label' => $this->resolution->label(),
+                'policy_id' => $this->resolution->policy?->id,
+            ],
             'kept_count' => count($this->kept()),
             'removed_count' => count($this->removed()),
             'tags' => array_map(fn (RetentionDecision $decision): array => [

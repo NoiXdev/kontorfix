@@ -47,7 +47,7 @@ class ApplyOciRetention extends Command
                 $package->name,
                 count($report->removed()),
                 $dryRun ? 'würden entfernt' : 'entfernt',
-                $report->policy->name,
+                $report->resolution->label(),
             ));
         }
 

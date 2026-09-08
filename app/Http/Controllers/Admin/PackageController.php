@@ -491,24 +491,19 @@ class PackageController extends Controller
     {
         $runner = app(RetentionRunner::class);
         $report = $runner->dryRun($package);
-
-        // Which tier answered: the resolver prefers the package's own policy, so a package
-        // that names one resolved through 'package'; anything else that resolved came from
-        // the instance default.
-        $tier = $report === null ? null : ($package->retention_policy_id !== null ? 'package' : 'instance');
+        $resolution = $report?->resolution;
 
         $canAssign = (bool) $request->user()?->isSuperAdmin();
 
         return [
-            'policy' => $report === null ? null : ['id' => $report->policy->id, 'name' => $report->policy->name],
-            'tier' => $tier,
-            'rules' => $report === null ? [] : array_map(
-                fn ($rule): string => $rule->describe(),
-                $runner->rulesOf($report->policy),
-            ),
+            'policy' => $resolution?->policy === null ? null : ['id' => $resolution->policy->id, 'name' => $resolution->policy->name],
+            'tier' => $resolution?->tier,
+            'label' => $resolution?->label(),
+            'rules' => $resolution === null ? [] : $resolution->describedRules(),
             'dry_run' => $report?->toArray(),
             'can_assign' => $canAssign,
             'selected_policy_id' => $package->retention_policy_id,
+            'inline_rules' => $package->retention_rules,
             'policies' => $canAssign
                 ? RetentionPolicy::query()->orderBy('name')->get(['id', 'name'])->map(
                     fn (RetentionPolicy $policy): array => ['id' => (string) $policy->id, 'name' => $policy->name],

@@ -338,16 +338,17 @@ class RegistryController extends Controller
             return null;
         }
 
-        $runner = app(RetentionRunner::class);
-        $report = $runner->dryRun($package);
+        $report = app(RetentionRunner::class)->dryRun($package);
 
         if ($report === null) {
             return ['policy_name' => null, 'rules' => [], 'removals' => []];
         }
 
         return [
-            'policy_name' => $report->policy->name,
-            'rules' => array_map(fn ($rule): string => $rule->describe(), $runner->rulesOf($report->policy)),
+            // label(), not a policy name: inline rules have no policy row, and the
+            // customer still deserves to see what governs their repository.
+            'policy_name' => $report->resolution->label(),
+            'rules' => $report->resolution->describedRules(),
             // Only the removals, not every decision: the customer's question is "what will
             // disappear, and do I still need it" — pull or re-tag before the next run.
             'removals' => array_map(fn ($decision): array => [

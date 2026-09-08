@@ -30,17 +30,17 @@ class RetentionRunner
         private RetentionEvaluator $evaluator,
     ) {}
 
-    /** Null when no policy resolves — the package is never touched, not evaluated. */
+    /** Null when nothing resolves — the package is never touched, not evaluated. */
     public function dryRun(Package $package): ?RetentionReport
     {
-        $policy = $this->resolver->for($package);
+        $resolution = $this->resolver->for($package);
 
-        if ($policy === null) {
+        if ($resolution === null) {
             return null;
         }
 
-        return RetentionReport::for($package, $policy, $this->evaluator->decide(
-            $this->rulesOf($policy),
+        return RetentionReport::for($package, $resolution, $this->evaluator->decide(
+            $resolution->rules,
             $package->ociTags()->get(),
             CarbonImmutable::now(),
         ));
@@ -87,10 +87,12 @@ class RetentionRunner
             ->event('retention_applied')
             // The names, not only the count: the description is what a reader skims, the
             // properties are what a reader who needs to know WHICH tag vanished opens.
-            ->withProperties(['policy' => $report->policy->name, 'tags' => $names])
+            // The label, not a policy name: inline rules have no policy row, and the
+            // audit trail still has to say which rule set acted.
+            ->withProperties(['policy' => $report->resolution->label(), 'tags' => $names])
             ->log(sprintf(
                 'Retention „%s“: %d Tag(s) entfernt',
-                $report->policy->name,
+                $report->resolution->label(),
                 count($names),
             ));
 
@@ -131,7 +133,12 @@ class RetentionRunner
      */
     public function packagesFor(RetentionPolicy $policy): Builder
     {
-        $query = Package::query()->where('type', PackageType::Docker);
+        $query = Package::query()
+            ->where('type', PackageType::Docker)
+            // A package with inline rules is governed by THEM, whatever it also names:
+            // inline is tier 0. Without this exclusion the policy's dry run would list a
+            // package whose report was computed from someone else's rules.
+            ->whereNull('retention_rules');
 
         if (SystemSetting::current()->retention_policy_id === $policy->id) {
             return $query->where(fn (Builder $inner) => $inner
