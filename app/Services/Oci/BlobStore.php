@@ -221,12 +221,11 @@ final class BlobStore
             : $this->hashRemoteParts($upload);
 
         if ($actualDigest !== $expectedDigest) {
-            // Delete the partial upload BEFORE throwing, and write no OciBlob row: nothing
+            // Discard the partial upload BEFORE throwing, and write no OciBlob row: nothing
             // that failed verification may ever reach content-addressed storage. The
             // upload session itself is also removed — its storage is gone, so nothing could
             // resume it — leaving the client to restart with a fresh POST.
-            $this->deleteUploadStorage($upload);
-            $upload->delete();
+            $this->discardUpload($upload);
 
             throw OciException::digestInvalid($expectedDigest, $actualDigest);
         }
@@ -346,6 +345,34 @@ final class BlobStore
         fclose($combined);
 
         $this->disk()->deleteDirectory($upload->path);
+    }
+
+    /**
+     * Removes an upload session and whatever storage it accumulated. Public because the
+     * storage sweeper reclaims sessions a client abandoned (`expires_at` in the past), and
+     * it must not learn the local-file-vs-remote-parts distinction a second time —
+     * deleteUploadStorage() below is the one place that knows it. finish()'s
+     * digest-mismatch branch discards through here too, for the same reason.
+     */
+    public function discardUpload(OciBlobUpload $upload): void
+    {
+        $this->deleteUploadStorage($upload);
+        $upload->delete();
+    }
+
+    /**
+     * Removes a promoted blob's bytes, for the storage sweeper. Only the bytes — the row is
+     * the sweeper's to delete, since which rows die is its decision, not this store's.
+     *
+     * Here rather than in the sweeper because this class is documented as the only one that
+     * touches the artifacts disk for OCI blobs, and that sentence is load-bearing: it is
+     * what makes "verify before promote" and organization scoping checkable in one file.
+     * delete() over a missing file is a no-op on both disk drivers, which is what makes a
+     * scheduled sweep and a manually dispatched one safe to overlap.
+     */
+    public function deleteBlobStorage(OciBlob $blob): void
+    {
+        $this->disk()->delete($blob->path);
     }
 
     private function deleteUploadStorage(OciBlobUpload $upload): void

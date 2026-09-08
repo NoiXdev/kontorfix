@@ -243,6 +243,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | OCI sweep blob budget
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound on the number of blobs `oci:sweep` deletes per run. The budget
+    | exists so a first sweep of a registry that has never been swept does not
+    | spend an hour in the scheduler moving files; it bounds blob deletions only,
+    | because manifests, upload sessions and empty repositories are cheap row
+    | deletes by comparison. Hitting the budget is reported, never silent — the
+    | command warns and the sweeper view shows how many candidates remain, so a
+    | bounded run cannot read as "everything is clean".
+    |
+    | The grace period itself (how old an unreachable blob must be before it may
+    | be swept at all) is not here: it lives in system_settings, beside the other
+    | instance-wide switches, because it is an operator decision, not a deploy
+    | parameter.
+    |
+    */
+
+    'oci_sweep_blob_limit' => (int) env('KONTORFIX_OCI_SWEEP_BLOB_LIMIT', 1000),
+
+    /*
+    |--------------------------------------------------------------------------
     | Upstream artifact fetch lock
     |--------------------------------------------------------------------------
     |

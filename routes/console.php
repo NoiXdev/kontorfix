@@ -30,4 +30,5 @@ Schedule::command('upstream-cache:prune')->daily()->withoutOverlapping();
 // everything already scheduled there. The command runs synchronously, which is what makes
 // withoutOverlapping() meaningful for it (see the Schedule::job() caveat above).
 Schedule::command('oci:retention')->dailyAt('03:10')->withoutOverlapping();
+Schedule::command('oci:sweep')->dailyAt('03:40')->withoutOverlapping();
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
