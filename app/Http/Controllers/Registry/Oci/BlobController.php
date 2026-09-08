@@ -14,6 +14,7 @@ use App\Models\RegistryToken;
 use App\Services\Oci\BlobStore;
 use App\Services\Oci\Digest;
 use App\Services\RegistryAccessService;
+use App\Support\Oci\ManifestReferences;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
@@ -361,32 +362,19 @@ class BlobController extends Controller
      * layers/config, exactly as `docker pull` itself would walk an index before ever
      * asking for a blob.
      *
+     * The union of both of ManifestReferences' answers, because the GATE's question is "is
+     * this digest named at all". The sweeper asks the same parser the two questions
+     * separately — a blob digest names an oci_blobs row, a child digest an oci_manifests
+     * row — and sharing the parser is what keeps the two readers from drifting.
+     *
      * @return list<string>
      */
     private function referencedDigests(OciManifest $manifest): array
     {
-        $payload = json_decode($manifest->payload, true);
-        if (! is_array($payload)) {
-            return [];
-        }
-
-        $digests = [];
-
-        $configDigest = $payload['config']['digest'] ?? null;
-        if (is_string($configDigest)) {
-            $digests[] = $configDigest;
-        }
-
-        foreach (['layers', 'manifests'] as $key) {
-            foreach ($payload[$key] ?? [] as $entry) {
-                $entryDigest = is_array($entry) ? ($entry['digest'] ?? null) : null;
-                if (is_string($entryDigest)) {
-                    $digests[] = $entryDigest;
-                }
-            }
-        }
-
-        return $digests;
+        return [
+            ...ManifestReferences::blobDigests($manifest->payload),
+            ...ManifestReferences::childManifestDigests($manifest->payload),
+        ];
     }
 
     /**
