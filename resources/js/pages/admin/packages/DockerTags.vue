@@ -7,11 +7,14 @@ import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, watch } from 'vue';
+import { NO_SPACE_FREED_YET } from '@/pages/admin/retention/policies';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { computed, ref, watch } from 'vue';
 
 interface DockerPackage {
     id: string;
@@ -70,12 +73,67 @@ const props = defineProps<{
     tags: TagRow[];
     stats: { tag_count: number; occupied_bytes: number; shared_bytes: number };
     activities: ActivityRow[];
+    // Which policy resolves for this repository and from which tier, what the next run
+    // would remove, and — super-admin only — the selector. `policies` is empty for an org
+    // admin on purpose: which rule sets exist is operator config.
+    retention: {
+        policy: { id: string; name: string } | null;
+        tier: 'package' | 'instance' | null;
+        rules: string[];
+        dry_run: {
+            kept_count: number;
+            removed_count: number;
+            tags: { name: string; pushed_at: string | null; keep: boolean; reason: string | null }[];
+        } | null;
+        can_assign: boolean;
+        selected_policy_id: string | null;
+        policies: { id: string; name: string }[];
+    };
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Pakete', href: '/admin/packages' },
     { title: props.package.name, href: route('admin.packages.show', props.package.id) },
 ];
+
+// --- Retention card state ---
+
+const retentionOptions = computed(() => [
+    { value: '', label: 'Instanz-Vorgabe (keine eigene Richtlinie)' },
+    ...props.retention.policies.map((p) => ({ value: p.id, label: p.name })),
+]);
+
+const selectedPolicy = ref<string>(props.retention.selected_policy_id ?? '');
+const savingPolicy = ref(false);
+
+function saveRetentionPolicy() {
+    savingPolicy.value = true;
+
+    router.put(
+        route('admin.packages.retention.update', props.package.id),
+        { retention_policy_id: selectedPolicy.value || null },
+        { preserveScroll: true, onFinish: () => (savingPolicy.value = false) },
+    );
+}
+
+const retentionConfirmOpen = ref(false);
+const applyingRetention = ref(false);
+
+function applyRetention() {
+    applyingRetention.value = true;
+
+    router.post(
+        route('admin.packages.retention.apply', props.package.id),
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                applyingRetention.value = false;
+                retentionConfirmOpen.value = false;
+            },
+        },
+    );
+}
 
 // Binary units, spelled correctly (MiB, not MB for a division by 1024) — the mockups this
 // page implements use them throughout, and this page has no legacy formatBytes() to stay
@@ -191,6 +249,7 @@ function saveShared() {
                     <TabsTrigger value="tags">Tags ({{ props.tags.length }})</TabsTrigger>
                     <TabsTrigger value="zugang">Zugang</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
+                    <TabsTrigger value="retention">Retention</TabsTrigger>
                     <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
                     <TabsTrigger value="verwaltung">Verwaltung</TabsTrigger>
                 </TabsList>
@@ -305,6 +364,93 @@ function saveShared() {
                             </table>
                         </div>
                     </section>
+                </TabsContent>
+
+                <TabsContent value="retention">
+                    <div class="flex max-w-3xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
+                        <div v-if="props.retention.policy" class="text-sm">
+                            <span class="font-medium">{{ props.retention.policy.name }}</span>
+                            <span class="ml-2 text-xs text-muted-foreground">
+                                {{ props.retention.tier === 'package' ? 'diesem Repository zugewiesen' : 'geerbt von der Instanz-Vorgabe' }}
+                            </span>
+                            <ul class="mt-2 list-inside list-disc text-muted-foreground">
+                                <li v-for="rule in props.retention.rules" :key="rule">{{ rule }}</li>
+                            </ul>
+                        </div>
+                        <p v-else class="text-sm text-muted-foreground">
+                            Keine Richtlinie aufgelöst — es wird nichts entfernt. Alle Tags bleiben, bis eine Richtlinie zugewiesen oder eine
+                            Instanz-Vorgabe gesetzt wird.
+                        </p>
+
+                        <div v-if="props.retention.can_assign" class="flex items-end gap-3 border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                            <div class="grid w-72 gap-1">
+                                <label class="text-xs font-medium" for="retention-policy">Richtlinie</label>
+                                <SearchableSelect id="retention-policy" v-model="selectedPolicy" :options="retentionOptions" />
+                            </div>
+                            <Button variant="outline" :disabled="savingPolicy" @click="saveRetentionPolicy">Zuweisen</Button>
+                        </div>
+
+                        <div v-if="props.retention.dry_run" class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                            <div class="mb-2 flex items-center justify-between">
+                                <p class="text-sm">
+                                    Nächster Lauf: <span class="font-medium text-destructive">{{ props.retention.dry_run.removed_count }}</span>
+                                    Tag(s) würden entfernt, {{ props.retention.dry_run.kept_count }} bleiben.
+                                </p>
+                                <Button
+                                    v-if="props.retention.can_assign"
+                                    variant="destructive"
+                                    size="sm"
+                                    :disabled="props.retention.dry_run.removed_count === 0"
+                                    @click="retentionConfirmOpen = true"
+                                >
+                                    Jetzt anwenden
+                                </Button>
+                            </div>
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="border-b border-sidebar-border/70 text-left dark:border-sidebar-border">
+                                        <th class="py-2 pr-4 font-medium">Tag</th>
+                                        <th class="py-2 pr-4 font-medium">Gepusht</th>
+                                        <th class="py-2 pr-4 font-medium">Entscheidung</th>
+                                        <th class="py-2 font-medium">Begründung</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="tag in props.retention.dry_run.tags"
+                                        :key="tag.name"
+                                        class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40"
+                                    >
+                                        <td class="py-2 pr-4 font-mono">{{ tag.name }}</td>
+                                        <td class="py-2 pr-4 text-muted-foreground">{{ tag.pushed_at ?? '—' }}</td>
+                                        <td class="py-2 pr-4">
+                                            <span v-if="tag.keep" class="text-emerald-600 dark:text-emerald-400">bleibt</span>
+                                            <span v-else class="text-destructive">wird entfernt</span>
+                                        </td>
+                                        <td class="py-2 text-muted-foreground">{{ tag.reason ?? '—' }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <Dialog v-model:open="retentionConfirmOpen">
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>Retention auf „{{ props.package.name }}“ anwenden?</DialogTitle>
+                            </DialogHeader>
+                            <p class="text-sm">
+                                {{ props.retention.dry_run?.removed_count ?? 0 }} Tag(s) werden entfernt. Beim Anwenden wird neu ausgewertet.
+                            </p>
+                            <p class="text-sm text-muted-foreground">{{ NO_SPACE_FREED_YET }}</p>
+                            <DialogFooter>
+                                <Button variant="outline" :disabled="applyingRetention" @click="retentionConfirmOpen = false">Abbrechen</Button>
+                                <Button variant="destructive" :disabled="applyingRetention" @click="applyRetention">
+                                    {{ applyingRetention ? 'Läuft …' : 'Anwenden' }}
+                                </Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
                 </TabsContent>
 
                 <TabsContent value="aktivitaet">

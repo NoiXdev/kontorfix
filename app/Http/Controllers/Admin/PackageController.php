@@ -16,8 +16,10 @@ use App\Models\OciTag;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
+use App\Models\RetentionPolicy;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Oci\BlobStore;
+use App\Services\Oci\Retention\RetentionRunner;
 use App\Services\Package\PackageDependencies;
 use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
@@ -471,7 +473,89 @@ class PackageController extends Controller
                 'shared_bytes' => $sharedBytes,
             ],
             'activities' => ActivityPresenter::recentFor($package),
+            'retention' => $this->retentionCard($request, $package),
         ]);
+    }
+
+    /**
+     * The retention card's payload: which policy resolves for this repository, from which
+     * tier, what the next run would remove — and, for a super-admin only, the selector.
+     *
+     * `policies` is empty for an organization admin on purpose, not merely unused: which
+     * rule sets exist on the instance is operator configuration, and the read-only card
+     * must not double as a catalogue of it.
+     *
+     * @return array<string, mixed>
+     */
+    private function retentionCard(Request $request, Package $package): array
+    {
+        $runner = app(RetentionRunner::class);
+        $report = $runner->dryRun($package);
+
+        // Which tier answered: the resolver prefers the package's own policy, so a package
+        // that names one resolved through 'package'; anything else that resolved came from
+        // the instance default.
+        $tier = $report === null ? null : ($package->retention_policy_id !== null ? 'package' : 'instance');
+
+        $canAssign = (bool) $request->user()?->isSuperAdmin();
+
+        return [
+            'policy' => $report === null ? null : ['id' => $report->policy->id, 'name' => $report->policy->name],
+            'tier' => $tier,
+            'rules' => $report === null ? [] : array_map(
+                fn ($rule): string => $rule->describe(),
+                $runner->rulesOf($report->policy),
+            ),
+            'dry_run' => $report?->toArray(),
+            'can_assign' => $canAssign,
+            'selected_policy_id' => $package->retention_policy_id,
+            'policies' => $canAssign
+                ? RetentionPolicy::query()->orderBy('name')->get(['id', 'name'])->map(
+                    fn (RetentionPolicy $policy): array => ['id' => (string) $policy->id, 'name' => $policy->name],
+                )->all()
+                : [],
+        ];
+    }
+
+    /**
+     * Re-points a repository at a policy, or back to inheriting the instance default
+     * (null). Registered in the SUPER route group — an organization admin choosing a laxer
+     * policy would make the instance default a suggestion, opt-out-able by anyone who can
+     * administer a package.
+     */
+    public function updateRetention(Request $request, Package $package): RedirectResponse
+    {
+        // 409, not validation: the route resolved a real package, but retention operates
+        // on tags and only Docker repositories have any — the same reason the resolver
+        // answers null for every other type.
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $data = $request->validate([
+            'retention_policy_id' => ['nullable', 'uuid', 'exists:retention_policies,id'],
+        ]);
+
+        $package->update(['retention_policy_id' => $data['retention_policy_id'] ?? null]);
+
+        return back()->with('success', $data['retention_policy_id'] ?? null
+            ? 'Richtlinie zugewiesen.'
+            : 'Richtlinie entfernt — es gilt wieder die Instanz-Vorgabe.');
+    }
+
+    /**
+     * The card's "Anwenden": one repository, re-resolved at apply time, with the caller as
+     * causer. Super-only for the same reason assignment is — applying is the other half of
+     * the same lever.
+     */
+    public function applyRetention(Request $request, Package $package, RetentionRunner $runner): RedirectResponse
+    {
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $report = $runner->apply($package, $request->user());
+
+        return back()->with('success', sprintf(
+            '%d Tag(s) entfernt. Speicherplatz wird erst von der Speicherbereinigung freigegeben, nach Ablauf der Schonfrist.',
+            $report === null ? 0 : count($report->removed()),
+        ));
     }
 
     /**

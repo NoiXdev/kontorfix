@@ -165,6 +165,16 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::get('oci/sweeper', [Admin\OciSweeperController::class, 'show'])->name('oci.sweeper');
     Route::post('oci/sweeper', [Admin\OciSweeperController::class, 'run'])->name('oci.sweeper.run');
 
+    // Which policy applies to a repository is decided HERE, in the super group, although
+    // the package's other mutations live with the owning organization above: an org admin
+    // re-pointing their package at a laxer policy would make the instance default a
+    // suggestion, opt-out-able by anyone who can administer a package. They see the
+    // resolved policy read-only on the package page instead.
+    Route::put('packages/{package}/retention', [Admin\PackageController::class, 'updateRetention'])
+        ->name('packages.retention.update');
+    Route::post('packages/{package}/retention/apply', [Admin\PackageController::class, 'applyRetention'])
+        ->name('packages.retention.apply');
+
     // Global audit log (Spatie activitylog). Scoped views are reached via query params.
     Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');
 
