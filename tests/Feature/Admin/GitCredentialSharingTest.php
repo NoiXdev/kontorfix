@@ -312,3 +312,12 @@ it('agrees with isUsableBy() across every organization in a multi-organization s
     expect($usableIds)->toContain($own->id, $global->id, $shared->id)
         ->and($usableIds)->not->toContain($sharedElsewhere->id, $foreign->id);
 });
+
+it('answers usableByAny([]) with nothing, not every global credential', function () {
+    // "Usable by any organization in an empty set" is empty. Before the guard, `orWhere
+    // ('is_global', true)` matched regardless of the (empty, always-false) `whereIn`, so a
+    // caller with no candidate owners yet saw every global credential offered.
+    GitCredential::factory()->create(['is_global' => true]);
+
+    expect(GitCredential::query()->usableByAny([])->pluck('id')->all())->toBe([]);
+});

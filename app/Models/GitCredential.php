@@ -143,6 +143,15 @@ class GitCredential extends Model
     {
         $ids = is_array($organizationIds) ? $organizationIds : [...$organizationIds];
 
+        if ($ids === []) {
+            // "Usable by any organization in an empty set" is empty, not "every global
+            // credential" — without this guard, `whereIn('organization_id', [])` (always
+            // false) still lost to `orWhere('is_global', true)`, which matches regardless
+            // of $ids. A caller with no candidate owners yet (the create page before a
+            // registry is picked) would otherwise see every global credential offered.
+            return $query->whereRaw('1 = 0');
+        }
+
         return $query->where(fn (Builder $inner) => $inner
             ->whereIn('organization_id', $ids)
             ->orWhere('is_global', true)

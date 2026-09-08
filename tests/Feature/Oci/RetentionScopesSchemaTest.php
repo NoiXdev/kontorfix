@@ -84,3 +84,45 @@ it('has the new columns', function () {
         ->and(Schema::hasColumn('git_credentials', 'is_global'))->toBeTrue()
         ->and(Schema::hasTable('git_credential_organization'))->toBeTrue();
 });
+
+/** Same shape as GroupSlugUniquenessMigrationTest's runScopeGroupSlugMigration(). */
+function runAddRetentionScopesMigration(): object
+{
+    return require database_path('migrations/2026_09_08_200000_add_retention_scopes.php');
+}
+
+it('rolls back the pivot before the columns it references, cleanly', function () {
+    // RefreshDatabase has already run up() for this test; populate every row down() has to
+    // get rid of first, so a wrong drop order (a column dropped while the pivot referencing
+    // its table still holds a row) would surface here rather than only on a bare schema.
+    $package = Package::factory()->docker()->create(['retention_rules' => [['type' => 'keep_last', 'count' => 5]]]);
+    $policy = RetentionPolicy::factory()->create(['is_global' => true]);
+    $credential = GitCredential::factory()->create(['is_global' => true]);
+    $organization = Organization::factory()->create();
+    $credential->sharedOrganizations()->attach($organization);
+
+    runAddRetentionScopesMigration()->down();
+
+    // The pivot table is dropped outright (not row-by-row), so its FK to git_credentials
+    // and organizations cannot be what blocks the column drops that follow — this is the
+    // property "pivot before columns" buys, exercised rather than merely read off the
+    // migration's source.
+    expect(Schema::hasTable('git_credential_organization'))->toBeFalse()
+        ->and(Schema::hasColumn('git_credentials', 'is_global'))->toBeFalse()
+        ->and(Schema::hasColumn('retention_policies', 'is_global'))->toBeFalse()
+        ->and(Schema::hasColumn('packages', 'retention_rules'))->toBeFalse();
+
+    // The package and policy rows themselves survive — only the columns this migration
+    // added are gone, not the tables.
+    expect(Package::query()->whereKey($package->id)->exists())->toBeTrue()
+        ->and(RetentionPolicy::query()->whereKey($policy->id)->exists())->toBeTrue();
+
+    // up() re-applies cleanly afterward: a failed deploy that rolls back and retries is not
+    // left with a schema neither migration recognises.
+    runAddRetentionScopesMigration()->up();
+
+    expect(Schema::hasColumn('packages', 'retention_rules'))->toBeTrue()
+        ->and(Schema::hasColumn('retention_policies', 'is_global'))->toBeTrue()
+        ->and(Schema::hasColumn('git_credentials', 'is_global'))->toBeTrue()
+        ->and(Schema::hasTable('git_credential_organization'))->toBeTrue();
+});
