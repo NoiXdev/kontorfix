@@ -29,10 +29,14 @@ it('gives every documented operation a non-empty summary', function () {
 
     $spec = $this->actingAs($admin)->get('/docs/api.json')->assertOk()->json();
 
+    // Without this, an empty (or missing) `paths` makes the loop below a no-op and the
+    // guard passes vacuously — never actually checking a single operation.
+    expect($spec['paths'] ?? [])->not->toBeEmpty();
+
     $httpMethods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
 
     $missing = [];
-    foreach ($spec['paths'] ?? [] as $path => $operations) {
+    foreach ($spec['paths'] as $path => $operations) {
         foreach ($operations as $method => $operation) {
             if (! in_array($method, $httpMethods, true) || ! is_array($operation)) {
                 continue;

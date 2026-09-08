@@ -21,9 +21,9 @@ class StatusController extends Controller
     /**
      * Systemstatus der gesamten Instanz abrufen (nur Super-Admin).
      *
-     * Instance health at a glance: are the core dependencies up, how many jobs failed, and
-     * the instance-wide package sync totals. Built for uptime monitors — `healthy` is the
-     * single boolean to alert on.
+     * Instanzstatus auf einen Blick: laufen die Kernabhängigkeiten, wie viele Jobs sind
+     * fehlgeschlagen, und die instanzweiten Paket-Sync-Summen. Für Uptime-Monitore gedacht
+     * — `healthy` ist das eine Boolean, auf das man alarmieren sollte.
      */
     public function show(HealthService $health): JsonResponse
     {
@@ -41,9 +41,9 @@ class StatusController extends Controller
     /**
      * Sync-Status der eigenen Pakete abrufen.
      *
-     * Package sync health for the caller's own organizations — "which of my packages
-     * failed?" at a glance. Scoped, so any member can call it for their registries;
-     * a super-admin sees every package.
+     * Paket-Sync-Status für die eigenen Organisationen des aufrufenden Kontos — „welche
+     * meiner Pakete sind fehlgeschlagen?“ auf einen Blick. Ist auf die eigenen Registries
+     * beschränkt; ein Super-Admin sieht jedes Paket.
      */
     public function packages(): JsonResponse
     {

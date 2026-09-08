@@ -156,10 +156,8 @@ class PackageController extends Controller
     /**
      * Paket als aufgegeben markieren oder die Markierung aufheben.
      *
-     * Mirrors Admin\PackageController::abandonment (same request, same "don't reset
-     * abandoned_at on a re-mark" rule) — kept as its own action here too, alongside
-     * resync()/destroy(), rather than folded into a general update() this controller does
-     * not have.
+     * Ein erneutes Markieren als aufgegeben setzt `abandoned_at` nicht zurück, sondern
+     * behält den ursprünglichen Zeitpunkt.
      */
     public function abandonment(UpdatePackageAbandonmentRequest $request, Package $package): PackageResource
     {
@@ -167,6 +165,10 @@ class PackageController extends Controller
 
         $abandoned = $request->boolean('abandoned');
 
+        // Mirrors Admin\PackageController::abandonment (same request, same "don't reset
+        // abandoned_at on a re-mark" rule) — kept as its own action here too, alongside
+        // resync()/destroy(), rather than folded into a general update() this controller
+        // does not have.
         $package->update([
             'abandoned_at' => $abandoned ? ($package->abandoned_at ?? now()) : null,
             'replacement_package' => $abandoned ? $request->validated('replacement_package') : null,
