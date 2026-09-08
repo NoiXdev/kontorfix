@@ -34,12 +34,15 @@ class OciReachability
 {
     /**
      * @param  array<string, CarbonImmutable>  $untaggedWindows  package_id ⇒ cutoff, from
-     *                                                           UntaggedRetention::windowsFor(). An untagged manifest created at or after its
-     *                                                           package's cutoff is a ROOT: the keep_untagged rule keeps a manifest nothing
-     *                                                           tags, and without this its layers would be collected out from under it — an
-     *                                                           image that resolves and pulls halfway, the exact failure the manifest sweep
-     *                                                           exists to prevent, reintroduced by the rule if the roots did not grow with
-     *                                                           it. Timestamps only: the rules themselves never reach this class.
+     *                                                           UntaggedRetention::windowsFor(). Checked by created_at against every
+     *                                                           manifest of a windowed package, not only untagged ones — a tagged manifest
+     *                                                           inside the window is added too, redundantly and harmlessly, since the tag
+     *                                                           worklist below already roots it. What the check protects is the untagged
+     *                                                           case: the keep_untagged rule keeps a manifest nothing tags, and without
+     *                                                           this its layers would be collected out from under it — an image that
+     *                                                           resolves and pulls halfway, the exact failure the manifest sweep exists to
+     *                                                           prevent, reintroduced by the rule if the roots did not grow with it.
+     *                                                           Timestamps only: the rules themselves never reach this class.
      */
     public function forOrganization(string $organizationId, array $untaggedWindows = []): ReachableSet
     {
@@ -77,8 +80,10 @@ class OciReachability
                 }
             });
 
-        // The roots: every manifest a tag points at, plus every untagged manifest still
-        // inside its package's keep_untagged window. Nothing else.
+        // The roots: every manifest a tag points at, plus every manifest of a windowed
+        // package still inside that window — tag status is not checked here, so a tagged
+        // manifest in-window is added too, redundantly (it is already rooted by the line
+        // above). Nothing else.
         $worklist = OciTag::query()->whereIn('package_id', $packageIds)->pluck('manifest_id')->all();
 
         foreach ($untaggedRoots as $id) {
