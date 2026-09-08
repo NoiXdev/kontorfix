@@ -9,6 +9,7 @@ use App\Models\OciManifest;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Oci\BlobStore;
+use App\Services\Oci\Retention\UntaggedRetention;
 use App\Services\Registry\OciSettings;
 use App\Support\Oci\SweepReport;
 use Illuminate\Database\Eloquent\Builder;
@@ -51,6 +52,7 @@ class OciSweeper
         private OciReachability $reachability,
         private OciSettings $settings,
         private BlobStore $blobs,
+        private UntaggedRetention $untagged,
     ) {}
 
     /**
@@ -106,8 +108,14 @@ class OciSweeper
         foreach (Organization::query()->lazyById() as $organization) {
             // Built ONCE per organization and shared by the manifest and blob passes —
             // never per row: the walk reads every manifest of the organization, and a
-            // per-row rebuild would make the sweep quadratic.
-            $reachable = $this->reachability->forOrganization((string) $organization->id);
+            // per-row rebuild would make the sweep quadratic. The keep_untagged windows go
+            // in as timestamps (UntaggedRetention is the policy side's whole hand-off);
+            // a manifest inside its window becomes a root, so BOTH passes hold it and its
+            // layers without either pass learning a rule.
+            $reachable = $this->reachability->forOrganization(
+                (string) $organization->id,
+                $this->untagged->windowsFor((string) $organization->id),
+            );
 
             $packageIds = Package::query()->where('organization_id', $organization->id)->pluck('id');
 

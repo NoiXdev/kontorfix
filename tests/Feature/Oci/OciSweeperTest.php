@@ -334,3 +334,79 @@ it('warns when the command hits its budget, and reports each count', function ()
 
     expect(OciBlob::count())->toBe(0);
 });
+
+it('holds an untagged manifest inside its keep_untagged window — with its blobs', function () {
+    // THE gate from the spec: the manifest alone surviving proves nothing. The rule keeps
+    // a manifest nothing tags, so without the extended reachability roots the blob pass
+    // would collect its layers out from under it — an image that resolves and pulls
+    // halfway, the exact failure the manifest sweep exists to prevent, reintroduced by
+    // the new rule.
+    $package = Package::factory()->docker()->create([
+        'retention_rules' => [['type' => 'keep_untagged', 'days' => 14]],
+    ]);
+
+    $bytes = json_encode(['layers' => [['digest' => 'sha256:digestonly']]], JSON_THROW_ON_ERROR);
+    $manifest = OciManifest::factory()->for($package)->create([
+        'digest' => 'sha256:'.hash('sha256', $bytes),
+        'payload' => $bytes,
+        'size' => strlen($bytes),
+        // Far past the grace period, inside the 14-day window.
+        'created_at' => now()->subDays(5),
+    ]);
+    $blob = sweeperBlob($package, 'sha256:digestonly', 5 * 24);
+
+    $report = app(OciSweeper::class)->sweep(1000);
+
+    expect(OciManifest::whereKey($manifest->id)->exists())->toBeTrue()
+        ->and(OciBlob::whereKey($blob->id)->exists())->toBeTrue()
+        ->and(Storage::disk('artifacts')->exists($blob->path))->toBeTrue()
+        ->and($report->manifestsRemoved)->toBe(0)
+        ->and($report->blobsRemoved)->toBe(0);
+});
+
+it('collects an untagged manifest past its window, blobs included', function () {
+    $package = Package::factory()->docker()->create([
+        'retention_rules' => [['type' => 'keep_untagged', 'days' => 14]],
+    ]);
+
+    $bytes = json_encode(['layers' => [['digest' => 'sha256:tooold']]], JSON_THROW_ON_ERROR);
+    $manifest = OciManifest::factory()->for($package)->create([
+        'digest' => 'sha256:'.hash('sha256', $bytes),
+        'payload' => $bytes,
+        'size' => strlen($bytes),
+        'created_at' => now()->subDays(20),
+    ]);
+    $blob = sweeperBlob($package, 'sha256:tooold', 20 * 24);
+
+    app(OciSweeper::class)->sweep(1000);
+
+    expect(OciManifest::whereKey($manifest->id)->exists())->toBeFalse()
+        ->and(OciBlob::whereKey($blob->id)->exists())->toBeFalse();
+});
+
+it("does not let one package's window protect another package's untagged manifest", function () {
+    // The window is resolved per package. A per-organization reading would let one
+    // customer repository's rule keep every sibling's digest-pushes alive.
+    $organization = Organization::factory()->create();
+    $ruled = Package::factory()->docker()->for($organization)->create([
+        'name' => 'ruled',
+        'retention_rules' => [['type' => 'keep_untagged', 'days' => 14]],
+    ]);
+    $bare = Package::factory()->docker()->for($organization)->create(['name' => 'bare']);
+
+    $orphan = OciManifest::factory()->for($bare)->create([
+        'payload' => '{"layers":[]}',
+        'created_at' => now()->subDays(5),
+    ]);
+    // The ruled package's own untagged manifest, same age — the contrast that makes the
+    // per-package claim distinguishable.
+    $held = OciManifest::factory()->for($ruled)->create([
+        'payload' => '{"layers":[]}',
+        'created_at' => now()->subDays(5),
+    ]);
+
+    app(OciSweeper::class)->sweep(1000);
+
+    expect(OciManifest::whereKey($orphan->id)->exists())->toBeFalse()
+        ->and(OciManifest::whereKey($held->id)->exists())->toBeTrue();
+});

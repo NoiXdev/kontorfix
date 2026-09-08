@@ -7,6 +7,7 @@ use App\Models\OciTag;
 use App\Models\Package;
 use App\Support\Oci\ManifestReferences;
 use App\Support\Oci\ReachableSet;
+use Carbon\CarbonImmutable;
 
 /**
  * The reachability graph the sweeper walks, per organization.
@@ -31,7 +32,16 @@ use App\Support\Oci\ReachableSet;
  */
 class OciReachability
 {
-    public function forOrganization(string $organizationId): ReachableSet
+    /**
+     * @param  array<string, CarbonImmutable>  $untaggedWindows  package_id ⇒ cutoff, from
+     *                                                           UntaggedRetention::windowsFor(). An untagged manifest created at or after its
+     *                                                           package's cutoff is a ROOT: the keep_untagged rule keeps a manifest nothing
+     *                                                           tags, and without this its layers would be collected out from under it — an
+     *                                                           image that resolves and pulls halfway, the exact failure the manifest sweep
+     *                                                           exists to prevent, reintroduced by the rule if the roots did not grow with
+     *                                                           it. Timestamps only: the rules themselves never reach this class.
+     */
+    public function forOrganization(string $organizationId, array $untaggedWindows = []): ReachableSet
     {
         $packageIds = Package::query()->where('organization_id', $organizationId)->pluck('id');
 
@@ -41,12 +51,14 @@ class OciReachability
         $idByPackageAndDigest = [];
         /** @var array<string, string> $packageIdById */
         $packageIdById = [];
+        /** @var list<string> $untaggedRoots */
+        $untaggedRoots = [];
 
         OciManifest::query()
             ->whereIn('package_id', $packageIds)
-            ->select(['id', 'package_id', 'digest', 'payload'])
+            ->select(['id', 'package_id', 'digest', 'payload', 'created_at'])
             ->lazyById()
-            ->each(function (OciManifest $manifest) use (&$byId, &$idByPackageAndDigest, &$packageIdById): void {
+            ->each(function (OciManifest $manifest) use (&$byId, &$idByPackageAndDigest, &$packageIdById, &$untaggedRoots, $untaggedWindows): void {
                 $byId[$manifest->id] = [
                     'children' => ManifestReferences::childManifestDigests($manifest->payload),
                     'blobs' => ManifestReferences::blobDigests($manifest->payload),
@@ -57,10 +69,21 @@ class OciReachability
                 // an edge case.
                 $idByPackageAndDigest[$manifest->package_id.'@'.$manifest->digest] = $manifest->id;
                 $packageIdById[$manifest->id] = $manifest->package_id;
+
+                $window = $untaggedWindows[$manifest->package_id] ?? null;
+
+                if ($window !== null && $manifest->created_at !== null && $manifest->created_at->greaterThanOrEqualTo($window)) {
+                    $untaggedRoots[] = $manifest->id;
+                }
             });
 
-        // The roots: every manifest a tag points at. Nothing else is a root.
+        // The roots: every manifest a tag points at, plus every untagged manifest still
+        // inside its package's keep_untagged window. Nothing else.
         $worklist = OciTag::query()->whereIn('package_id', $packageIds)->pluck('manifest_id')->all();
+
+        foreach ($untaggedRoots as $id) {
+            $worklist[] = $id;
+        }
 
         $manifestIds = [];
         $blobDigests = [];
