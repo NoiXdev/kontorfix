@@ -26,6 +26,14 @@ class UntaggedRetention
      * package is the cost of the four-tier chain; the sweep is a nightly batch job, not a
      * request path.
      *
+     * Deliberately does NOT catch CorruptInlineRetentionRules: unlike `oci:retention` (which
+     * catches it per package and skips only that one), a package silently skipped HERE would
+     * lose its keep_untagged protection for the whole organization's sweep — OciSweeper
+     * builds one reachability graph per organization from every package's window at once, so
+     * "skip the corrupt package" would mean "delete the manifests its rule was meant to
+     * keep, alongside everyone else's". Letting the exception propagate aborts the sweep
+     * instead, which is the safe direction. See CorruptInlineRetentionRules's docblock.
+     *
      * @return array<string, CarbonImmutable>
      */
     public function windowsFor(string $organizationId): array

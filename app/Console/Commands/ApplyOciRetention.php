@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Enums\PackageType;
 use App\Models\Package;
 use App\Services\Oci\Retention\RetentionRunner;
+use App\Support\Retention\CorruptInlineRetentionRules;
 use Illuminate\Console\Command;
 
 /**
@@ -25,6 +26,7 @@ class ApplyOciRetention extends Command
         $dryRun = (bool) $this->option('dry-run');
         $removed = 0;
         $touched = 0;
+        $failed = 0;
 
         $query = Package::query()->where('type', PackageType::Docker);
 
@@ -33,7 +35,20 @@ class ApplyOciRetention extends Command
         }
 
         foreach ($query->lazyById() as $package) {
-            $report = $dryRun ? $runner->dryRun($package) : $runner->apply($package);
+            try {
+                $report = $dryRun ? $runner->dryRun($package) : $runner->apply($package);
+            } catch (CorruptInlineRetentionRules $e) {
+                // Caught PER PACKAGE, deliberately: a corrupt `retention_rules` jsonb must
+                // never read as "delete freely" for this package (dryRun()/apply() never
+                // ran for it, so nothing was touched), nor abort the run for every OTHER
+                // package that has nothing wrong with it. Contrast UntaggedRetention's
+                // sweeper path, which lets the same exception type abort instead — see its
+                // docblock for why that direction is the safe one there.
+                $failed++;
+                $this->error(sprintf('%s: %s', $package->name, $e->getMessage()));
+
+                continue;
+            }
 
             if ($report === null || $report->removed() === []) {
                 continue;
@@ -63,6 +78,15 @@ class ApplyOciRetention extends Command
         // against the sweeper. Retention deletes tag rows; the bytes come back when
         // `oci:sweep` collects what those tags reached, after the grace period.
         $this->comment('Speicherplatz wird erst von `oci:sweep` freigegeben, nach Ablauf der Schonfrist.');
+
+        if ($failed > 0) {
+            $this->error(sprintf(
+                '%d Repository/Repositories übersprungen: ungültige eigene Regeln, nichts entfernt.',
+                $failed,
+            ));
+
+            return self::FAILURE;
+        }
 
         return self::SUCCESS;
     }

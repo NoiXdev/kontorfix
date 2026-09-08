@@ -216,6 +216,29 @@ it('spares a tag re-pushed between evaluation and deletion', function () {
         ->and($package->ociTags()->pluck('name')->sort()->values()->all())->toBe(['alt', 'neu']);
 });
 
+it('skips a package with corrupt inline rules, reports it, exits non-zero, and touches nothing else', function () {
+    $policy = RetentionPolicy::factory()->create(['rules' => [['type' => 'keep_last', 'count' => 1]]]);
+    $healthy = retentionTaggedPackage(['neu' => '2026-09-07 00:00:00', 'alt' => '2020-01-01 00:00:00']);
+    $healthy->update(['retention_policy_id' => $policy->id]);
+
+    // Bypasses RetentionRuleSetValidator the same way a hand-edited jsonb value or a
+    // pre-validation row would: the model itself only casts the column, it does not
+    // validate it — see RetentionRule::fromArray()'s own docblock on why validation lives
+    // there instead.
+    $corrupt = retentionTaggedPackage(['bleibt' => '2020-01-01 00:00:00']);
+    $corrupt->update(['retention_rules' => [['type' => 'not_a_real_rule_type']]]);
+
+    $this->artisan('oci:retention')
+        // Named, not just counted: an operator has to know WHICH repository to fix.
+        ->expectsOutputToContain($corrupt->name)
+        ->assertFailed();
+
+    // The healthy package ran to completion — one corrupt package must not abort the batch.
+    expect($healthy->ociTags()->pluck('name')->all())->toBe(['neu'])
+        // The corrupt package: dryRun()/apply() never ran for it, so nothing was deleted.
+        ->and($corrupt->ociTags()->count())->toBe(1);
+});
+
 it('excludes inline-ruled packages from a policy\'s governed set', function () {
     $default = RetentionPolicy::factory()->create();
     SystemSetting::current()->update(['retention_policy_id' => $default->id]);

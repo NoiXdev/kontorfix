@@ -5,6 +5,7 @@ use App\Models\Package;
 use App\Models\RetentionPolicy;
 use App\Models\SystemSetting;
 use App\Services\Oci\Retention\RetentionPolicyResolver;
+use App\Support\Retention\CorruptInlineRetentionRules;
 
 it('resolves nothing on a fresh installation', function () {
     // Both tiers ship unset — a fresh installation deletes nothing until someone says
@@ -61,15 +62,31 @@ it('lets inline rules beat both the named policy and the instance default', func
         ->and($resolved?->rules[0]->count)->toBe(3);
 });
 
-it('throws on corrupt inline rules instead of guessing', function () {
+it('throws on corrupt inline rules instead of guessing, with the package attached', function () {
     // A corrupt jsonb value must not silently read as "keep everything" (the feature stops
-    // working unnoticed) nor as an empty OR (everything unshielded is removed).
+    // working unnoticed) nor as an empty OR (everything unshielded is removed). Wrapped in
+    // CorruptInlineRetentionRules rather than left as the bare ValueError
+    // RetentionRule::fromArray() throws: a caller catching it per package (oci:retention)
+    // or letting it abort a sweep (UntaggedRetention) both need to say WHICH package, and
+    // a bare ValueError carries none of that context.
     $package = Package::factory()->docker()->create([
+        'name' => 'kaputtes-repo',
         'retention_rules' => [['type' => 'delete_everything']],
     ]);
 
     expect(fn () => app(RetentionPolicyResolver::class)->for($package))
-        ->toThrow(ValueError::class);
+        ->toThrow(CorruptInlineRetentionRules::class, $package->name);
+
+    try {
+        app(RetentionPolicyResolver::class)->for($package);
+    } catch (CorruptInlineRetentionRules $e) {
+        // The original ValueError survives as the previous exception — nothing about the
+        // underlying failure (which rule type, from RetentionRuleType::from()) is lost by
+        // adding package context on top of it.
+        expect($e->getPrevious())->toBeInstanceOf(ValueError::class)
+            ->and($e->packageId)->toBe($package->id)
+            ->and($e->packageName)->toBe('kaputtes-repo');
+    }
 });
 
 it('reports the tier for each named source', function () {

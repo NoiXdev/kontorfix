@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\SystemSetting;
 use App\Services\Oci\Sweeper\OciSweeper;
+use App\Support\Retention\CorruptInlineRetentionRules;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Activitylog\Models\Activity;
 
@@ -409,4 +410,20 @@ it("does not let one package's window protect another package's untagged manifes
 
     expect(OciManifest::whereKey($orphan->id)->exists())->toBeFalse()
         ->and(OciManifest::whereKey($held->id)->exists())->toBeTrue();
+});
+
+it('aborts the whole sweep, loudly, when a package has corrupt inline rules', function () {
+    // Deliberately NOT the same direction as `oci:retention`: skipping the corrupt
+    // package here would drop its keep_untagged protection for the WHOLE organization's
+    // sweep (one reachability graph built from every package's window at once), deleting
+    // manifests the corrupt rule was meant to keep. See UntaggedRetention::windowsFor()'s
+    // docblock.
+    $organization = Organization::factory()->create();
+    $corrupt = Package::factory()->docker()->for($organization)->create([
+        'name' => 'corrupt-repo',
+        'retention_rules' => [['type' => 'not_a_real_rule_type']],
+    ]);
+
+    expect(fn () => app(OciSweeper::class)->sweep(1000))
+        ->toThrow(CorruptInlineRetentionRules::class, $corrupt->id);
 });

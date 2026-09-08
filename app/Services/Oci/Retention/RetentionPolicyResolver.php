@@ -5,8 +5,10 @@ namespace App\Services\Oci\Retention;
 use App\Enums\PackageType;
 use App\Models\Package;
 use App\Models\SystemSetting;
+use App\Support\Retention\CorruptInlineRetentionRules;
 use App\Support\Retention\ResolvedRetention;
 use App\Support\Retention\RetentionRule;
+use Throwable;
 
 /**
  * Which rules apply to a package. An ordered list of tiers, first non-null wins:
@@ -26,6 +28,13 @@ use App\Support\Retention\RetentionRule;
  * must not silently read as "keep everything" (the feature stops working unnoticed) nor as
  * an empty OR (everything unshielded is removed). RetentionRule::fromArray() is the one
  * grammar; surfacing its refusal beats guessing on a delete path.
+ *
+ * Only the INLINE tier wraps that refusal with package context (CorruptInlineRetentionRules)
+ * — see that class's docblock for why, and for how `oci:retention` and the keep_untagged
+ * sweeper each act on the throw. The named-policy and instance-default tiers below still
+ * let RetentionRule::fromArray()'s bare exception through: a policy's rules are validated
+ * once at write time by the same admin who authored them, not per-package like the inline
+ * jsonb, so there is no per-package identity to attach were one of those rows ever corrupt.
  */
 class RetentionPolicyResolver
 {
@@ -54,7 +63,7 @@ class RetentionPolicyResolver
     {
         return [
             fn (Package $package): ?ResolvedRetention => $package->retention_rules === null ? null : new ResolvedRetention(
-                array_map(fn (array $raw): RetentionRule => RetentionRule::fromArray($raw), $package->retention_rules),
+                $this->parseInlineRules($package),
                 ResolvedRetention::TIER_INLINE,
                 null,
             ),
@@ -74,5 +83,20 @@ class RetentionPolicyResolver
                 );
             },
         ];
+    }
+
+    /**
+     * The inline tier's parse step, wrapped so a corrupt row throws WITH the package that
+     * carries it — see CorruptInlineRetentionRules's docblock for who catches this and why.
+     *
+     * @return list<RetentionRule>
+     */
+    private function parseInlineRules(Package $package): array
+    {
+        try {
+            return array_map(fn (array $raw): RetentionRule => RetentionRule::fromArray($raw), $package->retention_rules);
+        } catch (Throwable $e) {
+            throw new CorruptInlineRetentionRules((string) $package->id, $package->name, $e);
+        }
     }
 }
