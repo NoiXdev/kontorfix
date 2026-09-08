@@ -24,4 +24,10 @@ Schedule::command('model:prune', ['--model' => [NotificationEventRecord::class]]
 Schedule::command('queue:prune-failed --hours=168')->daily();
 // Keeps the proxied upstream artifact cache under its byte budget over time.
 Schedule::command('upstream-cache:prune')->daily()->withoutOverlapping();
+// Retention runs before the sweep: it creates the garbage the sweeper collects, though the
+// grace period means the sweeper will not touch that garbage for another day whatever the
+// order. Explicit times rather than daily(), so neither lands on midnight alongside
+// everything already scheduled there. The command runs synchronously, which is what makes
+// withoutOverlapping() meaningful for it (see the Schedule::job() caveat above).
+Schedule::command('oci:retention')->dailyAt('03:10')->withoutOverlapping();
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
