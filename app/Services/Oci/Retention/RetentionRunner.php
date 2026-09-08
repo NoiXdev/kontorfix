@@ -48,6 +48,10 @@ class RetentionRunner
 
     public function apply(Package $package, ?User $causer = null): ?RetentionReport
     {
+        // Captured BEFORE the evaluation reads a single tag: the delete below is guarded to
+        // rows whose pushed_at is not newer than this instant.
+        $evaluatedAt = CarbonImmutable::now();
+
         $report = $this->dryRun($package);
 
         if ($report === null || $report->removed() === []) {
@@ -56,9 +60,26 @@ class RetentionRunner
             return $report;
         }
 
-        $names = $report->removedTagNames();
+        // Deleted by name AND unchanged pushed_at, never by name alone. Between the
+        // evaluation's read and this delete, a real `docker push` can re-point one of the
+        // doomed tags — ManifestStore::put() stamps pushed_at on every push — and a
+        // name-only delete would then remove the tag the client just pushed: worse than a
+        // failed push, because the client believes it succeeded. The guard makes such a tag
+        // fall out of the delete; it is evaluated afresh on the next run, as a new push
+        // should be. Selected first (id + name) so the audit entry below records what was
+        // ACTUALLY deleted, not what the evaluation intended.
+        $deleted = $package->ociTags()
+            ->whereIn('name', $report->removedTagNames())
+            ->where('pushed_at', '<=', $evaluatedAt)
+            ->get(['id', 'name']);
 
-        $package->ociTags()->whereIn('name', $names)->delete();
+        if ($deleted->isEmpty()) {
+            return $report;
+        }
+
+        $package->ociTags()->whereIn('id', $deleted->pluck('id'))->delete();
+
+        $names = $deleted->pluck('name')->all();
 
         activity('retention')
             ->performedOn($package)

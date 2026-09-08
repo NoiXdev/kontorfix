@@ -1,5 +1,6 @@
 <?php
 
+use GuzzleHttp\Client;
 use Tests\E2E\Support\E2eStack;
 
 /**
@@ -539,4 +540,72 @@ it('pushes and pulls through the path address rather than the registered domain'
         'pathmode',
         $context['read_token'],
     ))->toBe($matches[1][0]);
+});
+
+it('sweeps an abandoned upload session but never a layer a pull still needs', function () {
+    $context = E2eStack::context();
+
+    // A REAL abandoned upload: POST opens the session, nothing ever finishes it. Basic
+    // auth, the same form docker login itself hands the registry.
+    $client = new Client(['http_errors' => false, 'timeout' => 30]);
+    $response = $client->post(
+        E2eStack::hostRoot()."/v2/{$context['docker_repository']}/blobs/uploads/",
+        ['auth' => ['x', $context['publish_token']]],
+    );
+    expect($response->getStatusCode())->toBe(202);
+
+    // Age the whole registry past a 1-hour grace period, and expire the session. Done
+    // through the app container because that is where the database lives; the CONTENT is
+    // untouched — only timestamps move, which is exactly what a day of real time would do.
+    $prepare = <<<'PHP'
+        php artisan tinker --execute="
+            App\Models\SystemSetting::current()->update(['oci_blob_grace_hours' => 1]);
+            App\Models\OciBlob::query()->update(['created_at' => now()->subHours(2)]);
+            App\Models\OciManifest::query()->update(['created_at' => now()->subHours(2)]);
+            App\Models\OciBlobUpload::query()->update(['expires_at' => now()->subMinute()]);
+            echo App\Models\OciBlobUpload::count();
+        " 2>/dev/null | tail -n 1
+        PHP;
+
+    $before = E2eStack::exec('app', $prepare, 60);
+    expect((int) trim($before->getOutput()))->toBeGreaterThanOrEqual(1);
+
+    // The sweep, against the real stack: real files on the real artifacts disk.
+    $sweep = E2eStack::exec('app', 'php artisan oci:sweep', 120);
+    expect($sweep->isSuccessful())->toBeTrue($sweep->getErrorOutput());
+
+    // The session is gone — row and file both. The file half matters: the row alone
+    // disappearing would leave exactly the disk filler the sweep exists to stop.
+    $check = <<<'PHP'
+        php artisan tinker --execute="
+            echo App\Models\OciBlobUpload::count();
+            echo ':';
+            echo collect(Illuminate\Support\Facades\Storage::disk('artifacts')->files('docker/uploads'))->count();
+        " 2>/dev/null | tail -n 1
+        PHP;
+
+    $after = E2eStack::exec('app', $check, 60);
+    expect(trim($after->getOutput()))->toBe('0:0');
+
+    // THE gate: everything a tag still reaches survived a sweep whose grace period the
+    // aging above genuinely put it past. A hand-built fixture cannot rule out the sweeper
+    // deleting something reachable — only a real pull after a real sweep can. A clean
+    // local store, same reasoning as the plain pull test.
+    $ref = dockerRef('v1');
+    $config = dockerConfigDir('sweep-pull');
+
+    $script = <<<SH
+        set -e
+        mkdir -p {$config}
+        echo '{$context['read_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
+        docker rmi -f {$ref} >/dev/null 2>&1 || true
+        DOCKER_CONFIG={$config} docker pull {$ref}
+        SH;
+
+    $process = E2eStack::exec('client-docker', $script, 300);
+
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput())
+        // Bytes really fetched, not resolved against a local leftover — the same
+        // "Pull complete" reasoning the plain pull test above records at length.
+        ->and($process->getOutput())->toMatch('/Pull complete|Download complete/');
 });

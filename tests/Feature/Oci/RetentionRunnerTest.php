@@ -6,6 +6,8 @@ use App\Models\Package;
 use App\Models\RetentionPolicy;
 use App\Models\SystemSetting;
 use App\Services\Oci\Retention\RetentionRunner;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\Models\Activity;
 
 /**
@@ -172,4 +174,44 @@ it('scopes the command to one repository with --package', function () {
 
     expect($mine->ociTags()->count())->toBe(1)
         ->and($other->ociTags()->count())->toBe(2);
+});
+
+it('spares a tag re-pushed between evaluation and deletion', function () {
+    // The race a real `docker push` can produce: apply() evaluates, and before its DELETE
+    // lands, a push re-points one of the doomed tags. Deleting by name alone would remove
+    // the tag the client just pushed — worse than a failed push, because the client
+    // believes it succeeded. Same query-listener technique as AutoCreateRepositoryTest's
+    // plant: one thread, and the competitor fires from the last read before the write.
+    $this->travelTo('2026-09-08 12:00:00');
+
+    $policy = RetentionPolicy::factory()->create(['rules' => [['type' => 'keep_matching', 'pattern' => 'neu']]]);
+    $package = retentionTaggedPackage(['neu' => '2026-09-07 00:00:00', 'alt' => '2020-01-01 00:00:00']);
+    $package->update(['retention_policy_id' => $policy->id]);
+
+    $raced = false;
+
+    DB::listen(function (QueryExecuted $query) use (&$raced, $package): void {
+        // The tag SELECT dryRun() runs — the last read before apply()'s delete.
+        $isTheGap = str_starts_with($query->sql, 'select') && str_contains($query->sql, 'oci_tags');
+
+        if ($raced || ! $isTheGap) {
+            return;
+        }
+
+        // Set BEFORE the write, so the plant's own UPDATE cannot re-enter.
+        $raced = true;
+
+        // The re-push: ManifestStore::put() would stamp pushed_at = now(); a strictly later
+        // instant stands in for "after the evaluation read".
+        DB::table('oci_tags')
+            ->where('package_id', $package->id)
+            ->where('name', 'alt')
+            ->update(['pushed_at' => now()->addSecond()]);
+    });
+
+    app(RetentionRunner::class)->apply($package);
+
+    expect($raced)->toBeTrue()
+        // The re-pushed tag survived; without the pushed_at guard on the delete it is gone.
+        ->and($package->ociTags()->pluck('name')->sort()->values()->all())->toBe(['alt', 'neu']);
 });
