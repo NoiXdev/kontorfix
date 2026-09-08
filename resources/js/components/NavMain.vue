@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import {
     SidebarGroup,
     SidebarGroupLabel,
@@ -71,8 +72,16 @@ function setOpen(value: boolean): void {
 // When the whole sidebar is collapsed to icons, the section labels disappear and there is
 // no trigger to click — so every section must stay expanded there, otherwise its nav
 // icons would vanish too. Collapsing only applies to the full-width sidebar.
-const { state } = useSidebar();
+const { state, isMobile } = useSidebar();
 const sectionOpen = computed(() => state.value === 'collapsed' || open.value);
+
+// `SidebarMenuSub` hides itself in the icon rail (`group-data-[collapsible=icon]:hidden`),
+// so an item's children — e.g. "System" → E-Mail/Storage — would otherwise become
+// unreachable there rather than merely losing their label like a plain item does. Standard
+// shadcn fix: swap the inline sub-menu for a DropdownMenu, opened from the parent's own
+// icon button, that lists the parent page plus its children. Mobile never renders the icon
+// rail (the sidebar is a full-width sheet there), so it keeps the inline sub-menu too.
+const collapsedToIcons = computed(() => state.value === 'collapsed' && !isMobile.value);
 </script>
 
 <template>
@@ -87,22 +96,53 @@ const sectionOpen = computed(() => state.value === 'collapsed' || open.value);
             <CollapsibleContent>
                 <SidebarMenu>
                     <SidebarMenuItem v-for="item in items" :key="item.title">
-                        <SidebarMenuButton as-child :is-active="isNavItemActive(page.url, item)">
-                            <Link :href="item.href">
-                                <component :is="item.icon" />
-                                <span>{{ item.title }}</span>
-                            </Link>
-                        </SidebarMenuButton>
-                        <SidebarMenuSub v-if="item.children?.length">
-                            <SidebarMenuSubItem v-for="child in item.children" :key="child.title">
-                                <SidebarMenuSubButton as-child :is-active="child.href === page.url">
+                        <!-- Icon rail, item has children: the inline sub-menu below is hidden by
+                             `SidebarMenuSub` itself, so its children need another way to stay
+                             reachable — a DropdownMenu opened from the parent's own icon button,
+                             listing the parent page plus every child. -->
+                        <DropdownMenu v-if="item.children?.length && collapsedToIcons">
+                            <DropdownMenuTrigger as-child>
+                                <SidebarMenuButton :tooltip="item.title" :is-active="isNavItemActive(page.url, item)">
+                                    <component :is="item.icon" />
+                                    <span>{{ item.title }}</span>
+                                </SidebarMenuButton>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent side="right" align="start" :side-offset="4">
+                                <DropdownMenuItem as-child>
+                                    <Link :href="item.href">
+                                        <component :is="item.icon" />
+                                        <span>{{ item.title }}</span>
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-for="child in item.children" :key="child.title" as-child>
                                     <Link :href="child.href">
                                         <component :is="child.icon" />
                                         <span>{{ child.title }}</span>
                                     </Link>
-                                </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                        </SidebarMenuSub>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <!-- Expanded sidebar (or mobile, which never shows the icon rail): the
+                             sub-menu unchanged from before. -->
+                        <template v-else>
+                            <SidebarMenuButton as-child :is-active="isNavItemActive(page.url, item)">
+                                <Link :href="item.href">
+                                    <component :is="item.icon" />
+                                    <span>{{ item.title }}</span>
+                                </Link>
+                            </SidebarMenuButton>
+                            <SidebarMenuSub v-if="item.children?.length">
+                                <SidebarMenuSubItem v-for="child in item.children" :key="child.title">
+                                    <SidebarMenuSubButton as-child :is-active="child.href === page.url">
+                                        <Link :href="child.href">
+                                            <component :is="child.icon" />
+                                            <span>{{ child.title }}</span>
+                                        </Link>
+                                    </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                            </SidebarMenuSub>
+                        </template>
                     </SidebarMenuItem>
                 </SidebarMenu>
             </CollapsibleContent>
