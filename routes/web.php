@@ -120,9 +120,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // The inline-rules editor's live preview: the UNSAVED rules tried against this package
     // itself, same org-scoped boundary as the two routes above. JSON, not Inertia, for the
     // same reason the policy form's preview is: a page visit would discard the unsaved
-    // rules it exists to try out.
+    // rules it exists to try out. Throttled like `packages.probe` above: the debounced
+    // editor can still fire one request per keystroke burst, and the budget is per account
+    // so one tenant cannot spend another's.
     Route::post('packages/{package}/retention/preview', [Admin\PackageController::class, 'previewRetention'])
-        ->name('packages.retention.preview');
+        ->middleware('throttle:10,1')->name('packages.retention.preview');
 });
 
 // Instance-wide administration: only the global super-admin. These surfaces have no

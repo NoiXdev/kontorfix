@@ -260,6 +260,18 @@ it('refuses retention assignment on a non-Docker package', function () {
     expect($composer->fresh()->retention_policy_id)->toBeNull();
 });
 
+it('refuses the inline preview on a non-Docker package', function () {
+    $composer = Package::factory()->create();
+
+    $this->actingAs(superAdmin())
+        ->postJson(route('admin.packages.retention.preview', $composer), [
+            'retention_rules' => [['type' => 'keep_last', 'count' => 1]],
+        ])
+        ->assertStatus(409);
+
+    expect($composer->fresh()->retention_rules)->toBeNull();
+});
+
 it('applies retention for one repository from its card, and logs the causer', function () {
     $policy = RetentionPolicy::factory()->create(['name' => 'Knapp', 'rules' => [['type' => 'keep_last', 'count' => 1]]]);
     $package = retentionCardPackage();
