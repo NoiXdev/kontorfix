@@ -14,6 +14,7 @@ use App\Models\GitCredential;
 use App\Models\Group;
 use App\Models\OciManifest;
 use App\Models\OciTag;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
@@ -144,9 +145,7 @@ class PackageController extends Controller
             // hides the selector for it rather than offering a rejected choice.
             'sourceModes' => $this->sourceModesPayload(),
             // Managed git credentials the user may assign (never exposes the token).
-            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
-                ->orderBy('name')->get(['id', 'name', 'provider'])
-                ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
+            'gitCredentials' => $this->gitCredentialOptions(),
         ]);
     }
 
@@ -260,8 +259,9 @@ class PackageController extends Controller
             // than re-derived in Vue so the front end never restates the gate's rule (the
             // instance setting it reads is not itself exposed to the client).
             'canSharePackages' => (bool) $request->user()?->can('share-packages'),
-            // Managed credentials assignable to this package (never exposes the token).
-            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
+            // Managed credentials assignable to this package: own, global, or explicitly
+            // shared to the package's owning organization (never exposes the token).
+            'gitCredentials' => GitCredential::usableBy($package->organization)
                 ->orderBy('name')->get(['id', 'name', 'provider'])
                 ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
@@ -782,8 +782,10 @@ class PackageController extends Controller
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);
             // Refuse loudly rather than silently probing without the credential: a
-            // reference to a foreign organization's secret is never a legitimate request.
-            $this->assertAdministersOrg($credential->organization_id);
+            // reference to a credential no organization in the active scope may use is
+            // never a legitimate request. Own, global and shared all qualify — the same
+            // set the create page's dropdown offers.
+            $this->assertCredentialUsableInScope($credential);
             // A stored token is bound to one host and may not be probed against another.
             $this->assertCredentialPermits($credential, $data['repository_url']);
 
@@ -830,11 +832,12 @@ class PackageController extends Controller
             (string) $request->validated('name'),
         );
 
-        // A referenced credential must belong to an organization the user administers,
+        // A referenced credential must be usable by the package's owning organization —
+        // its own, global, or explicitly shared to it (see GitCredential::isUsableBy()) —
         // and may only be paired with a repository on the host it is bound to.
         if ($request->filled('git_credential_id')) {
             $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
-            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialUsableBy($credential, $request->ownerOrganizationId());
             $this->assertCredentialPermits($credential, $request->validated('repository_url'));
         }
 
@@ -919,7 +922,7 @@ class PackageController extends Controller
 
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);
-            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialUsableBy($credential, $package->organization_id);
             $this->assertCredentialPermits($credential, $url);
         }
 
@@ -1091,6 +1094,59 @@ class PackageController extends Controller
                 'repository_url' => $credential->hostMismatchMessage(),
             ]);
         }
+    }
+
+    /**
+     * Aborts 403 unless $organizationId may USE the credential — its own, global, or
+     * explicitly shared to it (see GitCredential::isUsableBy()). Replaces a stricter "must
+     * administer the credential's own organization" check: with shared/global credentials
+     * the two organizations are allowed to differ, e.g. the operator's own credential
+     * assigned to a customer's package. A plain foreign credential (neither global nor
+     * shared) still refuses, exactly as it did before.
+     */
+    private function assertCredentialUsableBy(GitCredential $credential, string $organizationId): void
+    {
+        abort_unless($credential->isUsableBy(Organization::findOrFail($organizationId)), 403);
+    }
+
+    /**
+     * The probe endpoint has no package (and so no owning organization) to check against
+     * yet — it is reached from the create page before any registry has been submitted.
+     * Refuses unless the credential is usable by at least one organization in the active
+     * console scope, the same set the create page's dropdown offers via
+     * gitCredentialOptions() below.
+     */
+    private function assertCredentialUsableInScope(GitCredential $credential): void
+    {
+        $scopedOrgIds = $this->scopedOrgIds();
+
+        $usable = $credential->is_global
+            || in_array($credential->organization_id, $scopedOrgIds, true)
+            || $credential->sharedOrganizations()->whereIn('organizations.id', $scopedOrgIds)->exists();
+
+        abort_unless($usable, 403);
+    }
+
+    /**
+     * Credentials assignable from the create page's dropdown: own (within the active
+     * scope) plus global/shared ones. Widened to every organization in scope, not just
+     * one, because the package's eventual owner is not known until the registry selection
+     * is submitted — mirrors GitCredential::scopeUsableBy() applied to each scoped
+     * organization in turn rather than to one already-known package.
+     *
+     * @return array<int, array{id: string, name: string, provider: string}>
+     */
+    private function gitCredentialOptions(): array
+    {
+        $scopedOrgIds = $this->scopedOrgIds();
+
+        return GitCredential::query()
+            ->where(fn ($q) => $q->whereIn('organization_id', $scopedOrgIds)
+                ->orWhere('is_global', true)
+                ->orWhereHas('sharedOrganizations', fn ($s) => $s->whereIn('organizations.id', $scopedOrgIds)))
+            ->orderBy('name')->get(['id', 'name', 'provider'])
+            ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value])
+            ->all();
     }
 
     /**

@@ -213,6 +213,26 @@ class SyncPackage implements ShouldQueue
             return; // Configuration error — retrying makes no sense
         }
 
+        // A managed credential can be un-shared (or un-globalled) at any time, entirely
+        // independently of this package: an operator revoking access must end the grant
+        // for the very next sync, not only for the next time someone opens the assignment
+        // dropdown. Checked here, before anything reaches out to the repository, so the
+        // refusal is deterministic and names the real reason — Package::gitAuth() also
+        // refuses the same credential (defense in depth for any other caller), but silently,
+        // by withholding the token and letting the git operation itself fail; that would
+        // still end in Failed/sync_error for a private repository, just with a git-shaped
+        // message instead of this one, and would say nothing at all for a repository that
+        // happens to be reachable without authentication.
+        $credential = $this->package->gitCredential;
+        if ($credential !== null && ! $credential->isUsableBy($this->package->organization)) {
+            $this->markFailed(
+                'Der zugewiesene Git-Token ist für diese Organisation nicht mehr freigegeben — im Tab „Quelle“ '
+                .'einen anderen Token hinterlegen oder die Freigabe des bisherigen Tokens wiederherstellen lassen.'
+            );
+
+            return; // Configuration error — retrying makes no sense until re-shared or replaced
+        }
+
         $this->package->update(['sync_status' => SyncStatus::Syncing]);
 
         try {

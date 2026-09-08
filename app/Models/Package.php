@@ -293,6 +293,18 @@ class Package extends Model
     {
         $credential = $this->gitCredential;
         if ($credential !== null) {
+            // Checked at every sync, not only at assignment time: un-sharing a credential
+            // (dropping is_global, or removing this organization from sharedOrganizations)
+            // must end the grant for the very next sync, not merely for the next time
+            // someone opens the assignment dropdown. SyncPackage::handle() already refuses
+            // this earlier, with a clear German message and without reaching this method at
+            // all — this is the same "last line of defence" gitAuth() already keeps for a
+            // host mismatch below, for any caller that reaches this method without going
+            // through that preflight.
+            if (! $credential->isUsableBy($this->organization)) {
+                return ['token' => null, 'provider' => $credential->provider, 'username' => $credential->username];
+            }
+
             // Last line of defence: a credential is bound to one host, so a repository URL
             // that no longer matches gets no token rather than leaking it to that host.
             if (! $credential->permits($this->repository_url)) {

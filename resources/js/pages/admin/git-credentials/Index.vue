@@ -20,11 +20,15 @@ interface CredentialRow {
     username: string | null;
     organization: string | null;
     organization_id: string | null;
-    packages_count: number;
+    packages_count: number | null;
     last_used_at: string | null;
     // Raw ISO timestamp, sort-only — `last_used_at` is a relative string ("vor 3 Tagen")
     // that Date.parse cannot read.
     last_used_at_iso: string | null;
+    // False for a credential owned elsewhere but usable here (global, or explicitly
+    // shared) — listed read-only, with no test/edit/delete action.
+    is_own: boolean;
+    badge: 'global' | 'shared' | null;
 }
 
 const props = defineProps<{
@@ -42,6 +46,7 @@ const columns: ColumnDef<CredentialRow>[] = [
     { key: 'name', label: 'Name' },
     { key: 'provider', label: 'Provider' },
     { key: 'organization', label: 'Organisation' },
+    { key: 'badge', label: 'Freigabe', sortable: false },
     { key: 'packages_count', label: 'Pakete', sortAs: 'number' },
     { key: 'last_used_at', label: 'Zuletzt genutzt', sortAs: 'date', sortValue: (row) => row.last_used_at_iso },
     { key: 'actions', label: 'Aktionen', sortable: false },
@@ -169,10 +174,19 @@ async function runTest(id: string) {
                                 }}</span>
                             </td>
                             <td class="px-4 py-3">{{ cred.organization ?? '—' }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ cred.packages_count }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ cred.last_used_at ?? 'nie' }}</td>
                             <td class="px-4 py-3">
-                                <div class="flex items-center gap-1">
+                                <span v-if="cred.badge === 'global'" class="rounded bg-verdigris/10 px-1.5 py-0.5 text-xs text-verdigris"
+                                    >Global</span
+                                >
+                                <span v-else-if="cred.badge === 'shared'" class="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                                    >Freigegeben</span
+                                >
+                                <span v-else class="text-muted-foreground">—</span>
+                            </td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ cred.packages_count ?? '—' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">{{ cred.is_own ? (cred.last_used_at ?? 'nie') : '—' }}</td>
+                            <td class="px-4 py-3">
+                                <div v-if="cred.is_own" class="flex items-center gap-1">
                                     <Button variant="ghost" size="sm" @click="openTest(cred.id)"><KeyRound class="size-4" /> Testen</Button>
                                     <Button as-child variant="ghost" size="icon" aria-label="Bearbeiten">
                                         <Link :href="route('admin.git-credentials.edit', cred.id)"><Pencil class="size-4" /></Link>
@@ -181,10 +195,11 @@ async function runTest(id: string) {
                                         <Trash2 class="size-4 text-destructive" />
                                     </Button>
                                 </div>
+                                <span v-else class="text-xs text-muted-foreground">Nur lesend — verwaltet von {{ cred.organization }}</span>
                             </td>
                         </tr>
                         <tr v-if="testOpenFor === cred.id" class="border-b border-sidebar-border/70 bg-muted/30 dark:border-sidebar-border">
-                            <td colspan="6" class="px-4 py-3">
+                            <td colspan="7" class="px-4 py-3">
                                 <div class="flex flex-wrap items-end gap-3">
                                     <div class="grid flex-1 gap-1.5">
                                         <Label :for="`test-url-${cred.id}`">Repository-URL zum Testen (HTTPS)</Label>

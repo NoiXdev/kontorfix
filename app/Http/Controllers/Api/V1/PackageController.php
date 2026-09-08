@@ -12,6 +12,7 @@ use App\Http\Resources\Api\PackageResource;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Package\SharedAssignment;
 use Illuminate\Http\JsonResponse;
@@ -65,12 +66,15 @@ class PackageController extends Controller
             (string) $request->validated('name'),
         );
 
-        // A git credential is an organization-owned secret: referencing a foreign one
-        // would make the sync send that organization's decrypted token to the submitted
-        // repository host. Mirrors the check on the admin surface.
+        // A git credential must be usable by the package's owning organization — its own,
+        // global, or explicitly shared to it (see GitCredential::isUsableBy()). Mirrors
+        // the check on the admin surface, including the resolved owner rather than the
+        // caller's own organization: a shared/global credential legitimately belongs to a
+        // different organization (typically the operator's) than the one being written to.
         if ($request->filled('git_credential_id')) {
             $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
-            $this->assertCanWriteOrg($credential->organization_id);
+            $ownerOrganization = Organization::findOrFail($request->ownerOrganizationId());
+            abort_unless($credential->isUsableBy($ownerOrganization), 403);
 
             // …and it is bound to one host, so it may not be paired with a repository
             // anywhere else (see GitCredential::permits).

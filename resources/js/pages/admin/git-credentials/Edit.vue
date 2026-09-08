@@ -10,6 +10,7 @@ import { gitCredentialFormKey, type GitCredentialFormData } from './gitCredentia
 interface OrganizationOption {
     id: string;
     name: string;
+    is_operator: boolean;
 }
 
 interface ProviderOption {
@@ -25,11 +26,14 @@ interface CredentialRecord {
     host: string | null;
     username: string | null;
     organization_id: string | null;
+    is_global: boolean;
+    shared_organization_ids: string[];
 }
 
 const props = defineProps<{
     credential: CredentialRecord;
     organizations: OrganizationOption[];
+    shareableOrganizations: { id: string; name: string }[];
     providers: ProviderOption[];
 }>();
 
@@ -47,6 +51,8 @@ const form = useForm<GitCredentialFormData>({
     // Never pre-filled — the stored token itself never leaves the server (see
     // GitCredentialController::edit()). Blank keeps it; a value replaces it.
     token: '',
+    is_global: props.credential.is_global,
+    shared_organization_ids: props.credential.shared_organization_ids,
 });
 
 provide(gitCredentialFormKey, form);
@@ -65,7 +71,12 @@ function submit() {
                 <h1 class="text-xl font-semibold">Git-Token bearbeiten</h1>
 
                 <form class="space-y-4" @submit.prevent="submit">
-                    <Form :organizations="props.organizations" :providers="props.providers" mode="edit" />
+                    <Form
+                        :organizations="props.organizations"
+                        :shareable-organizations="props.shareableOrganizations"
+                        :providers="props.providers"
+                        mode="edit"
+                    />
 
                     <div class="flex justify-end gap-2">
                         <Button as-child variant="outline">
