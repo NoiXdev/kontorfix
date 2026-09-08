@@ -20,6 +20,7 @@ import {
     Gauge,
     GitBranch,
     Globe,
+    History,
     KeyRound,
     LayoutGrid,
     Mail as MailIcon,
@@ -74,6 +75,9 @@ const navSections = computed<NavSection[]>(() => {
                 { title: 'Gruppen', href: '/admin/groups', icon: Boxes },
                 { title: 'Upstreams', href: '/admin/upstreams', icon: CloudDownload },
                 { title: 'Domains', href: '/admin/domains', icon: Globe },
+                // Retention policies are instance-wide operator config (super route group);
+                // an org admin sees a package's resolved policy on the package page instead.
+                ...(isSuper.value ? [{ title: 'Retention', href: '/admin/retention-policies', icon: History }] : []),
             ],
         },
         {

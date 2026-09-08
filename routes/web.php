@@ -142,6 +142,23 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
     Route::put('system', [Admin\SystemController::class, 'update'])->name('system.update');
 
+    // Retention policies are instance-wide like the system settings beside them: they are
+    // operator-defined rule sets with no per-organization dimension, and assigning one must
+    // not be a lever a customer-org admin can pull to opt a package out of the instance
+    // default — the default would then be a suggestion, not a default. The extra routes:
+    // dry-run is the report over every package the SAVED policy governs, preview evaluates
+    // the UNSAVED rules currently in the editor form, apply is the manual run behind the
+    // confirmation dialog. `preview` is declared before the resource for the same
+    // literal-vs-parameter reason webhooks/create is above.
+    Route::post('retention-policies/preview', [Admin\RetentionPolicyController::class, 'preview'])
+        ->name('retention-policies.preview');
+    Route::resource('retention-policies', Admin\RetentionPolicyController::class)
+        ->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
+    Route::get('retention-policies/{retention_policy}/dry-run', [Admin\RetentionPolicyController::class, 'dryRun'])
+        ->name('retention-policies.dry-run');
+    Route::post('retention-policies/{retention_policy}/apply', [Admin\RetentionPolicyController::class, 'apply'])
+        ->name('retention-policies.apply');
+
     // Global audit log (Spatie activitylog). Scoped views are reached via query params.
     Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');
 

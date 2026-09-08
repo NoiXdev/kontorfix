@@ -2,6 +2,7 @@
 import InputError from '@/components/InputError.vue';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Switch } from '@/components/ui/switch';
@@ -19,8 +20,13 @@ const props = defineProps<{
         // The instance-wide ceiling for OCI_AUTO_CREATE_LABEL. An organization may only
         // narrow within it, never switch on what this switches off.
         oci_auto_create_repositories: boolean;
+        // The instance-default retention policy (null = keep everything for packages
+        // without a policy of their own) and the sweeper's grace period in hours.
+        retention_policy_id: string | null;
+        oci_blob_grace_hours: number;
     };
     registryTypes: string[];
+    retentionPolicies: { id: string; name: string }[];
     // Both values with their German labels, from App\Enums\SharedPackageRole::options().
     // The two cases are stated once, in PHP, because the gate reads the same enum.
     sharedPackageRoles: { value: string; label: string }[];
@@ -33,14 +39,29 @@ const form = useForm({
     enabled_registry_types: [...props.settings.enabled_registry_types],
     shared_package_role: props.settings.shared_package_role,
     oci_auto_create_repositories: props.settings.oci_auto_create_repositories,
+    retention_policy_id: props.settings.retention_policy_id,
+    oci_blob_grace_hours: props.settings.oci_blob_grace_hours as number | string,
 });
+
+// '' as the "keine Vorgabe" sentinel: SearchableSelect models strings, the column is
+// nullable — mapped back to null on save().
+const retentionOptions = [
+    { value: '', label: 'Keine Vorgabe — alles behalten' },
+    ...props.retentionPolicies.map((p) => ({ value: p.id, label: p.name })),
+];
 
 function toggleType(type: string, on: boolean) {
     form.enabled_registry_types = on ? [...new Set([...form.enabled_registry_types, type])] : form.enabled_registry_types.filter((t) => t !== type);
 }
 
 function save() {
-    form.put(route('admin.system.update'), { preserveScroll: true });
+    form.transform((data) => ({
+        ...data,
+        retention_policy_id: data.retention_policy_id || null,
+        oci_blob_grace_hours: Number(data.oci_blob_grace_hours),
+    })).put(route('admin.system.update'), {
+        preserveScroll: true,
+    });
 }
 </script>
 
@@ -107,6 +128,30 @@ function save() {
                         </span>
                     </label>
                     <InputError :message="form.errors.oci_auto_create_repositories" />
+                </div>
+
+                <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                    <h2 class="text-sm font-medium">Aufbewahrung &amp; Speicherbereinigung</h2>
+                    <p class="mb-3 text-xs text-muted-foreground">
+                        Die Vorgabe gilt für jedes Image-Repository ohne eigene Richtlinie. Ohne Vorgabe wird nichts entfernt.
+                    </p>
+                    <Label for="retention_policy_id" class="mb-1.5 block">Instanz-Vorgabe</Label>
+                    <SearchableSelect
+                        id="retention_policy_id"
+                        :model-value="form.retention_policy_id ?? ''"
+                        class="max-w-md"
+                        :options="retentionOptions"
+                        @update:model-value="(v) => (form.retention_policy_id = v || null)"
+                    />
+                    <InputError :message="form.errors.retention_policy_id" />
+                    <Label for="oci_blob_grace_hours" class="mt-4 mb-1.5 block">Schonfrist (Stunden)</Label>
+                    <Input id="oci_blob_grace_hours" v-model.number="form.oci_blob_grace_hours" type="number" min="1" class="max-w-32" />
+                    <p class="mt-1 text-xs text-muted-foreground">
+                        Die Speicherbereinigung entfernt unreferenzierte Daten erst, wenn sie älter als diese Frist sind. Ein Push lädt erst alle
+                        Schichten hoch und schreibt das Manifest zuletzt — die Frist muss deshalb den längsten realistischen Push überdauern, sonst
+                        räumt die Bereinigung einem laufenden Push die Schichten weg.
+                    </p>
+                    <InputError :message="form.errors.oci_blob_grace_hours" />
                 </div>
 
                 <div class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">

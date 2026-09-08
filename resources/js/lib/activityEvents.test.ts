@@ -13,6 +13,11 @@ describe('eventLabel', () => {
         expect(eventLabel('restored', 'egal')).toBe('restored');
     });
 
+    it('translates the two OCI cleanup events', () => {
+        expect(eventLabel('retention_applied', 'egal')).toBe('Retention angewendet');
+        expect(eventLabel('storage_swept', 'egal')).toBe('Speicher bereinigt');
+    });
+
     it('falls back to the description only when there is no event', () => {
         expect(eventLabel(null, 'Paket entfernt')).toBe('Paket entfernt');
         expect(eventLabel(undefined, 'Paket entfernt')).toBe('Paket entfernt');
@@ -37,6 +42,13 @@ describe('eventClass', () => {
         expect(eventClass('restored')).toBe(neutral);
         expect(eventClass(null)).toBe(neutral);
         expect(eventClass(undefined)).toBe(neutral);
+    });
+
+    it('marks a retention run as destructive and the sweep as neutral', () => {
+        // A retention run deletes tags an operator may be looking for; the sweep removes
+        // only what nothing references. The colours carry that difference.
+        expect(eventClass('retention_applied')).toBe(eventClass('deleted'));
+        expect(eventClass('storage_swept')).toBe(eventClass('updated'));
     });
 });
 

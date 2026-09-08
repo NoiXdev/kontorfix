@@ -13,11 +13,18 @@ const EVENT_LABELS: Record<string, string> = {
     created: 'Erstellt',
     updated: 'Aktualisiert',
     deleted: 'Gelöscht',
+    // The two events the OCI cleanup layers write by hand (RetentionRunner, OciSweeper) —
+    // the first custom events in this log; everything above is Spatie's own vocabulary.
+    retention_applied: 'Retention angewendet',
+    storage_swept: 'Speicher bereinigt',
 };
 
 const EVENT_CLASSES: Record<string, string> = {
     created: 'border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
     deleted: 'border-destructive/30 bg-destructive/15 text-destructive',
+    // Destructive like `deleted`, because it is one: a retention run deletes tags. The
+    // sweep stays on the neutral marker — it removes only what nothing references.
+    retention_applied: 'border-destructive/30 bg-destructive/15 text-destructive',
 };
 
 const DEFAULT_EVENT_CLASS = 'border-copper/30 bg-copper/15 text-copper-hi';
