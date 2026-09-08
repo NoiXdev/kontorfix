@@ -54,10 +54,21 @@ final class ManifestStore
             );
 
             if (! $this->isDigest($reference)) {
-                OciTag::updateOrCreate(
+                $tag = OciTag::updateOrCreate(
                     ['package_id' => $package->id, 'name' => $reference],
                     ['manifest_id' => $manifest->id],
                 );
+
+                // Stamped in a SECOND write with timestamps suppressed, not folded into
+                // the updateOrCreate above — the two-query cost is the point, not an
+                // oversight. Folded in, the model would be dirty on every push and
+                // Eloquent would bump `updated_at` too; OciTag::scopeInPullOrder() orders
+                // by `updated_at` on the documented premise that it means "re-pointed at a
+                // different manifest", and the portal's claim that the printed
+                // `docker pull` names the tag table's first row rests on that. Retention's
+                // time-window rules read `pushed_at` because "keep the last N pushed" is a
+                // question about pushes, including ones that changed nothing.
+                OciTag::withoutTimestamps(fn () => $tag->update(['pushed_at' => now()]));
             }
 
             return $manifest;
