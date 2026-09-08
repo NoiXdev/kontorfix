@@ -15,15 +15,24 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Package\SharedAssignment;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
 
+#[ApiGroup('Pakete')]
 class PackageController extends Controller
 {
     use ClampsPageSize, ScopesApiToUser;
 
+    /**
+     * Pakete der eigenen Registries auflisten.
+     *
+     * Ergebnis ist paginiert und auf die Organisationen des aufrufenden Kontos beschränkt
+     * (eigene und Mitgliedschaften); ein Super-Admin sieht alle. Filterbar über `q` (Namenssuche)
+     * und `type` (`composer`/`npm`).
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = trim((string) $request->query('q', ''));
@@ -39,6 +48,7 @@ class PackageController extends Controller
         return PackageResource::collection($packages);
     }
 
+    /** Paketdetails inklusive Versionshistorie abrufen. */
     public function show(Package $package): PackageResource
     {
         $this->assertCanReadPackage($package);
@@ -46,6 +56,12 @@ class PackageController extends Controller
         return new PackageResource($package->load('versions'));
     }
 
+    /**
+     * Neues Paket anlegen und einer oder mehreren Registries zuweisen.
+     *
+     * Nur für Organisations-Admins/-Maintainer. Ein git-basiertes Paket mit hinterlegter
+     * `repository_url` löst sofort eine erste Synchronisierung im Hintergrund aus.
+     */
     public function store(StorePackageRequest $request, SharedAssignment $sharedAssignment): JsonResponse
     {
         // A package may only be attached to registries the caller administers.
@@ -113,6 +129,12 @@ class PackageController extends Controller
         return (new PackageResource($package))->response()->setStatusCode(201);
     }
 
+    /**
+     * Erneute Synchronisierung eines git-basierten Pakets anstoßen.
+     *
+     * Nur für git-basierte Pakete — für Publish-basierte Pakete (npm, Python) antwortet der
+     * Endpunkt mit 409, da diese nicht aus einem Repository synchronisiert werden.
+     */
     public function resync(Package $package): PackageResource
     {
         $this->assertCanWritePackage($package);
@@ -132,10 +154,12 @@ class PackageController extends Controller
     }
 
     /**
-     * Marks or unmarks a package as abandoned. Mirrors Admin\PackageController::abandonment
-     * (same request, same "don't reset abandoned_at on a re-mark" rule) — kept as its own
-     * action here too, alongside resync()/destroy(), rather than folded into a general
-     * update() this controller does not have.
+     * Paket als aufgegeben markieren oder die Markierung aufheben.
+     *
+     * Mirrors Admin\PackageController::abandonment (same request, same "don't reset
+     * abandoned_at on a re-mark" rule) — kept as its own action here too, alongside
+     * resync()/destroy(), rather than folded into a general update() this controller does
+     * not have.
      */
     public function abandonment(UpdatePackageAbandonmentRequest $request, Package $package): PackageResource
     {
@@ -152,6 +176,7 @@ class PackageController extends Controller
         return new PackageResource($package);
     }
 
+    /** Paket löschen. */
     public function destroy(Package $package): JsonResponse
     {
         $this->assertCanWritePackage($package);

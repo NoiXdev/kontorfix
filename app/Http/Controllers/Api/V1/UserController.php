@@ -11,16 +11,23 @@ use App\Http\Requests\Admin\UpdateUserRequest;
 use App\Http\Resources\Api\UserResource;
 use App\Models\Organization;
 use App\Models\User;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
+#[Group('Benutzer')]
 class UserController extends Controller
 {
     use ClampsPageSize;
 
+    /**
+     * Benutzer- und Roboter-Accounts auflisten (instanzweit, nur Super-Admin).
+     *
+     * Filterbar über `account_type` (`human`/`robot`).
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
         $type = $request->query('account_type');
@@ -33,6 +40,7 @@ class UserController extends Controller
         );
     }
 
+    /** Neuen Benutzer- oder Roboter-Account anlegen. */
     public function store(StoreUserRequest $request): JsonResponse
     {
         $validated = $request->validated();
@@ -52,6 +60,11 @@ class UserController extends Controller
         return (new UserResource($user))->response()->setStatusCode(201);
     }
 
+    /**
+     * Benutzer aktualisieren.
+     *
+     * Ein Herabstufen des letzten verbliebenen Super-Admins wird abgelehnt (422).
+     */
     public function update(UpdateUserRequest $request, User $user): UserResource
     {
         $validated = $request->validated();
@@ -68,6 +81,11 @@ class UserController extends Controller
         return new UserResource($user);
     }
 
+    /**
+     * Benutzer löschen.
+     *
+     * Das eigene Konto sowie der letzte verbliebene Super-Admin können nicht gelöscht werden (422).
+     */
     public function destroy(Request $request, User $user): JsonResponse
     {
         if ($user->is($request->user())) {

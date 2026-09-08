@@ -11,14 +11,22 @@ use App\Http\Resources\Api\RegistryTokenResource;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\RegistryToken;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[ApiGroup('Registries')]
 class RegistryTokenController extends Controller
 {
     use ClampsPageSize, ScopesApiToUser;
 
+    /**
+     * Registry-Zugriffstoken auflisten.
+     *
+     * Beschränkt auf die vom aufrufenden Konto administrierten Organisationen; ein
+     * Super-Admin sieht alle. Bereits widerrufene Token werden nicht aufgeführt.
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
         // Registry tokens are organization credentials — only administered orgs are listed.
@@ -32,6 +40,11 @@ class RegistryTokenController extends Controller
         );
     }
 
+    /**
+     * Neues Registry-Zugriffstoken ausstellen (für Composer/npm-Pull oder -Publish).
+     *
+     * Der Klartext-Token wird nur in dieser Antwort zurückgegeben und ist danach nicht mehr abrufbar.
+     */
     public function store(StoreTokenRequest $request): JsonResponse
     {
         // Only ever for an organization the caller administers (group is validated by the
@@ -51,6 +64,7 @@ class RegistryTokenController extends Controller
         return (new RegistryTokenResource($token))->response()->setStatusCode(201);
     }
 
+    /** Registry-Zugriffstoken widerrufen. */
     public function destroy(RegistryToken $registryToken): JsonResponse
     {
         $this->assertCanWriteOrg($registryToken->organization_id);

@@ -8,10 +8,20 @@ use App\Http\Requests\Api\StoreApiKeyRequest;
 use App\Http\Resources\Api\ApiKeyResource;
 use App\Models\ApiKey;
 use App\Models\User;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 
+#[Group('Benutzer')]
 class RobotApiKeyController extends Controller
 {
+    /**
+     * API-Schlüssel für einen Roboter-Account ausstellen.
+     *
+     * Nur für Roboter-Accounts (422 sonst) — verhindert, dass über diesen Endpunkt ein
+     * Schlüssel mit unbegrenzter Lebensdauer für ein menschliches Konto ausgestellt und so
+     * dessen 2FA/Passkey umgangen wird. Der Klartextschlüssel wird nur in dieser Antwort
+     * zurückgegeben.
+     */
     public function store(StoreApiKeyRequest $request, User $user): JsonResponse
     {
         // Only robot accounts may obtain an API key via this endpoint — otherwise

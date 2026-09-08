@@ -6,16 +6,20 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreWebhookRequest;
 use App\Http\Resources\Api\WebhookResource;
 use App\Models\Webhook;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[Group('Webhooks')]
 class WebhookController extends Controller
 {
+    /** Webhooks auflisten (instanzweit, nur Super-Admin). */
     public function index(): AnonymousResourceCollection
     {
         return WebhookResource::collection(Webhook::latest()->get());
     }
 
+    /** Neuen Webhook anlegen. */
     public function store(StoreWebhookRequest $request): JsonResponse
     {
         $data = $request->validated();
@@ -34,6 +38,7 @@ class WebhookController extends Controller
         return (new WebhookResource($webhook))->response()->setStatusCode(201);
     }
 
+    /** Webhook löschen. */
     public function destroy(Webhook $webhook): JsonResponse
     {
         $webhook->delete();

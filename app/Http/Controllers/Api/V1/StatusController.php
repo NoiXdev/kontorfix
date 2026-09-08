@@ -8,18 +8,22 @@ use App\Http\Controllers\Controller;
 use App\Models\Package;
 use App\Services\Health\HealthService;
 use App\Support\CredentialUrl;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
+#[Group('Status')]
 class StatusController extends Controller
 {
     use ScopesApiToUser;
 
     /**
-     * Instance health at a glance (super-admin only): are the core dependencies up, how
-     * many jobs failed, and the instance-wide package sync totals. Built for uptime
-     * monitors — `healthy` is the single boolean to alert on.
+     * Systemstatus der gesamten Instanz abrufen (nur Super-Admin).
+     *
+     * Instance health at a glance: are the core dependencies up, how many jobs failed, and
+     * the instance-wide package sync totals. Built for uptime monitors — `healthy` is the
+     * single boolean to alert on.
      */
     public function show(HealthService $health): JsonResponse
     {
@@ -35,6 +39,8 @@ class StatusController extends Controller
     }
 
     /**
+     * Sync-Status der eigenen Pakete abrufen.
+     *
      * Package sync health for the caller's own organizations — "which of my packages
      * failed?" at a glance. Scoped, so any member can call it for their registries;
      * a super-admin sees every package.

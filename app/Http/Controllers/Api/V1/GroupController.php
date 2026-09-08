@@ -11,14 +11,17 @@ use App\Http\Resources\Api\GroupResource;
 use App\Models\Group;
 use App\Services\Package\SharedAssignment;
 use App\Services\Slugs\SlugClaimGuard;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[ApiGroup('Registries')]
 class GroupController extends Controller
 {
     use ClampsPageSize, ScopesApiToUser;
 
+    /** Eigene Registries auflisten. */
     public function index(Request $request): AnonymousResourceCollection
     {
         return GroupResource::collection(
@@ -26,6 +29,7 @@ class GroupController extends Controller
         );
     }
 
+    /** Registry-Details abrufen. */
     public function show(Group $group): GroupResource
     {
         $this->assertCanReadGroup($group);
@@ -33,6 +37,12 @@ class GroupController extends Controller
         return new GroupResource($group);
     }
 
+    /**
+     * Neue Registry anlegen.
+     *
+     * Nur für Organisations-Admins/-Maintainer. Kann optional bereits Pakete zuweisen
+     * (`package_ids`), sofern die Organisation diese verwalten darf.
+     */
     public function store(StoreGroupRequest $request, SharedAssignment $sharedAssignment, SlugClaimGuard $slugs): JsonResponse
     {
         $organizationId = $this->resolveWriteOrg($request->validated('organization_id'));
@@ -73,6 +83,7 @@ class GroupController extends Controller
         return (new GroupResource($group))->response()->setStatusCode(201);
     }
 
+    /** Registry aktualisieren. */
     public function update(UpdateGroupRequest $request, Group $group, SlugClaimGuard $slugs): GroupResource
     {
         $this->assertCanWriteGroup($group);
@@ -101,6 +112,7 @@ class GroupController extends Controller
         return new GroupResource($group);
     }
 
+    /** Registry löschen. */
     public function destroy(Group $group): JsonResponse
     {
         $this->assertCanWriteGroup($group);
