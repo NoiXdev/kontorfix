@@ -41,7 +41,8 @@ class RetentionPolicyRequest extends FormRequest
      */
     private function validRuleSet(string $attribute, mixed $value, Closure $fail): void
     {
-        $hasKeep = false;
+        $hasEffect = false;
+        $untaggedRules = 0;
 
         foreach (is_array($value) ? $value : [] as $raw) {
             try {
@@ -52,11 +53,24 @@ class RetentionPolicyRequest extends FormRequest
                 return;
             }
 
-            $hasKeep = $hasKeep || ! $rule->type->isShield();
+            // A keep-rule or an untagged rule both DO something; a shield alone does not.
+            // The refusal is about inert-but-protective-looking policies, so keep_untagged
+            // counts as effect even though it never keeps a tag.
+            $hasEffect = $hasEffect || ! $rule->type->isShield();
+
+            if (! $rule->type->affectsTags()) {
+                $untaggedRules++;
+            }
         }
 
-        if (! $hasKeep) {
+        if (! $hasEffect) {
             $fail('Mindestens eine Behalte-Regel ist nötig — „Nie löschen“ allein entfernt nichts.');
+        }
+
+        // Two windows would mean a silent max() (or min(), depending on the reader) —
+        // refused instead of decided quietly.
+        if ($untaggedRules > 1) {
+            $fail('Höchstens eine Regel „Ungetaggte behalten“ pro Richtlinie.');
         }
     }
 

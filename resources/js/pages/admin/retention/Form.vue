@@ -23,6 +23,7 @@ interface RuleTypeOption {
     value: string;
     label: string;
     shield: boolean;
+    untagged: boolean;
 }
 
 interface PreviewTag {
@@ -46,18 +47,23 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const shieldTypes = new Set(props.ruleTypes.filter((t) => t.shield).map((t) => t.value));
+const untaggedTypes = new Set(props.ruleTypes.filter((t) => t.untagged).map((t) => t.value));
 
-// Two local lists, one submitted array: the editor renders keep-rules and shields as the
-// two mechanically different things they are (plate 4), and merges them on save.
-const keepRules = ref<RuleInput[]>((props.policy?.rules ?? []).filter((r) => !shieldTypes.has(r.type)));
+// Three local groups, one submitted array: the editor renders keep-rules, shields and the
+// untagged window as the mechanically different things they are, and merges them on save.
+const keepRules = ref<RuleInput[]>((props.policy?.rules ?? []).filter((r) => !shieldTypes.has(r.type) && !untaggedTypes.has(r.type)));
 const shields = ref<RuleInput[]>((props.policy?.rules ?? []).filter((r) => shieldTypes.has(r.type)));
+// At most one per set (the server refuses two), so this is a value, not a list.
+const untaggedDays = ref<number | string>(
+    (props.policy?.rules ?? []).find((r) => untaggedTypes.has(r.type))?.days ?? '',
+);
 
 const form = useForm({
     name: props.policy?.name ?? '',
     rules: [] as RuleInput[],
 });
 
-const keepTypeOptions = props.ruleTypes.filter((t) => !t.shield).map((t) => ({ value: t.value, label: t.label }));
+const keepTypeOptions = props.ruleTypes.filter((t) => !t.shield && !t.untagged).map((t) => ({ value: t.value, label: t.label }));
 
 function addKeepRule() {
     keepRules.value.push({ type: 'keep_last', count: 10 });
@@ -72,17 +78,28 @@ function normalise(rule: RuleInput): RuleInput {
     if (rule.type === 'keep_last') {
         return { type: rule.type, count: Number(rule.count) };
     }
-    if (rule.type === 'keep_newer_than_days') {
+    if (rule.type === 'keep_newer_than_days' || rule.type === 'keep_untagged') {
         return { type: rule.type, days: Number(rule.days) };
     }
 
     return { type: rule.type, pattern: rule.pattern ?? '' };
 }
 
-const canSave = computed(() => keepRules.value.length > 0);
+/** The merged rule set as the server stores it — save and preview submit the same array. */
+function mergedRules(): RuleInput[] {
+    return [
+        ...keepRules.value.map(normalise),
+        ...shields.value.map(normalise),
+        ...(untaggedDays.value !== '' ? [normalise({ type: 'keep_untagged', days: untaggedDays.value })] : []),
+    ];
+}
+
+// A keep-rule OR the untagged window: both do something real; shields alone do not — the
+// same reading the server's validation enforces.
+const canSave = computed(() => keepRules.value.length > 0 || untaggedDays.value !== '');
 
 function save() {
-    form.rules = [...keepRules.value.map(normalise), ...shields.value.map(normalise)];
+    form.rules = mergedRules();
 
     if (props.policy) {
         form.put(route('admin.retention-policies.update', props.policy.id), { preserveScroll: true });
@@ -127,7 +144,7 @@ async function runPreview() {
             credentials: 'same-origin',
             body: JSON.stringify({
                 package_id: previewPackageId.value,
-                rules: [...keepRules.value.map(normalise), ...shields.value.map(normalise)],
+                rules: mergedRules(),
             }),
         });
 
@@ -226,11 +243,41 @@ async function runPreview() {
                     </div>
                 </div>
 
+                <!-- Untagged images: decides MANIFESTS, not tags — a per-digest-pushed image
+                     with no tag survives this many days instead of only the grace period. -->
+                <div class="space-y-3 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border">
+                    <div>
+                        <h2 class="font-medium">Ungetaggte Images</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">
+                            Nur per Digest gepushte Images ohne Tag werden normalerweise nach der Schonfrist entfernt. Mit dieser Regel bleiben sie
+                            die angegebene Zahl von Tagen erhalten. Sie betrifft keine Tags und taucht deshalb nie in der Begründungsspalte auf.
+                        </p>
+                    </div>
+                    <div class="flex items-end gap-3">
+                        <div class="grid w-32 gap-1">
+                            <Label for="untagged-days" class="text-xs">Tage</Label>
+                            <Input id="untagged-days" v-model="untaggedDays" type="number" min="1" placeholder="—" />
+                        </div>
+                        <Button
+                            v-if="untaggedDays !== ''"
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Regel entfernen"
+                            @click="untaggedDays = ''"
+                        >
+                            <Trash2 class="size-4 text-destructive" />
+                        </Button>
+                    </div>
+                </div>
+
                 <InputError :message="form.errors.rules" />
 
                 <div class="flex items-center gap-3">
                     <Button type="submit" :disabled="form.processing || !canSave">Speichern</Button>
-                    <p v-if="!canSave" class="text-sm text-muted-foreground">Mindestens eine Behalte-Regel ist nötig.</p>
+                    <p v-if="!canSave" class="text-sm text-muted-foreground">
+                        Mindestens eine Behalte-Regel oder die Ungetaggt-Regel ist nötig.
+                    </p>
                 </div>
             </form>
 

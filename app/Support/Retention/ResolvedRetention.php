@@ -39,6 +39,21 @@ final readonly class ResolvedRetention
     }
 
     /**
+     * The untagged-manifest window in days, or null when no rule sets one. Validation
+     * refuses two keep_untagged rules per set, so "the first" is "the only".
+     */
+    public function untaggedKeepDays(): ?int
+    {
+        foreach ($this->rules as $rule) {
+            if (! $rule->type->affectsTags()) {
+                return $rule->days;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * The rules in words — RetentionRule::describe(), the one wording the operator's dry
      * run and the customer's portal share.
      *

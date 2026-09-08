@@ -241,3 +241,33 @@ it('refuses a grace period under one hour, and keeps the stored value', function
 
     expect(SystemSetting::current()->oci_blob_grace_hours)->toBe(24);
 });
+
+it('accepts keep_untagged as the only effective rule, but refuses two of them', function () {
+    // The shield-only refusal is about inert-but-protective-looking policies; a
+    // keep_untagged rule DOES something (extends untagged manifests' lifetime), so it
+    // counts as effect even though it never keeps a tag.
+    $this->actingAs(superAdmin())
+        ->post(route('admin.retention-policies.store'), [
+            'name' => 'Nur Ungetaggt',
+            'rules' => [['type' => 'keep_untagged', 'days' => 14]],
+        ])
+        ->assertRedirect(route('admin.retention-policies.index'));
+
+    // toEqual, not toBe: Postgres jsonb normalises key order (shorter keys first, then
+    // byte order), so the stored array reads ['days', 'type'] — same pairs, different walk.
+    expect(RetentionPolicy::sole()->rules)->toEqual([['type' => 'keep_untagged', 'days' => 14]]);
+
+    // Two windows would mean a silent max() — refused instead of decided quietly.
+    $this->actingAs(superAdmin())
+        ->from(route('admin.retention-policies.create'))
+        ->post(route('admin.retention-policies.store'), [
+            'name' => 'Doppelt',
+            'rules' => [
+                ['type' => 'keep_untagged', 'days' => 14],
+                ['type' => 'keep_untagged', 'days' => 30],
+            ],
+        ])
+        ->assertSessionHasErrors('rules');
+
+    expect(RetentionPolicy::count())->toBe(1);
+});

@@ -154,14 +154,24 @@ class RetentionPolicyController extends Controller
         $data = $request->validate([
             'package_id' => ['required', 'uuid', 'exists:packages,id'],
             'rules' => ['required', 'array', 'min:1', function (string $attribute, mixed $value, Closure $fail): void {
+                $untaggedRules = 0;
+
                 foreach (is_array($value) ? $value : [] as $raw) {
                     try {
-                        RetentionRule::fromArray(is_array($raw) ? $raw : []);
+                        $rule = RetentionRule::fromArray(is_array($raw) ? $raw : []);
                     } catch (ValueError|InvalidArgumentException) {
                         $fail('Eine Regel ist unvollständig oder unbekannt.');
 
                         return;
                     }
+
+                    if (! $rule->type->affectsTags()) {
+                        $untaggedRules++;
+                    }
+                }
+
+                if ($untaggedRules > 1) {
+                    $fail('Höchstens eine Regel „Ungetaggte behalten“ pro Richtlinie.');
                 }
             }],
         ]);

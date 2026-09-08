@@ -38,7 +38,8 @@ final readonly class RetentionRule
 
         return match ($type) {
             RetentionRuleType::KeepLast => new self($type, self::positiveInt($raw, 'count'), null, null),
-            RetentionRuleType::KeepNewerThanDays => new self($type, null, self::positiveInt($raw, 'days'), null),
+            RetentionRuleType::KeepNewerThanDays,
+            RetentionRuleType::KeepUntagged => new self($type, null, self::positiveInt($raw, 'days'), null),
             RetentionRuleType::KeepMatching,
             RetentionRuleType::NeverDelete => new self($type, null, null, self::pattern($raw)),
         };
@@ -110,6 +111,11 @@ final readonly class RetentionRule
             RetentionRuleType::KeepNewerThanDays => CarbonImmutable::parse($tag->pushed_at)
                 ->greaterThanOrEqualTo($now->subDays((int) $this->days)),
             RetentionRuleType::KeepMatching, RetentionRuleType::NeverDelete => $this->matches($tag->name),
+            // Unreachable by construction: the evaluator filters on affectsTags() before
+            // ever asking. False rather than an exception, so a future caller that forgets
+            // the filter keeps FEWER tags instead of all of them — the failure direction
+            // that shows up in a dry run instead of hiding.
+            RetentionRuleType::KeepUntagged => false,
         };
     }
 
@@ -124,6 +130,7 @@ final readonly class RetentionRule
             RetentionRuleType::KeepNewerThanDays => "Jünger als {$this->days} Tage",
             RetentionRuleType::KeepMatching => "Passend zu Muster „{$this->pattern}“",
             RetentionRuleType::NeverDelete => "Nie löschen: „{$this->pattern}“",
+            RetentionRuleType::KeepUntagged => "Ungetaggte behalten: {$this->days} Tage",
         };
     }
 }

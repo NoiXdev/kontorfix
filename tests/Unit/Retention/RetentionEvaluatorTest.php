@@ -17,7 +17,7 @@ function retentionRule(string $type, int|string $value): RetentionRule
 {
     return RetentionRule::fromArray(match ($type) {
         'keep_last' => ['type' => $type, 'count' => $value],
-        'keep_newer_than_days' => ['type' => $type, 'days' => $value],
+        'keep_newer_than_days', 'keep_untagged' => ['type' => $type, 'days' => $value],
         default => ['type' => $type, 'pattern' => $value],
     });
 }
@@ -252,4 +252,45 @@ it('round-trips a rule through toArray', function () {
     $raw = ['type' => 'keep_last', 'count' => 10];
 
     expect(RetentionRule::fromArray($raw)->toArray())->toBe($raw);
+});
+
+it('builds and describes a keep_untagged rule, one per set semantics live elsewhere', function () {
+    $rule = RetentionRule::fromArray(['type' => 'keep_untagged', 'days' => 14]);
+
+    expect($rule->days)->toBe(14)
+        ->and($rule->type->affectsTags())->toBeFalse()
+        ->and($rule->describe())->toBe('Ungetaggte behalten: 14 Tage')
+        ->and($rule->toArray())->toBe(['type' => 'keep_untagged', 'days' => 14]);
+
+    expect(fn () => RetentionRule::fromArray(['type' => 'keep_untagged', 'days' => 0]))
+        ->toThrow(InvalidArgumentException::class);
+});
+
+it('never lets keep_untagged decide a tag', function () {
+    // The rule decides MANIFESTS, not tags. As a tag keep-rule it would keep every tag
+    // (or none, depending on the reading) — either way it must not participate in the OR
+    // and must never appear in a reason.
+    $tags = new Collection([
+        retentionTag('alt', '2020-01-01 00:00:00'),
+        retentionTag('neu', '2026-09-07 00:00:00'),
+    ]);
+
+    $onlyUntagged = $this->evaluator->decide(
+        [retentionRule('keep_untagged', 14)],
+        $tags,
+        $this->now,
+    );
+
+    // No tag keep-rule in the set -> removes nothing (the shield-only invariant extends).
+    expect(retentionNames($onlyUntagged, false))->toBe([]);
+
+    $mixed = $this->evaluator->decide(
+        [retentionRule('keep_newer_than_days', 30), retentionRule('keep_untagged', 14)],
+        $tags,
+        $this->now,
+    );
+
+    expect(retentionNames($mixed, false))->toBe(['alt'])
+        // The kept tag's reason names the age rule, never the untagged rule.
+        ->and(collect($mixed)->firstWhere('keep', true)->reasons)->toBe(['Jünger als 30 Tage']);
 });

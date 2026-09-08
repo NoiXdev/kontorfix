@@ -51,7 +51,12 @@ final class RetentionEvaluator
     public function decide(array $rules, Collection $tags, CarbonImmutable $now): array
     {
         $shields = array_values(array_filter($rules, fn (RetentionRule $rule): bool => $rule->type->isShield()));
-        $keeps = array_values(array_filter($rules, fn (RetentionRule $rule): bool => ! $rule->type->isShield()));
+        $keeps = array_values(array_filter(
+            $rules,
+            // Not merely "not a shield": keep_untagged decides manifests, not tags, and as
+            // a member of this OR it would keep every tag or none.
+            fn (RetentionRule $rule): bool => ! $rule->type->isShield() && $rule->type->affectsTags(),
+        ));
 
         $decisions = [];
         $candidates = [];
