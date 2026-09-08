@@ -36,7 +36,18 @@ class OciTag extends Model
         'package_id',
         'name',
         'manifest_id',
+        'pushed_at',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'pushed_at' => 'datetime',
+        ];
+    }
 
     /**
      * The order the portal reads this repository's tags in: the first row is the tag a
@@ -65,6 +76,14 @@ class OciTag extends Model
      * `name` descending last, so two tags sharing a timestamp to the second — the ordinary
      * outcome of one `docker push` of a multi-tag build — still order deterministically rather
      * than by insertion order.
+     *
+     * STILL `updated_at` AND NOT `pushed_at`, now that both columns exist. They answer
+     * different questions and this one wants the older answer: this ordering exists so the
+     * printed `docker pull …:<tag>` names the tag table's first row, and re-pushing a tag at
+     * an unchanged digest should not reshuffle that table. `pushed_at` moves on every push
+     * (ManifestStore::put() stamps it out of band precisely so this clause keeps meaning
+     * what its paragraphs above say), and retention reads it because "keep the last N
+     * pushed" is a question about pushes. Do not "unify" the two.
      *
      * @param  Builder<self>  $query
      * @return Builder<self>

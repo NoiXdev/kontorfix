@@ -110,6 +110,8 @@ class Package extends Model
         'abandoned_at',
         'replacement_package',
         'abandonment_reason',
+        'retention_policy_id',
+        'auto_created_at',
     ];
 
     /**
@@ -130,6 +132,9 @@ class Package extends Model
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
             'abandoned_at' => 'datetime',
+            // When a `docker push` created this row on its own, and null for every other
+            // origin. Provenance, not a second created_at — see the migration.
+            'auto_created_at' => 'datetime',
             'shared' => 'bool',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',
@@ -213,6 +218,35 @@ class Package extends Model
     public function ociTags(): HasMany
     {
         return $this->hasMany(OciTag::class);
+    }
+
+    /**
+     * Blob upload sessions currently open against this repository. Only ever populated for
+     * PackageType::Docker.
+     *
+     * Read by the storage sweeper, which must not delete an empty push-created repository
+     * while a session a client may still resume is attached to it: the package delete
+     * cascades to `oci_blob_uploads`, so it would take the session with it.
+     *
+     * @return HasMany<OciBlobUpload, $this>
+     */
+    public function ociBlobUploads(): HasMany
+    {
+        return $this->hasMany(OciBlobUpload::class);
+    }
+
+    /**
+     * The retention policy this package selects, if any.
+     *
+     * Null is the ordinary state and means "ask the next tier", not "keep everything" —
+     * App\Services\Oci\Retention\RetentionPolicyResolver owns that chain. Nothing should
+     * read this relation to decide what applies to a package; read the resolver.
+     *
+     * @return BelongsTo<RetentionPolicy, $this>
+     */
+    public function retentionPolicy(): BelongsTo
+    {
+        return $this->belongsTo(RetentionPolicy::class);
     }
 
     /**

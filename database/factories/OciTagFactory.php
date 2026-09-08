@@ -30,6 +30,10 @@ class OciTagFactory extends Factory
             'package_id' => $manifest->package_id,
             'name' => fake()->word(),
             'manifest_id' => $manifest->id,
+            // "Just pushed", so a retention fixture that says nothing about age is inside
+            // every window rather than at whatever instant the database default fired. A
+            // test about ageing overrides it explicitly.
+            'pushed_at' => now(),
         ];
     }
 }
