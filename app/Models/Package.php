@@ -111,6 +111,7 @@ class Package extends Model
         'replacement_package',
         'abandonment_reason',
         'retention_policy_id',
+        'retention_rules',
         'auto_created_at',
     ];
 
@@ -135,6 +136,9 @@ class Package extends Model
             // When a `docker push` created this row on its own, and null for every other
             // origin. Provenance, not a second created_at — see the migration.
             'auto_created_at' => 'datetime',
+            // Anonymous inline retention rules — tier 0 of the resolution chain. Null is
+            // the ordinary state and means "ask the next tier".
+            'retention_rules' => 'array',
             'shared' => 'bool',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',

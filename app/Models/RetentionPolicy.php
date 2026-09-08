@@ -19,13 +19,25 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * @property string $name
  * @property array<int, array<string, mixed>> $rules
+ * @property bool $is_global
  */
 class RetentionPolicy extends Model
 {
     /** @use HasFactory<RetentionPolicyFactory> */
     use HasFactory, HasUuids;
 
-    protected $fillable = ['name', 'rules'];
+    protected $fillable = ['name', 'rules', 'is_global'];
+
+    /**
+     * Stated here as well as in the migration's column default, for the reason
+     * SystemSetting gives: a freshly constructed model must carry a truthful flag rather
+     * than null until it has been read back from the database.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'is_global' => false,
+    ];
 
     /**
      * @return array<string, string>
@@ -34,6 +46,9 @@ class RetentionPolicy extends Model
     {
         return [
             'rules' => 'array',
+            // Visible to and selectable by every organization, editable only by the
+            // operator — a publication flag, not shared authorship.
+            'is_global' => 'bool',
         ];
     }
 
