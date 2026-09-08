@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
+use App\Enums\RetentionRuleType;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
@@ -31,6 +32,7 @@ use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
 use App\Support\RepositoryUrlRules;
+use App\Support\Retention\RetentionRuleSetValidator;
 use App\Support\VersionOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -478,12 +480,13 @@ class PackageController extends Controller
     }
 
     /**
-     * The retention card's payload: which policy resolves for this repository, from which
-     * tier, what the next run would remove — and, for a super-admin only, the selector.
+     * The retention card's payload: which policy (or inline rule set) resolves for this
+     * repository, from which tier, what the next run would remove — and, for whoever
+     * administers the owning organization, the selector and the inline-rule editor.
      *
-     * `policies` is empty for an organization admin on purpose, not merely unused: which
-     * rule sets exist on the instance is operator configuration, and the read-only card
-     * must not double as a catalogue of it.
+     * `policies` carries only PUBLISHED (is_global) policies for a non-super caller: which
+     * other rule sets exist on the instance is operator configuration, and the card must not
+     * double as a catalogue of it. A super-admin sees every policy.
      *
      * @return array<string, mixed>
      */
@@ -493,7 +496,12 @@ class PackageController extends Controller
         $report = $runner->dryRun($package);
         $resolution = $report?->resolution;
 
-        $canAssign = (bool) $request->user()?->isSuperAdmin();
+        $user = $request->user();
+        $isSuper = (bool) $user?->isSuperAdmin();
+        // The owning organization's admin may set the package tier — the operator decision
+        // that made the instance default a default. administers() short-circuits true for
+        // a super-admin, so one check covers both.
+        $canAssign = (bool) $user?->administers((string) $package->organization_id);
 
         return [
             'policy' => $resolution?->policy === null ? null : ['id' => $resolution->policy->id, 'name' => $resolution->policy->name],
@@ -504,36 +512,67 @@ class PackageController extends Controller
             'can_assign' => $canAssign,
             'selected_policy_id' => $package->retention_policy_id,
             'inline_rules' => $package->retention_rules,
+            'rule_types' => RetentionRuleType::options(),
+            // A non-super caller sees only PUBLISHED policies — which other rule sets exist
+            // on the instance is operator configuration.
             'policies' => $canAssign
-                ? RetentionPolicy::query()->orderBy('name')->get(['id', 'name'])->map(
-                    fn (RetentionPolicy $policy): array => ['id' => (string) $policy->id, 'name' => $policy->name],
-                )->all()
+                ? RetentionPolicy::query()
+                    ->when(! $isSuper, fn ($query) => $query->where('is_global', true))
+                    ->orderBy('name')
+                    ->get(['id', 'name'])
+                    ->map(fn (RetentionPolicy $policy): array => ['id' => (string) $policy->id, 'name' => $policy->name])
+                    ->all()
                 : [],
         ];
     }
 
     /**
-     * Re-points a repository at a policy, or back to inheriting the instance default
-     * (null). Registered in the SUPER route group — an organization admin choosing a laxer
-     * policy would make the instance default a suggestion, opt-out-able by anyone who can
-     * administer a package.
+     * A repository's retention: the named policy it selects, and/or its anonymous inline
+     * rules. In the ORG-SCOPED group since the operator decision that the package tier
+     * wins unconditionally — the owning organization's admin sets it, and the instance
+     * default became a default rather than a mandate. Two guards remain:
+     *
+     *   - assertCanTouchPackage(): only the owning organization (or a super-admin).
+     *   - A non-super caller may select only PUBLISHED (is_global) policies. Unpublished
+     *     ones are operator-internal, and answering 403 for them would confirm which ids
+     *     exist — so an unpublished id gets the same validation error a nonexistent one
+     *     gets, and nothing changes either way.
      */
     public function updateRetention(Request $request, Package $package): RedirectResponse
     {
+        $this->assertCanTouchPackage($package);
+
         // 409, not validation: the route resolved a real package, but retention operates
         // on tags and only Docker repositories have any — the same reason the resolver
         // answers null for every other type.
         abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
 
+        $policyExists = Rule::exists('retention_policies', 'id');
+
+        if (! (bool) $request->user()?->isSuperAdmin()) {
+            $policyExists->where('is_global', true);
+        }
+
         $data = $request->validate([
-            'retention_policy_id' => ['nullable', 'uuid', 'exists:retention_policies,id'],
+            'retention_policy_id' => ['sometimes', 'nullable', 'uuid', $policyExists],
+            'retention_rules' => ['sometimes', 'nullable', 'array', 'min:1', RetentionRuleSetValidator::rule()],
         ]);
 
-        $package->update(['retention_policy_id' => $data['retention_policy_id'] ?? null]);
+        $update = [];
+        if (array_key_exists('retention_policy_id', $data)) {
+            $update['retention_policy_id'] = $data['retention_policy_id'];
+        }
+        if (array_key_exists('retention_rules', $data)) {
+            $update['retention_rules'] = $data['retention_rules'] === null
+                ? null
+                : RetentionRuleSetValidator::normalise($data['retention_rules']);
+        }
 
-        return back()->with('success', $data['retention_policy_id'] ?? null
-            ? 'Richtlinie zugewiesen.'
-            : 'Richtlinie entfernt — es gilt wieder die Instanz-Vorgabe.');
+        abort_if($update === [], 422, 'Nichts zu ändern.');
+
+        $package->update($update);
+
+        return back()->with('success', 'Aufbewahrung aktualisiert.');
     }
 
     /**
@@ -543,6 +582,10 @@ class PackageController extends Controller
      */
     public function applyRetention(Request $request, Package $package, RetentionRunner $runner): RedirectResponse
     {
+        // Whoever may edit the package's retention may run it — the same boundary as
+        // updateRetention(), for the same reason.
+        $this->assertCanTouchPackage($package);
+
         abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
 
         $report = $runner->apply($package, $request->user());

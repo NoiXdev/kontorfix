@@ -103,6 +103,20 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Switch the active organization scope (sidebar). Clamped server-side to the orgs the
     // user administers, so it can filter/redirect context but never widen access.
     Route::post('scope', Admin\ScopeController::class)->name('scope.set');
+
+    // Which retention rules govern a repository is the owning organization's decision —
+    // the operator decision that made the instance default a default rather than a
+    // mandate. The controller scopes to the caller's own packages, and a non-super caller
+    // may select only PUBLISHED (global) policies; unpublished ones stay the operator's.
+    // The policy listing is here for the same reason: org admins see the published
+    // policies read-only, while creating, editing, publishing and deleting stay in the
+    // super group below.
+    Route::get('retention-policies', [Admin\RetentionPolicyController::class, 'index'])
+        ->name('retention-policies.index');
+    Route::put('packages/{package}/retention', [Admin\PackageController::class, 'updateRetention'])
+        ->name('packages.retention.update');
+    Route::post('packages/{package}/retention/apply', [Admin\PackageController::class, 'applyRetention'])
+        ->name('packages.retention.apply');
 });
 
 // Instance-wide administration: only the global super-admin. These surfaces have no
@@ -152,8 +166,10 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // literal-vs-parameter reason webhooks/create is above.
     Route::post('retention-policies/preview', [Admin\RetentionPolicyController::class, 'preview'])
         ->name('retention-policies.preview');
+    // index is NOT here: org admins may see the published (global) policies read-only, so
+    // the listing lives in the operator group below; every mutating route stays super.
     Route::resource('retention-policies', Admin\RetentionPolicyController::class)
-        ->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
+        ->only(['create', 'store', 'edit', 'update', 'destroy']);
     Route::get('retention-policies/{retention_policy}/dry-run', [Admin\RetentionPolicyController::class, 'dryRun'])
         ->name('retention-policies.dry-run');
     Route::post('retention-policies/{retention_policy}/apply', [Admin\RetentionPolicyController::class, 'apply'])
@@ -164,16 +180,6 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
     // this page would mean anything.
     Route::get('oci/sweeper', [Admin\OciSweeperController::class, 'show'])->name('oci.sweeper');
     Route::post('oci/sweeper', [Admin\OciSweeperController::class, 'run'])->name('oci.sweeper.run');
-
-    // Which policy applies to a repository is decided HERE, in the super group, although
-    // the package's other mutations live with the owning organization above: an org admin
-    // re-pointing their package at a laxer policy would make the instance default a
-    // suggestion, opt-out-able by anyone who can administer a package. They see the
-    // resolved policy read-only on the package page instead.
-    Route::put('packages/{package}/retention', [Admin\PackageController::class, 'updateRetention'])
-        ->name('packages.retention.update');
-    Route::post('packages/{package}/retention/apply', [Admin\PackageController::class, 'applyRetention'])
-        ->name('packages.retention.apply');
 
     // Global audit log (Spatie activitylog). Scoped views are reached via query params.
     Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');

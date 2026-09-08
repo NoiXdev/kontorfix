@@ -13,12 +13,17 @@ interface PolicyRow {
     // Already-described rules (RetentionRule::describe()), one string per rule — the same
     // wording the dry run's reason column and the portal use.
     rules: string[];
-    package_count: number;
+    is_global: boolean;
+    // Null for an org admin: the governed count spans the instance and is operator info.
+    package_count: number | null;
     is_instance_default: boolean;
 }
 
 const props = defineProps<{
     policies: PolicyRow[];
+    // False for an org admin: the page lists the PUBLISHED policies read-only; every
+    // mutating route stays in the super group regardless of what is rendered here.
+    can_manage: boolean;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Retention', href: '/admin/retention-policies' }];
@@ -46,12 +51,15 @@ function destroy(policy: PolicyRow) {
                         Benannte Regelsätze, die entscheiden, welche Tags eines Image-Repositorys erhalten bleiben.
                     </p>
                 </div>
-                <Button as-child>
+                <Button v-if="props.can_manage" as-child>
                     <Link :href="route('admin.retention-policies.create')"><Plus class="mr-1 size-4" /> Neue Richtlinie</Link>
                 </Button>
             </div>
 
-            <div v-if="props.policies.length === 0" class="rounded-xl border border-sidebar-border/70 p-6 text-sm text-muted-foreground dark:border-sidebar-border">
+            <div
+                v-if="props.policies.length === 0"
+                class="rounded-xl border border-sidebar-border/70 p-6 text-sm text-muted-foreground dark:border-sidebar-border"
+            >
                 Noch keine Richtlinien. Ohne Richtlinie wird nichts entfernt — jedes Repository behält alle Tags.
             </div>
 
@@ -66,7 +74,11 @@ function destroy(policy: PolicyRow) {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="policy in props.policies" :key="policy.id" class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40">
+                        <tr
+                            v-for="policy in props.policies"
+                            :key="policy.id"
+                            class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40"
+                        >
                             <td class="px-4 py-2">
                                 <span class="font-medium">{{ policy.name }}</span>
                                 <span
@@ -75,11 +87,17 @@ function destroy(policy: PolicyRow) {
                                 >
                                     Instanz-Vorgabe
                                 </span>
+                                <span
+                                    v-if="policy.is_global"
+                                    class="ml-2 inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400"
+                                >
+                                    Veröffentlicht
+                                </span>
                             </td>
                             <td class="px-4 py-2 text-muted-foreground">{{ policy.rules.join(' · ') }}</td>
-                            <td class="px-4 py-2">{{ policy.package_count }}</td>
+                            <td class="px-4 py-2">{{ policy.package_count ?? '—' }}</td>
                             <td class="px-4 py-2">
-                                <div class="flex items-center gap-1">
+                                <div v-if="props.can_manage" class="flex items-center gap-1">
                                     <Button variant="ghost" size="icon" as-child :aria-label="`Probelauf für ${policy.name}`">
                                         <Link :href="route('admin.retention-policies.dry-run', policy.id)">
                                             <FlaskConical class="size-4" />
@@ -101,14 +119,13 @@ function destroy(policy: PolicyRow) {
                                                 </Button>
                                             </span>
                                         </TooltipTrigger>
-                                        <TooltipContent>
-                                            Instanz-Vorgabe — zuerst in den Systemeinstellungen entfernen.
-                                        </TooltipContent>
+                                        <TooltipContent> Instanz-Vorgabe — zuerst in den Systemeinstellungen entfernen. </TooltipContent>
                                     </Tooltip>
                                     <Button v-else variant="ghost" size="icon" :aria-label="`${policy.name} löschen`" @click="destroy(policy)">
                                         <Trash2 class="size-4 text-destructive" />
                                     </Button>
                                 </div>
+                                <span v-else class="text-xs text-muted-foreground">nur lesend</span>
                             </td>
                         </tr>
                     </tbody>

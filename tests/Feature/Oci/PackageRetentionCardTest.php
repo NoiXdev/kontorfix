@@ -1,11 +1,14 @@
 <?php
 
+use App\Enums\UserRole;
 use App\Models\Group;
 use App\Models\OciManifest;
 use App\Models\OciTag;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RetentionPolicy;
 use App\Models\SystemSetting;
+use App\Models\User;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Activitylog\Models\Activity;
 
@@ -68,8 +71,10 @@ it('says explicitly that nothing is removed when no policy resolves', function (
             ->where('retention.dry_run', null));
 });
 
-it('tells an organization admin which policy applies, read-only', function () {
+it('tells an organization admin which policy applies, and offers only published policies', function () {
     $policy = RetentionPolicy::factory()->create(['name' => 'Vorgabe']);
+    RetentionPolicy::factory()->create(['name' => 'Intern']);
+    $published = RetentionPolicy::factory()->create(['name' => 'Veröffentlicht', 'is_global' => true]);
     SystemSetting::current()->update(['retention_policy_id' => $policy->id]);
     $package = retentionCardPackage();
 
@@ -78,10 +83,13 @@ it('tells an organization admin which policy applies, read-only', function () {
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('retention.policy.name', 'Vorgabe')
-            ->where('retention.can_assign', false)
-            // No selector for an org admin — and no catalogue of the instance's policies
-            // either: which rule sets exist is operator config.
-            ->has('retention.policies', 0));
+            // The owning organization's admin may set the package tier now — the operator
+            // decision that made the instance default a default rather than a mandate.
+            ->where('retention.can_assign', true)
+            // ...but the selector carries only PUBLISHED policies: which other rule sets
+            // exist on the instance is operator configuration.
+            ->has('retention.policies', 1)
+            ->where('retention.policies.0.id', $published->id));
 });
 
 it('lets a super-admin re-point a package at another policy', function () {
@@ -102,17 +110,82 @@ it('lets a super-admin re-point a package at another policy', function () {
     expect($package->fresh()->retention_policy_id)->toBeNull();
 });
 
-it('refuses an organization admin, and changes nothing', function () {
-    $policy = RetentionPolicy::factory()->create();
+it('lets the owning org admin assign a PUBLISHED policy, and refuses an unpublished one', function () {
+    $published = RetentionPolicy::factory()->create(['is_global' => true]);
+    $internal = RetentionPolicy::factory()->create();
+    $package = retentionCardPackage();
+    $admin = adminOf($package->organization);
+
+    $this->actingAs($admin)
+        ->put(route('admin.packages.retention.update', $package), ['retention_policy_id' => $published->id])
+        ->assertRedirect();
+
+    expect($package->fresh()->retention_policy_id)->toBe($published->id);
+
+    // An unpublished id gets the same validation error a nonexistent one gets — answering
+    // 403 for it would confirm which operator-internal ids exist. And nothing changes.
+    $this->actingAs($admin)
+        ->from(route('admin.packages.show', $package))
+        ->put(route('admin.packages.retention.update', $package), ['retention_policy_id' => $internal->id])
+        ->assertSessionHasErrors('retention_policy_id');
+
+    expect($package->fresh()->retention_policy_id)->toBe($published->id);
+});
+
+it('refuses a FOREIGN organization admin outright, and changes nothing', function () {
+    $policy = RetentionPolicy::factory()->create(['is_global' => true]);
     $package = retentionCardPackage();
 
-    $this->actingAs(adminOf($package->organization))
+    $this->actingAs(adminOf(Organization::factory()->create()))
         ->put(route('admin.packages.retention.update', $package), ['retention_policy_id' => $policy->id])
         ->assertForbidden();
 
-    // Both halves: the §3 decision is that the instance default is not opt-out-able by
-    // anyone below super — "refused" and "refused but applied" must not pass the same test.
+    // Both halves: "refused" and "refused but applied" must not pass the same test.
     expect($package->fresh()->retention_policy_id)->toBeNull();
+});
+
+it('refuses a portal member outright — the admin console itself is closed to them', function () {
+    $policy = RetentionPolicy::factory()->create(['is_global' => true]);
+    $package = retentionCardPackage();
+    // A Member of the package's own organization: EnsureOperator (the whole /admin group's
+    // gate) refuses before the route's own assertCanTouchPackage() is ever reached — being
+    // the right organization is not enough without an admin/maintainer role.
+    $member = User::factory()->for($package->organization)->create(['role' => UserRole::Member]);
+
+    $this->actingAs($member)
+        ->put(route('admin.packages.retention.update', $package), ['retention_policy_id' => $policy->id])
+        ->assertForbidden();
+
+    expect($package->fresh()->retention_policy_id)->toBeNull();
+});
+
+it('lets the owning org admin set and clear inline rules', function () {
+    $package = retentionCardPackage();
+    $admin = adminOf($package->organization);
+
+    $this->actingAs($admin)
+        ->put(route('admin.packages.retention.update', $package), [
+            'retention_rules' => [['type' => 'keep_last', 'count' => 5]],
+        ])
+        ->assertRedirect();
+
+    expect($package->fresh()->retention_rules)->toEqual([['type' => 'keep_last', 'count' => 5]]);
+
+    // Shield-only inline rules are refused for the same reason a shield-only policy is.
+    $this->actingAs($admin)
+        ->from(route('admin.packages.show', $package))
+        ->put(route('admin.packages.retention.update', $package), [
+            'retention_rules' => [['type' => 'never_delete', 'pattern' => 'prod-*']],
+        ])
+        ->assertSessionHasErrors('retention_rules');
+
+    expect($package->fresh()->retention_rules)->toEqual([['type' => 'keep_last', 'count' => 5]]);
+
+    $this->actingAs($admin)
+        ->put(route('admin.packages.retention.update', $package), ['retention_rules' => null])
+        ->assertRedirect();
+
+    expect($package->fresh()->retention_rules)->toBeNull();
 });
 
 it('refuses retention assignment on a non-Docker package', function () {
@@ -146,8 +219,26 @@ it('applies retention for one repository from its card, and logs the causer', fu
         ->and(Activity::where('log_name', 'retention')->sole()->causer_id)->toBe($admin->id);
 });
 
-it('refuses the per-package apply for an organization admin, and removes nothing', function () {
+it('refuses the per-package apply for a FOREIGN organization admin, and removes nothing', function () {
     $policy = RetentionPolicy::factory()->create(['rules' => [['type' => 'keep_last', 'count' => 1]]]);
+    $package = retentionCardPackage();
+    OciTag::factory()->create([
+        'package_id' => $package->id,
+        'name' => 'alt',
+        'manifest_id' => OciManifest::factory()->for($package)->create()->id,
+        'pushed_at' => '2020-01-01 00:00:00',
+    ]);
+    $package->update(['retention_policy_id' => $policy->id]);
+
+    $this->actingAs(adminOf(Organization::factory()->create()))
+        ->post(route('admin.packages.retention.apply', $package))
+        ->assertForbidden();
+
+    expect($package->ociTags()->count())->toBe(2);
+});
+
+it('lets the OWNING org admin apply retention for their repository', function () {
+    $policy = RetentionPolicy::factory()->create(['is_global' => true, 'rules' => [['type' => 'keep_last', 'count' => 1]]]);
     $package = retentionCardPackage();
     OciTag::factory()->create([
         'package_id' => $package->id,
@@ -159,7 +250,7 @@ it('refuses the per-package apply for an organization admin, and removes nothing
 
     $this->actingAs(adminOf($package->organization))
         ->post(route('admin.packages.retention.apply', $package))
-        ->assertForbidden();
+        ->assertRedirect();
 
-    expect($package->ociTags()->count())->toBe(2);
+    expect($package->ociTags()->pluck('name')->all())->toBe(['latest']);
 });

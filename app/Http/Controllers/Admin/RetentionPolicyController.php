@@ -12,19 +12,22 @@ use App\Models\SystemSetting;
 use App\Services\Oci\Retention\RetentionRunner;
 use App\Support\Retention\RetentionDecision;
 use App\Support\Retention\RetentionRule;
-use Closure;
+use App\Support\Retention\RetentionRuleSetValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
-use InvalidArgumentException;
-use ValueError;
 
 /**
- * Instance-wide administration (the `super` route group): policies are operator-defined and
- * have no per-organization dimension — and assigning or editing one must not be a lever a
- * customer-organization admin can pull to opt their packages out of the instance default.
+ * Policy CRUD, the preview/dry-run/apply tooling, and `index()` (the only action here reached
+ * from the `operator` route group too — see routes/web.php). Every other action lives in the
+ * `super` route group: creating, editing, publishing (`is_global`) and deleting a rule set are
+ * operator-only, since a policy has no per-organization dimension by itself.
+ *
+ * Assigning a PUBLISHED policy to one's own package, or writing that package's own inline
+ * rules, is a separate authorization question answered in `PackageController::updateRetention()`
+ * — not here, and not a lever this controller's own gate covers.
  */
 class RetentionPolicyController extends Controller
 {
@@ -39,21 +42,33 @@ class RetentionPolicyController extends Controller
 
     public function __construct(private RetentionRunner $runner) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         $defaultId = SystemSetting::current()->retention_policy_id;
+        $canManage = (bool) $request->user()?->isSuperAdmin();
+
+        // An org admin sees only what has been PUBLISHED to them: the global policies,
+        // read-only. Which other rule sets exist on the instance is operator configuration,
+        // and this list must not double as a catalogue of it. Everything mutating stays in
+        // the super route group regardless of what this page shows.
+        $policies = RetentionPolicy::query()
+            ->when(! $canManage, fn ($query) => $query->where('is_global', true))
+            ->orderBy('name')
+            ->get();
 
         return Inertia::render('admin/retention/Index', [
-            'policies' => RetentionPolicy::query()->orderBy('name')->get()->map(fn (RetentionPolicy $policy): array => [
+            'policies' => $policies->map(fn (RetentionPolicy $policy): array => [
                 'id' => $policy->id,
                 'name' => $policy->name,
                 'rules' => array_map(
                     fn (RetentionRule $rule): string => $rule->describe(),
                     $this->runner->rulesOf($policy),
                 ),
-                'package_count' => $this->runner->packagesFor($policy)->count(),
+                'is_global' => $policy->is_global,
+                'package_count' => $canManage ? $this->runner->packagesFor($policy)->count() : null,
                 'is_instance_default' => $policy->id === $defaultId,
             ])->all(),
+            'can_manage' => $canManage,
         ]);
     }
 
@@ -80,6 +95,7 @@ class RetentionPolicyController extends Controller
                 'id' => $retentionPolicy->id,
                 'name' => $retentionPolicy->name,
                 'rules' => $retentionPolicy->rules,
+                'is_global' => $retentionPolicy->is_global,
             ],
             'ruleTypes' => RetentionRuleType::options(),
             'dockerPackages' => $this->dockerPackages(),
@@ -153,27 +169,7 @@ class RetentionPolicyController extends Controller
     {
         $data = $request->validate([
             'package_id' => ['required', 'uuid', 'exists:packages,id'],
-            'rules' => ['required', 'array', 'min:1', function (string $attribute, mixed $value, Closure $fail): void {
-                $untaggedRules = 0;
-
-                foreach (is_array($value) ? $value : [] as $raw) {
-                    try {
-                        $rule = RetentionRule::fromArray(is_array($raw) ? $raw : []);
-                    } catch (ValueError|InvalidArgumentException) {
-                        $fail('Eine Regel ist unvollständig oder unbekannt.');
-
-                        return;
-                    }
-
-                    if (! $rule->type->affectsTags()) {
-                        $untaggedRules++;
-                    }
-                }
-
-                if ($untaggedRules > 1) {
-                    $fail('Höchstens eine Regel „Ungetaggte behalten“ pro Richtlinie.');
-                }
-            }],
+            'rules' => ['required', 'array', 'min:1', RetentionRuleSetValidator::rule()],
         ]);
 
         /** @var Package $package */

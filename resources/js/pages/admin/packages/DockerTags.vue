@@ -12,6 +12,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
+import RetentionRulesEditor from '@/components/kontorfix/RetentionRulesEditor.vue';
 import { NO_SPACE_FREED_YET } from '@/pages/admin/retention/policies';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
@@ -78,7 +79,8 @@ const props = defineProps<{
     // admin on purpose: which rule sets exist is operator config.
     retention: {
         policy: { id: string; name: string } | null;
-        tier: 'package' | 'instance' | null;
+        tier: 'inline' | 'package' | 'instance' | null;
+        label: string | null;
         rules: string[];
         dry_run: {
             kept_count: number;
@@ -87,6 +89,8 @@ const props = defineProps<{
         } | null;
         can_assign: boolean;
         selected_policy_id: string | null;
+        inline_rules: { type: string; count?: number | string; days?: number | string; pattern?: string }[] | null;
+        rule_types: { value: string; label: string; shield: boolean; untagged: boolean }[];
         policies: { id: string; name: string }[];
     };
 }>();
@@ -113,6 +117,47 @@ function saveRetentionPolicy() {
         route('admin.packages.retention.update', props.package.id),
         { retention_policy_id: selectedPolicy.value || null },
         { preserveScroll: true, onFinish: () => (savingPolicy.value = false) },
+    );
+}
+
+// --- Inline rules: anonymous, valid only for this repository, tier 0 of the chain. ---
+
+const editingInline = ref(false);
+const inlineRules = ref<{ type: string; count?: number | string; days?: number | string; pattern?: string }[]>(props.retention.inline_rules ?? []);
+const savingInline = ref(false);
+
+// A keep-rule OR the untagged window — the same reading the server enforces.
+const inlineSavable = computed(() => inlineRules.value.some((r) => r.type !== 'never_delete'));
+
+function saveInlineRules() {
+    savingInline.value = true;
+
+    router.put(
+        route('admin.packages.retention.update', props.package.id),
+        { retention_rules: inlineRules.value },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                savingInline.value = false;
+                editingInline.value = false;
+            },
+        },
+    );
+}
+
+function clearInlineRules() {
+    savingInline.value = true;
+
+    router.put(
+        route('admin.packages.retention.update', props.package.id),
+        { retention_rules: null },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                savingInline.value = false;
+                editingInline.value = false;
+            },
+        },
     );
 }
 
@@ -368,10 +413,16 @@ function saveShared() {
 
                 <TabsContent value="retention">
                     <div class="flex max-w-3xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                        <div v-if="props.retention.policy" class="text-sm">
-                            <span class="font-medium">{{ props.retention.policy.name }}</span>
+                        <div v-if="props.retention.label" class="text-sm">
+                            <span class="font-medium">{{ props.retention.label }}</span>
                             <span class="ml-2 text-xs text-muted-foreground">
-                                {{ props.retention.tier === 'package' ? 'diesem Repository zugewiesen' : 'geerbt von der Instanz-Vorgabe' }}
+                                {{
+                                    props.retention.tier === 'inline'
+                                        ? 'eigene Regeln, nur dieses Repository'
+                                        : props.retention.tier === 'package'
+                                          ? 'diesem Repository zugewiesen'
+                                          : 'geerbt von der Instanz-Vorgabe'
+                                }}
                             </span>
                             <ul class="mt-2 list-inside list-disc text-muted-foreground">
                                 <li v-for="rule in props.retention.rules" :key="rule">{{ rule }}</li>
@@ -382,19 +433,58 @@ function saveShared() {
                             Instanz-Vorgabe gesetzt wird.
                         </p>
 
-                        <div v-if="props.retention.can_assign" class="flex items-end gap-3 border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
-                            <div class="grid w-72 gap-1">
-                                <label class="text-xs font-medium" for="retention-policy">Richtlinie</label>
-                                <SearchableSelect id="retention-policy" v-model="selectedPolicy" :options="retentionOptions" />
+                        <div v-if="props.retention.can_assign" class="space-y-4 border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
+                            <div class="flex items-end gap-3">
+                                <div class="grid w-72 gap-1">
+                                    <label class="text-xs font-medium" for="retention-policy">Richtlinie</label>
+                                    <SearchableSelect id="retention-policy" v-model="selectedPolicy" :options="retentionOptions" />
+                                </div>
+                                <Button variant="outline" :disabled="savingPolicy" @click="saveRetentionPolicy">Zuweisen</Button>
                             </div>
-                            <Button variant="outline" :disabled="savingPolicy" @click="saveRetentionPolicy">Zuweisen</Button>
+
+                            <!-- Inline rules win over everything (tier 0): stated where they are edited. -->
+                            <div class="space-y-3">
+                                <div class="flex items-center gap-3">
+                                    <Button variant="outline" size="sm" @click="editingInline = !editingInline">
+                                        {{
+                                            editingInline
+                                                ? 'Eigene Regeln ausblenden'
+                                                : props.retention.inline_rules
+                                                  ? 'Eigene Regeln bearbeiten'
+                                                  : 'Eigene Regeln anlegen'
+                                        }}
+                                    </Button>
+                                    <p class="text-xs text-muted-foreground">
+                                        Eigene Regeln gelten nur für dieses Repository und gehen jeder Richtlinie vor.
+                                    </p>
+                                </div>
+
+                                <template v-if="editingInline">
+                                    <RetentionRulesEditor v-model="inlineRules" :rule-types="props.retention.rule_types" compact />
+                                    <div class="flex items-center gap-3">
+                                        <Button :disabled="savingInline || !inlineSavable" @click="saveInlineRules">Eigene Regeln speichern</Button>
+                                        <Button
+                                            v-if="props.retention.inline_rules"
+                                            variant="outline"
+                                            :disabled="savingInline"
+                                            @click="clearInlineRules"
+                                        >
+                                            Eigene Regeln entfernen
+                                        </Button>
+                                        <p v-if="!inlineSavable" class="text-xs text-muted-foreground">
+                                            Mindestens eine Behalte-Regel oder die Ungetaggt-Regel ist nötig.
+                                        </p>
+                                    </div>
+                                </template>
+                            </div>
                         </div>
 
                         <div v-if="props.retention.dry_run" class="border-t border-sidebar-border/70 pt-4 dark:border-sidebar-border">
                             <div class="mb-2 flex items-center justify-between">
                                 <p class="text-sm">
-                                    Nächster Lauf: <span class="font-medium text-destructive">{{ props.retention.dry_run.removed_count }}</span>
-                                    Tag(s) würden entfernt, {{ props.retention.dry_run.kept_count }} bleiben.
+                                    Nächster Lauf:
+                                    <span class="font-medium text-destructive">{{ props.retention.dry_run.removed_count }}</span> Tag(s) würden
+                                    entfernt, {{ props.retention.dry_run.kept_count }} bleiben.
                                 </p>
                                 <Button
                                     v-if="props.retention.can_assign"
@@ -514,8 +604,8 @@ function saveShared() {
                             <span>
                                 Für andere Organisationen freigeben
                                 <span class="block text-xs text-muted-foreground">
-                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der
-                                    besitzenden Organisation. Nur für Pakete der Betreiber-Organisation möglich.
+                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der besitzenden
+                                    Organisation. Nur für Pakete der Betreiber-Organisation möglich.
                                 </span>
                             </span>
                         </label>

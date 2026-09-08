@@ -2,17 +2,17 @@
 
 namespace App\Http\Requests\Admin;
 
-use App\Support\Retention\RetentionRule;
-use Closure;
+use App\Support\Retention\RetentionRuleSetValidator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use InvalidArgumentException;
-use ValueError;
 
 /**
- * Store and update share one request: the fields, the rule grammar and the one policy-level
- * invariant (at least one keep-rule) are identical for both, and the unique-name rule
- * ignores the routed policy on update by reading the route parameter.
+ * Store and update share one request: the fields, the rule grammar and the set-level
+ * invariants are identical for both, and the unique-name rule ignores the routed policy on
+ * update by reading the route parameter. The rule-set grammar itself lives in
+ * RetentionRuleSetValidator — the policy form, the preview endpoint and the package's
+ * inline rules all submit the same shape, and three drifting copies of one grammar is how
+ * a rule gets stored that another writer refuses.
  */
 class RetentionPolicyRequest extends FormRequest
 {
@@ -26,71 +26,32 @@ class RetentionPolicyRequest extends FormRequest
                 'required', 'string', 'max:255',
                 Rule::unique('retention_policies', 'name')->ignore($this->route('retention_policy')),
             ],
-            'rules' => ['required', 'array', 'min:1', $this->validRuleSet(...)],
+            'rules' => ['required', 'array', 'min:1', RetentionRuleSetValidator::rule()],
+            // Publication to every organization, read-only there. Operator-only by way of
+            // the route group; `sometimes` so callers that do not send it change nothing.
+            'is_global' => ['sometimes', 'boolean'],
         ];
     }
 
     /**
-     * Each element through RetentionRule::fromArray() — the same constructor the evaluator
-     * uses, so the form cannot store a rule the evaluator would refuse to build. The
-     * policy-level invariant on top: at least one keep-rule. A policy of shields alone
-     * expresses no deletion at all (the evaluator treats it as inert), so accepting one
-     * would store a policy the operator believes is protecting something while it does
-     * nothing. Refused here for the form's writes; the evaluator's own guard covers rows a
-     * seeder, a migration or a hand-edited jsonb produces.
-     */
-    private function validRuleSet(string $attribute, mixed $value, Closure $fail): void
-    {
-        $hasEffect = false;
-        $untaggedRules = 0;
-
-        foreach (is_array($value) ? $value : [] as $raw) {
-            try {
-                $rule = RetentionRule::fromArray(is_array($raw) ? $raw : []);
-            } catch (ValueError|InvalidArgumentException) {
-                $fail('Eine Regel ist unvollständig oder unbekannt.');
-
-                return;
-            }
-
-            // A keep-rule or an untagged rule both DO something; a shield alone does not.
-            // The refusal is about inert-but-protective-looking policies, so keep_untagged
-            // counts as effect even though it never keeps a tag.
-            $hasEffect = $hasEffect || ! $rule->type->isShield();
-
-            if (! $rule->type->affectsTags()) {
-                $untaggedRules++;
-            }
-        }
-
-        if (! $hasEffect) {
-            $fail('Mindestens eine Behalte-Regel ist nötig — „Nie löschen“ allein entfernt nichts.');
-        }
-
-        // Two windows would mean a silent max() (or min(), depending on the reader) —
-        // refused instead of decided quietly.
-        if ($untaggedRules > 1) {
-            $fail('Höchstens eine Regel „Ungetaggte behalten“ pro Richtlinie.');
-        }
-    }
-
-    /**
-     * The validated payload with every rule normalised through the value object, so what is
-     * stored is exactly what fromArray() accepted — no stray keys a client sent along.
+     * The validated payload with every rule normalised through the value object.
      *
-     * @return array{name: string, rules: list<array<string, mixed>>}
+     * @return array{name: string, rules: list<array<string, mixed>>, is_global?: bool}
      */
     public function policyData(): array
     {
-        /** @var array{name: string, rules: list<array<string, mixed>>} $validated */
+        /** @var array{name: string, rules: list<array<string, mixed>>, is_global?: bool} $validated */
         $validated = $this->validated();
 
-        return [
+        $data = [
             'name' => $validated['name'],
-            'rules' => array_map(
-                fn (array $raw): array => RetentionRule::fromArray($raw)->toArray(),
-                $validated['rules'],
-            ),
+            'rules' => RetentionRuleSetValidator::normalise($validated['rules']),
         ];
+
+        if (array_key_exists('is_global', $validated)) {
+            $data['is_global'] = $validated['is_global'];
+        }
+
+        return $data;
     }
 }

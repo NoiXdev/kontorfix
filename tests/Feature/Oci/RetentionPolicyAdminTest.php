@@ -88,6 +88,36 @@ it('refuses an unknown rule type, a non-positive count and an empty pattern', fu
     'empty list' => [[[]]],
 ]);
 
+it('shows an organization admin the published policies only, read-only', function () {
+    $default = RetentionPolicy::factory()->create(['name' => 'Vorgabe']);
+    $published = RetentionPolicy::factory()->create(['name' => 'Veröffentlicht', 'is_global' => true]);
+    SystemSetting::current()->update(['retention_policy_id' => $default->id]);
+
+    $this->actingAs(adminOf(Organization::factory()->create()))
+        ->get(route('admin.retention-policies.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('admin/retention/Index')
+            ->where('can_manage', false)
+            // The unpublished instance default never appears in an org admin's list —
+            // which other rule sets exist on the instance is operator configuration.
+            ->has('policies', 1)
+            ->where('policies.0.id', $published->id)
+            ->where('policies.0.package_count', null));
+});
+
+it('stores a policy published to every organization via is_global', function () {
+    $this->actingAs(superAdmin())
+        ->post(route('admin.retention-policies.store'), [
+            'name' => 'Global',
+            'rules' => [['type' => 'keep_last', 'count' => 10]],
+            'is_global' => true,
+        ])
+        ->assertRedirect(route('admin.retention-policies.index'));
+
+    expect(RetentionPolicy::sole()->is_global)->toBeTrue();
+});
+
 it('refuses a non-super-admin outright', function () {
     $policy = RetentionPolicy::factory()->create(['name' => 'Standard']);
 

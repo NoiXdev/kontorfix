@@ -4,6 +4,7 @@ import FlashToast from '@/components/kontorfix/FlashToast.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
@@ -34,7 +35,7 @@ interface PreviewTag {
 }
 
 const props = defineProps<{
-    policy: { id: string; name: string; rules: RuleInput[] } | null;
+    policy: { id: string; name: string; rules: RuleInput[]; is_global: boolean } | null;
     // From RetentionRuleType::options() — which types are shields is the server's fact,
     // never restated here: the split below reads the flag.
     ruleTypes: RuleTypeOption[];
@@ -54,13 +55,12 @@ const untaggedTypes = new Set(props.ruleTypes.filter((t) => t.untagged).map((t) 
 const keepRules = ref<RuleInput[]>((props.policy?.rules ?? []).filter((r) => !shieldTypes.has(r.type) && !untaggedTypes.has(r.type)));
 const shields = ref<RuleInput[]>((props.policy?.rules ?? []).filter((r) => shieldTypes.has(r.type)));
 // At most one per set (the server refuses two), so this is a value, not a list.
-const untaggedDays = ref<number | string>(
-    (props.policy?.rules ?? []).find((r) => untaggedTypes.has(r.type))?.days ?? '',
-);
+const untaggedDays = ref<number | string>((props.policy?.rules ?? []).find((r) => untaggedTypes.has(r.type))?.days ?? '');
 
 const form = useForm({
     name: props.policy?.name ?? '',
     rules: [] as RuleInput[],
+    is_global: props.policy?.is_global ?? false,
 });
 
 const keepTypeOptions = props.ruleTypes.filter((t) => !t.shield && !t.untagged).map((t) => ({ value: t.value, label: t.label }));
@@ -185,6 +185,18 @@ async function runPreview() {
                     <InputError :message="form.errors.name" />
                 </div>
 
+                <label class="flex max-w-md items-start gap-2 text-sm">
+                    <Switch v-model="form.is_global" class="mt-1" />
+                    <span>
+                        Für alle Organisationen veröffentlichen
+                        <span class="block text-xs text-muted-foreground">
+                            Veröffentlichte Richtlinien kann jede Organisation ihren eigenen Repositories zuweisen — nur lesend, bearbeiten kann sie
+                            weiterhin ausschließlich der Betreiber.
+                        </span>
+                    </span>
+                </label>
+                <InputError :message="form.errors.is_global" />
+
                 <!-- Keep-rules: the OR is stated at the point where rules are added. -->
                 <div class="space-y-3 rounded-xl border border-sidebar-border/70 p-6 dark:border-sidebar-border">
                     <div class="flex items-start justify-between gap-4">
@@ -275,9 +287,7 @@ async function runPreview() {
 
                 <div class="flex items-center gap-3">
                     <Button type="submit" :disabled="form.processing || !canSave">Speichern</Button>
-                    <p v-if="!canSave" class="text-sm text-muted-foreground">
-                        Mindestens eine Behalte-Regel oder die Ungetaggt-Regel ist nötig.
-                    </p>
+                    <p v-if="!canSave" class="text-sm text-muted-foreground">Mindestens eine Behalte-Regel oder die Ungetaggt-Regel ist nötig.</p>
                 </div>
             </form>
 
@@ -310,7 +320,11 @@ async function runPreview() {
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="tag in previewTags" :key="tag.name" class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40">
+                        <tr
+                            v-for="tag in previewTags"
+                            :key="tag.name"
+                            class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40"
+                        >
                             <td class="py-2 pr-4 font-mono">{{ tag.name }}</td>
                             <td class="py-2 pr-4 text-muted-foreground">{{ tag.pushed_at ?? '—' }}</td>
                             <td class="py-2 pr-4">
