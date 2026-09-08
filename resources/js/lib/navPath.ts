@@ -1,3 +1,5 @@
+import type { NavItem } from '@/types';
+
 /**
  * Path helpers for deciding which sidebar section holds the page you are on.
  *
@@ -37,4 +39,33 @@ export function isWithin(current: string, href: string): boolean {
     }
 
     return a === b || a.startsWith(`${b}/`);
+}
+
+/**
+ * Is `item` the one to highlight for the current page — its own page, or (for an item with
+ * a sub-menu, e.g. "System" → E-Mail/Storage) one of its children's?
+ *
+ * An exact match against `item.href`/`child.href`, deliberately not `isWithin()`: this is
+ * the same strict comparison NavMain.vue always used for its own per-item highlight (as
+ * opposed to the section-level "open by default" rule below, which does use prefix
+ * matching) — extended one level down rather than changed.
+ */
+export function isNavItemActive(current: string, item: NavItem): boolean {
+    if (current === item.href) {
+        return true;
+    }
+
+    return (item.children ?? []).some((child) => child.href === current);
+}
+
+/**
+ * Does the section holding `items` cover the current page — an item's own page (or a
+ * detail page nested beneath it), or, for an item with a sub-menu, one of its children's?
+ *
+ * NavMain.vue's "the section you're inside opens itself" rule, extended one level down:
+ * moving E-Mail/Storage out of the section's own item list and into "System"'s `children`
+ * must not stop visiting /admin/mail from opening the "System" section.
+ */
+export function sectionHoldsCurrentPage(current: string, items: NavItem[]): boolean {
+    return items.some((item) => isWithin(current, item.href) || (item.children ?? []).some((child) => isWithin(current, child.href)));
 }

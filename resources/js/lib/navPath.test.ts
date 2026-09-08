@@ -1,5 +1,6 @@
+import type { NavItem } from '@/types';
 import { describe, expect, it } from 'vitest';
-import { isWithin, normalisePath } from './navPath';
+import { isNavItemActive, isWithin, normalisePath, sectionHoldsCurrentPage } from './navPath';
 
 describe('normalisePath', () => {
     it('drops the query string, which the listings now write to', () => {
@@ -45,5 +46,66 @@ describe('isWithin', () => {
 
     it('does not match an unrelated section', () => {
         expect(isWithin('/admin/users', '/admin/packages')).toBe(false);
+    });
+});
+
+// System → E-Mail/Storage: "System" is a NavItem with children rather than a bare link, so
+// both the per-item active highlight and the section's "open by default" rule have to reach
+// one level down into `item.children` — the shape neither predicate had to consider before.
+const systemItem: NavItem = {
+    title: 'System',
+    href: '/admin/system',
+    children: [
+        { title: 'E-Mail', href: '/admin/mail' },
+        { title: 'Storage', href: '/admin/storage' },
+    ],
+};
+
+describe('isNavItemActive', () => {
+    it('matches the item’s own page', () => {
+        expect(isNavItemActive('/admin/system', systemItem)).toBe(true);
+    });
+
+    it('matches a child’s page, so the parent highlights while a child page is open', () => {
+        expect(isNavItemActive('/admin/mail', systemItem)).toBe(true);
+        expect(isNavItemActive('/admin/storage', systemItem)).toBe(true);
+    });
+
+    it('does not match an unrelated page', () => {
+        expect(isNavItemActive('/admin/users', systemItem)).toBe(false);
+    });
+
+    it('does not match a lookalike page a plain prefix check would', () => {
+        expect(isNavItemActive('/admin/mail-templates', systemItem)).toBe(false);
+    });
+
+    it('matches a plain item (no children) exactly, same as before', () => {
+        expect(isNavItemActive('/admin/packages', { title: 'Pakete', href: '/admin/packages' })).toBe(true);
+        expect(isNavItemActive('/admin/packages/01a0', { title: 'Pakete', href: '/admin/packages' })).toBe(false);
+    });
+});
+
+describe('sectionHoldsCurrentPage', () => {
+    const items: NavItem[] = [
+        { title: 'System', href: '/admin/system', children: [{ title: 'E-Mail', href: '/admin/mail' }, { title: 'Storage', href: '/admin/storage' }] },
+        { title: 'Speicherbereinigung', href: '/admin/oci/sweeper' },
+        { title: 'Aktivität', href: '/admin/activity' },
+    ];
+
+    it('opens the section for its own item pages, as before', () => {
+        expect(sectionHoldsCurrentPage('/admin/activity', items)).toBe(true);
+    });
+
+    it('opens the section when the current page is a child of a nested item', () => {
+        expect(sectionHoldsCurrentPage('/admin/mail', items)).toBe(true);
+        expect(sectionHoldsCurrentPage('/admin/storage', items)).toBe(true);
+    });
+
+    it('opens for a detail page nested beneath a top-level item', () => {
+        expect(sectionHoldsCurrentPage('/admin/activity/42', items)).toBe(true);
+    });
+
+    it('stays closed for an unrelated page', () => {
+        expect(sectionHoldsCurrentPage('/admin/packages', items)).toBe(false);
     });
 });

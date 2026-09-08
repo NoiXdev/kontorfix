@@ -106,11 +106,21 @@ const navSections = computed<NavSection[]>(() => {
         sections.push({
             label: 'System',
             items: [
-                { title: 'System', href: '/admin/system', icon: SettingsIcon },
+                {
+                    title: 'System',
+                    href: '/admin/system',
+                    icon: SettingsIcon,
+                    // E-Mail and Storage moved in here as a sub-menu: both are instance-wide
+                    // settings pages one step below "System" in the console's own hierarchy,
+                    // and flattening them alongside it crowded the section for what is, day
+                    // to day, rarely touched configuration.
+                    children: [
+                        { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
+                        { title: 'Storage', href: '/admin/storage', icon: Database },
+                    ],
+                },
                 { title: 'Speicherbereinigung', href: '/admin/oci/sweeper', icon: Recycle },
                 { title: 'Aktivität', href: '/admin/activity', icon: ScrollText },
-                { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
-                { title: 'Storage', href: '/admin/storage', icon: Database },
             ],
         });
     }

@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from '@/components/ui/sidebar';
-import { isWithin } from '@/lib/navPath';
+import {
+    SidebarGroup,
+    SidebarGroupLabel,
+    SidebarMenu,
+    SidebarMenuButton,
+    SidebarMenuItem,
+    SidebarMenuSub,
+    SidebarMenuSubButton,
+    SidebarMenuSubItem,
+    useSidebar,
+} from '@/components/ui/sidebar';
+import { isNavItemActive, sectionHoldsCurrentPage } from '@/lib/navPath';
 import { type NavItem, type SharedData } from '@/types';
 import { Link, usePage } from '@inertiajs/vue3';
 import { ChevronRight } from 'lucide-vue-next';
@@ -40,10 +50,9 @@ const choice = ref<boolean | null>(storedChoice());
 
 // A prefix match on segment boundaries, so a detail page such as
 // `/admin/packages/01a0…` also counts as being inside the Registry section — while
-// `/dashboard-archive` is correctly NOT treated as living under `/dashboard`.
-const holdsCurrentPage = computed(() => {
-    return props.items.some((item) => isWithin(page.url, item.href));
-});
+// `/dashboard-archive` is correctly NOT treated as living under `/dashboard`. Also true for
+// an item's own sub-menu (e.g. System → E-Mail/Storage): see sectionHoldsCurrentPage().
+const holdsCurrentPage = computed(() => sectionHoldsCurrentPage(page.url, props.items));
 
 // Recomputed on every navigation. The previous version decided this once during setup, which
 // never re-ran because the sidebar lives in a persistent layout — harmless while every section
@@ -78,12 +87,22 @@ const sectionOpen = computed(() => state.value === 'collapsed' || open.value);
             <CollapsibleContent>
                 <SidebarMenu>
                     <SidebarMenuItem v-for="item in items" :key="item.title">
-                        <SidebarMenuButton as-child :is-active="item.href === page.url">
+                        <SidebarMenuButton as-child :is-active="isNavItemActive(page.url, item)">
                             <Link :href="item.href">
                                 <component :is="item.icon" />
                                 <span>{{ item.title }}</span>
                             </Link>
                         </SidebarMenuButton>
+                        <SidebarMenuSub v-if="item.children?.length">
+                            <SidebarMenuSubItem v-for="child in item.children" :key="child.title">
+                                <SidebarMenuSubButton as-child :is-active="child.href === page.url">
+                                    <Link :href="child.href">
+                                        <component :is="child.icon" />
+                                        <span>{{ child.title }}</span>
+                                    </Link>
+                                </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                        </SidebarMenuSub>
                     </SidebarMenuItem>
                 </SidebarMenu>
             </CollapsibleContent>
