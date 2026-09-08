@@ -132,7 +132,7 @@ it('withholds the token directly once usability is revoked, independent of SyncP
     expect($package->fresh()->gitAuth()['token'])->toBeNull();
 });
 
-it('never exposes the token to a non-owner, on the index listing or the package dropdown', function () {
+it('never exposes the token to a non-owner, on the index listing or either package dropdown', function () {
     $operator = Organization::factory()->create(['is_operator' => true]);
     $customer = sharingCustomer();
     $cred = GitCredential::factory()->for($operator)->create(['is_global' => true, 'token' => 'super-secret-token']);
@@ -147,6 +147,17 @@ it('never exposes the token to a non-owner, on the index listing or the package 
             ->missing('credentials.0.token'));
 
     $this->actingAs($customerAdmin)->get('/admin/packages/create')
+        ->assertInertia(fn ($page) => $page
+            ->has('gitCredentials', 1)
+            ->where('gitCredentials.0.id', $cred->id)
+            ->missing('gitCredentials.0.token'));
+
+    // The edit/show page's dropdown (PackageController::show()) is a second, separate
+    // non-owner-facing payload — GitCredential::usableBy($package->organization), not
+    // gitCredentialOptions() — and needs its own assertion rather than relying on the
+    // create page's coverage to stand in for it.
+    $package = Package::factory()->for($customer)->create(['repository_url' => 'https://github.com/acme/lib.git']);
+    $this->actingAs($customerAdmin)->get("/admin/packages/{$package->id}")
         ->assertInertia(fn ($page) => $page
             ->has('gitCredentials', 1)
             ->where('gitCredentials.0.id', $cred->id)
@@ -259,4 +270,45 @@ it('assigns an operator credential to a customer package via the create form', f
     $package = Package::where('name', 'acme/shared-lib')->firstOrFail();
     expect($package->git_credential_id)->toBe($cred->id)
         ->and($package->gitAuth()['token'])->toBe('ghp_assign');
+});
+
+/**
+ * Drift guard for GitCredential::scopeUsableByAny(), the multi-organization query behind
+ * GitCredentialController::index()'s "foreign but usable" listing,
+ * PackageController::gitCredentialOptions() and PackageController::assertCredentialUsableInScope().
+ * Before it existed, all three hand-rolled their own copy of the own/global/shared OR — a
+ * security-sensitive boundary with three independent chances to drift from
+ * GitCredential::isUsableBy() and from each other. This asserts the extracted scope agrees
+ * with isUsableBy() across an owner/global/shared/unrelated fixture matrix, the same way
+ * scopeUsableBy()'s own drift test (RetentionScopesSchemaTest) does for a single
+ * organization.
+ */
+it('agrees with isUsableBy() across every organization in a multi-organization scope', function () {
+    $owner = Organization::factory()->create();
+    $scopedA = Organization::factory()->create();
+    $scopedB = Organization::factory()->create();
+    $unrelated = Organization::factory()->create();
+    $scopedOrgIds = [$scopedA->id, $scopedB->id];
+
+    $own = GitCredential::factory()->for($scopedA)->create();
+    $global = GitCredential::factory()->for($owner)->create(['is_global' => true]);
+    $shared = GitCredential::factory()->for($owner)->create();
+    $shared->sharedOrganizations()->attach($scopedB);
+    $sharedElsewhere = GitCredential::factory()->for($owner)->create();
+    $sharedElsewhere->sharedOrganizations()->attach($unrelated);
+    $foreign = GitCredential::factory()->for($owner)->create();
+
+    $usableIds = GitCredential::query()->usableByAny($scopedOrgIds)->pluck('id')->all();
+
+    foreach ([$own, $global, $shared, $sharedElsewhere, $foreign] as $credential) {
+        // "Usable by any of the scoped organizations" must mean exactly what it would mean
+        // to ask isUsableBy() once per organization and OR the answers — never more, never
+        // less.
+        $expected = collect([$scopedA, $scopedB])->contains(fn (Organization $org) => $credential->isUsableBy($org));
+
+        expect(in_array($credential->id, $usableIds, true))->toBe($expected, "credential {$credential->name} disagreed");
+    }
+
+    expect($usableIds)->toContain($own->id, $global->id, $shared->id)
+        ->and($usableIds)->not->toContain($sharedElsewhere->id, $foreign->id);
 });

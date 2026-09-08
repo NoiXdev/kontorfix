@@ -110,17 +110,43 @@ class GitCredential extends Model
     /**
      * The credentials $organization may use — the package form's dropdown. One definition
      * with usableBy() above, asserted against it in the schema test so the two answers
-     * cannot drift.
+     * cannot drift. Delegates to scopeUsableByAny() below rather than restating the OR —
+     * that is the one place the own/global/shared query is written.
      *
      * @param  Builder<self>  $query
      * @return Builder<self>
      */
     public function scopeUsableBy(Builder $query, Organization $organization): Builder
     {
+        return $this->scopeUsableByAny($query, [$organization->id]);
+    }
+
+    /**
+     * The credentials usable by ANY organization in $organizationIds — scopeUsableBy()
+     * above, widened for a caller that has a *set* of candidate owners rather than one
+     * already-known organization: the package create page's dropdown (the eventual owner
+     * isn't known until a registry is picked), the probe endpoint (reached before any
+     * registry is chosen), and the git-credentials index's "foreign but usable" listing.
+     *
+     * Before this existed, all three call sites hand-rolled the same own/global/shared OR
+     * themselves — three independent copies of a security-sensitive boundary, free to
+     * drift from this model and from each other. Extracting it here, and asserting in
+     * GitCredentialSharingTest that it agrees with isUsableBy() across an
+     * own/global/shared/unrelated fixture matrix, keeps that from happening again the way
+     * scopeUsableBy()'s own drift test already does for the single-organization case.
+     *
+     * @param  Builder<self>  $query
+     * @param  iterable<string>  $organizationIds
+     * @return Builder<self>
+     */
+    public function scopeUsableByAny(Builder $query, iterable $organizationIds): Builder
+    {
+        $ids = is_array($organizationIds) ? $organizationIds : [...$organizationIds];
+
         return $query->where(fn (Builder $inner) => $inner
-            ->where('organization_id', $organization->id)
+            ->whereIn('organization_id', $ids)
             ->orWhere('is_global', true)
-            ->orWhereHas('sharedOrganizations', fn (Builder $shared) => $shared->whereKey($organization->id)));
+            ->orWhereHas('sharedOrganizations', fn (Builder $shared) => $shared->whereIn('organizations.id', $ids)));
     }
 
     /**

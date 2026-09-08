@@ -1114,15 +1114,15 @@ class PackageController extends Controller
      * yet — it is reached from the create page before any registry has been submitted.
      * Refuses unless the credential is usable by at least one organization in the active
      * console scope, the same set the create page's dropdown offers via
-     * gitCredentialOptions() below.
+     * gitCredentialOptions() below — both delegate to GitCredential::scopeUsableByAny()
+     * rather than each restating the own/global/shared OR.
      */
     private function assertCredentialUsableInScope(GitCredential $credential): void
     {
-        $scopedOrgIds = $this->scopedOrgIds();
-
-        $usable = $credential->is_global
-            || in_array($credential->organization_id, $scopedOrgIds, true)
-            || $credential->sharedOrganizations()->whereIn('organizations.id', $scopedOrgIds)->exists();
+        $usable = GitCredential::query()
+            ->whereKey($credential->id)
+            ->usableByAny($this->scopedOrgIds())
+            ->exists();
 
         abort_unless($usable, 403);
     }
@@ -1131,19 +1131,16 @@ class PackageController extends Controller
      * Credentials assignable from the create page's dropdown: own (within the active
      * scope) plus global/shared ones. Widened to every organization in scope, not just
      * one, because the package's eventual owner is not known until the registry selection
-     * is submitted — mirrors GitCredential::scopeUsableBy() applied to each scoped
-     * organization in turn rather than to one already-known package.
+     * is submitted — GitCredential::scopeUsableByAny() applied to every scoped organization
+     * at once, rather than GitCredential::scopeUsableBy() applied to one already-known
+     * package.
      *
      * @return array<int, array{id: string, name: string, provider: string}>
      */
     private function gitCredentialOptions(): array
     {
-        $scopedOrgIds = $this->scopedOrgIds();
-
         return GitCredential::query()
-            ->where(fn ($q) => $q->whereIn('organization_id', $scopedOrgIds)
-                ->orWhere('is_global', true)
-                ->orWhereHas('sharedOrganizations', fn ($s) => $s->whereIn('organizations.id', $scopedOrgIds)))
+            ->usableByAny($this->scopedOrgIds())
             ->orderBy('name')->get(['id', 'name', 'provider'])
             ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value])
             ->all();

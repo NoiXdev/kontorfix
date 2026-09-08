@@ -59,10 +59,13 @@ class GitCredentialController extends Controller
         // serialisation regardless), no packages count or last-used timestamp (that is the
         // owner's bookkeeping, not a fact about this organization), and the Vue table shows
         // no edit/delete/test action for a row this admin does not own.
+        // usableByAny()'s own-organization branch can never match here — this half is
+        // already excluded by whereNotIn() — so what is left is exactly global-or-shared.
+        // Delegating to the one canonical scope rather than restating that OR is the point:
+        // see GitCredential::scopeUsableByAny()'s docblock.
         $foreign = GitCredential::with('organization:id,name')
             ->whereNotIn('organization_id', $scopedOrgIds)
-            ->where(fn ($q) => $q->where('is_global', true)
-                ->orWhereHas('sharedOrganizations', fn ($s) => $s->whereIn('organizations.id', $scopedOrgIds)))
+            ->usableByAny($scopedOrgIds)
             ->orderBy('name')->get()
             ->map(fn (GitCredential $c) => [
                 'id' => $c->id,
