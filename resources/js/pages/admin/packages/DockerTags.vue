@@ -140,6 +140,11 @@ function saveInlineRules() {
             onFinish: () => {
                 savingInline.value = false;
                 editingInline.value = false;
+                // Inertia's put/post/delete visits default to preserveState: true — this
+                // component instance survives the round trip, so the local ref does not
+                // reset itself the way a fresh mount would. Re-seed it from the response's
+                // (possibly server-normalised) props rather than trusting what was sent.
+                inlineRules.value = props.retention.inline_rules ?? [];
             },
         },
     );
@@ -156,6 +161,10 @@ function clearInlineRules() {
             onFinish: () => {
                 savingInline.value = false;
                 editingInline.value = false;
+                // Same preserveState reason as saveInlineRules(): without this, the editor
+                // would still show the just-deleted rules, and reopening it to save again
+                // would silently resurrect them.
+                inlineRules.value = [];
             },
         },
     );

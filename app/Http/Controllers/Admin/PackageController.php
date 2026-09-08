@@ -533,10 +533,11 @@ class PackageController extends Controller
      * default became a default rather than a mandate. Two guards remain:
      *
      *   - assertCanTouchPackage(): only the owning organization (or a super-admin).
-     *   - A non-super caller may select only PUBLISHED (is_global) policies. Unpublished
-     *     ones are operator-internal, and answering 403 for them would confirm which ids
-     *     exist — so an unpublished id gets the same validation error a nonexistent one
-     *     gets, and nothing changes either way.
+     *   - A non-super caller may select only PUBLISHED (is_global) policies. Naming an
+     *     existing but unpublished policy is refused 403 — the same abort_unless() shape
+     *     assertCanTouchPackage() itself uses — not folded into validation: this is an
+     *     authorization decision (who this policy is for), not a "does this id exist" one,
+     *     and the two must not share a status code.
      */
     public function updateRetention(Request $request, Package $package): RedirectResponse
     {
@@ -547,16 +548,17 @@ class PackageController extends Controller
         // answers null for every other type.
         abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
 
-        $policyExists = Rule::exists('retention_policies', 'id');
-
-        if (! (bool) $request->user()?->isSuperAdmin()) {
-            $policyExists->where('is_global', true);
-        }
-
         $data = $request->validate([
-            'retention_policy_id' => ['sometimes', 'nullable', 'uuid', $policyExists],
+            'retention_policy_id' => ['sometimes', 'nullable', 'uuid', 'exists:retention_policies,id'],
             'retention_rules' => ['sometimes', 'nullable', 'array', 'min:1', RetentionRuleSetValidator::rule()],
         ]);
+
+        $isSuper = (bool) $request->user()?->isSuperAdmin();
+
+        if (! $isSuper && array_key_exists('retention_policy_id', $data) && $data['retention_policy_id'] !== null) {
+            $isGlobal = RetentionPolicy::whereKey($data['retention_policy_id'])->value('is_global');
+            abort_unless((bool) $isGlobal, 403, 'Diese Richtlinie ist nicht veröffentlicht.');
+        }
 
         $update = [];
         if (array_key_exists('retention_policy_id', $data)) {

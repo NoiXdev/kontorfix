@@ -122,13 +122,13 @@ it('lets the owning org admin assign a PUBLISHED policy, and refuses an unpublis
 
     expect($package->fresh()->retention_policy_id)->toBe($published->id);
 
-    // An unpublished id gets the same validation error a nonexistent one gets — answering
-    // 403 for it would confirm which operator-internal ids exist. And nothing changes.
+    // Naming an existing but unpublished policy is an authorization refusal, not a
+    // validation error — the same 403 assertCanTouchPackage() itself would answer.
     $this->actingAs($admin)
-        ->from(route('admin.packages.show', $package))
         ->put(route('admin.packages.retention.update', $package), ['retention_policy_id' => $internal->id])
-        ->assertSessionHasErrors('retention_policy_id');
+        ->assertForbidden();
 
+    // Both halves: "refused" and "refused but applied" must not pass the same test.
     expect($package->fresh()->retention_policy_id)->toBe($published->id);
 });
 
