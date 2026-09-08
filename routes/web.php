@@ -117,6 +117,12 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
         ->name('packages.retention.update');
     Route::post('packages/{package}/retention/apply', [Admin\PackageController::class, 'applyRetention'])
         ->name('packages.retention.apply');
+    // The inline-rules editor's live preview: the UNSAVED rules tried against this package
+    // itself, same org-scoped boundary as the two routes above. JSON, not Inertia, for the
+    // same reason the policy form's preview is: a page visit would discard the unsaved
+    // rules it exists to try out.
+    Route::post('packages/{package}/retention/preview', [Admin\PackageController::class, 'previewRetention'])
+        ->name('packages.retention.preview');
 });
 
 // Instance-wide administration: only the global super-admin. These surfaces have no

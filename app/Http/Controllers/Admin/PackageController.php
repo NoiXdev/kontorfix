@@ -33,6 +33,8 @@ use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
 use App\Support\RepositoryUrlRules;
+use App\Support\Retention\RetentionDecision;
+use App\Support\Retention\RetentionRule;
 use App\Support\Retention\RetentionRuleSetValidator;
 use App\Support\VersionOrder;
 use Illuminate\Http\JsonResponse;
@@ -597,6 +599,35 @@ class PackageController extends Controller
             '%d Tag(s) entfernt. Speicherplatz wird erst von der Speicherbereinigung freigegeben, nach Ablauf der Schonfrist.',
             $report === null ? 0 : count($report->removed()),
         ));
+    }
+
+    /**
+     * The inline-rules editor's live preview: the UNSAVED rules currently in the editor,
+     * tried against THIS package — no repository picker, unlike the policy form's preview,
+     * because the package being edited IS the one repository there is to try them against.
+     * Same boundary as updateRetention()/applyRetention(): whoever may edit or apply this
+     * package's retention may preview it too.
+     *
+     * Never writes `retention_rules` — the whole point is trying a rule set out before
+     * deciding to save it.
+     */
+    public function previewRetention(Request $request, Package $package, RetentionRunner $runner): JsonResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $data = $request->validate([
+            'retention_rules' => ['required', 'array', 'min:1', RetentionRuleSetValidator::rule()],
+        ]);
+
+        return response()->json([
+            'summary' => RetentionRule::describeAll($data['retention_rules']),
+            'tags' => array_map(
+                fn (RetentionDecision $decision): array => $decision->toArray(),
+                $runner->previewWithRules($package, $data['retention_rules']),
+            ),
+        ]);
     }
 
     /**

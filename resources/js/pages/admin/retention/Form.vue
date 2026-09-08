@@ -6,11 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { postRetentionPreview, useRetentionPreview, type RetentionPreviewRequest } from '@/composables/useRetentionPreview';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, useForm } from '@inertiajs/vue3';
 import { FlaskConical, Plus, Shield, Trash2 } from 'lucide-vue-next';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { DRY_RUN_EXPLANATION, KEEP_RULES_OR, PATTERN_HELP, SHIELD_EXPLANATION } from './policies';
 
 interface RuleInput {
@@ -25,13 +26,6 @@ interface RuleTypeOption {
     label: string;
     shield: boolean;
     untagged: boolean;
-}
-
-interface PreviewTag {
-    name: string;
-    pushed_at: string | null;
-    keep: boolean;
-    reason: string | null;
 }
 
 const props = defineProps<{
@@ -108,59 +102,61 @@ function save() {
     }
 }
 
-// --- The preview panel: the UNSAVED rules above, tried against one picked package. ---
+// --- The preview panel: the UNSAVED rules above, live. ---
+//
+// `package_id` is optional server-side (see RetentionPolicyController::preview()): the
+// summary line — RetentionRule::describe(), read from the server rather than
+// re-implemented here — is worth showing the moment the rules validate, before a
+// repository has even been picked. Once one IS picked, the same call also answers the
+// tag-by-tag table.
 
 const previewPackageId = ref<string>('');
-const previewTags = ref<PreviewTag[] | null>(null);
-const previewError = ref<string | null>(null);
-const previewing = ref(false);
+const {
+    summary: previewSummary,
+    tags: previewTags,
+    error: previewError,
+    loading: previewLoading,
+    schedule: schedulePreview,
+    runNow: runPreviewNow,
+    cancel: cancelPreview,
+} = useRetentionPreview();
 
 const packageOptions = computed(() => props.dockerPackages.map((p) => ({ value: p.id, label: p.name })));
 
-function xsrfToken(): string {
-    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+function previewRequest(): RetentionPreviewRequest {
+    const rules = mergedRules();
+    const packageId = previewPackageId.value || undefined;
+
+    return (signal) => postRetentionPreview(route('admin.retention-policies.preview'), { package_id: packageId, rules }, signal);
 }
 
-async function runPreview() {
-    previewError.value = null;
-    previewTags.value = null;
-
-    if (!previewPackageId.value) {
-        previewError.value = 'Bitte zuerst ein Repository wählen.';
-        return;
-    }
-
-    previewing.value = true;
-
-    try {
-        const response = await fetch(route('admin.retention-policies.preview'), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-                'X-XSRF-TOKEN': xsrfToken(),
-            },
-            credentials: 'same-origin',
-            body: JSON.stringify({
-                package_id: previewPackageId.value,
-                rules: mergedRules(),
-            }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            previewError.value = data?.message ?? 'Der Probelauf ist fehlgeschlagen.';
+// Every rule edit and every repository pick re-runs the preview, debounced ~600ms with the
+// stale request aborted — see useRetentionPreview.ts. An empty rule set previews nothing
+// (the server would only answer 422 "Mindestens eine Behalte-Regel…", not a useful state
+// to show while the operator is still building the first rule).
+watch(
+    () => [mergedRules(), previewPackageId.value] as const,
+    () => {
+        if (mergedRules().length === 0) {
+            cancelPreview();
+            previewSummary.value = [];
+            previewTags.value = null;
+            previewError.value = null;
             return;
         }
 
-        previewTags.value = data.tags;
-    } catch {
-        previewError.value = 'Der Probelauf ist fehlgeschlagen.';
-    } finally {
-        previewing.value = false;
+        schedulePreview(previewRequest());
+    },
+    { immediate: true },
+);
+
+/** The manual fallback: skips the debounce wait, e.g. right after picking a repository. */
+function runPreview() {
+    if (mergedRules().length === 0) {
+        return;
     }
+
+    void runPreviewNow(previewRequest());
 }
 </script>
 
@@ -303,12 +299,21 @@ async function runPreview() {
                         <Label for="preview-package" class="text-xs">Repository</Label>
                         <SearchableSelect id="preview-package" v-model="previewPackageId" placeholder="Bitte wählen" :options="packageOptions" />
                     </div>
-                    <Button type="button" variant="outline" :disabled="previewing || keepRules.length + shields.length === 0" @click="runPreview">
-                        {{ previewing ? 'Läuft …' : 'Probelauf starten' }}
+                    <Button type="button" variant="outline" :disabled="previewLoading || mergedRules().length === 0" @click="runPreview">
+                        {{ previewLoading ? 'Läuft …' : 'Probelauf starten' }}
                     </Button>
                 </div>
 
+                <!-- Live, from RetentionRule::describe() — never a client-side restatement of the grammar. -->
+                <ul v-if="previewSummary.length > 0" class="list-inside list-disc text-sm text-muted-foreground">
+                    <li v-for="line in previewSummary" :key="line">{{ line }}</li>
+                </ul>
+
                 <p v-if="previewError" class="text-sm text-destructive">{{ previewError }}</p>
+
+                <p v-if="!previewPackageId && previewSummary.length > 0" class="text-sm text-muted-foreground">
+                    Repository wählen, um zu sehen, welche Tags entfernt würden.
+                </p>
 
                 <table v-if="previewTags" class="w-full text-sm">
                     <thead>

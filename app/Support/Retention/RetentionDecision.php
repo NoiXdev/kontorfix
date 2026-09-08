@@ -22,4 +22,21 @@ final readonly class RetentionDecision
         public bool $keep,
         public array $reasons,
     ) {}
+
+    /**
+     * The one shape every preview/dry-run JSON response renders a decision as — the policy
+     * preview endpoint and the package-scoped one both build their `tags` array from this,
+     * so the two surfaces cannot drift on what a row looks like.
+     *
+     * @return array{name: string, pushed_at: string|null, keep: bool, reason: string|null}
+     */
+    public function toArray(): array
+    {
+        return [
+            'name' => $this->tag->name,
+            'pushed_at' => $this->tag->pushed_at?->toDateTimeString(),
+            'keep' => $this->keep,
+            'reason' => $this->reasons === [] ? null : implode(', ', $this->reasons),
+        ];
+    }
 }

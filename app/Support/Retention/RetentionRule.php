@@ -75,6 +75,23 @@ final readonly class RetentionRule
         return $value;
     }
 
+    /**
+     * The submitted (valid) rule set's German summary, one line per rule, in the order
+     * submitted — the live preview panels' `summary` and the saved dry run share this
+     * wording because both read it from here, never from a client-side re-implementation
+     * of the grammar.
+     *
+     * Assumes every entry already validated (RetentionRuleSetValidator::rule() ran first);
+     * fromArray() would throw on a malformed one, exactly as it does everywhere else.
+     *
+     * @param  list<array<string, mixed>>  $rawRules
+     * @return list<string>
+     */
+    public static function describeAll(array $rawRules): array
+    {
+        return array_map(fn (array $raw): string => self::fromArray($raw)->describe(), $rawRules);
+    }
+
     /** @return array<string, mixed> */
     public function toArray(): array
     {

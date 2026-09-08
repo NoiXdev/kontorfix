@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import RetentionRulesEditor from '@/components/kontorfix/RetentionRulesEditor.vue';
+import { postRetentionPreview, useRetentionPreview, type RetentionPreviewRequest } from '@/composables/useRetentionPreview';
 import { NO_SPACE_FREED_YET } from '@/pages/admin/retention/policies';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
@@ -134,6 +135,42 @@ const inlineRulesError = ref<string | null>(null);
 
 // A keep-rule OR the untagged window — the same reading the server enforces.
 const inlineSavable = computed(() => inlineRules.value.some((r) => r.type !== 'never_delete'));
+
+// --- Live preview of the UNSAVED inline rules, while the editor is open. ---
+//
+// No repository picker, unlike the policy form's preview: the package being edited IS the
+// one repository there is to try the rules against, so the same admin.packages.retention.
+// preview endpoint is always called with THIS package's id.
+const {
+    summary: inlinePreviewSummary,
+    tags: inlinePreviewTags,
+    error: inlinePreviewError,
+    loading: inlinePreviewLoading,
+    schedule: scheduleInlinePreview,
+    cancel: cancelInlinePreview,
+} = useRetentionPreview();
+
+function inlinePreviewRequest(): RetentionPreviewRequest {
+    const rules = inlineRules.value;
+
+    return (signal) => postRetentionPreview(route('admin.packages.retention.preview', props.package.id), { retention_rules: rules }, signal);
+}
+
+// Re-runs on every rule edit while the editor is open, debounced ~600ms with the stale
+// request aborted (see useRetentionPreview.ts). Closing the editor, or emptying the rule
+// set down to nothing, drops any pending/in-flight request and clears the shown result —
+// an empty rule set would only earn a 422 from the server, not a preview worth showing.
+watch([editingInline, inlineRules], () => {
+    if (!editingInline.value || inlineRules.value.length === 0) {
+        cancelInlinePreview();
+        inlinePreviewSummary.value = [];
+        inlinePreviewTags.value = null;
+        inlinePreviewError.value = null;
+        return;
+    }
+
+    scheduleInlinePreview(inlinePreviewRequest());
+});
 
 function saveInlineRules() {
     savingInline.value = true;
@@ -509,6 +546,49 @@ function saveShared() {
                                         </p>
                                     </div>
                                     <p v-if="inlineRulesError" class="text-sm text-destructive">{{ inlineRulesError }}</p>
+
+                                    <!-- The unsaved rules above, evaluated live against this repository — visually apart
+                                         from the saved-state dry run further down, which still reflects what is stored. -->
+                                    <div class="space-y-2 rounded-lg border border-dashed border-copper/50 bg-copper/5 p-3">
+                                        <p class="text-xs font-medium text-muted-foreground">
+                                            Vorschau (ungespeichert) {{ inlinePreviewLoading ? '— läuft …' : '' }}
+                                        </p>
+
+                                        <ul v-if="inlinePreviewSummary.length > 0" class="list-inside list-disc text-sm text-muted-foreground">
+                                            <li v-for="line in inlinePreviewSummary" :key="line">{{ line }}</li>
+                                        </ul>
+
+                                        <p v-if="inlinePreviewError" class="text-sm text-destructive">{{ inlinePreviewError }}</p>
+
+                                        <table v-if="inlinePreviewTags" class="w-full text-sm">
+                                            <thead>
+                                                <tr class="border-b border-sidebar-border/70 text-left dark:border-sidebar-border">
+                                                    <th class="py-2 pr-4 font-medium">Tag</th>
+                                                    <th class="py-2 pr-4 font-medium">Gepusht</th>
+                                                    <th class="py-2 pr-4 font-medium">Entscheidung</th>
+                                                    <th class="py-2 font-medium">Begründung</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr
+                                                    v-for="tag in inlinePreviewTags"
+                                                    :key="tag.name"
+                                                    class="border-b border-sidebar-border/40 last:border-b-0 dark:border-sidebar-border/40"
+                                                >
+                                                    <td class="py-2 pr-4 font-mono">{{ tag.name }}</td>
+                                                    <td class="py-2 pr-4 text-muted-foreground">{{ tag.pushed_at ?? '—' }}</td>
+                                                    <td class="py-2 pr-4">
+                                                        <span v-if="tag.keep" class="text-emerald-600 dark:text-emerald-400">bleibt</span>
+                                                        <span v-else class="text-destructive">wird entfernt</span>
+                                                    </td>
+                                                    <td class="py-2 text-muted-foreground">{{ tag.reason ?? '—' }}</td>
+                                                </tr>
+                                                <tr v-if="inlinePreviewTags.length === 0">
+                                                    <td colspan="4" class="py-2 text-muted-foreground">Dieses Repository hat keine Tags.</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </template>
                             </div>
                         </div>

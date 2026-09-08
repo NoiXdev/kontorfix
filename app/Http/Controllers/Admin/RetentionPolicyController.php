@@ -160,30 +160,37 @@ class RetentionPolicyController extends Controller
     }
 
     /**
-     * The editor panel's evaluation of the UNSAVED rules currently in the form, against one
-     * picked package. JSON rather than an Inertia page: the panel updates in place while
-     * the operator types, and a page visit would discard exactly the unsaved state it is
-     * there to preview.
+     * The editor panel's evaluation of the UNSAVED rules currently in the form — the rule
+     * summary always, and the tag-by-tag verdict once a package has been picked to try them
+     * against. JSON rather than an Inertia page: the panel updates in place while the
+     * operator types, and a page visit would discard exactly the unsaved state it is there
+     * to preview.
+     *
+     * `package_id` is optional: the summary line is worth showing the instant the rules
+     * validate, before the operator has picked a repository to test them against — and the
+     * live editor re-runs this on every keystroke, not only once a package is chosen.
      */
     public function preview(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'package_id' => ['required', 'uuid', 'exists:packages,id'],
+            'package_id' => ['sometimes', 'nullable', 'uuid', 'exists:packages,id'],
             'rules' => ['required', 'array', 'min:1', RetentionRuleSetValidator::rule()],
         ]);
 
-        /** @var Package $package */
-        $package = Package::query()->where('type', PackageType::Docker)->findOrFail($data['package_id']);
+        $tags = null;
+        if (! empty($data['package_id'])) {
+            /** @var Package $package */
+            $package = Package::query()->where('type', PackageType::Docker)->findOrFail($data['package_id']);
 
-        $decisions = $this->runner->previewWithRules($package, $data['rules']);
+            $tags = array_map(
+                fn (RetentionDecision $decision): array => $decision->toArray(),
+                $this->runner->previewWithRules($package, $data['rules']),
+            );
+        }
 
         return response()->json([
-            'tags' => array_map(fn (RetentionDecision $decision): array => [
-                'name' => $decision->tag->name,
-                'pushed_at' => $decision->tag->pushed_at?->toDateTimeString(),
-                'keep' => $decision->keep,
-                'reason' => $decision->reasons === [] ? null : implode(', ', $decision->reasons),
-            ], $decisions),
+            'summary' => RetentionRule::describeAll($data['rules']),
+            'tags' => $tags,
         ]);
     }
 

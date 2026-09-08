@@ -189,7 +189,21 @@ it('previews unsaved rules without creating a policy', function () {
 
     expect(collect($tags)->firstWhere('name', 'alt')['keep'])->toBeFalse()
         ->and($package->ociTags()->count())->toBe(2)
-        ->and(RetentionPolicy::count())->toBe(0);
+        ->and(RetentionPolicy::count())->toBe(0)
+        // The summary line comes from RetentionRule::describe() — the one German grammar,
+        // not a TS re-implementation of it.
+        ->and($response->json('summary'))->toBe(['Letzte 1 behalten']);
+});
+
+it('returns the rule summary with no package chosen yet, and evaluates no tags', function () {
+    $response = $this->actingAs(superAdmin())
+        ->postJson(route('admin.retention-policies.preview'), [
+            'rules' => [['type' => 'keep_last', 'count' => 3]],
+        ])
+        ->assertOk();
+
+    expect($response->json('summary'))->toBe(['Letzte 3 behalten'])
+        ->and($response->json('tags'))->toBeNull();
 });
 
 it('refuses a preview with invalid rules instead of guessing', function () {

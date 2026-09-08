@@ -188,6 +188,67 @@ it('lets the owning org admin set and clear inline rules', function () {
     expect($package->fresh()->retention_rules)->toBeNull();
 });
 
+it('previews unsaved inline rules against the package itself, without saving them', function () {
+    $package = retentionCardPackage();
+    OciTag::factory()->create([
+        'package_id' => $package->id,
+        'name' => 'alt',
+        'manifest_id' => OciManifest::factory()->for($package)->create()->id,
+        'pushed_at' => '2020-01-01 00:00:00',
+    ]);
+    $admin = adminOf($package->organization);
+
+    $response = $this->actingAs($admin)
+        ->postJson(route('admin.packages.retention.preview', $package), [
+            'retention_rules' => [['type' => 'keep_last', 'count' => 1]],
+        ])
+        ->assertOk();
+
+    /** @var list<array{name: string, keep: bool}> $tags */
+    $tags = $response->json('tags');
+
+    expect($response->json('summary'))->toBe(['Letzte 1 behalten'])
+        ->and(collect($tags)->firstWhere('name', 'alt')['keep'])->toBeFalse()
+        // The unsaved rules are evaluated, never stored.
+        ->and($package->fresh()->retention_rules)->toBeNull();
+});
+
+it('refuses a preview with invalid rules instead of guessing', function () {
+    $package = retentionCardPackage();
+    $admin = adminOf($package->organization);
+
+    $this->actingAs($admin)
+        ->postJson(route('admin.packages.retention.preview', $package), [
+            'retention_rules' => [['type' => 'never_delete', 'pattern' => 'prod-*']],
+        ])
+        ->assertUnprocessable();
+});
+
+it('refuses the inline preview for a FOREIGN organization admin, and evaluates nothing', function () {
+    $package = retentionCardPackage();
+
+    $this->actingAs(adminOf(Organization::factory()->create()))
+        ->postJson(route('admin.packages.retention.preview', $package), [
+            'retention_rules' => [['type' => 'keep_last', 'count' => 1]],
+        ])
+        ->assertForbidden();
+
+    expect($package->fresh()->retention_rules)->toBeNull();
+});
+
+it('refuses the inline preview for a portal member outright', function () {
+    $package = retentionCardPackage();
+    $member = User::factory()->for($package->organization)->create(['role' => UserRole::Member]);
+
+    $this->actingAs($member)
+        ->postJson(route('admin.packages.retention.preview', $package), [
+            'retention_rules' => [['type' => 'keep_last', 'count' => 1]],
+        ])
+        ->assertForbidden();
+
+    expect($package->fresh()->retention_rules)->toBeNull();
+});
+
 it('refuses retention assignment on a non-Docker package', function () {
     $composer = Package::factory()->create();
     $policy = RetentionPolicy::factory()->create();
