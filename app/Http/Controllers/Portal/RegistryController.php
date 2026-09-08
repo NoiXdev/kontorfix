@@ -9,6 +9,7 @@ use App\Models\OciTag;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
+use App\Services\Oci\Retention\RetentionRunner;
 use App\Services\Package\PackageDependencies;
 use App\Services\Portal\PortalContext;
 use App\Services\Registry\RegistryTypeService;
@@ -313,7 +314,47 @@ class RegistryController extends Controller
             // snippet with the explanation when it does not — offering a command that
             // answers 404 is worse than saying nothing.
             'in_force' => $inForce,
+            'retention' => $this->retentionFor($package),
         ]);
+    }
+
+    /**
+     * What the customer may know about retention: the resolved policy's name, its rules in
+     * the SAME words the operator's dry run uses (RetentionRule::describe() — one string,
+     * so the two surfaces cannot drift), and the tags the next run would remove. Read-only
+     * is the whole of the permission — no selector, no trigger, and no catalogue of the
+     * instance's other policies.
+     *
+     * Null only for a non-Docker package (retention operates on tags). For a Docker
+     * repository with no resolved policy the shape is PRESENT with policy_name null: the
+     * page renders "es wird nichts entfernt" from it, because an absent section would be
+     * indistinguishable from one that failed to load.
+     *
+     * @return array{policy_name: string|null, rules: list<string>, removals: list<array{name: string, pushed_at: string|null}>}|null
+     */
+    private function retentionFor(Package $package): ?array
+    {
+        if ($package->type !== PackageType::Docker) {
+            return null;
+        }
+
+        $runner = app(RetentionRunner::class);
+        $report = $runner->dryRun($package);
+
+        if ($report === null) {
+            return ['policy_name' => null, 'rules' => [], 'removals' => []];
+        }
+
+        return [
+            'policy_name' => $report->policy->name,
+            'rules' => array_map(fn ($rule): string => $rule->describe(), $runner->rulesOf($report->policy)),
+            // Only the removals, not every decision: the customer's question is "what will
+            // disappear, and do I still need it" — pull or re-tag before the next run.
+            'removals' => array_map(fn ($decision): array => [
+                'name' => $decision->tag->name,
+                'pushed_at' => $decision->tag->pushed_at?->toDateTimeString(),
+            ], $report->removed()),
+        ];
     }
 
     /**

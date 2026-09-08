@@ -71,6 +71,14 @@ interface TagRow {
     updated_at: string | null;
 }
 
+import {
+    PORTAL_NO_REMOVALS,
+    PORTAL_NO_RETENTION,
+    PORTAL_RETENTION_ADVICE,
+    PORTAL_RETENTION_EXPLANATION,
+    PORTAL_UPCOMING_REMOVALS,
+} from './portalRetention';
+
 const props = defineProps<{
     registry: Registry;
     package: {
@@ -100,6 +108,18 @@ const props = defineProps<{
     // so the first row of the table is the tag in the pull command. Sorting this array in the
     // browser would break that pairing without touching any PHP.
     tags: TagRow[];
+    /**
+     * What the customer may know about retention, read-only: the resolved policy's name,
+     * its rules in the operator's own words, and the tags the next run would remove. Null
+     * for every type but Docker; for a Docker repository WITHOUT a policy the object is
+     * present with `policy_name` null and the section says "nichts wird entfernt" — an
+     * absent section would be indistinguishable from one that failed to load.
+     */
+    retention: {
+        policy_name: string | null;
+        rules: string[];
+        removals: { name: string; pushed_at: string | null }[];
+    } | null;
     /**
      * The whole command, built by `SetupSnippetBuilder::installCommand()` from THIS registry's
      * address — never assembled in the browser, and never from the package type alone.
@@ -298,6 +318,37 @@ function depCount(deps: Record<string, string>): number {
                             </tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- RETENTION, READ-ONLY (plate 5's customer half): why tags disappear, and
+                     which ones the next run would take. Always rendered for a Docker
+                     repository — with no policy it states the fact instead of vanishing. -->
+                <div v-if="isDocker && props.retention" class="rounded-xl border border-sidebar-border/70 p-4 text-sm dark:border-sidebar-border">
+                    <h2 class="font-medium">Aufbewahrung</h2>
+
+                    <template v-if="props.retention.policy_name">
+                        <p class="mt-1 text-muted-foreground">{{ PORTAL_RETENTION_EXPLANATION }}</p>
+                        <p class="mt-2">
+                            Richtlinie: <span class="font-medium">{{ props.retention.policy_name }}</span>
+                        </p>
+                        <ul class="mt-1 list-inside list-disc text-muted-foreground">
+                            <li v-for="rule in props.retention.rules" :key="rule">{{ rule }}</li>
+                        </ul>
+
+                        <template v-if="props.retention.removals.length > 0">
+                            <p class="mt-3">{{ PORTAL_UPCOMING_REMOVALS }}</p>
+                            <ul class="mt-1 list-inside list-disc font-mono text-muted-foreground">
+                                <li v-for="removal in props.retention.removals" :key="removal.name">
+                                    {{ removal.name }}
+                                    <span v-if="removal.pushed_at" class="font-sans text-xs">(gepusht {{ removal.pushed_at }})</span>
+                                </li>
+                            </ul>
+                            <p class="mt-2 text-muted-foreground">{{ PORTAL_RETENTION_ADVICE }}</p>
+                        </template>
+                        <p v-else class="mt-3 text-muted-foreground">{{ PORTAL_NO_REMOVALS }}</p>
+                    </template>
+
+                    <p v-else class="mt-1 text-muted-foreground">{{ PORTAL_NO_RETENTION }}</p>
                 </div>
 
                 <div
