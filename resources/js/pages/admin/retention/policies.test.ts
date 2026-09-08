@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DRY_RUN_EXPLANATION, KEEP_RULES_OR, NO_SPACE_FREED_YET, PATTERN_HELP, SHIELD_EXPLANATION } from './policies';
+import { DRY_RUN_EXCLUDES_INLINE_NOTE, DRY_RUN_EXPLANATION, KEEP_RULES_OR, NO_SPACE_FREED_YET, PATTERN_HELP, SHIELD_EXPLANATION } from './policies';
 
 describe('retention policy copy', () => {
     it('states the OR combination and its consequence, whole', () => {
@@ -39,8 +39,16 @@ describe('retention policy copy', () => {
         expect(DRY_RUN_EXPLANATION).toContain('welche Regel ihn behält');
     });
 
+    it('states that a package with inline rules falls outside the governed set', () => {
+        // Mirrors RetentionRunner::packagesFor()'s `whereNull('retention_rules')` — without
+        // this sentence the dry run's package count reads as complete when it silently
+        // excludes those repositories.
+        expect(DRY_RUN_EXCLUDES_INLINE_NOTE).toContain('eigenen Regeln');
+        expect(DRY_RUN_EXCLUDES_INLINE_NOTE).toContain('gehen jeder Richtlinie vor');
+    });
+
     it('keeps the formal register', () => {
-        for (const copy of [KEEP_RULES_OR, SHIELD_EXPLANATION, PATTERN_HELP, NO_SPACE_FREED_YET, DRY_RUN_EXPLANATION]) {
+        for (const copy of [KEEP_RULES_OR, SHIELD_EXPLANATION, PATTERN_HELP, NO_SPACE_FREED_YET, DRY_RUN_EXPLANATION, DRY_RUN_EXCLUDES_INLINE_NOTE]) {
             expect(copy).not.toMatch(/\bdu\b|\bdein/i);
         }
     });

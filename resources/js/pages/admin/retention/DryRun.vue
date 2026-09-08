@@ -6,7 +6,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
-import { DRY_RUN_EXPLANATION, NO_SPACE_FREED_YET } from './policies';
+import { DRY_RUN_EXCLUDES_INLINE_NOTE, DRY_RUN_EXPLANATION, NO_SPACE_FREED_YET } from './policies';
 
 interface ReportTag {
     name: string;
@@ -17,7 +17,9 @@ interface ReportTag {
 
 interface PackageReport {
     package: { id: string; name: string };
-    policy: { id: string; name: string };
+    // Mirrors RetentionReport::toArray(): never a bare policy, since an inline rule set has
+    // no policy row.
+    source: { tier: string; label: string | null; policy_id: string | null };
     kept_count: number;
     removed_count: number;
     tags: ReportTag[];
@@ -67,6 +69,7 @@ function apply() {
                 <div>
                     <h1 class="text-xl font-semibold">Probelauf: {{ props.policy.name }}</h1>
                     <p class="text-sm text-muted-foreground">{{ DRY_RUN_EXPLANATION }}</p>
+                    <p class="text-sm text-muted-foreground">{{ DRY_RUN_EXCLUDES_INLINE_NOTE }}</p>
                 </div>
                 <Button variant="destructive" :disabled="props.totals.removed === 0" @click="confirmOpen = true">
                     Jetzt anwenden

@@ -75,8 +75,9 @@ const props = defineProps<{
     stats: { tag_count: number; occupied_bytes: number; shared_bytes: number };
     activities: ActivityRow[];
     // Which policy resolves for this repository and from which tier, what the next run
-    // would remove, and — super-admin only — the selector. `policies` is empty for an org
-    // admin on purpose: which rule sets exist is operator config.
+    // would remove, and the selector — shown to the owning organization's admin (or a
+    // super-admin) via `can_assign`. `policies` lists only PUBLISHED (global) policies for
+    // a non-super caller; a super-admin also sees unpublished ones.
     retention: {
         policy: { id: string; name: string } | null;
         tier: 'inline' | 'package' | 'instance' | null;
@@ -125,26 +126,42 @@ function saveRetentionPolicy() {
 const editingInline = ref(false);
 const inlineRules = ref<{ type: string; count?: number | string; days?: number | string; pattern?: string }[]>(props.retention.inline_rules ?? []);
 const savingInline = ref(false);
+// Populated from the 422's `retention_rules` message (e.g. a `keep_matching` rule with an
+// empty pattern, which the client guard below does not catch) and cleared on the next
+// attempt — never on onFinish, or a failed save would wipe both the input AND the message
+// that explains why it wasn't saved.
+const inlineRulesError = ref<string | null>(null);
 
 // A keep-rule OR the untagged window — the same reading the server enforces.
 const inlineSavable = computed(() => inlineRules.value.some((r) => r.type !== 'never_delete'));
 
 function saveInlineRules() {
     savingInline.value = true;
+    inlineRulesError.value = null;
 
     router.put(
         route('admin.packages.retention.update', props.package.id),
         { retention_rules: inlineRules.value },
         {
             preserveScroll: true,
+            // Only a successful save closes the editor and re-seeds from props — Inertia's
+            // put/post/delete visits default to preserveState: true, so this component
+            // instance survives the round trip and the local ref does not reset itself the
+            // way a fresh mount would. Re-seeding trusts the response's (possibly
+            // server-normalised) props rather than what was sent.
+            onSuccess: () => {
+                editingInline.value = false;
+                inlineRules.value = props.retention.inline_rules ?? [];
+            },
+            // A 422 (e.g. the server refusing an empty pattern the client guard let through)
+            // must not close the editor or discard what the operator typed — both would
+            // happen silently under the old onFinish-only handling, losing the input with no
+            // explanation on screen.
+            onError: (errors) => {
+                inlineRulesError.value = errors.retention_rules ?? 'Speichern fehlgeschlagen.';
+            },
             onFinish: () => {
                 savingInline.value = false;
-                editingInline.value = false;
-                // Inertia's put/post/delete visits default to preserveState: true — this
-                // component instance survives the round trip, so the local ref does not
-                // reset itself the way a fresh mount would. Re-seed it from the response's
-                // (possibly server-normalised) props rather than trusting what was sent.
-                inlineRules.value = props.retention.inline_rules ?? [];
             },
         },
     );
@@ -152,19 +169,26 @@ function saveInlineRules() {
 
 function clearInlineRules() {
     savingInline.value = true;
+    inlineRulesError.value = null;
 
     router.put(
         route('admin.packages.retention.update', props.package.id),
         { retention_rules: null },
         {
             preserveScroll: true,
+            // Same reasoning as saveInlineRules(): only a successful clear closes the editor
+            // and empties the local ref. Without this, a failed clear would still show the
+            // just-deleted rules gone from the screen while the server kept them — reopening
+            // the editor to save again would silently resurrect them from stale local state.
+            onSuccess: () => {
+                editingInline.value = false;
+                inlineRules.value = [];
+            },
+            onError: (errors) => {
+                inlineRulesError.value = errors.retention_rules ?? 'Entfernen fehlgeschlagen.';
+            },
             onFinish: () => {
                 savingInline.value = false;
-                editingInline.value = false;
-                // Same preserveState reason as saveInlineRules(): without this, the editor
-                // would still show the just-deleted rules, and reopening it to save again
-                // would silently resurrect them.
-                inlineRules.value = [];
             },
         },
     );
@@ -484,6 +508,7 @@ function saveShared() {
                                             Mindestens eine Behalte-Regel oder die Ungetaggt-Regel ist nötig.
                                         </p>
                                     </div>
+                                    <p v-if="inlineRulesError" class="text-sm text-destructive">{{ inlineRulesError }}</p>
                                 </template>
                             </div>
                         </div>

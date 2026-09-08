@@ -36,3 +36,14 @@ export const NO_SPACE_FREED_YET =
 export const DRY_RUN_EXPLANATION =
     'Der Probelauf entfernt nichts. Für jeden Tag steht dabei, welche Regel ihn behält — ' +
     'ein Bericht, der nur eine Anzahl nennt, lässt sich nicht prüfen, nur glauben.';
+
+/**
+ * States the exclusion RetentionRunner::packagesFor() already enforces (a `WHERE
+ * retention_rules IS NULL`): a policy's dry run — and its real run — never lists a package
+ * with its own inline rules, however that package's `retention_policy_id` reads, because
+ * inline rules outrank every policy at tier 0. Without this sentence the governed count on
+ * plate 5 reads as complete when it silently excludes those repositories.
+ */
+export const DRY_RUN_EXCLUDES_INLINE_NOTE =
+    'Repositories mit eigenen Regeln gehören nicht zum Geltungsbereich dieser Richtlinie: Eigene Regeln gehen jeder Richtlinie vor ' +
+    'und werden hier — auch im echten Lauf — nie mitgezählt.';

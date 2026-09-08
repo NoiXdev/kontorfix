@@ -99,7 +99,7 @@ function toggleShare(organizationId: string, checked: boolean) {
     <div class="grid gap-2">
         <Label for="cred_host">Host</Label>
         <Input id="cred_host" v-model="form.host" :placeholder="hostPlaceholder" autocomplete="off" />
-        <p class="text-xs text-muted-foreground">Der Token wird ausschliesslich an diesen Host gesendet.</p>
+        <p class="text-xs text-muted-foreground">Der Token wird ausschließlich an diesen Host gesendet.</p>
         <InputError :message="form.errors.host" />
     </div>
 
@@ -124,7 +124,7 @@ function toggleShare(organizationId: string, checked: boolean) {
                 Für alle Organisationen freigeben
                 <span class="block text-xs text-muted-foreground">
                     Global freigegebene Tokens kann jede Organisation ihren eigenen Paketen zuweisen — nur lesend, bearbeiten kann sie
-                    weiterhin ausschliesslich der Betreiber.
+                    weiterhin ausschließlich der Betreiber.
                 </span>
             </span>
         </label>

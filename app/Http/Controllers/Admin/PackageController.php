@@ -579,8 +579,9 @@ class PackageController extends Controller
 
     /**
      * The card's "Anwenden": one repository, re-resolved at apply time, with the caller as
-     * causer. Super-only for the same reason assignment is — applying is the other half of
-     * the same lever.
+     * causer. Org-scoped, same boundary as updateRetention() — the owning organization's
+     * admin (or a super-admin) may run it, since applying is the other half of the same
+     * lever assignment is.
      */
     public function applyRetention(Request $request, Package $package, RetentionRunner $runner): RedirectResponse
     {
