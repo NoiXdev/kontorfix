@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 // Must match `PackagePicker.vue`'s own (correct, wider) local `Pkg` — this component only
@@ -29,6 +29,10 @@ interface OrgOption {
     // First segment of every registry URL, so the preview below can name it once the
     // operator has picked an owner.
     slug: string;
+    // Whether this organization's customer portal exists at all — see
+    // Organization::portal_enabled's docblock. Drives the hint under the "Im Kundenportal
+    // anzeigen" switch below once this org is the picked (or default) owner.
+    portal_enabled: boolean;
 }
 
 const props = withDefaults(
@@ -37,8 +41,23 @@ const props = withDefaults(
         // The registry URL form with both slugs left open, from RegistryUrl::template().
         // This sheet substitutes into it — it never assembles a registry URL itself.
         urlTemplate?: string;
+        // What "Standard (Betreiber)" (the SearchableSelect's empty option) resolves to on
+        // submit — the same organization ScopesToAdministeredOrgs::resolveCreationOrg()
+        // picks: the active scope, else the caller's home organization. Needed because that
+        // resolution happens server-side and cannot be recomputed from `organizations` alone.
+        defaultOrganizationId?: string | null;
+        defaultOrganizationPortalEnabled?: boolean;
+        // Whether the current caller may open admin.organizations.show — customer/
+        // organization management is super-admin only (see EnsureSuperAdmin).
+        canManageOrganization?: boolean;
     }>(),
-    { organizations: () => [], urlTemplate: '' },
+    {
+        organizations: () => [],
+        urlTemplate: '',
+        defaultOrganizationId: null,
+        defaultOrganizationPortalEnabled: true,
+        canManageOrganization: false,
+    },
 );
 
 const open = defineModel<boolean>('open', { default: false });
@@ -66,6 +85,19 @@ const orgSlug = computed(() => props.organizations.find((o) => o.id === form.org
 const urlFormLabel = computed(() => props.urlTemplate.replace('{organization}', '<organisation>').replace('{registry}', '<slug>'));
 
 const urlPreview = computed(() => origin + props.urlTemplate.replace('{organization}', orgSlug.value).replace('{registry}', form.slug || '…'));
+
+// The owner this registry will actually belong to once submitted: the explicitly picked
+// organization, or — for "Standard (Betreiber)" — whatever resolveCreationOrg() resolves to
+// server-side (see `defaultOrganizationId`/`defaultOrganizationPortalEnabled` above). Reading
+// the picked option from `organizations` rather than trusting the SearchableSelect's own
+// state keeps this in one place with `orgSlug` above.
+const selectedOrganization = computed(() => props.organizations.find((o) => o.id === form.organization_id));
+
+const ownerPortalEnabled = computed(() =>
+    form.organization_id ? (selectedOrganization.value?.portal_enabled ?? true) : props.defaultOrganizationPortalEnabled,
+);
+
+const ownerOrganizationId = computed(() => (form.organization_id ? form.organization_id : props.defaultOrganizationId));
 
 const selected = ref<Pkg[]>([]);
 const slugTouched = ref(false);
@@ -165,6 +197,26 @@ function close() {
                     </Label>
                 </div>
                 <InputError :message="form.errors.portal_enabled" />
+
+                <!-- The switch above only controls whether this registry appears inside the customer
+                     portal — it says nothing about whether the OWNING organization's portal exists at
+                     all. Reflects whichever organization the registry will actually belong to: the
+                     picked owner, or — for "Standard (Betreiber)" — the server's own resolution. -->
+                <p
+                    v-if="!ownerPortalEnabled"
+                    class="inline-flex w-fit items-start gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
+                >
+                    <span>
+                        Das Kundenportal dieser Organisation ist deaktiviert — diese Registry erscheint dort erst, wenn es aktiviert wird.
+                        <Link
+                            v-if="canManageOrganization && ownerOrganizationId"
+                            :href="route('admin.organizations.show', ownerOrganizationId)"
+                            class="underline underline-offset-2 hover:text-foreground"
+                        >
+                            Organisation öffnen
+                        </Link>
+                    </span>
+                </p>
 
                 <div class="grid gap-2">
                     <Label>Pakete</Label>

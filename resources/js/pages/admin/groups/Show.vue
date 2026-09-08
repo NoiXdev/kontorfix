@@ -35,6 +35,11 @@ interface GroupInfo {
     slug: string;
     public: boolean;
     portal_enabled: boolean;
+    // Whether the OWNING organization's customer portal exists at all — see
+    // Organization::portal_enabled's docblock. Not the same question as `portal_enabled`
+    // above, which only answers whether this registry appears inside that portal once it
+    // exists.
+    organization_portal_enabled: boolean;
     organization: string | null;
     organization_id: string | null;
     // Supplied by App\Services\Registry\RegistryUrl — the URL form is stated once, in PHP.
@@ -117,6 +122,10 @@ const props = defineProps<{
     // the previous day for several hours, so the two would disagree about whether a chosen
     // date has already passed.
     today: string;
+    // Whether the current caller may open admin.organizations.show — customer/organization
+    // management is super-admin only (see EnsureSuperAdmin). Decided server-side rather than
+    // re-derived here: see GroupController::show()'s docblock on the field of the same name.
+    can_manage_organization: boolean;
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -487,6 +496,27 @@ async function copyToken() {
                                     </span>
                                 </span>
                             </label>
+
+                            <!-- The switch above only controls whether this registry appears inside the customer
+                                 portal — it says nothing about whether that portal exists at all. Without this,
+                                 turning it on here looks broken for as long as the organization's own portal stays
+                                 off, with nothing on this page to explain why. -->
+                            <p
+                                v-if="!props.group.organization_portal_enabled"
+                                class="inline-flex w-fit items-start gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
+                            >
+                                <span>
+                                    Das Kundenportal dieser Organisation ist deaktiviert — diese Registry erscheint dort erst, wenn es aktiviert
+                                    wird.
+                                    <Link
+                                        v-if="props.can_manage_organization && props.group.organization_id"
+                                        :href="route('admin.organizations.show', props.group.organization_id)"
+                                        class="underline underline-offset-2 hover:text-foreground"
+                                    >
+                                        Organisation öffnen
+                                    </Link>
+                                </span>
+                            </p>
 
                             <div class="flex flex-col gap-1.5">
                                 <label for="registry-slug" class="text-sm font-medium">Slug</label>
