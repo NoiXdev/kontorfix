@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import OrgPortalHint from '@/components/kontorfix/OrgPortalHint.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Switch } from '@/components/ui/switch';
-import { Link, useForm } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 // Must match `PackagePicker.vue`'s own (correct, wider) local `Pkg` — this component only
@@ -198,25 +199,13 @@ function close() {
                 </div>
                 <InputError :message="form.errors.portal_enabled" />
 
-                <!-- The switch above only controls whether this registry appears inside the customer
-                     portal — it says nothing about whether the OWNING organization's portal exists at
-                     all. Reflects whichever organization the registry will actually belong to: the
+                <!-- Reflects whichever organization the registry will actually belong to: the
                      picked owner, or — for "Standard (Betreiber)" — the server's own resolution. -->
-                <p
-                    v-if="!ownerPortalEnabled"
-                    class="inline-flex w-fit items-start gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
-                >
-                    <span>
-                        Das Kundenportal dieser Organisation ist deaktiviert — diese Registry erscheint dort erst, wenn es aktiviert wird.
-                        <Link
-                            v-if="canManageOrganization && ownerOrganizationId"
-                            :href="route('admin.organizations.show', ownerOrganizationId)"
-                            class="underline underline-offset-2 hover:text-foreground"
-                        >
-                            Organisation öffnen
-                        </Link>
-                    </span>
-                </p>
+                <OrgPortalHint
+                    :portal-enabled="ownerPortalEnabled"
+                    :can-manage-organization="canManageOrganization"
+                    :organization-id="ownerOrganizationId"
+                />
 
                 <div class="grid gap-2">
                     <Label>Pakete</Label>

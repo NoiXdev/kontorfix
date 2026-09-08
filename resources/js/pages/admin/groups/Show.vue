@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
+import OrgPortalHint from '@/components/kontorfix/OrgPortalHint.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
@@ -497,26 +498,11 @@ async function copyToken() {
                                 </span>
                             </label>
 
-                            <!-- The switch above only controls whether this registry appears inside the customer
-                                 portal — it says nothing about whether that portal exists at all. Without this,
-                                 turning it on here looks broken for as long as the organization's own portal stays
-                                 off, with nothing on this page to explain why. -->
-                            <p
-                                v-if="!props.group.organization_portal_enabled"
-                                class="inline-flex w-fit items-start gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground"
-                            >
-                                <span>
-                                    Das Kundenportal dieser Organisation ist deaktiviert — diese Registry erscheint dort erst, wenn es aktiviert
-                                    wird.
-                                    <Link
-                                        v-if="props.can_manage_organization && props.group.organization_id"
-                                        :href="route('admin.organizations.show', props.group.organization_id)"
-                                        class="underline underline-offset-2 hover:text-foreground"
-                                    >
-                                        Organisation öffnen
-                                    </Link>
-                                </span>
-                            </p>
+                            <OrgPortalHint
+                                :portal-enabled="props.group.organization_portal_enabled"
+                                :can-manage-organization="props.can_manage_organization"
+                                :organization-id="props.group.organization_id"
+                            />
 
                             <div class="flex flex-col gap-1.5">
                                 <label for="registry-slug" class="text-sm font-medium">Slug</label>
