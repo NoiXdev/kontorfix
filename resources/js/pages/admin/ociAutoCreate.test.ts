@@ -19,7 +19,17 @@ describe('oci auto-create copy', () => {
         expect(OCI_AUTO_CREATE_COST).toContain('Abgebrochene Pushes');
         expect(OCI_AUTO_CREATE_COST).toContain('Paketlisten');
         expect(OCI_AUTO_CREATE_COST).toContain('Kundenportal');
-        expect(OCI_AUTO_CREATE_COST).toContain('von Hand');
         expect(OCI_AUTO_CREATE_COST).not.toMatch(/\bdu\b|\bdein/i);
+    });
+
+    it('promises the sweeper, not manual cleanup', () => {
+        // This sentence used to end "nur von Hand wieder entfernt" — true until the storage
+        // sweeper existed, and a wrong cost statement afterwards. The sweep is conditional
+        // (older than the grace period AND still empty), so the copy has to say both, or an
+        // operator watches a fresh leftover survive a sweep and files it as a bug.
+        expect(OCI_AUTO_CREATE_COST).toContain('Speicherbereinigung');
+        expect(OCI_AUTO_CREATE_COST).toContain('Schonfrist');
+        expect(OCI_AUTO_CREATE_COST).toContain('weiterhin kein Image');
+        expect(OCI_AUTO_CREATE_COST).not.toContain('von Hand');
     });
 });

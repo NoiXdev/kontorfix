@@ -25,14 +25,18 @@ export const OCI_AUTO_CREATE_LABEL = 'Repositories beim Push anlegen';
  *
  * A `docker push` creates the repository row at its FIRST request — `POST
  * .../blobs/uploads/` — long before any layer, let alone a manifest, has arrived. A client
- * that opens sessions and never finishes them therefore leaves fully-fledged, permanently
- * empty `packages` rows behind, and nothing reclaims them: they count in package lists, in
- * the dashboard's totals and in the customer portal. That is a deliberate trade (the
- * alternative is a repository that does not exist until a push completes, which no client
- * can address in the meantime), but it is not one an operator should discover from a package
- * list that grew overnight.
+ * that opens sessions and never finishes them therefore leaves fully-fledged, empty
+ * `packages` rows behind: they count in package lists, in the dashboard's totals and in the
+ * customer portal until the storage sweeper reclaims them, which it does only once they are
+ * older than the grace period and still hold no image (see OciSweeper — the rows carry
+ * `auto_created_at` precisely so the sweeper can tell them from repositories an operator
+ * registered on purpose). That is a deliberate trade (the alternative is a repository that
+ * does not exist until a push completes, which no client can address in the meantime), but
+ * the interval between the broken push and the next sweep is still not one an operator
+ * should discover from a package list that grew overnight.
  */
 export const OCI_AUTO_CREATE_COST =
     'Zu bedenken: Das Repository entsteht bereits beim ersten Upload-Request, nicht erst mit dem fertigen Image. ' +
     'Abgebrochene Pushes hinterlassen daher leere Repository-Einträge, die in Paketlisten, Zählungen und im ' +
-    'Kundenportal auftauchen und nur von Hand wieder entfernt werden.';
+    'Kundenportal auftauchen. Die Speicherbereinigung entfernt sie wieder, sobald sie älter als die Schonfrist ' +
+    'sind und weiterhin kein Image enthalten.';

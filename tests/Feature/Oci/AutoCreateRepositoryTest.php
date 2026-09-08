@@ -432,3 +432,51 @@ it('answers every unresolvable name identically while the setting is off', funct
     expect($answer('anderswo'))->toBe($answer('neu'))
         ->and($answer('fremd'))->toBe($answer('neu'));
 });
+
+it('marks a push-created repository as push-created', function () {
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $this->travelTo('2026-09-08 09:00:00');
+
+    pushBlobIntoNeu($this->publish, $this->bytes)->assertStatus(201);
+
+    // The provenance marker the sweeper filters on: this row exists because a push made
+    // it, and if the push dies here it is the sweeper's to reclaim.
+    expect(Package::where('name', 'neu')->sole()->auto_created_at?->toDateTimeString())
+        ->toBe('2026-09-08 09:00:00');
+});
+
+it('does not mark a repository an operator registered, even when the push path touches it', function () {
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    // Pre-registered by hand, the way every repository existed before push-time creation.
+    $registered = Package::factory()->inOrgOf($this->group)->create([
+        'type' => PackageType::Docker,
+        'source_mode' => PackageSourceMode::Publish,
+        'name' => 'vonhand',
+    ]);
+    $this->group->packages()->attach($registered);
+
+    pushBlobIntoRepository($this->publish, 'vonhand', $this->bytes)->assertStatus(201);
+
+    // The stamp belongs to ociCreateRepository() and nowhere else. A push into an existing
+    // repository resolves it, writes a blob, and must leave the provenance alone — or the
+    // sweeper would treat a deliberately pre-registered repository as a broken push's
+    // leftover the moment its images age out.
+    expect($registered->fresh()->auto_created_at)->toBeNull();
+});
+
+it('does not stamp the winner\'s row when losing the create race', function () {
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $winner = plantCompetingRepository('neu', $this->group);
+
+    pushBlobIntoNeu($this->publish, $this->bytes)->assertStatus(201);
+
+    // The loser's catch branch re-resolves and returns the winner's row AS IS. The planted
+    // competitor carries whatever provenance its own path wrote (none, here — it stands in
+    // for any committed row); the loser marking it would falsify that provenance and, with
+    // it, the sweeper's "only rows a push created" filter.
+    expect($winner()?->fresh()->auto_created_at)->toBeNull()
+        ->and(Package::where('name', 'neu')->count())->toBe(1);
+});

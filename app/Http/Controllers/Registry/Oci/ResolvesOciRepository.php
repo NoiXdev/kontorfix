@@ -276,6 +276,13 @@ trait ResolvesOciRepository
                     // git-sourced is never synced and says so only by staying empty.
                     'source_mode' => PackageSourceMode::Publish,
                     'name' => $name,
+                    // The provenance marker the storage sweeper filters on, written HERE
+                    // and nowhere else: it is what tells "a broken push left this empty
+                    // row behind" from "an operator registered this repository and has
+                    // not pushed to it yet". Every other create path leaves it null — a
+                    // second writer would put deliberately pre-registered repositories on
+                    // the sweeper's delete list.
+                    'auto_created_at' => now(),
                 ]);
 
                 $group->packages()->attach($package);
