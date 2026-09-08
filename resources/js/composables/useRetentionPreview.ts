@@ -126,6 +126,10 @@ export function createRetentionPreview(options: { debounceMs?: number } = {}): R
         }
 
         controller?.abort();
+
+        // Safe even when nothing was in flight: every run() sets loading back to true, so
+        // this can never mask a request that is genuinely still pending.
+        loading.value = false;
     }
 
     return { summary, tags, error, loading, schedule, runNow, cancel };

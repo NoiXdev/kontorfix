@@ -167,4 +167,23 @@ describe('cancel', () => {
 
         expect(inFlight.aborted()).toBe(true);
     });
+
+    it('resets loading when cancelling a request still in flight', async () => {
+        const core = createRetentionPreview({ debounceMs: 0 });
+        const inFlight = deferredRequest();
+
+        core.schedule(inFlight.request);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(core.loading.value).toBe(true);
+
+        core.cancel();
+
+        expect(core.loading.value).toBe(false);
+
+        // The aborted request resolving late must not flip loading back on.
+        inFlight.resolve({ summary: [], tags: null });
+        await Promise.resolve();
+
+        expect(core.loading.value).toBe(false);
+    });
 });
