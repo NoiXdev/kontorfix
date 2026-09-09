@@ -243,6 +243,32 @@ it('refuses an oversize dist and creates neither artifact nor row for it', funct
     expect(Storage::disk('artifacts')->allFiles())->toBe([]);
 });
 
+it('refuses a dist truncated mid-transfer and persists neither artifact nor row for it', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test']);
+    $pkg = mirroredComposerPackage($group, $source, 'acme/demo');
+
+    // The server declares a Content-Length larger than the body it actually sends — the
+    // shape of a connection dropped mid-download. fetchArtifact() must compare the bytes
+    // it actually received against this declared length, not just cap-check the length
+    // upfront; a truncated artifact is worse than a merely oversize one when the feed
+    // carries no shasum to catch it independently (Composer p2 without `shasum`).
+    Http::fake([
+        '*/p2/acme/demo.json' => Http::response([
+            'packages' => ['acme/demo' => MetadataMinifier::minify([
+                composerMirrorVersion('acme/demo', 'v1.0.0', '1.0.0.0', 'https://repo.test/dist/a.zip'),
+            ])],
+        ], 200),
+        '*/dist/a.zip' => Http::response('short-body', 200, ['Content-Length' => '9999']),
+    ]);
+
+    expect(fn () => app(MirrorImporter::class)->import($pkg, $source))->toThrow(MirrorSyncFailed::class);
+
+    expect($pkg->versions()->count())->toBe(0);
+    expect(Storage::disk('artifacts')->allFiles())->toBe([]);
+});
+
 it('skips an unparseable version tag silently and still imports the others', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);

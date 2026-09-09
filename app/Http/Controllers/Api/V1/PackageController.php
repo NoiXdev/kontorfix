@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ClampsPageSize;
+use App\Http\Controllers\Concerns\GuardsMirrorSourceAssignment;
 use App\Http\Controllers\Concerns\ScopesApiToUser;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
@@ -13,6 +15,7 @@ use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Services\Package\SharedAssignment;
@@ -25,7 +28,7 @@ use Illuminate\Validation\ValidationException;
 #[ApiGroup('Pakete')]
 class PackageController extends Controller
 {
-    use ClampsPageSize, ScopesApiToUser;
+    use ClampsPageSize, GuardsMirrorSourceAssignment, ScopesApiToUser;
 
     /**
      * Pakete der eigenen Registries auflisten.
@@ -102,12 +105,26 @@ class PackageController extends Controller
             }
         }
 
+        $type = PackageType::from($request->validated('type'));
+        $sourceMode = $request->effectiveSourceMode($type);
+
+        // A referenced mirror source must belong to the package's owning organization and
+        // match its type — checked (and refused) before anything is persisted, the same
+        // guarantee the credential checks above give the git path. Mirrors
+        // Admin\PackageController::store: without this, a foreign-org (or wrong-type)
+        // mirror source was accepted here (only `exists` was validated) and persisted as a
+        // broken row that never synced.
+        if ($sourceMode === PackageSourceMode::Mirror) {
+            $mirrorSource = MirrorSource::findOrFail($request->validated('mirror_source_id'));
+            $this->assertMirrorSourceUsable($mirrorSource, $request->ownerOrganizationId(), $type);
+        }
+
         // Mirrors Admin\PackageController::store: the request, not the raw submitted
         // value, is authoritative for the stored mode — otherwise a type that didn't
         // submit source_mode at all (or submitted one it doesn't allow) would fall through
         // to the column's DB default ('publish') instead of the type's real default.
         $attributes = $request->safe()->except('group_ids');
-        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        $attributes['source_mode'] = $sourceMode->value;
         // The owner is the organization the selected registries belong to; the request has
         // already refused a selection spanning more than one. Mirrors Admin\PackageController::store.
         $attributes['organization_id'] = $request->ownerOrganizationId();
@@ -115,11 +132,15 @@ class PackageController extends Controller
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Publish-based packages (npm, Python) are filled by pushing artifacts; a
-        // repository_url on one is reference-only (npm publish uploads a tarball, not the
-        // tree), so it must not queue a sync. Mirrors Admin\PackageController::store.
+        // Only git- and mirror-sourced packages have something to sync; publish-based
+        // packages (npm, Python) are filled by pushing artifacts (a repository_url on one
+        // is reference-only — npm publish uploads a tarball, not the tree) — skip the
+        // (doomed) sync job. Mirrors Admin\PackageController::store: without the mirror
+        // arm, an API-created mirror package stayed empty until the next hourly run.
         if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
+        } elseif ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
         }
 
         // sync_status comes from a DB default (migration) that Eloquent doesn't

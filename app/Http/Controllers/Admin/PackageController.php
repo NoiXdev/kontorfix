@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\RetentionRuleType;
+use App\Http\Controllers\Concerns\GuardsMirrorSourceAssignment;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
@@ -52,7 +53,7 @@ use Inertia\Response;
 
 class PackageController extends Controller
 {
-    use ScopesToAdministeredOrgs;
+    use GuardsMirrorSourceAssignment, ScopesToAdministeredOrgs;
 
     // The sort column never comes from the request — only a key that selects one. This
     // route takes untrusted query-string values and is not throttled, and this controller
@@ -1319,19 +1320,6 @@ class PackageController extends Controller
             ->orderBy('name')->get(['id', 'name', 'type'])
             ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name, 'type' => $s->type->value])
             ->all();
-    }
-
-    /**
-     * Aborts 403 unless $organizationId may use $source — a MirrorSource is never shared
-     * across organizations (see its docblock), so this is a plain ownership check, unlike the
-     * git credential equivalent above. Aborts 422 when the source's type does not match the
-     * package's — MirrorImporter::import() dispatches on the package's type alone and would
-     * otherwise read (say) an npm packument as if it were Composer's p2 feed.
-     */
-    private function assertMirrorSourceUsable(MirrorSource $source, string $organizationId, PackageType $type): void
-    {
-        abort_unless($source->organization_id === $organizationId, 403);
-        abort_unless($source->type === $type, 422);
     }
 
     /**

@@ -38,6 +38,22 @@ it('refuses to create a Docker mirror source', function () {
     expect(MirrorSource::count())->toBe(0);
 });
 
+it('lets a super-admin create a mirror source in an explicitly selected organization', function () {
+    // superAdmin()'s home organization is itself an operator org — a different one than
+    // $target below — so a source landing in $target proves the explicit selection was
+    // honoured rather than resolveCreationOrg() falling back to the active scope/home org.
+    $admin = superAdmin();
+    $target = Organization::factory()->create(['is_operator' => false]);
+
+    $this->actingAs($admin)->post('/admin/mirror-sources', [
+        'name' => 'Target Org Mirror', 'type' => 'composer', 'url' => 'https://repo.example.test',
+        'organization_id' => $target->id,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $source = MirrorSource::firstOrFail();
+    expect($source->organization_id)->toBe($target->id);
+});
+
 it('refuses an unsafe URL pointing at a private address', function () {
     $org = Organization::factory()->create();
 
@@ -46,6 +62,48 @@ it('refuses an unsafe URL pointing at a private address', function () {
     ])->assertSessionHasErrors('url');
 
     expect(MirrorSource::count())->toBe(0);
+});
+
+it('refuses a hostname that resolves to an internal address (DNS, not just an IP literal)', function () {
+    // The spec demands UrlSafety::isSafeResolving() here, not isSafe(): a mirror source is
+    // configured once and then fetched from repeatedly by a background job, so a hostname
+    // that only resolves internally — never caught by isSafe()'s IP-literal check alone —
+    // must be refused at configuration time. FixtureHostResolver (see its own docblock)
+    // resolves any `.internal` name to a private address without a real DNS lookup.
+    $org = Organization::factory()->create();
+
+    $this->actingAs(mirrorAdmin($org))->post('/admin/mirror-sources', [
+        'name' => 'Internal DNS', 'type' => 'composer', 'url' => 'http://vault.internal/repo',
+    ])->assertSessionHasErrors('url');
+
+    expect(MirrorSource::count())->toBe(0);
+});
+
+it('refuses a hostname that does not resolve at all (fail-closed)', function () {
+    $org = Organization::factory()->create();
+    $this->resolveHostTo('nowhere.example.com', []);
+
+    $this->actingAs(mirrorAdmin($org))->post('/admin/mirror-sources', [
+        'name' => 'Unresolvable', 'type' => 'composer', 'url' => 'https://nowhere.example.com/repo',
+    ])->assertSessionHasErrors('url');
+
+    expect(MirrorSource::count())->toBe(0);
+});
+
+it('does not flash the raw auth token into old-input storage when an unrelated field fails validation', function () {
+    // `type` is what fails here, not `auth_token` — the only thing standing between a
+    // failed create's old-input flash and a raw mirror credential sitting in the
+    // `sessions` table is bootstrap/app.php's dontFlash() list.
+    $org = Organization::factory()->create();
+
+    $this->actingAs(mirrorAdmin($org))->post('/admin/mirror-sources', [
+        'name' => 'Leaky', 'type' => 'not-a-real-type', 'url' => 'https://repo.example.test',
+        'auth_token' => 'super-secret-flash-token',
+    ])->assertSessionHasErrors('type');
+
+    $oldInput = session('_old_input');
+    expect($oldInput)->not->toBeNull();
+    expect($oldInput['auth_token'] ?? '')->not->toContain('super-secret-flash-token');
 });
 
 it('scopes the listing and blocks cross-org management', function () {

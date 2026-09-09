@@ -68,10 +68,10 @@ class MirrorImporter
             // spliced in here — this message is shown to operators as Package::sync_error
             // and is otherwise entirely German.
             $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
-            throw MirrorSyncFailed::because("Artefakt konnte nicht von der Quelle geladen werden: {$url}{$suffix}");
+            throw MirrorSyncFailed::because("Artefakt konnte nicht von der Quelle geladen werden: {$url}{$suffix}.");
         }
         if ($fetched === null) {
-            throw MirrorSyncFailed::because("Artefakt bei der Quelle nicht gefunden: {$url}");
+            throw MirrorSyncFailed::because("Artefakt bei der Quelle nicht gefunden: {$url}.");
         }
 
         $source = $fetched['stream'];
@@ -79,13 +79,13 @@ class MirrorImporter
 
         if ($declaredLength !== null && $declaredLength > $maxBytes) {
             fclose($source);
-            throw MirrorSyncFailed::because("Artefakt überschreitet das erlaubte Größenlimit von {$maxBytes} Byte: {$url}");
+            throw MirrorSyncFailed::because("Artefakt überschreitet das erlaubte Größenlimit von {$maxBytes} Byte: {$url}.");
         }
 
         $local = tmpfile();
         if ($local === false) {
             fclose($source);
-            throw MirrorSyncFailed::because("Artefakt konnte nicht zwischengespeichert werden: {$url}");
+            throw MirrorSyncFailed::because("Artefakt konnte nicht zwischengespeichert werden: {$url}.");
         }
 
         $sha1Context = hash_init('sha1');
@@ -101,7 +101,7 @@ class MirrorImporter
 
                 $size += strlen($chunk);
                 if ($size > $maxBytes) {
-                    throw MirrorSyncFailed::because("Artefakt überschreitet das erlaubte Größenlimit von {$maxBytes} Byte: {$url}");
+                    throw MirrorSyncFailed::because("Artefakt überschreitet das erlaubte Größenlimit von {$maxBytes} Byte: {$url}.");
                 }
 
                 hash_update($sha1Context, $chunk);
@@ -109,14 +109,30 @@ class MirrorImporter
                 fwrite($local, $chunk);
             }
 
+            // The declared Content-Length is checked twice: upfront (above, a cheap refusal
+            // before a single byte is read) and here, against what was ACTUALLY received.
+            // Without this second check, a connection that drops mid-transfer — the stream
+            // simply stops producing bytes, see UpstreamClient::getStream()'s own doc comment
+            // on why libcurl/Guzzle never raises for that — would fall through to a truncated
+            // artifact being staged and moved into place below as if it were complete. Worse
+            // than a one-off corrupt download: for a checksum-less feed (a Composer p2 entry
+            // with no shasum, or a PyPI file with no declared sha256 — both real, supported
+            // shapes this importer accepts) nothing else would ever catch it, and the
+            // idempotency skip every per-type importer applies (same size as the stored
+            // dist_size/PythonDist::size ⇒ already imported, don't re-fetch) would then treat
+            // the truncated file as permanently correct — no resync ever heals it.
+            if ($declaredLength !== null && $size !== $declaredLength) {
+                throw MirrorSyncFailed::because("Artefakt wurde unvollständig übertragen (erwartet {$declaredLength} Byte, erhalten {$size} Byte): {$url}.");
+            }
+
             $gotSha1 = hash_final($sha1Context);
             $gotSha256 = hash_final($sha256Context);
 
             if ($sha1 !== null && ! hash_equals(strtolower($sha1), $gotSha1)) {
-                throw MirrorSyncFailed::because("Prüfsumme (sha1) des Artefakts stimmt nicht überein: {$url}");
+                throw MirrorSyncFailed::because("Prüfsumme (sha1) des Artefakts stimmt nicht überein: {$url}.");
             }
             if ($sha256 !== null && ! hash_equals(strtolower($sha256), $gotSha256)) {
-                throw MirrorSyncFailed::because("Prüfsumme (sha256) des Artefakts stimmt nicht überein: {$url}");
+                throw MirrorSyncFailed::because("Prüfsumme (sha256) des Artefakts stimmt nicht überein: {$url}.");
             }
 
             rewind($local);

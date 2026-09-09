@@ -124,6 +124,14 @@ class ComposerMirrorImport
                 $expectedSha1 = $shasum;
             }
 
+            // Dists are treated as immutable once imported: same version, same file size on
+            // disk ⇒ already imported, skip. A shasum that changed on its own — the upstream
+            // republished the same version under a different hash without the size moving —
+            // is NOT by itself a reason to re-fetch; Composer versions are meant to be
+            // immutable in the first place, and this mirrors the mirror-wide "never
+            // re-download on a hash-only signal" stance (see PythonMirrorImport's identical
+            // choice for a declared-sha256-only feed). A genuinely republished artifact whose
+            // SIZE also changed still re-downloads below.
             $existing = $package->versions()->where('version', $normalized)->first();
             if ($existing !== null
                 && $existing->dist_path !== null

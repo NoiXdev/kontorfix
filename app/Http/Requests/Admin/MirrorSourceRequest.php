@@ -27,6 +27,12 @@ class MirrorSourceRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Absent/null lets MirrorSourceController::resolveCreationOrg() fall back to the
+            // active console scope, then the caller's home organization — the same
+            // GitCredentialController pattern. Without a rule here the create form's org
+            // picker had nothing to submit into: the key never reached validated() at all,
+            // so an explicit selection was silently ignored.
+            'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'name' => ['required', 'string', 'max:190'],
             // Docker is deliberately excluded: a Docker "mirror" is a registry-to-registry
             // pull-through, a different mechanism entirely from the Composer/npm/PyPI HTTP
@@ -38,10 +44,15 @@ class MirrorSourceRequest extends FormRequest
             ])],
             'url' => [
                 'required', 'string', 'max:500', 'url',
-                // Same SSRF net as the outgoing webhook URL: an admin-supplied mirror
-                // address must not be able to reach into the deployment's private network.
+                // DNS-resolving, not just isSafe()'s IP-literal check: a mirror source is
+                // configured once and then fetched from repeatedly by a background job
+                // (SyncMirrorPackage), unlike a one-shot outgoing webhook — so a hostname
+                // that resolves internally (vault.internal, or an octal/decimal-encoded
+                // private IP isSafe() alone would not decode) must be refused at
+                // configuration time, not only ever re-checked per-request deep inside
+                // UpstreamClient. Fails closed on a hostname that will not resolve at all.
                 function (string $attribute, mixed $value, \Closure $fail): void {
-                    if (is_string($value) && ! UrlSafety::isSafe($value)) {
+                    if (is_string($value) && ! UrlSafety::isSafeResolving($value)) {
                         $fail('Registry-URL nicht erlaubt (interne/reservierte Adresse).');
                     }
                 },

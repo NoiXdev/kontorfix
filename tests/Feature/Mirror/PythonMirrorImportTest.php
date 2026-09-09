@@ -89,6 +89,52 @@ it('imports both an sdist and a wheel from a PEP 691 project detail feed', funct
     Storage::disk('artifacts')->assertExists($wheel->path);
 });
 
+it('recovers the version from a legacy sdist whose project name itself contains a dash', function () {
+    // Pre-PEP-625 sdists are not required to escape a `-` in the project name the way a
+    // wheel filename must — "everything after the first dash" cuts python-dateutil's own
+    // name in half ("dateutil-2.8.2" as the version) unless the known project name is
+    // stripped as a prefix first.
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test', 'type' => PackageType::Python]);
+    $pkg = mirroredPythonPackage($group, $source, 'python-dateutil');
+
+    Http::fake([
+        '*/simple/python-dateutil/' => Http::response([
+            'files' => [
+                pep691File('python-dateutil-2.8.2.tar.gz', 'https://repo.test/dist/python-dateutil-2.8.2.tar.gz'),
+            ],
+        ], 200),
+        '*/dist/python-dateutil-2.8.2.tar.gz' => Http::response('sdist-bytes', 200),
+    ]);
+
+    app(MirrorImporter::class)->import($pkg, $source);
+
+    $dist = $pkg->pythonDists()->where('filename', 'python-dateutil-2.8.2.tar.gz')->first();
+    expect($dist)->not->toBeNull()->and($dist->version)->toBe('2.8.2');
+});
+
+it('recovers the version from a PEP 625 sdist whose name is underscore-escaped', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test', 'type' => PackageType::Python]);
+    $pkg = mirroredPythonPackage($group, $source, 'python-dateutil');
+
+    Http::fake([
+        '*/simple/python-dateutil/' => Http::response([
+            'files' => [
+                pep691File('python_dateutil-2.8.2.tar.gz', 'https://repo.test/dist/python_dateutil-2.8.2.tar.gz'),
+            ],
+        ], 200),
+        '*/dist/python_dateutil-2.8.2.tar.gz' => Http::response('sdist-bytes', 200),
+    ]);
+
+    app(MirrorImporter::class)->import($pkg, $source);
+
+    $dist = $pkg->pythonDists()->where('filename', 'python_dateutil-2.8.2.tar.gz')->first();
+    expect($dist)->not->toBeNull()->and($dist->version)->toBe('2.8.2');
+});
+
 it('defaults uploaded_at to now() when upload-time is absent', function () {
     Storage::fake('artifacts');
     Carbon\Carbon::setTestNow('2026-03-15T12:00:00Z');

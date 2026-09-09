@@ -77,6 +77,13 @@ class GitSourceImporter
                 // commit's archive, which is exactly what dist() would otherwise serve
                 // without ever noticing source_reference moved on.
                 'dist_path' => null,
+                // dist_size is dist_path's own sidecar (the size of the file dist_path
+                // names) and is displayed on the package detail page's version list
+                // independently of whether the archive has actually been rebuilt yet —
+                // left alone here, a force-push resync would keep showing the OLD archive's
+                // size next to a version whose dist_path (and so whose next-download
+                // archive) has already moved on.
+                'dist_size' => null,
             ],
         );
     }

@@ -111,7 +111,7 @@ class PythonMirrorImport
             }
 
             $filetype = str_ends_with($filename, '.whl') ? 'bdist_wheel' : 'sdist';
-            $version = $this->versionFromFilename($filename, $filetype);
+            $version = $this->versionFromFilename($filename, $filetype, $name);
             if ($version === null) {
                 continue; // could not recover a version from the filename — nothing to record it under
             }
@@ -198,10 +198,24 @@ class PythonMirrorImport
      * `{distribution}-{version}(-{build})?-{python tag}-{abi tag}-{platform tag}.whl` — the
      * wheel filename-escaping rules (PEP 427) replace any `-` inside the distribution name
      * with `_`, so the version is always the second `-`-separated segment regardless of what
-     * the project is called. An sdist's filename is just `{distribution}-{version}.tar.gz`
-     * (or `.zip`), escaped the same way — so the version is everything after the first `-`.
+     * the project is called.
+     *
+     * An sdist's filename is `{distribution}-{version}.tar.gz` (or `.zip`), but the PEP 427
+     * escaping guarantee does NOT carry over to it unconditionally — only a PEP 625 sdist
+     * (2023+ tooling) is required to normalise the distribution name the same way a wheel
+     * does. A legacy sdist built by older tooling may contain the project's name verbatim,
+     * dashes and all — `python-dateutil-2.8.2.tar.gz` for `python-dateutil` — and "everything
+     * after the first `-`" then cuts the name in half (`dateutil-2.8.2` as the "version").
+     * $projectName is $package->mirror_name, the name this import is already fetching under,
+     * so the known distribution name is stripped as a prefix instead: PEP-503-normalised
+     * (case-insensitive, `-`/`_`/`.` collapsed) and matched against the same run of
+     * separators in the RAW filename, since that is exactly what neither PEP 503 normalisation
+     * nor PEP 427 escaping guarantees stayed a plain `-` on a legacy sdist. Falls back to the
+     * historical "everything after the first `-`" heuristic when the prefix does not match —
+     * e.g. $projectName not actually being a prefix of the filename at all, which the safe
+     * fallback handles as gracefully as before this fix.
      */
-    private function versionFromFilename(string $filename, string $filetype): ?string
+    private function versionFromFilename(string $filename, string $filetype, string $projectName): ?string
     {
         if ($filetype === 'bdist_wheel') {
             $stem = substr($filename, 0, -strlen('.whl'));
@@ -213,11 +227,44 @@ class PythonMirrorImport
         $suffix = str_ends_with($filename, '.tar.gz') ? '.tar.gz' : '.zip';
         $stem = substr($filename, 0, -strlen($suffix));
 
+        $prefixed = $this->versionAfterKnownName($stem, $projectName);
+        if ($prefixed !== null) {
+            return $prefixed;
+        }
+
         $pos = strpos($stem, '-');
         if ($pos === false || $pos === strlen($stem) - 1) {
             return null;
         }
 
         return substr($stem, $pos + 1);
+    }
+
+    /**
+     * Strips $projectName off the front of $stem, tolerating any of `-`, `_` or `.` — in
+     * either string — wherever PEP 503 normalisation would collapse a run of them to one
+     * `-`. Returns null (never an empty string) when $stem does not actually start with
+     * $projectName this way, or when nothing follows it to be a version.
+     */
+    private function versionAfterKnownName(string $stem, string $projectName): ?string
+    {
+        $normalizedName = PythonName::normalize($projectName);
+        if ($normalizedName === '') {
+            return null;
+        }
+
+        // Every `-` the normaliser collapsed a run of separators into may have been any of
+        // `-`, `_` or `.` in the raw, unnormalised filename — so each becomes a character
+        // class rather than a literal dash, and the whole name becomes case-insensitive to
+        // match PEP 503's own case-folding.
+        $pattern = '/^'.str_replace('\-', '[-_.]', preg_quote($normalizedName, '/')).'[-_.]/i';
+
+        if (! preg_match($pattern, $stem, $matches)) {
+            return null;
+        }
+
+        $version = substr($stem, strlen($matches[0]));
+
+        return $version !== '' ? $version : null;
     }
 }
