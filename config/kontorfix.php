@@ -28,6 +28,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Composer mirror dist limits
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound for a single dist archive fetched from a mirrored Composer source,
+    | against memory/disk exhaustion by whatever the foreign registry serves. In bytes.
+    |
+    */
+
+    'composer_max_dist_bytes' => env('KONTORFIX_COMPOSER_MAX_DIST_BYTES', 100 * 1024 * 1024),
+
+    /*
+    |--------------------------------------------------------------------------
     | Registry token default lifetime
     |--------------------------------------------------------------------------
     |

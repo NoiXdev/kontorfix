@@ -3,17 +3,19 @@
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 
-it('allows only git for composer', function () {
-    expect(PackageSourceMode::allowedFor(PackageType::Composer))->toBe([PackageSourceMode::Git]);
+it('allows git and mirror for composer', function () {
+    expect(PackageSourceMode::allowedFor(PackageType::Composer))
+        ->toBe([PackageSourceMode::Git, PackageSourceMode::Mirror]);
 });
 
-it('allows only publish for npm', function () {
-    expect(PackageSourceMode::allowedFor(PackageType::Npm))->toBe([PackageSourceMode::Publish]);
+it('allows publish and mirror for npm', function () {
+    expect(PackageSourceMode::allowedFor(PackageType::Npm))
+        ->toBe([PackageSourceMode::Publish, PackageSourceMode::Mirror]);
 });
 
-it('allows both for python', function () {
+it('allows publish, git and mirror for python', function () {
     expect(PackageSourceMode::allowedFor(PackageType::Python))
-        ->toBe([PackageSourceMode::Publish, PackageSourceMode::Git]);
+        ->toBe([PackageSourceMode::Publish, PackageSourceMode::Git, PackageSourceMode::Mirror]);
 });
 
 it('defaults to the only allowed mode where there is one', function () {

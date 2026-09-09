@@ -103,6 +103,8 @@ class Package extends Model
         'repository_url',
         'repository_token',
         'git_credential_id',
+        'mirror_source_id',
+        'mirror_name',
         'sync_status',
         'sync_error',
         'synced_at',
@@ -161,6 +163,16 @@ class Package extends Model
     public function isPublishSourced(): bool
     {
         return ! $this->isGitSourced();
+    }
+
+    /**
+     * Whether this package is populated by mirroring a foreign Composer/npm/PyPI registry
+     * through a reusable, org-level MirrorSource — see PackageSourceMode's doc comment for
+     * how this mode relates to the other two.
+     */
+    public function isMirrorSourced(): bool
+    {
+        return $this->source_mode === PackageSourceMode::Mirror;
     }
 
     /** Whether an operator has retired this package. */
@@ -280,6 +292,18 @@ class Package extends Model
     public function gitCredential(): BelongsTo
     {
         return $this->belongsTo(GitCredential::class);
+    }
+
+    /**
+     * The reusable, org-level mirror source this package imports versions from. Only ever
+     * populated for a mirror-sourced package (isMirrorSourced()); nullOnDelete means this
+     * can go null again if the source is later deleted, without taking the package with it.
+     *
+     * @return BelongsTo<MirrorSource, $this>
+     */
+    public function mirrorSource(): BelongsTo
+    {
+        return $this->belongsTo(MirrorSource::class);
     }
 
     /**
