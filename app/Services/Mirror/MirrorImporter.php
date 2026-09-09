@@ -16,9 +16,9 @@ use LogicException;
 /**
  * Imports versions into a mirror-sourced package (Package::isMirrorSourced()) by talking to
  * its assigned MirrorSource — the mirror counterpart to GitSourceImporter, which does the
- * same job for a git-sourced package. Dispatches to a per-type collaborator (only
- * ComposerMirrorImport exists so far; npm/PyPI follow in later tasks) and exposes the
- * streaming artifact download every one of those collaborators needs, so the cap
+ * same job for a git-sourced package. Dispatches to a per-type collaborator (Composer and
+ * npm so far; PyPI follows in a later task) and exposes the streaming artifact download
+ * every one of those collaborators needs, so the cap
  * enforcement, checksum verification and atomic staging→move live in exactly one place.
  *
  * Every failure — metadata not found, an oversize or checksum-mismatched artifact, an
@@ -38,10 +38,10 @@ class MirrorImporter
     {
         match ($package->type) {
             PackageType::Composer => (new ComposerMirrorImport($this, $this->client))->import($package, $source),
-            // Not implemented yet — a later task adds these collaborators. Kept as an
+            PackageType::Npm => (new NpmMirrorImport($this, $this->client))->import($package, $source),
+            // Not implemented yet — a later task adds this collaborator. Kept as an
             // explicit arm (rather than a catch-all) so PackageType gaining a fifth case
             // fails this match at analysis time instead of silently falling through.
-            PackageType::Npm => throw new LogicException('npm mirror import is not implemented yet.'),
             PackageType::Python => throw new LogicException('Python mirror import is not implemented yet.'),
             // A Docker repository is never mirror-sourced (PackageSourceMode::allowedFor()
             // excludes Mirror for it) — this arm exists only to keep the match exhaustive

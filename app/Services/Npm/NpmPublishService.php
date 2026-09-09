@@ -47,10 +47,9 @@ class NpmPublishService
 
         // Derive the storage filename ourselves instead of trusting npm's attachment key
         // (which for scoped packages is "@scope/name-version.tgz", i.e. contains @ and /).
-        // strrchr/substr only returns the last path segment → structurally traversal-free.
         // The subsequent regex is deliberately narrow: versions with build metadata (1.0.0+x)
         // or uppercase letters in the pre-release fail here (fail-closed) — fine for v0.2.
-        $unscoped = str_contains($package->name, '/') ? substr((string) strrchr($package->name, '/'), 1) : $package->name;
+        $unscoped = self::unscopedName($package->name);
         $file = "{$unscoped}-{$versionString}.tgz";
         if (! preg_match('/^[a-z0-9][a-z0-9._~-]*\.tgz$/', $file) || str_contains($file, '..')) {
             throw new InvalidArgumentException('Cannot derive a safe tarball filename for this package/version.');
@@ -98,13 +97,40 @@ class NpmPublishService
             throw new VersionConflictException('Version already exists.', previous: $e);
         }
 
-        // Merge dist-tags.
-        $tags = $package->dist_tags ?? [];
-        foreach ((is_array($body['dist-tags'] ?? null) ? $body['dist-tags'] : []) as $tag => $v) {
-            $tags[(string) $tag] = (string) $v;
-        }
-        $package->update(['dist_tags' => $tags]);
+        $package->update(['dist_tags' => self::mergeDistTags($package->dist_tags, $body['dist-tags'] ?? null)]);
 
         return $version;
+    }
+
+    /**
+     * The bare package name without its scope — "pkg" for "@vendor/pkg", unchanged for an
+     * unscoped name. strrchr/substr only ever returns the last path segment, so this is
+     * structurally traversal-free (no "../" can survive it).
+     *
+     * Shared with App\Services\Mirror\NpmMirrorImport, which derives the identical on-disk
+     * tarball filename for a mirrored version — one rule, not two copies that could drift.
+     */
+    public static function unscopedName(string $name): string
+    {
+        return str_contains($name, '/') ? substr((string) strrchr($name, '/'), 1) : $name;
+    }
+
+    /**
+     * Merges a "dist-tags" object — from an uploaded package.json (publish()) or a mirrored
+     * registry's packument (App\Services\Mirror\NpmMirrorImport) — onto a package's stored
+     * map. The incoming value wins per tag; a tag the caller doesn't mention is left alone,
+     * which is why a re-sync never erases a tag only ever set locally.
+     *
+     * @param  array<string, string>|null  $current
+     * @return array<string, string>
+     */
+    public static function mergeDistTags(?array $current, mixed $incoming): array
+    {
+        $tags = $current ?? [];
+        foreach ((is_array($incoming) ? $incoming : []) as $tag => $value) {
+            $tags[(string) $tag] = (string) $value;
+        }
+
+        return $tags;
     }
 }
