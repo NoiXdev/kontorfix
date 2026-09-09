@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Registry;
 use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\PackageVersion;
 use App\Models\Upstream;
 use App\Services\Composer\ComposerMetadataBuilder;
 use App\Services\RegistryAccessService;
@@ -126,6 +127,22 @@ class ComposerController extends Controller
         }
 
         $disk = Storage::disk('artifacts');
+
+        // A mirror-imported version already carries its dist on the artifacts disk (see
+        // App\Services\Mirror\MirrorImporter::fetchArtifact() /
+        // App\Services\Mirror\ComposerMirrorImport, which populate dist_path only once the
+        // artifact has actually landed) — streamed directly, never through the git-clone-
+        // and-archive path below, which a mirror-sourced package may not even have a
+        // repository_url for. A git-mirrored version never lands here: GitSourceImporter
+        // resets dist_path to null on every (re)sync, so for that source mode it is only
+        // ever (re)populated by the lazy build a few lines down, for as long as the built
+        // archive stays valid.
+        if ($pkgVersion->dist_path !== null) {
+            abort_unless($disk->exists($pkgVersion->dist_path), 404);
+
+            return $this->streamDist($disk, $pkgVersion, $pkgVersion->dist_path, $name);
+        }
+
         // Keyed by commit SHA: a force-push changes source_reference and thus
         // the path — the old archive is never mistakenly served again (cache invalidation).
         $path = "dists/{$package->id}/{$pkgVersion->source_reference}.zip";
@@ -258,7 +275,17 @@ class ComposerController extends Controller
             }
         }
 
-        // Usage stats: record the download and (once) the dist size.
+        return $this->streamDist($disk, $pkgVersion, $path, $name);
+    }
+
+    /**
+     * The tail every dist path shares once an archive is known to be on disk at $path:
+     * backfill the size stat once, count the download, and stream the file. Shared by the
+     * mirror short-circuit above and the lazy git build below, so both keep exactly the
+     * same usage-stats behaviour.
+     */
+    private function streamDist(Filesystem $disk, PackageVersion $pkgVersion, string $path, string $name): StreamedResponse
+    {
         if ($pkgVersion->dist_size === null) {
             $pkgVersion->update(['dist_size' => $disk->size($path)]);
         }

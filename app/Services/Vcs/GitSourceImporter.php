@@ -66,6 +66,17 @@ class GitSourceImporter
                 'source_reference' => $repo->commitFor($tag),
                 'metadata' => $manifest,
                 'released_at' => $repo->committedAt($tag),
+                // Explicitly reset on every (re)sync, not left alone: dist_path now also
+                // doubles as ComposerController::dist()'s signal that a version's archive
+                // is already on the artifacts disk and can be served without going through
+                // the git-clone-and-archive path at all (see MirrorImporter/ComposerMirrorImport,
+                // which populate it for a genuinely mirror-imported version). For a
+                // git-mirrored version it is set only as a side effect of that lazy build,
+                // keyed by the commit sha at build time — a resync that lands a new commit
+                // (e.g. a force-push) must not leave a stale dist_path pointing at the old
+                // commit's archive, which is exactly what dist() would otherwise serve
+                // without ever noticing source_reference moved on.
+                'dist_path' => null,
             ],
         );
     }
