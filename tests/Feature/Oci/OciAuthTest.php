@@ -49,16 +49,21 @@ it('names no registry on a host that is not one, so /v2/ advertises nothing abou
     // `registry.context` refused every host without a `domains` row. Path addressing makes
     // any non-domain host — the instance's own included — a host on which a registry is
     // named by the URL rather than by the hostname, so the bare version check can no longer
-    // answer "no such registry": nothing has been named yet. It answers the protocol
-    // handshake (see VersionController) and nothing else.
+    // answer "no such registry": nothing has been named yet. It is the HOST ROOT ping (see
+    // VersionController) and answers 401 with the Basic challenge for an anonymous caller,
+    // exactly as it does on the instance's own host — not an `errors[]` envelope confirming
+    // or denying anything about this particular hostname, just the same challenge every
+    // host without a resolvable registry gives.
     //
     // What the old assertion was actually protecting is still protected, and asserted here
     // directly: no registry is resolvable on such a host without naming one, so nothing
-    // about this instance is advertised. Which hosts reach the application at all is
-    // TrustHosts' job (App\Services\Http\TrustedHosts — the APP_URL host, the loopback
-    // names, and every attached hostname), not this endpoint's.
+    // about this instance is advertised — a valid credential still reaches a plain 404 for
+    // any name on it, below. Which hosts reach the application at all is TrustHosts' job
+    // (App\Services\Http\TrustedHosts — the APP_URL host, the loopback names, and every
+    // attached hostname), not this endpoint's.
     $this->get('http://unknown.test/v2/')
-        ->assertOk()
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"')
         ->assertHeader('Docker-Distribution-Api-Version', 'registry/2.0');
 
     $response = $this->withHeaders(['Authorization' => 'Basic '.base64_encode('x:'.tokenPlainTextFor($this->group))])
@@ -70,16 +75,22 @@ it('names no registry on a host that is not one, so /v2/ advertises nothing abou
     expect($response->headers->get('Content-Type'))->toStartWith('text/html');
 });
 
-it('answers the bare version check anonymously on the instance host, where no registry is named yet', function () {
-    // The three-state table for the bare `/v2/` where the address carries no registry.
-    // State one: no credentials at all — the shape a real client's very first request is,
-    // and it MUST be 200. A 401 here makes a public registry unpullable by every real
-    // client, which is exactly the bug VersionController's own docblock records having
-    // shipped once; on the instance host there is not even a group whose `public` flag
-    // could excuse it.
+it('challenges an anonymous version ping on the instance host, where no registry is named yet', function () {
+    // A classic Docker engine (the overlay2/graphdriver store, still what CI runners ship)
+    // pings GET /v2/ at the HOST ROOT before it has any repository in mind, and configures
+    // auth for the whole push/pull from THAT response alone: 401 with a Basic challenge
+    // means every later request carries credentials, 200 means it never sends any at all.
+    // The instance host resolves no group at all (see ResolveOciContext), so there is no
+    // `public` flag to ask — anonymous here can only ever mean "no credentials offered",
+    // and answering that 200 leaves a classic engine convinced it should push anonymously,
+    // which then fails downstream with 401 from the repository endpoints. Docker Hub's own
+    // host root answers exactly this way, which is what makes `docker login <host>` and a
+    // subsequent path-addressed push work on a classic engine at all.
     $this->get(authInstanceAddress('/v2/'))
-        ->assertOk()
-        ->assertHeader('Docker-Distribution-Api-Version', 'registry/2.0');
+        ->assertStatus(401)
+        ->assertHeader('WWW-Authenticate', 'Basic realm="kontorfix"')
+        ->assertHeader('Docker-Distribution-Api-Version', 'registry/2.0')
+        ->assertJsonPath('errors.0.code', 'UNAUTHORIZED');
 });
 
 it('answers the bare version check for a valid token on the instance host', function () {

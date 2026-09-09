@@ -30,9 +30,10 @@ use Illuminate\Http\Request;
  * this codebase drives a request through a real client end-to-end the way bin/e2e does for
  * the other three ecosystems. Made to agree with the already-implemented, already-
  * documented model instead of the reverse: canAccessGroup() decides, exactly as it does
- * for ociRepository() and every other ecosystem's read path.
+ * for ociRepository() and every other ecosystem's read path — but only once a registry has
+ * actually been named (see the host-root rule below).
  *
- * TWO questions, asked in this order, because the endpoint answers to two audiences:
+ * THREE questions, asked in this order, because the endpoint answers to three audiences:
  *
  *  1. **Were credentials sent that resolved to nothing?** Then 401, whatever else is true —
  *     including on a PUBLIC registry's own domain. This is not an access decision, it is a
@@ -43,15 +44,29 @@ use Illuminate\Http\Request;
  *     short-circuits true for a null token there, which makes a wrong password
  *     indistinguishable from an anonymous caller. Anonymous callers send nothing at all and
  *     never reach this, which is what keeps a public registry pullable.
- *  2. **May this caller see the registry that was named?** canAccessGroup() decides,
- *     unchanged — the paragraph above is entirely about this. Only asked when a registry was
- *     named at all: in path mode the bare `/v2/` on the instance's own host carries no
- *     `{org}/{registry}` yet (see ResolveOciContext), so there is no group to ask about and
- *     the credential from step 1 is the whole answer.
+ *  2. **Was a registry even named?** In path mode the bare `/v2/` on the instance's own
+ *     host carries no `{org}/{registry}` yet (see ResolveOciContext) — this is the HOST ROOT
+ *     ping, the exact request a classic Docker engine (the overlay2/graphdriver store — see
+ *     tests/E2E/DockerTest.php's docblock for why CI still runs one) sends before it has
+ *     picked a repository, and the ONE response it uses to configure auth for the whole
+ *     push/pull: 200 means it will never send credentials again, 401+`WWW-Authenticate:
+ *     Basic` means it will. There is no group here whose `public` flag could excuse an
+ *     anonymous caller, so this answers 401 unless step 1 already resolved a real
+ *     credential — the same rule Docker Hub's own host root applies, and the reason a
+ *     classic engine can authenticate against a path address at all. The trade-off this
+ *     accepts: an anonymous PUBLIC pull through the PATH address on a classic engine no
+ *     longer works, because Basic has no anonymous grant to fall back to. Anonymous
+ *     consumption of a public registry belongs on that registry's OWN domain (step 3),
+ *     where anonymous still answers 200.
+ *  3. **May this caller see the registry that was named?** Only reached once a registry WAS
+ *     named — a domain-mode host, or a path-mode address past the host root. canAccessGroup()
+ *     decides, unchanged: a public group still answers anonymous with 200 here.
  *
- * The resulting table is the same in both addressing modes: anonymous is 200 unless a named
- * private registry refuses it, a valid token is 200 unless the named registry refuses it,
- * and a credential that resolves to nothing is always 401 with the Basic challenge.
+ * The resulting table: a credential that resolves to nothing is always 401 with the Basic
+ * challenge, regardless of addressing mode. Past that, the host root (no registry named) is
+ * 401 for anonymous and 200 for a valid credential; a named registry is 200 for anonymous
+ * only if it is public, 200 for a valid credential unless the named registry refuses it, and
+ * 401 for anonymous otherwise.
  */
 class VersionController extends Controller
 {
@@ -78,9 +93,25 @@ class VersionController extends Controller
             throw OciException::unauthorized();
         }
 
-        // Only when a registry was actually named. Without a group there is nothing to ask
-        // about and the credential above was the whole question.
-        if ($group instanceof Group && ! $this->access->canAccessGroup($token, $group)) {
+        // No registry was named at all: this is the HOST ROOT ping, path mode's equivalent
+        // of Docker Hub's own `/v2/`. A classic Docker engine (the overlay2 store CI runners
+        // still have — see this class's docblock) sends this ping BEFORE it has picked a
+        // repository, and configures authentication for the entire push/pull from this one
+        // response: 200 means it will never send credentials again, 401+Basic means it will.
+        // There is no group here whose `public` flag could excuse an anonymous caller — so a
+        // credential is the only thing that can turn this 200, exactly like Docker Hub's own
+        // host root, which never grants an anonymous host-root ping either.
+        if (! $group instanceof Group) {
+            if ($token === null) {
+                throw OciException::unauthorized();
+            }
+
+            return $this->acknowledge();
+        }
+
+        // A registry WAS named (domain mode, or path mode past the host root): canAccessGroup()
+        // decides, unchanged — a public group still answers anonymous with 200 here.
+        if (! $this->access->canAccessGroup($token, $group)) {
             throw OciException::unauthorized();
         }
 
