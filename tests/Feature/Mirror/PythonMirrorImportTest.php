@@ -126,8 +126,14 @@ it('requests the PEP 503 normalized name with the PEP 691 JSON Accept header', f
 
     app(MirrorImporter::class)->import($pkg, $source);
 
+    // hasHeader() is a subset check — it would still pass if the PEP 691 value merely got
+    // appended alongside acceptJson()'s default rather than replacing it (i.e. the request
+    // actually going out as `Accept: application/json, application/vnd.pypi.simple.v1+json`).
+    // Reading the header's own value list and asserting it equals exactly one entry is what
+    // catches that: PyPI's simple API is picky about a client asking for exactly its vendor
+    // media type, not that type merely being present among others.
     Http::assertSent(fn ($r) => str_contains($r->url(), '/simple/foo-bar-baz/')
-        && $r->hasHeader('Accept', 'application/vnd.pypi.simple.v1+json'));
+        && $r->header('Accept') === ['application/vnd.pypi.simple.v1+json']);
 });
 
 it('throws MirrorSyncFailed naming PEP 691 when the response is not valid JSON', function () {

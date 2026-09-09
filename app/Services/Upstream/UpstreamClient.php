@@ -11,11 +11,17 @@ use Illuminate\Support\Facades\Http;
 class UpstreamClient
 {
     /**
-     * @param  array<string, string>  $headers  Additional request headers — merged in after
-     *                                          the default `Accept: application/json` set by
-     *                                          acceptJson(), so e.g. a caller wanting PyPI's
-     *                                          `application/vnd.pypi.simple.v1+json` can
-     *                                          override it here without a second client method.
+     * @param  array<string, string>  $headers  Additional request headers that OVERRIDE the
+     *                                          default `Accept: application/json` set by
+     *                                          acceptJson() — e.g. a caller wanting PyPI's
+     *                                          `application/vnd.pypi.simple.v1+json` passes
+     *                                          `['Accept' => '...']` here and the wire request
+     *                                          carries exactly that value, not both. Must use
+     *                                          replaceHeaders() (true override), not
+     *                                          withHeaders() (array_merge_recursive — for a
+     *                                          key already set by acceptJson() that appends a
+     *                                          second value onto the same header instead of
+     *                                          replacing it).
      * @return array<string, mixed>|null null on 404
      */
     public function getJson(UpstreamEndpoint $endpoint, string $path, array $headers = []): ?array
@@ -27,7 +33,7 @@ class UpstreamClient
         // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
         $response = $this->follow($endpoint, $url, fn (PendingRequest $req) => $headers === []
             ? $req->acceptJson()
-            : $req->acceptJson()->withHeaders($headers));
+            : $req->acceptJson()->replaceHeaders($headers));
 
         if ($response->status() === 404) {
             return null;
