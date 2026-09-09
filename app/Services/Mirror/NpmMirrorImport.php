@@ -39,9 +39,21 @@ class NpmMirrorImport
         private readonly UpstreamClient $client,
     ) {}
 
-    public function import(Package $package, MirrorSource $source): void
+    /**
+     * Fetches and parses this mirror's npm packument (`GET /{name}`, percent-encoded the way
+     * the npm client itself sends a scoped name) for $name — the HTTP fetch + parsing lives
+     * here once; import() below and App\Services\Mirror\MirrorProbe (a cheap, read-only
+     * preview before a package is even created) both call this rather than each speaking the
+     * protocol themselves.
+     *
+     * `raw` carries the full packument import() needs (dist-tags, readme, per-version dist
+     * URLs, …) — a preview call throws it away and keeps only the name/description/versions
+     * summary; import() is what actually fetches the tarballs.
+     *
+     * @return array{name: string, description: string|null, versions: list<string>, raw: array<string, mixed>}
+     */
+    public function fetchMetadata(MirrorSource $source, string $name): array
     {
-        $name = (string) $package->mirror_name;
         $encodedName = str_replace('/', '%2F', $name);
 
         try {
@@ -50,7 +62,8 @@ class NpmMirrorImport
             // $e->status() is a language-neutral fact (an HTTP status code, or null for a
             // transport-level refusal); $e->getMessage() is English prose and MUST NOT be
             // spliced in here — this message is shown to operators as Package::sync_error
-            // and is otherwise entirely German.
+            // (or, from the probe, as the create form's error banner) and is otherwise
+            // entirely German.
             $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
             throw MirrorSyncFailed::because("npm-Packument für „{$name}“ konnte nicht geladen werden{$suffix}.");
         }
@@ -58,6 +71,33 @@ class NpmMirrorImport
         if ($packument === null) {
             throw MirrorSyncFailed::because("Paket „{$name}“ bei der Quelle nicht gefunden (npm-Packument erforderlich).");
         }
+
+        $versions = is_array($packument['versions'] ?? null) ? $packument['versions'] : [];
+        $parser = new VersionParser;
+        $tags = [];
+        foreach ($versions as $tag => $version) {
+            $versionString = (string) $tag;
+            if ($versionString === '') {
+                continue;
+            }
+            try {
+                $parser->normalize($versionString);
+            } catch (UnexpectedValueException) {
+                continue; // not a version tag — skip silently, mirrors import()'s own tolerance
+            }
+            $tags[] = $versionString;
+        }
+
+        $discoveredName = is_string($packument['name'] ?? null) && $packument['name'] !== '' ? $packument['name'] : $name;
+        $description = is_string($packument['description'] ?? null) ? $packument['description'] : null;
+
+        return ['name' => $discoveredName, 'description' => $description, 'versions' => $tags, 'raw' => $packument];
+    }
+
+    public function import(Package $package, MirrorSource $source): void
+    {
+        $name = (string) $package->mirror_name;
+        $packument = $this->fetchMetadata($source, $name)['raw'];
 
         $versions = is_array($packument['versions'] ?? null) ? $packument['versions'] : [];
         $times = is_array($packument['time'] ?? null) ? $packument['time'] : [];

@@ -98,6 +98,9 @@ const props = defineProps<{
         replacement_package: string | null;
         abandonment_reason: string | null;
         shared: boolean;
+        // The mirror source this package imports from, for a mirror-sourced package; null
+        // for every other source mode (git, publish). See PackageController::show().
+        mirror: { source_name: string | null; mirror_name: string } | null;
     };
     versions: VersionRow[];
     pythonDists: PythonDistRow[];
@@ -300,6 +303,9 @@ useOperatorChannel({
                     {{ props.package.repository_url }}
                 </a>
                 <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">Zuletzt synchronisiert: {{ props.package.synced_at }}</div>
+                <div v-if="props.package.mirror" class="text-xs text-muted-foreground">
+                    Mirror-Quelle: {{ props.package.mirror.source_name }} · Paket: {{ props.package.mirror.mirror_name }}
+                </div>
                 <div v-if="syncError" class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {{ syncError }}
                 </div>

@@ -8,9 +8,11 @@ import Form from './Form.vue';
 import {
     canChooseSourceMode,
     isGitMode as computeIsGitMode,
+    isMirrorMode as computeIsMirrorMode,
     packageFormKey,
     type GitCredentialOption,
     type GroupOption,
+    type MirrorSourceOption,
     type PackageFormData,
     type ProbeResult,
     type SourceModeMap,
@@ -20,6 +22,7 @@ const props = defineProps<{
     groups: GroupOption[];
     registryTypes: string[];
     gitCredentials: GitCredentialOption[];
+    mirrorSources: MirrorSourceOption[];
     sourceModes: SourceModeMap;
 }>();
 
@@ -36,6 +39,8 @@ const form = useForm<PackageFormData>({
     is_private: false,
     repository_token: '',
     git_credential_id: '',
+    mirror_source_id: '',
+    mirror_name: '',
     group_ids: [],
 });
 
@@ -46,11 +51,16 @@ provide(packageFormKey, form);
 const probeResult = ref<ProbeResult | null>(null);
 
 const isGitMode = computed(() => computeIsGitMode(props.sourceModes, form.type, form.source_mode));
+const isMirrorMode = computed(() => computeIsMirrorMode(props.sourceModes, form.type, form.source_mode));
 
 // A package with no registry is invisible to its own creator and burns its name
 // instance-wide, so at least one is mandatory. The server enforces this (StorePackageRequest);
-// this only spares the operator the round trip.
-const canSubmit = computed(() => form.name.trim() !== '' && form.group_ids.length > 0 && (!isGitMode.value || probeResult.value?.ok === true));
+// this only spares the operator the round trip. Mirror mode is gated on the same probe-first
+// rule as git mode — both point at an address outside this instance, and creating the package
+// before confirming it resolves there would be indistinguishable from a typo in the name.
+const canSubmit = computed(
+    () => form.name.trim() !== '' && form.group_ids.length > 0 && ((!isGitMode.value && !isMirrorMode.value) || probeResult.value?.ok === true),
+);
 
 function submit() {
     // Enforce the probe-first gate here too — not only via the disabled button — so a
@@ -84,6 +94,7 @@ function submit() {
                         :groups="props.groups"
                         :registry-types="props.registryTypes"
                         :git-credentials="props.gitCredentials"
+                        :mirror-sources="props.mirrorSources"
                         :source-modes="props.sourceModes"
                         v-model:probe-result="probeResult"
                     />

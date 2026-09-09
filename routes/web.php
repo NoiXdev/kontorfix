@@ -58,6 +58,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // and 10/minute is far above what filling in the create dialog costs.
     Route::post('packages/probe', [Admin\PackageController::class, 'probe'])
         ->middleware('throttle:10,1')->name('packages.probe');
+    // Same job as the git probe above, for a mirror-mode package: confirm the named package
+    // exists at the chosen MirrorSource before it is ever persisted. Throttled identically —
+    // this too makes the instance dial an address the caller only indirectly controls.
+    Route::post('packages/probe-mirror', [Admin\PackageController::class, 'probeMirror'])
+        ->middleware('throttle:10,1')->name('packages.probe-mirror');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     // Just the sync status, polled by the detail page with a backoff until it turns
     // terminal. It exists because the `PackageSynced` broadcast can only reach a browser

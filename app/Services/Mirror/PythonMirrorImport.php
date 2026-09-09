@@ -42,9 +42,25 @@ class PythonMirrorImport
         private readonly UpstreamClient $client,
     ) {}
 
-    public function import(Package $package, MirrorSource $source): void
+    /**
+     * Fetches and parses this mirror's PEP 691 project detail feed
+     * (`GET /simple/{normalized}/`) for $name — the HTTP fetch + parsing lives here once;
+     * import() below and App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a
+     * package is even created) both call this rather than each speaking the protocol
+     * themselves.
+     *
+     * `raw` carries the full feed import() needs (the per-file URLs and hashes) — a preview
+     * call throws it away and keeps only the name/description/versions summary; import() is
+     * what actually fetches the distribution files.
+     *
+     * No description: PyPI's PEP 691 feed carries no project-level description field, so this
+     * always answers null for it — the same scope decision this class's own docblock states
+     * for readme handling.
+     *
+     * @return array{name: string, description: string|null, versions: list<string>, raw: array<string, mixed>}
+     */
+    public function fetchMetadata(MirrorSource $source, string $name): array
     {
-        $name = (string) $package->mirror_name;
         $normalized = PythonName::normalize($name);
 
         try {
@@ -53,7 +69,8 @@ class PythonMirrorImport
             // $e->status() is a language-neutral fact (an HTTP status code, or null for a
             // transport-level refusal); $e->getMessage() is English prose and MUST NOT be
             // spliced in here — this message is shown to operators as Package::sync_error
-            // and is otherwise entirely German.
+            // (or, from the probe, as the create form's error banner) and is otherwise
+            // entirely German.
             $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
             throw MirrorSyncFailed::because("PyPI-Metadaten (PEP 691) für „{$name}“ konnten nicht geladen werden{$suffix}.");
         }
@@ -67,6 +84,34 @@ class PythonMirrorImport
         if ($payload === null) {
             throw MirrorSyncFailed::because("Paket „{$name}“ bei der Quelle nicht gefunden (PEP 691 erforderlich).");
         }
+
+        $files = is_array($payload['files'] ?? null) ? $payload['files'] : [];
+        $versions = [];
+        foreach ($files as $file) {
+            if (! is_array($file)) {
+                continue;
+            }
+            $filename = $file['filename'] ?? null;
+            if (! is_string($filename) || $filename === '') {
+                continue;
+            }
+            if (! preg_match(self::FILENAME_PATTERN, $filename) || str_contains($filename, '..')) {
+                continue;
+            }
+            $filetype = str_ends_with($filename, '.whl') ? 'bdist_wheel' : 'sdist';
+            $version = $this->versionFromFilename($filename, $filetype);
+            if ($version !== null) {
+                $versions[$version] = true; // de-dupe: an sdist and a wheel can share a version
+            }
+        }
+
+        return ['name' => $name, 'description' => null, 'versions' => array_keys($versions), 'raw' => $payload];
+    }
+
+    public function import(Package $package, MirrorSource $source): void
+    {
+        $name = (string) $package->mirror_name;
+        $payload = $this->fetchMetadata($source, $name)['raw'];
 
         $files = is_array($payload['files'] ?? null) ? $payload['files'] : [];
         $maxBytes = (int) config('kontorfix.python_max_dist_bytes', 200 * 1024 * 1024);

@@ -32,17 +32,28 @@ class ComposerMirrorImport
         private readonly UpstreamClient $client,
     ) {}
 
-    public function import(Package $package, MirrorSource $source): void
+    /**
+     * Fetches and parses this mirror's Composer-v2 metadata (`/p2/{name}.json`) for $name —
+     * the HTTP fetch + JSON/version parsing lives here once; import() below and
+     * App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a package is even
+     * created) both call this rather than each speaking the protocol themselves.
+     *
+     * `raw` carries the expanded per-version metadata array import() needs (dist URL,
+     * shasum, released_at, …) — a preview call throws it away and keeps only the name/
+     * description/versions summary; import() is what actually fetches the dists.
+     *
+     * @return array{name: string, description: string|null, versions: list<string>, raw: array<int, mixed>}
+     */
+    public function fetchMetadata(MirrorSource $source, string $name): array
     {
-        $name = (string) $package->mirror_name;
-
         try {
             $payload = $this->client->getJson($source, "/p2/{$name}.json");
         } catch (UpstreamException $e) {
             // $e->status() is a language-neutral fact (an HTTP status code, or null for a
             // transport-level refusal); $e->getMessage() is English prose and MUST NOT be
             // spliced in here — this message is shown to operators as Package::sync_error
-            // and is otherwise entirely German.
+            // (or, from the probe, as the create form's error banner) and is otherwise
+            // entirely German.
             $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
             throw MirrorSyncFailed::because("Composer-v2-Metadaten für „{$name}“ konnten nicht geladen werden{$suffix}.");
         }
@@ -52,7 +63,37 @@ class ComposerMirrorImport
         }
 
         $minified = $payload['packages'][$name] ?? [];
-        $versions = MetadataMinifier::expand(is_array($minified) ? $minified : []);
+        $expanded = MetadataMinifier::expand(is_array($minified) ? $minified : []);
+
+        $parser = new VersionParser;
+        $tags = [];
+        $description = null;
+        foreach ($expanded as $version) {
+            if (! is_array($version)) {
+                continue;
+            }
+            $tag = $version['version'] ?? null;
+            if (! is_string($tag) || $tag === '') {
+                continue;
+            }
+            try {
+                $parser->normalize($tag);
+            } catch (UnexpectedValueException) {
+                continue; // not a version tag — skip silently, mirrors import()'s own tolerance
+            }
+            $tags[] = $tag;
+            if ($description === null && is_string($version['description'] ?? null)) {
+                $description = $version['description'];
+            }
+        }
+
+        return ['name' => $name, 'description' => $description, 'versions' => $tags, 'raw' => $expanded];
+    }
+
+    public function import(Package $package, MirrorSource $source): void
+    {
+        $name = (string) $package->mirror_name;
+        $versions = $this->fetchMetadata($source, $name)['raw'];
 
         $parser = new VersionParser;
         $maxBytes = (int) config('kontorfix.composer_max_dist_bytes', 100 * 1024 * 1024);

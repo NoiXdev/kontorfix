@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { describeManifestOutcome, describeProbeFailure, PROBE_RETRY_MESSAGE, type ProbeResponseLike, type ProbeResult } from './packageForm';
+import {
+    describeManifestOutcome,
+    describeProbeFailure,
+    isGitMode,
+    isMirrorMode,
+    PROBE_RETRY_MESSAGE,
+    type ProbeResponseLike,
+    type ProbeResult,
+    type SourceModeMap,
+} from './packageForm';
+
+/** Mirrors PackageSourceMode::allowedFor() for the three source-having types. */
+const sourceModes: SourceModeMap = {
+    composer: [
+        { value: 'git', label: 'Git-Mirror' },
+        { value: 'mirror', label: 'Mirror (fremde Registry)' },
+    ],
+    npm: [
+        { value: 'publish', label: 'Publish (Push)' },
+        { value: 'mirror', label: 'Mirror (fremde Registry)' },
+    ],
+    python: [
+        { value: 'publish', label: 'Publish (Push)' },
+        { value: 'git', label: 'Git-Mirror' },
+        { value: 'mirror', label: 'Mirror (fremde Registry)' },
+    ],
+    docker: [{ value: 'publish', label: 'Publish (Push)' }],
+};
 
 /** A stand-in for the part of `fetch`'s Response the helper reads. */
 function response(status: number, body?: unknown): ProbeResponseLike {
@@ -87,6 +114,34 @@ describe('describeProbeFailure', () => {
 
         expect(failure.errors).toEqual({});
         expect(failure.message).toContain('abgelehnt');
+    });
+});
+
+describe('isGitMode / isMirrorMode', () => {
+    // Composer's only allowed mode is git — its selector is hidden entirely (canChooseSourceMode
+    // is false), so nothing ever sets `source_mode` for it deliberately; isGitMode must still
+    // answer true from the type's default alone.
+    it('treats composer as git-mode even with no explicit source_mode', () => {
+        expect(isGitMode(sourceModes, 'composer', '')).toBe(true);
+        expect(isMirrorMode(sourceModes, 'composer', '')).toBe(false);
+    });
+
+    it('is mirror-mode only when explicitly selected — never a type default', () => {
+        expect(isMirrorMode(sourceModes, 'composer', 'mirror')).toBe(true);
+        expect(isMirrorMode(sourceModes, 'npm', 'mirror')).toBe(true);
+        expect(isMirrorMode(sourceModes, 'python', 'mirror')).toBe(true);
+    });
+
+    it('is neither git nor mirror for a publish-mode npm/python package', () => {
+        expect(isGitMode(sourceModes, 'npm', 'publish')).toBe(false);
+        expect(isMirrorMode(sourceModes, 'npm', 'publish')).toBe(false);
+        expect(isGitMode(sourceModes, 'python', 'publish')).toBe(false);
+        expect(isMirrorMode(sourceModes, 'python', 'publish')).toBe(false);
+    });
+
+    it('is git-mode for a python package with source_mode explicitly set to git', () => {
+        expect(isGitMode(sourceModes, 'python', 'git')).toBe(true);
+        expect(isMirrorMode(sourceModes, 'python', 'git')).toBe(false);
     });
 });
 

@@ -13,6 +13,7 @@ use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\MirrorSource;
 use App\Models\OciManifest;
 use App\Models\OciTag;
 use App\Models\Organization;
@@ -21,6 +22,7 @@ use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Models\RetentionPolicy;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Services\Mirror\MirrorProbe;
 use App\Services\Oci\BlobStore;
 use App\Services\Oci\Retention\RetentionRunner;
 use App\Services\Package\PackageDependencies;
@@ -149,6 +151,13 @@ class PackageController extends Controller
             'sourceModes' => $this->sourceModesPayload(),
             // Managed git credentials the user may assign (never exposes the token).
             'gitCredentials' => $this->gitCredentialOptions(),
+            // Reusable mirror sources the mirror-mode field may select. Scoped to the active
+            // console scope the same way gitCredentialOptions() is — the package's eventual
+            // owner is not known until the registry selection is submitted — and further
+            // narrowed client-side to the currently selected package type, since a mirror
+            // source is itself typed (Composer/npm/Python) and a Composer package cannot
+            // mirror an npm source.
+            'mirrorSources' => $this->mirrorSourceOptions(),
         ]);
     }
 
@@ -192,7 +201,11 @@ class PackageController extends Controller
         // registries, and RegistryUrl reads the domain rows to decide whether that registry is
         // addressed on its own host or on the instance host with a path prefix. Without the
         // relation it would be one lazy load per group inside that decision.
-        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
+        // `mirrorSource:id,name` on top: the sync card below names the source a mirror-sourced
+        // package points at. Selecting only `id, name` (never `auth_token`, which is `$hidden`
+        // on the model anyway, but explicit is cheaper to audit) keeps the eager load to the
+        // one column the card actually prints.
+        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains', 'mirrorSource:id,name']);
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         // `assertCanTouchPackage()` asserts that the package's OWNER is in the active scope
@@ -257,6 +270,14 @@ class PackageController extends Controller
                 'replacement_package' => $package->replacement_package,
                 'abandonment_reason' => $package->abandonment_reason,
                 'shared' => $package->shared,
+                // The sync card's mirror line: which reusable MirrorSource this package
+                // imports from, and what it is called there. Null for every other source
+                // mode — never an object with null members, so the template can gate on
+                // presence alone rather than re-deriving isMirrorSourced() on the client.
+                'mirror' => $package->isMirrorSourced() ? [
+                    'source_name' => $package->mirrorSource?->name,
+                    'mirror_name' => $package->mirror_name,
+                ] : null,
             ],
             // Whether the viewer holds the share-packages ability at all — passed rather
             // than re-derived in Vue so the front end never restates the gate's rule (the
@@ -844,6 +865,41 @@ class PackageController extends Controller
         return response()->json($result);
     }
 
+    /**
+     * The mirror counterpart of probe() above: confirm a package exists at a MirrorSource and
+     * show its discovered name/description/versions before anything is persisted — the create
+     * mask's precondition for saving a mirror-mode package, the same way probe() gates a
+     * git-mode one. Throttled identically (`throttle:10,1`, see routes/web.php) since this,
+     * too, makes the instance dial an address the caller only indirectly controls.
+     */
+    public function probeMirror(Request $request, MirrorProbe $probe): JsonResponse
+    {
+        $data = $request->validate([
+            'mirror_source_id' => ['required', 'uuid', 'exists:mirror_sources,id'],
+            'mirror_name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $source = MirrorSource::findOrFail($data['mirror_source_id']);
+        // A mirror source is never shared across organizations (see its docblock) — usable
+        // only by the active scope's own organizations, the same boundary MirrorSourceController
+        // itself enforces.
+        $this->assertAdministersOrg($source->organization_id);
+
+        $result = $probe->probe($source, $data['mirror_name']);
+
+        // Same audit rationale as probe() above: this endpoint makes the instance dial an
+        // address the caller only indirectly controls (via the chosen MirrorSource), and
+        // leaving no trace made a Maintainer's probing indistinguishable from nobody having
+        // used the console.
+        Log::info('Mirror probe.', [
+            'user_id' => $request->user()?->id,
+            'mirror_source_id' => $source->id,
+            'ok' => $result['ok'],
+        ]);
+
+        return response()->json($result);
+    }
+
     public function store(StorePackageRequest $request, SharedAssignment $sharedAssignment): RedirectResponse|JsonResponse
     {
         // A package may only be attached to registries the user administers, so it can
@@ -874,10 +930,21 @@ class PackageController extends Controller
             $this->assertCredentialPermits($credential, $request->validated('repository_url'));
         }
 
+        $type = PackageType::from($request->validated('type'));
+        $sourceMode = $request->effectiveSourceMode($type);
+
+        // A referenced mirror source must belong to the package's owning organization and
+        // match its type — checked (and refused) before anything is persisted, the same
+        // guarantee the credential checks above give the git path.
+        if ($sourceMode === PackageSourceMode::Mirror) {
+            $mirrorSource = MirrorSource::findOrFail($request->validated('mirror_source_id'));
+            $this->assertMirrorSourceUsable($mirrorSource, $request->ownerOrganizationId(), $type);
+        }
+
         // The source mode is authoritative (Composer is always git; npm/Python honour the
         // submitted mode) so the stored column is truthful regardless of what was sent.
         $attributes = $request->safe()->except('group_ids');
-        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        $attributes['source_mode'] = $sourceMode->value;
         // The owner is the organization the selected registries belong to; the request has
         // already refused a selection spanning more than one.
         $attributes['organization_id'] = $request->ownerOrganizationId();
@@ -885,10 +952,12 @@ class PackageController extends Controller
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Only git-sourced packages have something to sync; publish-based packages (npm,
-        // Python) are filled by pushing artifacts — skip the (doomed) sync job.
+        // Only git- and mirror-sourced packages have something to sync; publish-based
+        // packages (npm, Python) are filled by pushing artifacts — skip the (doomed) sync job.
         if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
+        } elseif ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
         }
 
         // The PackagePicker creates packages inline via fetch and needs the
@@ -921,6 +990,12 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
+        // A mirror-sourced package has no repository of its own to edit here — it points at
+        // a MirrorSource instead — so it gets its own, much narrower, write path.
+        if ($package->isMirrorSourced()) {
+            return $this->updateMirror($request, $package);
+        }
+
         // The detail page is now shown the redacted URL like every other reader, and its
         // form posts back whatever it was given. A redacted value byte-identical to the
         // redaction of what is stored is that echo — it means "unchanged", not "erase the
@@ -944,6 +1019,10 @@ class PackageController extends Controller
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
+            // This is the git/publish path: mirror_source_id/mirror_name belong to a
+            // mirror-sourced package only, which is refused above before reaching here.
+            'mirror_source_id' => ['prohibited'],
+            'mirror_name' => ['prohibited'],
         ], RepositoryUrlRules::messages());
 
         // `??` could not express "clear it". An emptied field arrives as null (the global
@@ -987,6 +1066,45 @@ class PackageController extends Controller
         // Re-sync git-sourced packages so a changed URL/token takes effect immediately.
         if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
+        }
+
+        return back()->with('success', 'Paket aktualisiert.');
+    }
+
+    /**
+     * update()'s mirror-mode counterpart: the only two fields a mirror-sourced package's
+     * "Quelle" ever has are which MirrorSource it points at and what it is called there. Git
+     * fields are prohibited here — a mirror-sourced package authenticates through its
+     * MirrorSource, never through a per-package git token — so posting them is refused the
+     * same way mirror fields are refused on the git/publish path above.
+     *
+     * Re-dispatches SyncMirrorPackage only when something actually changed: an operator
+     * re-submitting the same source/name (e.g. the form's own success round-trip) must not
+     * spend another sync run for nothing.
+     */
+    private function updateMirror(Request $request, Package $package): RedirectResponse
+    {
+        $data = $request->validate([
+            'mirror_source_id' => ['required', 'uuid', 'exists:mirror_sources,id'],
+            'mirror_name' => ['required', 'string', 'max:255'],
+            'repository_url' => ['prohibited'],
+            'repository_token' => ['prohibited'],
+            'git_credential_id' => ['prohibited'],
+        ]);
+
+        $source = MirrorSource::findOrFail($data['mirror_source_id']);
+        $this->assertMirrorSourceUsable($source, $package->organization_id, $package->type);
+
+        $changed = $package->mirror_source_id !== $data['mirror_source_id']
+            || $package->mirror_name !== $data['mirror_name'];
+
+        $package->update([
+            'mirror_source_id' => $data['mirror_source_id'],
+            'mirror_name' => $data['mirror_name'],
+        ]);
+
+        if ($changed) {
+            SyncMirrorPackage::dispatch($package);
         }
 
         return back()->with('success', 'Paket aktualisiert.');
@@ -1184,6 +1302,36 @@ class PackageController extends Controller
             ->orderBy('name')->get(['id', 'name', 'provider'])
             ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value])
             ->all();
+    }
+
+    /**
+     * Mirror sources assignable from the create page's mirror-mode field: those owned within
+     * the active scope. Unlike GitCredential, a MirrorSource is never shared across
+     * organizations (see its docblock) — so, unlike gitCredentialOptions() above, this is a
+     * plain ownership filter, not an own/global/shared union.
+     *
+     * @return array<int, array{id: string, name: string, type: string}>
+     */
+    private function mirrorSourceOptions(): array
+    {
+        return MirrorSource::query()
+            ->whereIn('organization_id', $this->scopedOrgIds())
+            ->orderBy('name')->get(['id', 'name', 'type'])
+            ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name, 'type' => $s->type->value])
+            ->all();
+    }
+
+    /**
+     * Aborts 403 unless $organizationId may use $source — a MirrorSource is never shared
+     * across organizations (see its docblock), so this is a plain ownership check, unlike the
+     * git credential equivalent above. Aborts 422 when the source's type does not match the
+     * package's — MirrorImporter::import() dispatches on the package's type alone and would
+     * otherwise read (say) an npm packument as if it were Composer's p2 feed.
+     */
+    private function assertMirrorSourceUsable(MirrorSource $source, string $organizationId, PackageType $type): void
+    {
+        abort_unless($source->organization_id === $organizationId, 403);
+        abort_unless($source->type === $type, 422);
     }
 
     /**
