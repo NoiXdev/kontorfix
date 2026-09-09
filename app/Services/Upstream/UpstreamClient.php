@@ -11,16 +11,23 @@ use Illuminate\Support\Facades\Http;
 class UpstreamClient
 {
     /**
+     * @param  array<string, string>  $headers  Additional request headers — merged in after
+     *                                          the default `Accept: application/json` set by
+     *                                          acceptJson(), so e.g. a caller wanting PyPI's
+     *                                          `application/vnd.pypi.simple.v1+json` can
+     *                                          override it here without a second client method.
      * @return array<string, mixed>|null null on 404
      */
-    public function getJson(UpstreamEndpoint $endpoint, string $path): ?array
+    public function getJson(UpstreamEndpoint $endpoint, string $path, array $headers = []): ?array
     {
         $url = rtrim($endpoint->endpointUrl(), '/').'/'.ltrim($path, '/');
 
         // Like getBytes: follow redirects manually and re-check each hop against the
         // SSRF rules — a malicious upstream must not be able to redirect a metadata
         // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
-        $response = $this->follow($endpoint, $url, fn (PendingRequest $req) => $req->acceptJson());
+        $response = $this->follow($endpoint, $url, fn (PendingRequest $req) => $headers === []
+            ? $req->acceptJson()
+            : $req->acceptJson()->withHeaders($headers));
 
         if ($response->status() === 404) {
             return null;
