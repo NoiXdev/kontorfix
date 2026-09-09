@@ -9,14 +9,16 @@ namespace App\Enums;
  * Composer/npm/PyPI registry via a reusable, org-level MirrorSource.
  *
  * Which modes a type may use is decided by allowedFor(), the single source of truth.
- * Composer is always git-sourced: a Composer package *is* its source tree. Python may be
- * either, because pip builds from a source distribution at install time. npm is publish
- * only by decision, not by impossibility: most npm packages publish a derived subset of
- * the repo (a build step, `files`, `.npmignore`), but some publish their source tree
- * essentially unchanged, and there is no way to tell the two apart from outside the repo.
- * A mode that silently works for some repos and produces an unusable package for others is
- * worse than not offering it at all. Mirror is offered for every type except Docker: an
- * image is built and pushed, never fetched from a foreign package index.
+ * Composer is never publish-based, only git- or mirror-sourced: a Composer package *is*
+ * its source tree, whether that tree is cloned directly or reached via a mirrored foreign
+ * registry. Python may be any of the three, because pip builds from a source distribution
+ * at install time. npm is publish only by decision, not by impossibility: most npm packages
+ * publish a derived subset of the repo (a build step, `files`, `.npmignore`), but some
+ * publish their source tree essentially unchanged, and there is no way to tell the two
+ * apart from outside the repo. A mode that silently works for some repos and produces an
+ * unusable package for others is worse than not offering it at all. Mirror is offered for
+ * every type except Docker: an image is built and pushed, never fetched from a foreign
+ * package index.
  */
 enum PackageSourceMode: string
 {
