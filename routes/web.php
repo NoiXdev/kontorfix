@@ -100,6 +100,10 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Reusable git access tokens (for syncing private repositories), org-scoped.
     Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::post('git-credentials/{gitCredential}/test', [Admin\GitCredentialController::class, 'test'])->name('git-credentials.test');
+    // Reusable, org-scoped pointers at a foreign Composer/npm/PyPI registry that packages
+    // can mirror from. No sharing (unlike git-credentials) — a mirror source belongs to
+    // exactly one organization.
+    Route::resource('mirror-sources', Admin\MirrorSourceController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     // Switch the active organization scope (sidebar). Clamped server-side to the orgs the
     // user administers, so it can filter/redirect context but never widen access.
     Route::post('scope', Admin\ScopeController::class)->name('scope.set');

@@ -15,6 +15,7 @@ import {
     Building2,
     CloudDownload,
     Database,
+    DatabaseZap,
     Fingerprint,
     Folder,
     Gauge,
@@ -85,6 +86,7 @@ const navSections = computed<NavSection[]>(() => {
             items: [
                 { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
                 { title: 'Git-Tokens', href: '/admin/git-credentials', icon: GitBranch },
+                { title: 'Mirror-Quellen', href: '/admin/mirror-sources', icon: DatabaseZap },
                 // Outgoing webhooks are instance-wide config — super-admin only.
                 ...(isSuper.value ? [{ title: 'Webhooks', href: '/admin/webhooks', icon: Webhook }] : []),
             ],
