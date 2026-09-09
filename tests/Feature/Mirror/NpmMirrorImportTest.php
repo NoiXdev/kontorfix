@@ -148,6 +148,51 @@ it('throws MirrorSyncFailed and persists nothing when the tarball bytes do not m
     expect(Storage::disk('artifacts')->allFiles())->toBe([]);
 });
 
+it('does not destroy a previously verified artifact when a re-sync integrity check fails with no shasum to guard the write', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test', 'type' => PackageType::Npm]);
+    $pkg = mirroredNpmPackage($group, $source, 'acme-demo');
+
+    $goodBytes = 'previously-verified-good-bytes';
+    $goodIntegrity = 'sha512-'.base64_encode(hash('sha512', $goodBytes, true));
+    $distPath = 'tarballs/'.$pkg->id.'/acme-demo-1.0.0.tgz';
+    Storage::disk('artifacts')->put($distPath, $goodBytes);
+    $pkg->versions()->create([
+        'version' => '1.0.0',
+        'version_pretty' => '1.0.0',
+        'source_reference' => null,
+        'metadata' => [],
+        'dist_path' => $distPath,
+        'dist_size' => strlen($goodBytes),
+        'dist_integrity' => $goodIntegrity,
+    ]);
+
+    // Upstream now declares a *different* integrity for the same version — forcing a
+    // re-download — but, without a shasum to gate fetchArtifact's own atomic move, actually
+    // serves bytes that don't even match its own newly-declared integrity (a corrupt or
+    // malicious response). The write must land somewhere other than $distPath, so this
+    // failure cannot cost the artifact a previous, successful sync already verified.
+    $claimedIntegrity = 'sha512-'.base64_encode(hash('sha512', 'whatever-the-feed-claims', true));
+    Http::fake([
+        '*/acme-demo' => Http::response([
+            'name' => 'acme-demo',
+            'dist-tags' => [],
+            'versions' => [
+                '1.0.0' => npmMirrorVersion('1.0.0', 'https://repo.test/acme-demo-1.0.0.tgz', null, $claimedIntegrity),
+            ],
+        ], 200),
+        '*/acme-demo-1.0.0.tgz' => Http::response('corrupted-bytes', 200),
+    ]);
+
+    expect(fn () => app(MirrorImporter::class)->import($pkg, $source))->toThrow(MirrorSyncFailed::class);
+
+    Storage::disk('artifacts')->assertExists($distPath);
+    expect(Storage::disk('artifacts')->get($distPath))->toBe($goodBytes);
+    expect(collect(Storage::disk('artifacts')->allFiles())->filter(fn ($f) => $f !== $distPath))->toBeEmpty();
+    expect($pkg->versions()->where('version', '1.0.0')->first()->dist_integrity)->toBe($goodIntegrity);
+});
+
 it('does not re-download a tarball whose local row and file already match (idempotent re-sync)', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);

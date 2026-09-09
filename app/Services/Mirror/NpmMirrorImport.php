@@ -14,6 +14,7 @@ use Composer\Semver\VersionParser;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Throwable;
 use UnexpectedValueException;
 
@@ -97,16 +98,24 @@ class NpmMirrorImport
                 continue; // already imported and the artifact is intact — no re-download
             }
 
-            // fetchArtifact() only ever verifies sha1/sha256, so a declared sha512
-            // integrity (the stronger, preferred check) is verified afterwards, against the
-            // bytes now on disk; a declared shasum is verified in-stream instead, which is
-            // cheaper and just as good when no integrity was declared at all.
-            $sha1ToVerify = $integrity === null ? $shasum : null;
+            // fetchArtifact() only ever verifies sha1/sha256 in-stream, before it atomically
+            // moves the bytes into their final path — so a declared shasum is passed straight
+            // through and gates that move exactly like ComposerMirrorImport's dist does.
+            // dist.integrity (sha512) is the stronger, preferred check, but fetchArtifact
+            // cannot perform it; verifying it only *after* fetchArtifact's own move would let
+            // a corrupt re-fetch overwrite an already-verified artifact from a previous sync
+            // before the mismatch is even detected (same $distPath every sync, by version).
+            // So whenever integrity is declared, fetchArtifact is pointed at a staging path
+            // instead of $distPath, verifyIntegrity() reads *that*, and only a pass moves it
+            // into $distPath — a previously good artifact is never touched by a fetch that
+            // ultimately fails.
+            $writePath = $integrity !== null ? $this->stagingPath($distPath) : $distPath;
 
-            [$size] = $this->importer->fetchArtifact($source, $dist['tarball'], $distPath, $maxBytes, null, $sha1ToVerify);
+            [$size] = $this->importer->fetchArtifact($source, $dist['tarball'], $writePath, $maxBytes, null, $shasum);
 
             if ($integrity !== null) {
-                $this->verifyIntegrity($disk, $distPath, $integrity, $dist['tarball']);
+                $this->verifyIntegrity($disk, $writePath, $integrity, $dist['tarball']);
+                $disk->move($writePath, $distPath);
             }
 
             $package->versions()->updateOrCreate(
@@ -134,6 +143,16 @@ class NpmMirrorImport
         ]);
 
         $this->syncReadme($package, $packument);
+    }
+
+    /**
+     * A sibling path fetchArtifact() can write and verifyIntegrity() can delete freely,
+     * distinct from $finalPath so a failed integrity check never touches whatever is
+     * already sitting at $finalPath from a previous, already-verified sync.
+     */
+    private function stagingPath(string $finalPath): string
+    {
+        return dirname($finalPath).'/.'.basename($finalPath).'.'.Str::random(8).'.integrity-check';
     }
 
     /** Whether a locally stored version still matches what the feed currently declares for it. */
