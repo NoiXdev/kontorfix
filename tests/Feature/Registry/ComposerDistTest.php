@@ -71,6 +71,35 @@ it('rebuilds the dist when a tag was force-pushed to a new commit', function () 
         ->toBe("dists/{$pkg->id}/{$newSha}.zip");
 });
 
+it('also resets the stale dist_size when a force-pushed tag resets dist_path', function () {
+    // dist_size is dist_path's own sidecar — the size of the file dist_path names. Left
+    // alone on a resync, the package detail page's version list would keep showing the OLD
+    // archive's size next to a version whose dist_path (and so whose next-download
+    // archive) has already moved on to a new commit.
+    Storage::fake('artifacts');
+    $fixture = FixtureRepo::make();
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.$fixture]);
+    (new SyncPackage($pkg))->handle();
+    $group->packages()->attach($pkg);
+    $headers = tokenHeaderFor($group);
+
+    // Build the dist once so dist_path/dist_size are both populated.
+    $this->withHeaders($headers)->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertOk();
+    expect($pkg->versions()->where('version', '1.0.0.0')->first()->dist_size)->not->toBeNull();
+
+    // Real force-push: same tag, new commit — checked immediately after the resync, before
+    // anything rebuilds the dist again.
+    $git = fn (string $cmd) => Process::path($fixture)->run($cmd)->throw();
+    $git('git -c user.email=t@t -c user.name=t commit --allow-empty -m forcepush');
+    $git('git tag -f v1.0.0');
+    (new SyncPackage($pkg))->handle();
+
+    $version = $pkg->versions()->where('version', '1.0.0.0')->first();
+    expect($version->dist_path)->toBeNull()
+        ->and($version->dist_size)->toBeNull();
+});
+
 it('waits out a briefly busy mirror lock instead of failing the download', function () {
     // The scenario the mirror lock was added for, seen from the caller that has no retry
     // behind it: two cold versions of one package requested in parallel take two different

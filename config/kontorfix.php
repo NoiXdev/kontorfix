@@ -28,6 +28,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Composer mirror dist limits
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound for a single dist archive fetched from a mirrored Composer source,
+    | against memory/disk exhaustion by whatever the foreign registry serves. In bytes.
+    |
+    */
+
+    'composer_max_dist_bytes' => env('KONTORFIX_COMPOSER_MAX_DIST_BYTES', 100 * 1024 * 1024),
+
+    /*
+    |--------------------------------------------------------------------------
     | Registry token default lifetime
     |--------------------------------------------------------------------------
     |
@@ -240,6 +252,28 @@ return [
     'upstream_cache_max_artifact_bytes' => (int) env('KONTORFIX_UPSTREAM_CACHE_MAX_ARTIFACT_BYTES', 100 * 1024 * 1024),
 
     'upstream_cache_prune_days' => (int) env('KONTORFIX_UPSTREAM_CACHE_PRUNE_DAYS', 30),
+
+    /*
+    |--------------------------------------------------------------------------
+    | OCI sweep blob budget
+    |--------------------------------------------------------------------------
+    |
+    | Upper bound on the number of blobs `oci:sweep` deletes per run. The budget
+    | exists so a first sweep of a registry that has never been swept does not
+    | spend an hour in the scheduler moving files; it bounds blob deletions only,
+    | because manifests, upload sessions and empty repositories are cheap row
+    | deletes by comparison. Hitting the budget is reported, never silent — the
+    | command warns and the sweeper view shows how many candidates remain, so a
+    | bounded run cannot read as "everything is clean".
+    |
+    | The grace period itself (how old an unreachable blob must be before it may
+    | be swept at all) is not here: it lives in system_settings, beside the other
+    | instance-wide switches, because it is an operator decision, not a deploy
+    | parameter.
+    |
+    */
+
+    'oci_sweep_blob_limit' => (int) env('KONTORFIX_OCI_SWEEP_BLOB_LIMIT', 1000),
 
     /*
     |--------------------------------------------------------------------------

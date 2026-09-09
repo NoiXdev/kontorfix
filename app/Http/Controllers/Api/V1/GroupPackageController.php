@@ -9,14 +9,23 @@ use App\Models\Group;
 use App\Models\GroupPackage;
 use App\Models\Package;
 use App\Services\Package\SharedAssignment;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\Rule;
 
+#[ApiGroup('Registries')]
 class GroupPackageController extends Controller
 {
     use ScopesApiToUser;
 
+    /**
+     * Paketzuweisungen einer Registry auflisten.
+     *
+     * Enthält auch bereits abgelaufene (nicht mehr ausgelieferte) Zuweisungen, jeweils
+     * markiert, ob sie aktuell wirksam sind — diese Liste ist die Eingabe für PUT auf
+     * denselben Endpunkt, siehe dort.
+     */
     public function index(Group $group): AnonymousResourceCollection
     {
         $this->assertCanReadGroup($group);
@@ -24,6 +33,13 @@ class GroupPackageController extends Controller
         return $this->assignments($group);
     }
 
+    /**
+     * Paketzuweisungen einer Registry vollständig ersetzen.
+     *
+     * Die Übermittlung ist der komplette Soll-Zustand: eine bestehende Zuweisung, die nicht
+     * erneut mitgeschickt wird, wird dadurch entfernt (DETACH BY OMISSION). Vorher gegen
+     * GET desselben Endpunkts abrufen, ändern und vollständig zurücksenden.
+     */
     public function update(Request $request, Group $group, SharedAssignment $sharedAssignment): AnonymousResourceCollection
     {
         $this->assertCanWriteGroup($group);

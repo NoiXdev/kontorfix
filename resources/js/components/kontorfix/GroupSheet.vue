@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import OrgPortalHint from '@/components/kontorfix/OrgPortalHint.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,14 +13,14 @@ import { computed, ref, watch } from 'vue';
 
 // Must match `PackagePicker.vue`'s own (correct, wider) local `Pkg` — this component only
 // ever receives package objects from `<PackagePicker v-model="selected">` below, and that
-// component's search can return Python packages too. This file never reads `.type` (only
-// `.id`, for `form.package_ids`), so the missing `'python'` member was never a live bug —
-// strictVModel caught the two interfaces having silently drifted apart, not a behaviour
-// difference.
+// component's search can return Python and Docker packages too. This file never reads
+// `.type` (only `.id`, for `form.package_ids`), so a missing member here is never a live
+// behaviour bug — strictVModel is what catches the two interfaces having silently drifted
+// apart, most recently when Docker joined as a fourth type and this copy was not updated.
 interface Pkg {
     id: string;
     name: string;
-    type: 'composer' | 'npm' | 'python';
+    type: 'composer' | 'npm' | 'python' | 'docker';
     shared: boolean;
 }
 
@@ -29,6 +30,10 @@ interface OrgOption {
     // First segment of every registry URL, so the preview below can name it once the
     // operator has picked an owner.
     slug: string;
+    // Whether this organization's customer portal exists at all — see
+    // Organization::portal_enabled's docblock. Drives the hint under the "Im Kundenportal
+    // anzeigen" switch below once this org is the picked (or default) owner.
+    portal_enabled: boolean;
 }
 
 const props = withDefaults(
@@ -37,8 +42,23 @@ const props = withDefaults(
         // The registry URL form with both slugs left open, from RegistryUrl::template().
         // This sheet substitutes into it — it never assembles a registry URL itself.
         urlTemplate?: string;
+        // What "Standard (Betreiber)" (the SearchableSelect's empty option) resolves to on
+        // submit — the same organization ScopesToAdministeredOrgs::resolveCreationOrg()
+        // picks: the active scope, else the caller's home organization. Needed because that
+        // resolution happens server-side and cannot be recomputed from `organizations` alone.
+        defaultOrganizationId?: string | null;
+        defaultOrganizationPortalEnabled?: boolean;
+        // Whether the current caller may open admin.organizations.show — customer/
+        // organization management is super-admin only (see EnsureSuperAdmin).
+        canManageOrganization?: boolean;
     }>(),
-    { organizations: () => [], urlTemplate: '' },
+    {
+        organizations: () => [],
+        urlTemplate: '',
+        defaultOrganizationId: null,
+        defaultOrganizationPortalEnabled: true,
+        canManageOrganization: false,
+    },
 );
 
 const open = defineModel<boolean>('open', { default: false });
@@ -66,6 +86,19 @@ const orgSlug = computed(() => props.organizations.find((o) => o.id === form.org
 const urlFormLabel = computed(() => props.urlTemplate.replace('{organization}', '<organisation>').replace('{registry}', '<slug>'));
 
 const urlPreview = computed(() => origin + props.urlTemplate.replace('{organization}', orgSlug.value).replace('{registry}', form.slug || '…'));
+
+// The owner this registry will actually belong to once submitted: the explicitly picked
+// organization, or — for "Standard (Betreiber)" — whatever resolveCreationOrg() resolves to
+// server-side (see `defaultOrganizationId`/`defaultOrganizationPortalEnabled` above). Reading
+// the picked option from `organizations` rather than trusting the SearchableSelect's own
+// state keeps this in one place with `orgSlug` above.
+const selectedOrganization = computed(() => props.organizations.find((o) => o.id === form.organization_id));
+
+const ownerPortalEnabled = computed(() =>
+    form.organization_id ? (selectedOrganization.value?.portal_enabled ?? true) : props.defaultOrganizationPortalEnabled,
+);
+
+const ownerOrganizationId = computed(() => (form.organization_id ? form.organization_id : props.defaultOrganizationId));
 
 const selected = ref<Pkg[]>([]);
 const slugTouched = ref(false);
@@ -165,6 +198,14 @@ function close() {
                     </Label>
                 </div>
                 <InputError :message="form.errors.portal_enabled" />
+
+                <!-- Reflects whichever organization the registry will actually belong to: the
+                     picked owner, or — for "Standard (Betreiber)" — the server's own resolution. -->
+                <OrgPortalHint
+                    :portal-enabled="ownerPortalEnabled"
+                    :can-manage-organization="canManageOrganization"
+                    :organization-id="ownerOrganizationId"
+                />
 
                 <div class="grid gap-2">
                     <Label>Pakete</Label>

@@ -9,7 +9,8 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
-import { offersMinting, offersPublishing } from './registrySetup';
+import { dockerDomainNote, dockerSetupSnippet, dockerStepTitle, type SetupAudience } from './dockerSetup';
+import { noEcosystemMessage, offersMinting, offersPublishing, stepsForEcosystems } from './registrySetup';
 
 interface Snippets {
     composer: string;
@@ -17,6 +18,15 @@ interface Snippets {
     npm: string;
     pip: string;
     twine: string;
+    // Docker's raw facts, not a finished snippet — see SetupSnippetBuilder::for()'s doc
+    // comment. Required, not optional: `dockerHost` stopped being nullable when
+    // ResolveOciContext gave every registry a working address on the instance host, and an
+    // optional field here would let a caller silently forward a payload that no longer
+    // carries them.
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+    dockerHasDomain: boolean;
+    dockerExample?: string | null;
 }
 
 interface PersonalToken {
@@ -33,8 +43,22 @@ const props = defineProps<{
     storeRouteParams?: ParameterValue;
     storePayload?: Record<string, unknown>;
     personalTokens?: PersonalToken[];
-    // Which ecosystems to show setup steps for. Omitted → all.
-    types?: string[];
+    // Which ecosystems to show setup steps for — the types the organization MAY serve
+    // (RegistryTypeService::effectiveFor()), never the types of the packages already in the
+    // registry. Both callers used to derive it from the package list, which meant an empty
+    // registry showed no instructions at all; for images that is the normal first state,
+    // because nobody pushes a first image into a registry whose address is written nowhere.
+    //
+    // REQUIRED, for the same reason `audience` below is: with the prop meaning "permitted"
+    // rather than "present", `[]` is a definite answer — this organization may serve
+    // nothing — and any default substituted for it prints instructions against endpoints
+    // that answer 404. See stepsForEcosystems() in registrySetup.ts.
+    types: string[];
+    // Who is reading. It changes exactly one sentence — the note under the Docker snippet
+    // on a registry with no custom domain — and it is REQUIRED rather than defaulted,
+    // because the wrong default is not a cosmetic miss: the operator's version names
+    // Registry → Domains, a console page a portal account cannot open at all.
+    audience: SetupAudience;
     // Whether to offer minting at all. Omitted → yes, which is the console's case: every
     // caller there is already an admin or maintainer of the organization. The portal passes
     // the shared `portal.may_mint_tokens`, so an operator standing in a customer's portal is
@@ -122,7 +146,16 @@ function createAndInsert() {
     });
 }
 
-const substituted = computed<Snippets>(() => {
+/**
+ * The five snippets a minted token gets substituted into. Deliberately NOT `Snippets`: the
+ * Docker step's fields are raw facts rather than text, they carry no `<token>` at all
+ * (`docker login` prompts for the password instead of taking it on a command line that
+ * lands in the shell history), and typing this as the whole payload would force four fields
+ * to be copied through a map that has nothing to do with them.
+ */
+type TextSnippetKey = 'composer' | 'auth' | 'npm' | 'pip' | 'twine';
+
+const substituted = computed<Record<TextSnippetKey, string>>(() => {
     const t = activeToken.value;
     const sub = (s: string) => (t ? s.split(PLACEHOLDER).join(t) : s);
     return {
@@ -141,12 +174,38 @@ const stepDefs = [
     { key: 'npm', eco: 'npm', title: 'npm einrichten' },
     { key: 'pip', eco: 'python', title: 'pip einrichten' },
     { key: 'twine', eco: 'python', title: 'Veröffentlichen mit twine' },
+    { key: 'docker', eco: 'docker', title: dockerStepTitle() },
 ] as const;
 
-const steps = computed(() => {
-    const show = props.types && props.types.length ? props.types : ['composer', 'npm', 'python'];
-    return stepDefs.filter((s) => show.includes(s.eco)).map((s) => ({ key: s.key, title: s.title, content: substituted.value[s.key] }));
-});
+interface Step {
+    key: string;
+    title: string;
+    /** The copyable block. Every step has one — there is no address-less state left. */
+    content: string;
+    /** A sentence under the block, or '' for none. Today only the Docker step sets it, on a
+     *  registry with no custom domain: the commands above work as they stand, and this says
+     *  what a hostname of its own would change. */
+    note: string;
+}
+
+const steps = computed<Step[]>(() =>
+    stepsForEcosystems(stepDefs, props.types).map((s) => {
+        if (s.key === 'docker') {
+            return {
+                key: s.key,
+                title: s.title,
+                // Built from the raw facts rather than read out of `substituted`: this
+                // block carries no <token> to replace at all — `docker login` prompts
+                // for the password instead of taking it on a command line that lands
+                // in the shell history.
+                content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix, props.snippets.dockerExample),
+                note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
+            };
+        }
+
+        return { key: s.key, title: s.title, content: substituted.value[s.key], note: '' };
+    }),
+);
 
 const copiedKey = ref<string | null>(null);
 
@@ -222,6 +281,16 @@ function selectSession(value: string) {
         </div>
 
         <div class="grid gap-4">
+            <!-- The organization may serve nothing: `types` is empty, every registry
+                 endpoint answers 404, and there is no instruction here that would work. It
+                 says so rather than falling back to a set of ecosystems nobody enabled —
+                 see stepsForEcosystems() and noEcosystemMessage() in registrySetup.ts. -->
+            <p
+                v-if="!steps.length"
+                class="rounded-xl border border-sidebar-border/70 px-4 py-3 text-sm text-muted-foreground dark:border-sidebar-border"
+            >
+                {{ noEcosystemMessage() }}
+            </p>
             <div v-for="step in steps" :key="step.key" class="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                 <div class="flex items-center justify-between gap-4 border-b border-sidebar-border/70 px-4 py-3 dark:border-sidebar-border">
                     <h3 class="font-medium">{{ step.title }}</h3>
@@ -231,6 +300,13 @@ function selectSession(value: string) {
                     </Button>
                 </div>
                 <pre class="overflow-x-auto px-4 py-3 font-mono text-sm">{{ step.content }}</pre>
+                <!-- Plate 3, rewritten: a registry without its own hostname is no longer a
+                     dead end — the commands above address it on the instance host — so this
+                     sits UNDER the block as a note rather than replacing it. Its wording
+                     differs by audience; see dockerSetup.ts's dockerDomainNote(). -->
+                <p v-if="step.note" class="border-t border-sidebar-border/70 px-4 py-3 text-sm text-muted-foreground dark:border-sidebar-border">
+                    {{ step.note }}
+                </p>
             </div>
         </div>
     </div>

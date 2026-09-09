@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { Switch } from '@/components/ui/switch';
 import { computed, inject } from 'vue';
 import { gitCredentialFormKey } from './gitCredentialForm';
 
 interface OrganizationOption {
+    id: string;
+    name: string;
+    is_operator: boolean;
+}
+
+interface ShareTargetOption {
     id: string;
     name: string;
 }
@@ -19,6 +27,9 @@ interface ProviderOption {
 
 const props = defineProps<{
     organizations: OrganizationOption[];
+    // Only ever non-empty when the currently targeted organization (see targetIsOperator
+    // below) actually is the operator organization — see GitCredentialController.
+    shareableOrganizations: ShareTargetOption[];
     providers: ProviderOption[];
     mode: 'create' | 'edit';
 }>();
@@ -47,6 +58,23 @@ const createOrgId = computed({
     get: () => form.organization_id ?? '',
     set: (value: string) => (form.organization_id = value),
 });
+
+// Sharing only ever applies to an operator-owned credential. `form.organization_id` names
+// the targeted organization in both modes: it changes live while creating (the picker
+// above), and is fixed to the credential's own organization while editing (there is no
+// picker then) — either way this reads the right answer without a separate prop.
+const targetIsOperator = computed(() => props.organizations.find((o) => o.id === form.organization_id)?.is_operator ?? false);
+
+// Sharing to the organization that already owns the credential grants nothing (it can
+// already use its own token) — filtered out so the list only ever offers organizations
+// the toggle would actually change something for.
+const shareTargets = computed(() => props.shareableOrganizations.filter((o) => o.id !== form.organization_id));
+
+function toggleShare(organizationId: string, checked: boolean) {
+    form.shared_organization_ids = checked
+        ? [...form.shared_organization_ids, organizationId]
+        : form.shared_organization_ids.filter((id) => id !== organizationId);
+}
 </script>
 
 <template>
@@ -71,7 +99,7 @@ const createOrgId = computed({
     <div class="grid gap-2">
         <Label for="cred_host">Host</Label>
         <Input id="cred_host" v-model="form.host" :placeholder="hostPlaceholder" autocomplete="off" />
-        <p class="text-xs text-muted-foreground">Der Token wird ausschliesslich an diesen Host gesendet.</p>
+        <p class="text-xs text-muted-foreground">Der Token wird ausschließlich an diesen Host gesendet.</p>
         <InputError :message="form.errors.host" />
     </div>
 
@@ -85,5 +113,37 @@ const createOrgId = computed({
         <Label for="cred_token">Token{{ mode === 'edit' ? ' (leer lassen = unverändert)' : '' }}</Label>
         <Input id="cred_token" v-model="form.token" type="password" placeholder="ghp_… / glpat-… / …" autocomplete="off" class="font-mono" />
         <InputError :message="form.errors.token" />
+    </div>
+
+    <!-- Sharing only ever applies to a credential owned by the operator organization —
+         a customer's own token cannot be shared with other customers at all. -->
+    <div v-if="targetIsOperator" class="grid gap-3 rounded-md border border-input p-3">
+        <label class="flex items-start gap-2 text-sm">
+            <Switch v-model="form.is_global" class="mt-1" />
+            <span>
+                Für alle Organisationen freigeben
+                <span class="block text-xs text-muted-foreground">
+                    Global freigegebene Tokens kann jede Organisation ihren eigenen Paketen zuweisen — nur lesend, bearbeiten kann sie
+                    weiterhin ausschließlich der Betreiber.
+                </span>
+            </span>
+        </label>
+        <InputError :message="form.errors.is_global" />
+
+        <div v-if="!form.is_global" class="grid gap-2">
+            <Label>Freigegeben für</Label>
+            <div class="max-h-40 space-y-2 overflow-y-auto rounded-md border border-input p-3">
+                <div v-for="org in shareTargets" :key="org.id" class="flex items-center gap-2">
+                    <Checkbox
+                        :id="`share-${org.id}`"
+                        :checked="form.shared_organization_ids.includes(org.id)"
+                        @update:checked="(checked) => toggleShare(org.id, checked === true)"
+                    />
+                    <Label :for="`share-${org.id}`" class="font-normal">{{ org.name }}</Label>
+                </div>
+                <p v-if="shareTargets.length === 0" class="text-sm text-muted-foreground">Keine weiteren Organisationen vorhanden.</p>
+            </div>
+            <InputError :message="form.errors.shared_organization_ids" />
+        </div>
     </div>
 </template>

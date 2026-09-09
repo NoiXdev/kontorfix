@@ -53,7 +53,14 @@ jobs:
       # bin/e2e already dumps the app/worker logs on failure and tears the stack down with
       # `down -v`; do not add an `if: failure()` step here for the same thing, or the log
       # dump ends up living in two places and the two can drift.
+      #
+      # E2E_LARGE_LAYER is unconditional, unlike E2E_UPSTREAM: the 500 MiB layer gate is
+      # Spec §4's own acceptance criterion for this project's OCI registry, not an optional
+      # extra like the upstream fallthrough tests (which reach real external registries and
+      # exist to be toggled off by default). Measured at 28s locally — there is no cost
+      # reason to leave a spec-mandated check unexercised by every push to main.
       - name: Run the end-to-end suite
         env:
           E2E_SKIP_BUILD: '1'
+          E2E_LARGE_LAYER: '1'
         run: bin/e2e ${{ inputs.upstream && '--upstream' || '' }}

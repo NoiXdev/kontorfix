@@ -2,13 +2,15 @@ import type { InertiaForm } from '@inertiajs/vue3';
 import type { InjectionKey } from 'vue';
 
 export interface PackageFormData {
-    type: 'composer' | 'npm' | 'python';
-    source_mode: 'publish' | 'git';
+    type: 'composer' | 'npm' | 'python' | 'docker';
+    source_mode: 'publish' | 'git' | 'mirror';
     name: string;
     repository_url: string;
     is_private: boolean;
     repository_token: string;
     git_credential_id: string;
+    mirror_source_id: string;
+    mirror_name: string;
     group_ids: string[];
 }
 
@@ -31,6 +33,12 @@ export interface GitCredentialOption {
     provider: string;
 }
 
+export interface MirrorSourceOption {
+    id: string;
+    name: string;
+    type: string;
+}
+
 export type SourceModeMap = Record<string, { value: string; label: string }[]>;
 
 /**
@@ -50,6 +58,10 @@ export interface ProbeResult {
      *  type → filename mapping stays in the PackageType enum only. */
     manifest_file?: string;
     versions: string[];
+    /** Mirror probe only: the source's own address is unencrypted and carries a token, which
+     *  the client already withholds (see UpstreamClient::isEncrypted()) rather than sending
+     *  in the clear — this makes that silent behaviour visible before the package is saved. */
+    warning?: string;
 }
 
 /** The modes a given package type actually allows, per PackageSourceMode::allowedFor() on
@@ -74,6 +86,15 @@ export function canChooseSourceMode(sourceModes: SourceModeMap, type: string): b
  * submission on it). */
 export function isGitMode(sourceModes: SourceModeMap, type: string, sourceModeValue: string): boolean {
     return modesFor(sourceModes, type)[0]?.value === 'git' || sourceModeValue === 'git';
+}
+
+/** Mirror is never a type's default/only mode (PackageSourceMode::allowedFor() always lists
+ * Git or Publish first), so — unlike isGitMode() above — this needs no "type's only mode"
+ * fallback: the explicit submitted value is the only way to be in mirror mode. Kept as its
+ * own named predicate anyway, mirroring isGitMode()'s shape, so Form.vue and Create.vue read
+ * the same way for both mutually exclusive source kinds. */
+export function isMirrorMode(sourceModes: SourceModeMap, type: string, sourceModeValue: string): boolean {
+    return modesFor(sourceModes, type)[0]?.value === 'mirror' || sourceModeValue === 'mirror';
 }
 
 /**

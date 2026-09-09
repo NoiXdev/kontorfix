@@ -29,6 +29,10 @@ FROM dunglas/frankenphp:1-php8.4 AS app
 RUN install-php-extensions pcntl posix pdo_pgsql redis zip intl opcache
 RUN apt-get update && apt-get install -y --no-install-recommends git unzip \
     && rm -rf /var/lib/apt/lists/*
+# See docker/php.ini's own comment: the base image loads no php.ini at all, so without
+# this the compiled-in post_max_size=8M default would reject any OCI blob push above that
+# size before the streaming upload path in App\Services\Oci\BlobStore ever ran.
+COPY docker/php.ini /usr/local/etc/php/conf.d/kontorfix.ini
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 WORKDIR /app
 COPY composer.json composer.lock ./
@@ -67,4 +71,10 @@ EXPOSE 8080
 # survives restarts, since the entrypoint recompiles bootstrap/cache on every boot.
 USER www-data
 ENTRYPOINT ["docker/entrypoint.sh"]
-CMD ["frankenphp", "php-server", "-r", "public/", "--listen", ":8080"]
+# `frankenphp run`, not `php-server`: `php-server` builds its own Caddy config
+# on the fly and has no way to attach the request-body limit docker/Caddyfile sets
+# (see that file's own comment for what it protects and why php.ini alone cannot).
+# `--config` is relative to WORKDIR (/app), where `COPY . .` above already placed
+# docker/Caddyfile — no separate COPY needed, unlike docker/php.ini, which has to
+# land at an absolute system path COPY . . would never reach.
+CMD ["frankenphp", "run", "--config", "docker/Caddyfile"]

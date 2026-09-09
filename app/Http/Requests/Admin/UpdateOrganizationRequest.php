@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Rules\AddressableSlug;
 use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -43,7 +44,11 @@ class UpdateOrganizationRequest extends FormRequest
             // Globally unique: the organization slug is the top level of the registry
             // namespace and the first segment of every registry URL it owns.
             'slug' => [
-                'required', 'string', 'max:190', 'regex:/^[a-z0-9-]+$/',
+                // The row's CURRENT slug is passed through as `$unchanged`, so an organization
+                // created before AddressableSlug existed can still be edited without being
+                // forced to rename itself; only a NEW value has to be OCI-addressable. See
+                // that class for why the rule is narrower than routes/registry.php's $ociName.
+                'required', 'string', 'max:190', new AddressableSlug($this->route('organization')?->slug),
                 Rule::unique('organizations', 'slug')->ignore($this->route('organization')?->id),
                 // …and never equal to a registry slug: the two share one namespace in the
                 // registry URL. StoreOrganizationRequest guards the create path; this is the
@@ -66,6 +71,24 @@ class UpdateOrganizationRequest extends FormRequest
             // already passes an absent field and `validated()` already omits one. What makes
             // an omitted switch mean "leave it alone" is the conditional merge above.
             'portal_enabled' => ['boolean'],
+            // Push-time repository creation for this organization, as THREE states: null
+            // (inherit the instance setting), true, false. `nullable` is what carries the
+            // inherit state through validation — without it a null would be rejected as a
+            // non-boolean and the console could never hand an organization back to the
+            // ceiling.
+            //
+            // No `sometimes`, for the same reason `portal_enabled` above carries none: it
+            // would be a modifier no mutation can redden. An absent field is skipped by
+            // `boolean` and omitted by `validated()` on its own, so a payload that never
+            // mentions the switch already leaves the stored value alone — which is what
+            // OrganizationAutoCreateTest's omitted-field case asserts.
+            //
+            // No clamping here: an organization storing `true` under a globally disabled
+            // setting is inert, because OciSettings::autoCreateEnabledFor() intersects the
+            // two rather than preferring the organization's value. Clamping on write would
+            // additionally erase the organization's choice the moment an operator switched
+            // the ceiling off and back on.
+            'oci_auto_create_repositories' => ['nullable', 'boolean'],
         ];
     }
 }

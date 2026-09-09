@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\PackageSourceMode;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\Package;
 use Illuminate\Support\Facades\Queue;
@@ -30,4 +32,26 @@ it('does not dispatch a sync job for a publish-based package that only carries a
     // for the isGitSourced() guard — dropping it would push 2 jobs instead of 1.
     Queue::assertPushed(SyncPackage::class, 1);
     Queue::assertPushed(SyncPackage::class, fn (SyncPackage $job) => $job->package->is($gitSourced));
+});
+
+it('dispatches SyncMirrorPackage for a mirror-sourced package and nothing for a publish-based one', function () {
+    Queue::fake();
+    $gitSourced = Package::factory()->create(['repository_url' => 'https://github.com/acme/widget.git']);
+    $mirrorSourced = Package::factory()->create([
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => null,
+        'repository_url' => null,
+    ]);
+    Package::factory()->create([
+        'type' => 'npm',
+        'source_mode' => 'publish',
+        'repository_url' => null,
+    ]);
+
+    $this->artisan('packages:resync')->assertSuccessful();
+
+    Queue::assertPushed(SyncPackage::class, 1);
+    Queue::assertPushed(SyncPackage::class, fn (SyncPackage $job) => $job->package->is($gitSourced));
+    Queue::assertPushed(SyncMirrorPackage::class, 1);
+    Queue::assertPushed(SyncMirrorPackage::class, fn (SyncMirrorPackage $job) => $job->package->is($mirrorSourced));
 });

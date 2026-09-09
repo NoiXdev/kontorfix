@@ -1,7 +1,9 @@
 <?php
 
+use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\Package;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -43,4 +45,49 @@ it('builds pip and twine snippets for the Python registry', function () {
         ->toContain('[distutils]')
         ->toContain('repository = https://reg.example.test/r/kunde/acme/')
         ->toContain('username = token');
+});
+
+it('addresses docker on the instance host, with both slugs, when the registry has no domain', function () {
+    // The premise this case used to assert the opposite of. `/v2/` sits at the root of a
+    // host, so a registry without a domain of its own once had no address a Docker client
+    // could use at all and `dockerHost` was null. ResolveOciContext ended that: the
+    // instance's own host serves `/v2/`, and the two slugs ride along as the leading
+    // segments of the repository name.
+    $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['dockerHost'])->toBe('reg.example.test')
+        // NOT `/r/kunde/acme`: that is the Composer/npm/Python address. An image reference
+        // carries no leading slash and no `/r`.
+        ->and($snips['dockerRepositoryPrefix'])->toBe('kunde/acme/')
+        ->and($snips['dockerHasDomain'])->toBeFalse()
+        ->and($snips['dockerExample'])->toBeNull();
+});
+
+it('keeps the port of a development instance in the docker host', function () {
+    // parse_url's PHP_URL_HOST drops it, and an image reference that names the wrong port
+    // reaches nothing. host() (composer/npm/pip) has always dropped it; dockerHost() must
+    // not, which is why the two are separate methods rather than one.
+    config(['app.url' => 'http://localhost:8099']);
+    $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['dockerHost'])->toBe('localhost:8099');
+});
+
+it('drops the namespace and uses the domain once the registry has one', function () {
+    $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
+    Domain::factory()->for($group)->create(['hostname' => 'images.acme.test']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => 'docker', 'name' => 'meinapp']);
+    $group->packages()->attach($pkg);
+
+    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+
+    expect($snips['dockerHost'])->toBe('images.acme.test')
+        // Empty, not `kunde/acme/`: a custom domain is the registry root, so the repository
+        // name reaches it bare. This is the assertion that keeps the two addressing modes
+        // from being conflated into one string.
+        ->and($snips['dockerRepositoryPrefix'])->toBe('')
+        ->and($snips['dockerHasDomain'])->toBeTrue()
+        ->and($snips['dockerExample'])->toBe('meinapp');
 });

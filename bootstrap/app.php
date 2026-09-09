@@ -10,9 +10,11 @@ use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\PinUrlRoot;
 use App\Http\Middleware\RejectRobotWebSession;
 use App\Http\Middleware\RequireSetup;
+use App\Http\Middleware\ResolveOciContext;
 use App\Http\Middleware\ResolvePortalContext;
 use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\ValidatePostSize;
 use App\Services\Http\TrustedHosts;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -70,6 +72,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // writes a static declared on the parent, which the subclass shares.
         $middleware->replace(TrustHosts::class, App\Http\Middleware\TrustHosts::class);
 
+        // The framework class rejects any request whose Content-Length exceeds
+        // post_max_size — global, every route, every method. Correct everywhere except
+        // `/v2/*` (the OCI distribution API), which legitimately carries request bodies
+        // far larger than post_max_size on purpose (spec §4) and never reads them through
+        // the mechanism post_max_size actually bounds ($_POST/$_FILES). See the subclass's
+        // own comment for what reproducibly broke without this exemption once
+        // post_max_size became a real, finite number (docker/php.ini's DoS fix) instead of
+        // 0 — a `docker push` of any layer above it, not merely the 500 MiB gate.
+        $middleware->replace(
+            Illuminate\Http\Middleware\ValidatePostSize::class,
+            ValidatePostSize::class,
+        );
+
         // Deployment runs behind a reverse proxy (Traefik/Portainer). Without this,
         // getSchemeAndHttpHost() would return the internal host and the generated
         // dist URLs in the Composer metadata would be wrong. The trusted
@@ -125,6 +140,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'registry.auth' => AuthenticateRegistry::class,
             'registry.context' => ResolveRegistryContext::class,
+            // The OCI protocol's own resolver: it decides between domain and path
+            // addressing from the Host, which registry.context cannot do because a
+            // path-mode /v2 URL is indistinguishable from a domain-mode one at the router.
+            // See ResolveOciContext.
+            'oci.context' => ResolveOciContext::class,
             'registry.type' => EnsureRegistryTypeEnabled::class,
             'portal.context' => ResolvePortalContext::class,
             'operator' => EnsureOperator::class,
@@ -133,20 +153,27 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        // Both fields can carry an inline Basic-auth credential (see CredentialUrl).
-        // UpdateUpstreamRequest::prepareForValidation() and PackageController::update()
-        // resolve a redacted echo back to the raw stored URL before validation runs, so
-        // that a *failed* save's ...->withInput() redirect does not see the redaction
-        // marker in $request->input() — but that same raw value is what Handler::invalid()
-        // would otherwise flash into `_old_input` in the sessions table. Nothing renders
-        // old() for these fields today, so this is not a live disclosure, but a raw
-        // credential has no business sitting in secondary storage until the session
-        // expires.
-        $exceptions->dontFlash(['url', 'repository_url']);
+        // `url`/`repository_url` can carry an inline Basic-auth credential (see
+        // CredentialUrl). UpdateUpstreamRequest::prepareForValidation() and
+        // PackageController::update() resolve a redacted echo back to the raw stored URL
+        // before validation runs, so that a *failed* save's ...->withInput() redirect does
+        // not see the redaction marker in $request->input() — but that same raw value is
+        // what Handler::invalid() would otherwise flash into `_old_input` in the sessions
+        // table. `auth_token` (MirrorSourceRequest) and `repository_token` (git-sourced
+        // packages) are plain secrets with no redaction step at all, so a failed validation
+        // on either form flashes the raw value the same way. Nothing renders old() for any
+        // of these fields today, so this is not a live disclosure, but a raw credential has
+        // no business sitting in secondary storage until the session expires.
+        $exceptions->dontFlash(['url', 'repository_url', 'auth_token', 'repository_token']);
 
         // A broken/slow upstream is a gateway error, not a 500 on our part.
-        // UpstreamException is thrown exclusively in the registry proxy — hence always
-        // 502, regardless of whether access came via /r/{slug} or a custom domain.
+        // UpstreamException is thrown in the registry proxy AND in the mirror import
+        // pipeline (App\Services\Mirror\MirrorImporter and its per-type collaborators) —
+        // but the mirror pipeline always catches it and re-throws MirrorSyncFailed with a
+        // German message (see that class's own docblock), so it never reaches this handler
+        // from there. This render() is reached from the registry proxy alone in practice —
+        // hence always 502, regardless of whether access came via /r/{slug} or a custom
+        // domain.
         $exceptions->render(fn (UpstreamException $e, Request $request) => response()->json(
             ['error' => 'Upstream registry unavailable.'], 502
         ));

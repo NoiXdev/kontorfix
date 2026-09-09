@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import InputError from '@/components/InputError.vue';
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
+import OrgPortalHint from '@/components/kontorfix/OrgPortalHint.vue';
 import PackagePicker from '@/components/kontorfix/PackagePicker.vue';
 import RegistrySetup from '@/components/kontorfix/RegistrySetup.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
@@ -35,6 +36,11 @@ interface GroupInfo {
     slug: string;
     public: boolean;
     portal_enabled: boolean;
+    // Whether the OWNING organization's customer portal exists at all — see
+    // Organization::portal_enabled's docblock. Not the same question as `portal_enabled`
+    // above, which only answers whether this registry appears inside that portal once it
+    // exists.
+    organization_portal_enabled: boolean;
     organization: string | null;
     organization_id: string | null;
     // Supplied by App\Services\Registry\RegistryUrl — the URL form is stated once, in PHP.
@@ -76,6 +82,13 @@ interface Setup {
     npm: string;
     pip: string;
     twine: string;
+    // Docker's raw facts, forwarded verbatim to RegistrySetup — see SetupSnippetBuilder.
+    // Named here rather than left off: this interface used to omit them, which let the page
+    // forward a payload whose Docker half it did not describe at all.
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+    dockerHasDomain: boolean;
+    dockerExample: string | null;
 }
 
 interface ActivityRow {
@@ -98,6 +111,11 @@ const props = defineProps<{
     upstreams: UpstreamRow[];
     tokens: TokenRow[];
     setup: Setup;
+    // What this organization MAY serve (RegistryTypeService::effectiveFor()), not what is
+    // already in the registry. This used to be `[...new Set(packages.map(p => p.type))]`
+    // computed in this file, and a registry with no packages therefore showed no setup
+    // instructions at all — the state every registry is in on the day it is created.
+    types: string[];
     stats: { downloads: number; storage_bytes: number; packages: number };
     activities: ActivityRow[];
     // The application's own calendar day (`YYYY-MM-DD`), from the controller. Not derived
@@ -105,6 +123,10 @@ const props = defineProps<{
     // the previous day for several hours, so the two would disagree about whether a chosen
     // date has already passed.
     today: string;
+    // Whether the current caller may open admin.organizations.show — customer/organization
+    // management is super-admin only (see EnsureSuperAdmin). Decided server-side rather than
+    // re-derived here: see GroupController::show()'s docblock on the field of the same name.
+    can_manage_organization: boolean;
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -160,10 +182,8 @@ function save() {
 }
 
 // --- Package assignment (add existing/quick-created packages to this registry) ---
-const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python'; shared: boolean }[]>([]);
-
-// Which ecosystems this registry actually hosts — drives the setup snippets shown.
-const registryTypes = computed(() => [...new Set(props.packages.map((p) => p.type))]);
+// Must match PackagePicker.vue's own local `Pkg` — same reasoning as GroupSheet.vue's copy.
+const packagesToAdd = ref<{ id: string; name: string; type: 'composer' | 'npm' | 'python' | 'docker'; shared: boolean }[]>([]);
 
 function addPackages() {
     if (packagesToAdd.value.length === 0) {
@@ -477,6 +497,12 @@ async function copyToken() {
                                     </span>
                                 </span>
                             </label>
+
+                            <OrgPortalHint
+                                :portal-enabled="props.group.organization_portal_enabled"
+                                :can-manage-organization="props.can_manage_organization"
+                                :organization-id="props.group.organization_id"
+                            />
 
                             <div class="flex flex-col gap-1.5">
                                 <label for="registry-slug" class="text-sm font-medium">Slug</label>
@@ -873,7 +899,8 @@ async function copyToken() {
                 <TabsContent value="einrichtung">
                     <RegistrySetup
                         :snippets="props.setup"
-                        :types="registryTypes"
+                        :types="props.types"
+                        audience="operator"
                         store-route="admin.tokens.store"
                         :store-payload="{ organization_id: props.group.organization_id, group_id: props.group.id }"
                         :personal-tokens="props.tokens"

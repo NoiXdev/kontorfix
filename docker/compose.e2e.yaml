@@ -107,7 +107,28 @@ services:
     volumes:
       - ../tests/E2E/fixtures/composer-package:/fixture:ro
 
-  # The three clients are shells the tests reach into, not services.
+  # The four clients are shells the tests reach into, not services. client-docker is the
+  # odd one of the four: it does not run its own Docker daemon (docker-in-docker), it is a
+  # bare `docker` CLI pointed at the HOST's socket (see the bind mount below). Every
+  # `docker build/login/push/pull` tests/E2E/DockerTest.php runs through it is therefore
+  # executed by the SAME daemon `bin/e2e` itself already runs `docker compose` against —
+  # Docker Desktop's daemon on a developer machine, or the runner's daemon in CI — not by
+  # an isolated daemon inside this container. That is what makes the plaintext-to-127.0.0.1
+  # exception apply at all (see DockerTest.php's own docblock): the push/pull request
+  # leaves from that daemon's own network stack, at the exact loopback address `app`
+  # already publishes on, exactly as if a developer had typed the same command in a host
+  # shell. The corollary is that images and layers this container builds or pulls are NOT
+  # torn down by `bin/e2e`'s teardown() (which only removes this compose project, not the
+  # shared daemon's image store) — DockerTest.php removes the specific tags it creates
+  # itself in an afterAll().
+  client-docker:
+    image: docker:27-cli
+    entrypoint: ['sleep', 'infinity']
+    working_dir: /work
+    volumes:
+      - ../tests/E2E/fixtures:/fixtures:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+
   client-composer:
     image: composer:2
     entrypoint: ['sleep', 'infinity']

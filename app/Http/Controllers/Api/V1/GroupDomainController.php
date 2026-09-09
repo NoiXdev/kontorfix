@@ -8,13 +8,16 @@ use App\Http\Requests\Admin\StoreDomainRequest;
 use App\Http\Resources\Api\DomainResource;
 use App\Models\Domain;
 use App\Models\Group;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[ApiGroup('Registries')]
 class GroupDomainController extends Controller
 {
     use ScopesApiToUser;
 
+    /** Domains einer Registry auflisten. */
     public function index(Group $group): AnonymousResourceCollection
     {
         $this->assertCanReadGroup($group);
@@ -22,6 +25,12 @@ class GroupDomainController extends Controller
         return DomainResource::collection($group->domains);
     }
 
+    /**
+     * Domain zu einer Registry hinzufügen.
+     *
+     * Nur für Super-Admins — ein Hostname ist instanzweit eindeutig und lässt sich innerhalb
+     * der Anwendung nicht verifizieren.
+     */
     public function store(StoreDomainRequest $request, Group $group): JsonResponse
     {
         $this->assertCanWriteGroup($group);
@@ -31,6 +40,7 @@ class GroupDomainController extends Controller
         return (new DomainResource($domain))->response()->setStatusCode(201);
     }
 
+    /** Domain von einer Registry entfernen. */
     public function destroy(Group $group, Domain $domain): JsonResponse
     {
         $this->assertCanWriteGroup($group);

@@ -58,6 +58,11 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // and 10/minute is far above what filling in the create dialog costs.
     Route::post('packages/probe', [Admin\PackageController::class, 'probe'])
         ->middleware('throttle:10,1')->name('packages.probe');
+    // Same job as the git probe above, for a mirror-mode package: confirm the named package
+    // exists at the chosen MirrorSource before it is ever persisted. Throttled identically —
+    // this too makes the instance dial an address the caller only indirectly controls.
+    Route::post('packages/probe-mirror', [Admin\PackageController::class, 'probeMirror'])
+        ->middleware('throttle:10,1')->name('packages.probe-mirror');
     Route::get('packages/{package}', [Admin\PackageController::class, 'show'])->name('packages.show');
     // Just the sync status, polled by the detail page with a backoff until it turns
     // terminal. It exists because the `PackageSynced` broadcast can only reach a browser
@@ -100,9 +105,35 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // Reusable git access tokens (for syncing private repositories), org-scoped.
     Route::resource('git-credentials', Admin\GitCredentialController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     Route::post('git-credentials/{gitCredential}/test', [Admin\GitCredentialController::class, 'test'])->name('git-credentials.test');
+    // Reusable, org-scoped pointers at a foreign Composer/npm/PyPI registry that packages
+    // can mirror from. No sharing (unlike git-credentials) — a mirror source belongs to
+    // exactly one organization.
+    Route::resource('mirror-sources', Admin\MirrorSourceController::class)->only(['index', 'create', 'store', 'edit', 'update', 'destroy']);
     // Switch the active organization scope (sidebar). Clamped server-side to the orgs the
     // user administers, so it can filter/redirect context but never widen access.
     Route::post('scope', Admin\ScopeController::class)->name('scope.set');
+
+    // Which retention rules govern a repository is the owning organization's decision —
+    // the operator decision that made the instance default a default rather than a
+    // mandate. The controller scopes to the caller's own packages, and a non-super caller
+    // may select only PUBLISHED (global) policies; unpublished ones stay the operator's.
+    // The policy listing is here for the same reason: org admins see the published
+    // policies read-only, while creating, editing, publishing and deleting stay in the
+    // super group below.
+    Route::get('retention-policies', [Admin\RetentionPolicyController::class, 'index'])
+        ->name('retention-policies.index');
+    Route::put('packages/{package}/retention', [Admin\PackageController::class, 'updateRetention'])
+        ->name('packages.retention.update');
+    Route::post('packages/{package}/retention/apply', [Admin\PackageController::class, 'applyRetention'])
+        ->name('packages.retention.apply');
+    // The inline-rules editor's live preview: the UNSAVED rules tried against this package
+    // itself, same org-scoped boundary as the two routes above. JSON, not Inertia, for the
+    // same reason the policy form's preview is: a page visit would discard the unsaved
+    // rules it exists to try out. Throttled like `packages.probe` above: the debounced
+    // editor can still fire one request per keystroke burst, and the budget is per account
+    // so one tenant cannot spend another's.
+    Route::post('packages/{package}/retention/preview', [Admin\PackageController::class, 'previewRetention'])
+        ->middleware('throttle:10,1')->name('packages.retention.preview');
 });
 
 // Instance-wide administration: only the global super-admin. These surfaces have no
@@ -141,6 +172,31 @@ Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(fun
 
     Route::get('system', [Admin\SystemController::class, 'show'])->name('system.show');
     Route::put('system', [Admin\SystemController::class, 'update'])->name('system.update');
+
+    // Retention policies are instance-wide like the system settings beside them: they are
+    // operator-defined rule sets with no per-organization dimension, and assigning one must
+    // not be a lever a customer-org admin can pull to opt a package out of the instance
+    // default — the default would then be a suggestion, not a default. The extra routes:
+    // dry-run is the report over every package the SAVED policy governs, preview evaluates
+    // the UNSAVED rules currently in the editor form, apply is the manual run behind the
+    // confirmation dialog. `preview` is declared before the resource for the same
+    // literal-vs-parameter reason webhooks/create is above.
+    Route::post('retention-policies/preview', [Admin\RetentionPolicyController::class, 'preview'])
+        ->name('retention-policies.preview');
+    // index is NOT here: org admins may see the published (global) policies read-only, so
+    // the listing lives in the operator group below; every mutating route stays super.
+    Route::resource('retention-policies', Admin\RetentionPolicyController::class)
+        ->only(['create', 'store', 'edit', 'update', 'destroy']);
+    Route::get('retention-policies/{retention_policy}/dry-run', [Admin\RetentionPolicyController::class, 'dryRun'])
+        ->name('retention-policies.dry-run');
+    Route::post('retention-policies/{retention_policy}/apply', [Admin\RetentionPolicyController::class, 'apply'])
+        ->name('retention-policies.apply');
+
+    // The storage sweeper's view and its manual trigger. Instance-wide like the sweep
+    // itself: the reachability graph spans organizations, so no per-organization slice of
+    // this page would mean anything.
+    Route::get('oci/sweeper', [Admin\OciSweeperController::class, 'show'])->name('oci.sweeper');
+    Route::post('oci/sweeper', [Admin\OciSweeperController::class, 'run'])->name('oci.sweeper.run');
 
     // Global audit log (Spatie activitylog). Scoped views are reached via query params.
     Route::get('activity', [Admin\ActivityController::class, 'index'])->name('activity.index');

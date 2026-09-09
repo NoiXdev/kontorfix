@@ -8,6 +8,7 @@ use App\Enums\TokenAbility;
 use App\Enums\UpstreamPolicy;
 use App\Enums\UserRole;
 use App\Jobs\SyncPackage;
+use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
@@ -45,14 +46,14 @@ class E2eSeeder extends Seeder
             'name' => 'E2E Operator',
             'slug' => 'e2e-operator',
             'is_operator' => true,
-            'enabled_registry_types' => ['composer', 'npm', 'python'],
+            'enabled_registry_types' => ['composer', 'npm', 'python', 'docker'],
         ]);
 
         $customer = Organization::create([
             'name' => 'E2E Customer',
             'slug' => 'e2e-customer',
             'is_operator' => false,
-            'enabled_registry_types' => ['composer', 'npm', 'python'],
+            'enabled_registry_types' => ['composer', 'npm', 'python', 'docker'],
         ]);
 
         // RequireSetup makes the wizard the only reachable part of the web group while no
@@ -154,7 +155,45 @@ class E2eSeeder extends Seeder
             'description' => 'Fixture package for the end-to-end suite.',
         ]);
 
-        $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id]);
+        // Docker repositories are publish-based too — same reasoning as npm/Python above,
+        // and the same reason `ociWritableRepository()` refuses an unregistered name: a
+        // publish token must not be able to invent a repository on push.
+        //
+        // The name reuses the lowercase-with-dashes form the other two publish-based types
+        // already share (`kontorfix-e2e-demo`) — legal under PackageType::Docker's own name
+        // grammar (a single lowercase-alphanumeric-and-dash component), and the uniqueness
+        // constraint is scoped by `type`, so all three coexist under one name.
+        $dockerPackage = Package::create([
+            'organization_id' => $customer->id,
+            'type' => PackageType::Docker,
+            'name' => 'kontorfix-e2e-demo',
+            'description' => 'Fixture package for the end-to-end suite.',
+        ]);
+
+        $group->packages()->attach([$composerPackage->id, $npmPackage->id, $pythonPackage->id, $dockerPackage->id]);
+
+        // The `/v2/` OCI routes sit at the host root, never under `/r/{orgSlug}/{groupSlug}`
+        // (routes/registry.php) — a Docker client cannot address a path-PREFIXED registry,
+        // because it treats everything after the host as the repository name. A registry is
+        // therefore reachable either at a hostname of its own, which is what this row
+        // provides, or by path NAMESPACE on any other host this instance answers to, which
+        // is what `docker_path_host` below exercises. Both are seeded: the two addressing
+        // modes resolve in one place (ResolveOciContext) and neither substitutes for the
+        // other in the end-to-end run.
+        //
+        // The hostname is bare `127.0.0.1`, with NO port, even though the Docker client
+        // reaches this stack at `127.0.0.1:8099` (docker/compose.e2e.yaml's published
+        // loopback port — the one plaintext-HTTP exception the Docker daemon honours for a
+        // registry, see tests/E2E/DockerTest.php). `ResolveRegistryContext` looks the
+        // request up by `Request::getHost()`, and Symfony's implementation of that method
+        // always strips a trailing `:<port>` before returning (confirmed in
+        // vendor/symfony/http-foundation/Request.php) — the same way a browser's Host
+        // header is parsed. A `domains` row seeded WITH the port would simply never match
+        // and this whole suite would 404 on every request. No change to
+        // ResolveRegistryContext was needed for this; tests/Feature/Registry/
+        // CustomDomainTest.php now has a dedicated case pinning that stripping behaviour so
+        // a future change to that lookup cannot silently reintroduce the port into it.
+        Domain::create(['group_id' => $group->id, 'hostname' => '127.0.0.1']);
 
         // Every real creation path dispatches this itself right after creating a
         // git-sourced package (Admin\PackageController, Api\V1\PackageController) — nothing
@@ -184,6 +223,22 @@ class E2eSeeder extends Seeder
             'npm_package' => 'kontorfix-e2e-demo',
             'python_package' => 'kontorfix-e2e-demo',
             'python_module' => 'kontorfix_e2e_demo',
+            'docker_repository' => 'kontorfix-e2e-demo',
+            'docker_host' => '127.0.0.1:8099',
+            // The SAME registry, addressed by path namespace instead of by the `domains`
+            // row above: `<host>/<org>/<registry>/<repository>` (see ResolveOciContext).
+            //
+            // `localhost`, not `127.0.0.1`, and the difference is the whole point — the
+            // seeded `domains` row carries the literal string `127.0.0.1`, so a request
+            // with that Host resolves in DOMAIN mode and never reaches the path split at
+            // all. `localhost` is a different string, has no `domains` row, and is
+            // nevertheless (a) allowlisted by App\Services\Http\TrustedHosts, which lists
+            // the loopback names unconditionally, and (b) one of the two addresses every
+            // Docker daemon hardcodes as a plaintext-HTTP exception — the same property
+            // tests/E2E/DockerTest.php's docblock relies on for `127.0.0.1:8099`. Both
+            // names reach the identical published port (docker/compose.e2e.yaml).
+            'docker_path_host' => 'localhost:8099',
+            'docker_path_repository' => 'e2e-customer/e2e-registry/kontorfix-e2e-demo',
             'version' => '1.0.0',
         ], JSON_THROW_ON_ERROR));
     }

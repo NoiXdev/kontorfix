@@ -10,9 +10,11 @@ README stays deliberately technology-neutral).
 - **Data:** PostgreSQL 17 (UUID v7 primary keys), Redis (cache + queue).
 - **Operations:** Laravel Horizon (queue dashboard), Reverb (live updates over WebSockets),
   Scheduler (periodic re-sync + cleanup).
-- **Registry protocols:** Composer v2 (`packages.json`, `p2/*.json`, dist download) and
-  npm (packument, tarball, publish). Plus a REST management API under `/api/v1` with
-  auto-generated, interactive documentation at `/docs/api` (operator admins only).
+- **Registry protocols:** Composer v2 (`packages.json`, `p2/*.json`, dist download), npm
+  (packument, tarball, publish), the PyPI "simple" index (PEP 503/691) plus twine upload,
+  and the OCI Distribution Specification (`/v2/`) for Docker/OCI image push and pull. Plus
+  a REST management API under `/api/v1` with auto-generated, interactive documentation at
+  `/docs/api` (operator admins only).
 
 Registry and webhook endpoints run deliberately **stateless** (outside the `web` middleware
 group, without cookies/CSRF) and are secured solely by token or signature verification.
@@ -75,12 +77,16 @@ Two consequences worth knowing:
 
 ## End-to-end registry tests
 
-`tests/Feature/Registry/` proves the registry answers the requests we believe a client makes.
-This suite proves that `composer`, `npm` and `pip` — the actual binaries — agree.
+`tests/Feature/Registry/` and `tests/Feature/Oci/` prove the registry answers the requests
+we believe a client makes. This suite proves that `composer`, `npm`, `pip` and `docker` —
+the actual binaries — agree.
 
 ```bash
-bin/e2e              # the default run: publish, install and refusal, per ecosystem
-bin/e2e --upstream   # additionally the fallthrough to Packagist, npmjs and PyPI
+bin/e2e                # the default run: publish, install and refusal, per ecosystem
+bin/e2e --upstream     # additionally the fallthrough to Packagist, npmjs and PyPI
+bin/e2e --large-layer  # additionally builds, pushes and pulls a layer above 500 MiB —
+                        # the acceptance gate for the OCI registry (spec §4): if PHP
+                        # buffers a chunked PATCH body anywhere, this is what catches it
 ```
 
 It builds the production image from `docker/Dockerfile` and runs it beside Postgres, Redis, a
@@ -670,6 +676,48 @@ image, and a freshly created `artifacts` volume inherits the ownership from it.
 > docker run --rm -v <project>_artifacts:/data alpine chown -R 33:33 /data
 > ```
 
+### Upload ceilings and request memory
+
+Three limits stack above the application's own `KONTORFIX_*_MAX_*_BYTES` settings, and only
+the innermost one is configurable through `.env`. An operator who raises the application
+setting alone changes nothing except which layer refuses the upload.
+
+| Layer | Value | Applies to |
+| --- | --- | --- |
+| `docker/Caddyfile`, `@oversized` | 256 MiB declared `Content-Length` | every write method outside `/v2/*` |
+| `docker/php.ini`, `post_max_size` | **80 MiB** whole POST body | every route PHP parses a body for, twine's multipart upload included |
+| `config/kontorfix.php` | `KONTORFIX_PYTHON_MAX_DIST_BYTES`, default 200 MiB | the PyPI upload, in application code |
+
+**The effective ceiling for a twine upload is therefore 80 MiB, not the 200 MiB the setting
+defaults to.** Above it, PHP's multipart parser never runs at all, `$_FILES` arrives empty,
+and `PypiController::upload()` answers "Missing distribution file" — a wrong-sounding but
+harmless 400, not a crash.
+
+`post_max_size` cannot simply be raised. It is bound to `memory_limit` by a ratio measured
+against the production image, twice: an `application/x-www-form-urlencoded` body *just under*
+the ceiling is accepted and therefore actually parsed into `$_POST`, and doing that needs
+roughly 6.5x the body's size in memory. 512M/80M is clean over 55 runs across every request
+shape that has ever failed here; 512M/96M — the same memory with a slightly larger body —
+exhausts memory on the first attempt and marks the FrankenPHP thread unhealthy, anonymously,
+on any route. `docker/php.ini` carries the full measurement, including why the obvious
+larger numbers are worse rather than better.
+
+`memory_limit` is per request and therefore per FrankenPHP thread, and FrankenPHP starts
+2 x CPU threads. `docker/compose.yaml` caps the app container at `mem_limit: 2g` so a burst
+of concurrent large bodies restarts the container instead of letting the host's OOM killer
+pick a victim — which on a single-host deployment is as likely to be Postgres. For a hard
+bound rather than a blast radius, pin the thread count with `FRANKENPHP_CONFIG:
+num_threads=8`.
+
+Docker/OCI pushes are bounded by none of this. `BlobController` streams a layer through
+`php://input` without ever populating `$_POST`/`$_FILES`, which is exactly what
+`post_max_size` does not gate, and `@oversized` exempts `/v2/*` outright. Layers above
+500 MiB are covered by `bin/e2e --large-layer`.
+
+Closing the gap to the documented 200 MiB means making the PyPI upload path stream the way
+the OCI push path already does. That is a rewrite of `PythonPublishService`, not an ini
+value.
+
 ### Package ownership invariant
 
 Every package belongs to exactly one organization: `packages.organization_id` is `NOT NULL`,
@@ -1020,6 +1068,89 @@ judged to cost more than the stale bookmarks do. The console's slug confirmation
 addresses, before and after, and says that neither old one keeps answering. Tell the customer, or
 send them the new link.
 
+### Container registry (OCI): the two addressing modes
+
+A Docker/OCI registry is reachable at **two** addresses, and both resolve to the same
+`Group`, run the same authorization and serve the same content. Which one a request used is
+decided in exactly one place, `App\Http\Middleware\ResolveOciContext`, from the `Host`
+header alone.
+
+- **Custom domain.** The operator attaches a hostname to the registry (`domains.hostname`),
+  and the registry sits at that host's root:
+
+  ```
+  docker pull images.example.com/meinapp:1.4.0
+  ```
+
+  Everything after the host is the repository name, exactly as it is on Docker Hub. This is
+  the mode to give a customer when the image reference should carry no kontorfix-internal
+  structure at all.
+
+- **Path namespace on the instance host.** No extra DNS record and no extra certificate:
+
+  ```
+  docker pull registry.example.com/3b/intern/meinapp:1.4.0
+  ```
+
+  The first two segments are the organization slug and the registry slug — the same pair
+  `/r/{orgSlug}/{groupSlug}` uses for Composer/npm/PyPI — and everything after them is the
+  repository name. **At least three segments are required.** `registry.example.com/meinapp`
+  names no registry and answers a plain 404 — Laravel's own HTML error page, carrying no OCI
+  `errors[]` envelope — and so does `3b/intern` with no repository after it. The envelope is
+  what must be absent, and it is what `PathAddressingTest` asserts (an HTML content type, and
+  no `NAME_UNKNOWN` in the body): an `errors[]` envelope there would confirm to a caller who
+  merely guessed that the organization or the registry exists.
+
+Why one resolver rather than two route groups: a path-mode URL *is* a valid domain-mode URL
+whose repository name happens to contain slashes, so the router cannot tell them apart —
+whichever group registered first would match on every host and the second would be dead code.
+The `/v2/{name}/…` routes are therefore registered once and the middleware decides what
+`{name}` means, rewriting it to the bare repository name before any controller sees it.
+
+**A repository name may itself contain slashes** (`team/app`), so `3b/intern/team/app` means
+organization `3b`, registry `intern`, repository `team/app` — the split takes the *first* two
+segments, never "everything up to the last one".
+
+**Both slugs become path components of an image reference**, which is why a new slug may not
+begin or end with a hyphen (`App\Rules\AddressableSlug`; see the next section). It is also
+why every URL the registry hands *back* — an upload session's `Location`, a finished blob's,
+and the `name` in `GET /v2/{name}/tags/list` — is expressed in the address space the caller
+used. A `Location` that dropped the `3b/intern/` namespace pointed at a URL that is a 404 on
+the instance host, and a client follows an upload `Location` without asking, so the push died
+on the very next request.
+
+### Push-time repository creation (`oci_auto_create_repositories`)
+
+**Off by default.** With it off, a `docker push` to a repository name that is not registered
+is refused with `NAME_UNKNOWN`, and the German message names this switch so the operator does
+not go looking in the logs. The repository has to be created in the console and assigned to
+the registry first — the same rule npm and PyPI publishing already follow, where a publish
+token may not invent names in a registry.
+
+With it on, the first push creates the repository inside the addressed organization and
+assigns it to the addressed registry, which is the habit Harbor and Docker Hub have taught
+every client. Registration lives in the **system settings page**, not in `.env`: it is a
+system setting (`system_settings.oci_auto_create_repositories`) with a per-organization
+narrowing beside it (`organizations.oci_auto_create_repositories`, `null` = inherit). The two
+INTERSECT — the instance-wide value is a ceiling and an organization may only restrict within
+it, never switch on what the instance has switched off.
+
+What it does not weaken:
+
+- A name **another organization** already holds stays `NAME_UNKNOWN`. Otherwise a publish
+  token could discover foreign repository names by response code.
+- A name **this organization** holds but has not assigned to this registry is never
+  auto-attached — assigning it is a console decision.
+- A **shared** repository is still not writable through a customer's registry. Sharing hands
+  out reads, never writes.
+
+What it costs, and it is worth knowing before switching it on: **the repository row is created
+at the first upload request**, `POST /v2/{name}/blobs/uploads/`, long before a layer — let
+alone a manifest — has arrived. A client that opens upload sessions and never finishes them
+therefore leaves permanently empty `packages` rows behind, and nothing reclaims them: they
+appear in package lists, in counts and in the customer portal, and are removed by hand. The
+system settings page states this beside the switch.
+
 ### Organization-scoped registry slugs
 
 The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is
@@ -1039,6 +1170,18 @@ organization slug — the two share one namespace in the URL, and the rule runs 
 (`PUT /api/v1/groups/{group}` uses `UpdateGroupRequest` too), so it is enforced there as well;
 there is no API route to update an organization, so that half is console-only by having
 nothing else to cover.
+
+**A new slug may not begin or end with a hyphen** — `App\Rules\AddressableSlug`, wired into
+the same four requests plus `StoreSetupRequest`. `[a-z0-9-]+` is the constraint in the
+registry URL, but under OCI path addressing both slugs also become path components of a
+Docker repository name (`<instance>/v2/{orgSlug}/{groupSlug}/{repo}`), and the OCI name
+grammar — `$ociName` in `routes/registry.php`, and every real client's own reference parser —
+admits a hyphen only *between* alphanumerics. So `acme-` validated fine and then matched no
+`/v2` route at all, answering the fallback's bare `{}` 404. Hyphens *inside* a slug,
+consecutive ones included, stay legal. Existing slugs are neither migrated nor rewritten: the
+update requests pass the row's current slug through as `$unchanged`, so a registry created
+before this rule can still be saved without renaming itself — only a new value has to be
+addressable.
 
 **Old one-segment `/r/{slug}/…` URLs answer with a 301** (308 for a write — see below), so
 existing `composer.json`, `.npmrc` and `pip.conf` keep working unchanged. The redirect is

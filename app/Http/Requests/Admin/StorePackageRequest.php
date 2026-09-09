@@ -34,9 +34,16 @@ class StorePackageRequest extends FormRequest
         // The URL shape itself comes from RepositoryUrlRules, shared with the probe
         // endpoint the create mask gates saving on, so the two cannot disagree about
         // which URLs are acceptable — or about how they say so.
-        $repositoryRequired = $this->effectiveSourceMode($type) === PackageSourceMode::Git;
+        $effectiveMode = $this->effectiveSourceMode($type);
+        $repositoryRequired = $effectiveMode === PackageSourceMode::Git;
+        $isMirrorMode = $effectiveMode === PackageSourceMode::Mirror;
         $repositoryRule = array_merge(
             [$repositoryRequired ? 'required' : 'nullable'],
+            // Git and mirror are mutually exclusive ways to populate the same package: a
+            // mirror-sourced package has no repository of its own, and submitting one
+            // alongside mirror_source_id/mirror_name would leave two disagreeing origins
+            // on one row.
+            [Rule::prohibitedIf($isMirrorMode)],
             RepositoryUrlRules::shape(),
             [new NotRedactedCredentialUrl],
         );
@@ -78,10 +85,30 @@ class StorePackageRequest extends FormRequest
             ],
             'repository_url' => $repositoryRule,
             // Optional access token for a private git repository (e.g. a GitHub PAT).
-            // Only meaningful for git-synced types; ignored for publish-based ones.
-            'repository_token' => ['nullable', 'string', 'max:500'],
+            // Only meaningful for git-synced types; ignored for publish-based ones. Like
+            // repository_url above, prohibited in mirror mode: a mirror-sourced package
+            // authenticates through its MirrorSource, never through a per-package git token.
+            'repository_token' => ['nullable', 'string', 'max:500', Rule::prohibitedIf($isMirrorMode)],
             // Optionally reference a managed git credential instead of an inline token.
-            'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
+            'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id', Rule::prohibitedIf($isMirrorMode)],
+            // The reusable, org-level MirrorSource this package imports from — required
+            // exactly in mirror mode, prohibited otherwise (the mirror counterpart of the
+            // repository fields above). Existence alone is checked here; that it belongs to
+            // the package's owning organization and matches its type is an authorization/
+            // configuration question the controller answers, the same layer the git
+            // credential's usability check answers on.
+            'mirror_source_id' => [
+                Rule::requiredIf($isMirrorMode),
+                Rule::prohibitedIf(! $isMirrorMode),
+                'nullable', 'uuid', Rule::exists('mirror_sources', 'id'),
+            ],
+            // The package's name at the mirror source — may differ from the local `name`
+            // (e.g. a scoped npm name reserved locally under a shorter alias).
+            'mirror_name' => [
+                Rule::requiredIf($isMirrorMode),
+                Rule::prohibitedIf(! $isMirrorMode),
+                'nullable', 'string', 'max:255',
+            ],
             // At least one registry is mandatory, and it is what resolves the owner:
             // ownerOrganizationId() reads the organization off the selected registries, and
             // that organization is both what `packages.organization_id` gets set to and what

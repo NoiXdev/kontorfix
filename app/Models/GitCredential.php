@@ -5,10 +5,12 @@ namespace App\Models;
 use App\Enums\GitProvider;
 use App\Support\RepositoryAuthority;
 use Database\Factories\GitCredentialFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -22,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $username
  * @property string $token
  * @property Carbon|null $last_used_at
+ * @property bool $is_global
  */
 class GitCredential extends Model
 {
@@ -37,11 +40,23 @@ class GitCredential extends Model
         'username',
         'token',
         'last_used_at',
+        'is_global',
     ];
 
     /** @var list<string> */
     protected $hidden = [
         'token',
+    ];
+
+    /**
+     * Stated here as well as in the migration's column default, for the reason
+     * SystemSetting gives: a freshly constructed model must carry a truthful flag rather
+     * than null until it has been read back from the database.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'is_global' => false,
     ];
 
     /**
@@ -53,7 +68,94 @@ class GitCredential extends Model
             'provider' => GitProvider::class,
             'token' => 'encrypted',
             'last_used_at' => 'datetime',
+            // Usable by every organization, read-only. The accepted risk and its one
+            // mitigation (permits() binds the token to one host) are recorded on the
+            // migration; this flag and the targeted shares below answer the same question
+            // through usableBy().
+            'is_global' => 'bool',
         ];
+    }
+
+    /**
+     * The organizations this credential has been explicitly shared to, beside the global
+     * flag. Only the operator's own credentials are ever shared or global; a non-owner
+     * gets use (the sync transmits the token), never sight (hidden keeps the secret out of
+     * every serialisation) and never mutation.
+     *
+     * @return BelongsToMany<Organization, $this>
+     */
+    public function sharedOrganizations(): BelongsToMany
+    {
+        return $this->belongsToMany(Organization::class, 'git_credential_organization');
+    }
+
+    /**
+     * Whether $organization may USE this credential: it owns it, or the credential is
+     * global, or it was shared to it. Checked at SYNC time as well as at assignment time —
+     * un-sharing must end the grant for the next sync, not only for the next dropdown.
+     *
+     * `is`-prefixed so the name cannot collide with scopeUsableBy() below: Eloquent routes
+     * the static `GitCredential::usableBy(...)` through __callStatic onto a fresh instance,
+     * where an instance method of the same name would intercept the scope.
+     */
+    public function isUsableBy(Organization $organization): bool
+    {
+        if ($this->organization_id === $organization->id || $this->is_global) {
+            return true;
+        }
+
+        return $this->sharedOrganizations()->whereKey($organization->id)->exists();
+    }
+
+    /**
+     * The credentials $organization may use — the package form's dropdown. One definition
+     * with usableBy() above, asserted against it in the schema test so the two answers
+     * cannot drift. Delegates to scopeUsableByAny() below rather than restating the OR —
+     * that is the one place the own/global/shared query is written.
+     *
+     * @param  Builder<self>  $query
+     * @return Builder<self>
+     */
+    public function scopeUsableBy(Builder $query, Organization $organization): Builder
+    {
+        return $this->scopeUsableByAny($query, [$organization->id]);
+    }
+
+    /**
+     * The credentials usable by ANY organization in $organizationIds — scopeUsableBy()
+     * above, widened for a caller that has a *set* of candidate owners rather than one
+     * already-known organization: the package create page's dropdown (the eventual owner
+     * isn't known until a registry is picked), the probe endpoint (reached before any
+     * registry is chosen), and the git-credentials index's "foreign but usable" listing.
+     *
+     * Before this existed, all three call sites hand-rolled the same own/global/shared OR
+     * themselves — three independent copies of a security-sensitive boundary, free to
+     * drift from this model and from each other. Extracting it here, and asserting in
+     * GitCredentialSharingTest that it agrees with isUsableBy() across an
+     * own/global/shared/unrelated fixture matrix, keeps that from happening again the way
+     * scopeUsableBy()'s own drift test already does for the single-organization case.
+     *
+     * @param  Builder<self>  $query
+     * @param  iterable<string>  $organizationIds
+     * @return Builder<self>
+     */
+    public function scopeUsableByAny(Builder $query, iterable $organizationIds): Builder
+    {
+        $ids = is_array($organizationIds) ? $organizationIds : [...$organizationIds];
+
+        if ($ids === []) {
+            // "Usable by any organization in an empty set" is empty, not "every global
+            // credential" — without this guard, `whereIn('organization_id', [])` (always
+            // false) still lost to `orWhere('is_global', true)`, which matches regardless
+            // of $ids. A caller with no candidate owners yet (the create page before a
+            // registry is picked) would otherwise see every global credential offered.
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(fn (Builder $inner) => $inner
+            ->whereIn('organization_id', $ids)
+            ->orWhere('is_global', true)
+            ->orWhereHas('sharedOrganizations', fn (Builder $shared) => $shared->whereIn('organizations.id', $ids)));
     }
 
     /**

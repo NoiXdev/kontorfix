@@ -21,7 +21,7 @@ class RepositoryProbe
     private const UNREACHABLE = 'Repository nicht erreichbar.';
 
     /**
-     * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>, manifest?: string, manifest_file?: string}
+     * @return array{ok: bool, error?: string, name?: string|null, description?: string|null, default_branch?: string|null, versions: list<string>, manifest?: string, manifest_file?: string|null}
      */
     public function probe(PackageType $type, string $url, ?string $token = null, ?GitProvider $provider = null, ?string $username = null): array
     {
@@ -123,6 +123,16 @@ class RepositoryProbe
     {
         // Manifest filename comes from the type enum (the single source of truth).
         $manifest = $type->manifestFile();
+
+        // Docker has no manifest file at all — see PackageType::manifestFile(). Reporting
+        // this the same way as "the repository has no such file" is accurate (nothing is
+        // wrong; there was never a file to look for) and, just as importantly, skips the
+        // clone entirely instead of running `git ls-tree`/`git show` against an empty
+        // pathspec, which would resolve to a directory rather than a missing file.
+        if ($manifest === null) {
+            return ['name' => null, 'description' => null, 'status' => ManifestReadStatus::Missing];
+        }
+
         $dir = rtrim(sys_get_temp_dir(), '/').'/kfx-probe-'.Str::random(12);
 
         try {

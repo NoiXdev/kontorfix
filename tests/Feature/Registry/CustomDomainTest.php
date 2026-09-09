@@ -55,6 +55,28 @@ it('returns 404 for an unknown host', function () {
     $this->getJson('http://not-a-registry.test/packages.json')->assertNotFound();
 });
 
+it('resolves a domain from a Host header that carries a port, because Request::getHost() strips it', function () {
+    // The Docker E2E stack is what actually depends on this (see database/seeders/
+    // E2eSeeder.php and tests/E2E/DockerTest.php): a real `docker` client sends
+    // `Host: 127.0.0.1:8099`, but `/v2/` only exists at the domain-access root, so that
+    // Host header has to resolve to a `domains` row. That row is seeded WITHOUT the port
+    // (bare `127.0.0.1`) on purpose — Symfony's `Request::getHost()` always strips a
+    // trailing `:<port>` before returning (vendor/symfony/http-foundation/Request.php),
+    // the same way a browser parses its own Host header, so a row seeded WITH the port
+    // would simply never match. This pins that ResolveRegistryContext's lookup already
+    // gets this right, with a plain hostname rather than Docker's own domain-access path,
+    // so a regression here is caught in the normal suite rather than only in the E2E one.
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    Domain::factory()->for($group)->create(['hostname' => 'packages.kadenz.test']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);
+    $group->packages()->attach($pkg);
+
+    $res = $this->withHeaders(array_merge(['Host' => 'packages.kadenz.test:9443'], tokenHeaderFor($group)))
+        ->getJson('http://packages.kadenz.test:9443/packages.json');
+
+    $res->assertOk()->assertJsonPath('available-packages.0', 'acme/demo');
+});
+
 it('still serves the slug route unchanged after the domain-resolution refactor', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo']);

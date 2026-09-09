@@ -11,12 +11,14 @@ use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\GroupPackage;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use App\Services\Package\PackageNameKey;
 use App\Services\Package\SharedAssignment;
+use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
@@ -27,6 +29,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -36,6 +39,25 @@ class GroupController extends Controller
 
     public function index(RegistryUrl $url): Response
     {
+        $user = Auth::user();
+
+        // Same population as OrgScope::organizations(), fetched directly (rather than
+        // through that method) because the create sheet's portal hint needs a column
+        // (`portal_enabled`) that method deliberately does not carry — every other
+        // consumer of it is a plain {value,label,slug} picker.
+        $organizations = Organization::whereIn('id', $user?->administeredOrganizationIds() ?? [])
+            ->orderBy('name')->get(['id', 'name', 'slug', 'portal_enabled']);
+
+        // The organization a registry lands in when "Standard (Betreiber)" is left
+        // selected — the exact resolution resolveCreationOrg() applies at submit time
+        // (active scope, else the caller's home organization) — so the hint reflects the
+        // organization the registry will actually belong to, not merely the first one the
+        // picker happens to show.
+        $defaultOrganizationId = app(OrgScope::class)->creationOrganizationId() ?? $user?->organization_id;
+        $defaultOrganization = $defaultOrganizationId !== null
+            ? $organizations->firstWhere('id', $defaultOrganizationId)
+            : null;
+
         // Only registries of organizations the user may administer (and within the
         // active sidebar scope). A super-admin's scope spans every organization.
         return Inertia::render('admin/groups/Index', [
@@ -60,22 +82,41 @@ class GroupController extends Controller
                     'organization_id' => $g->organization_id,
                 ]),
             // The org picker only offers organizations the user may create registries in.
-            'organizations' => app(OrgScope::class)->organizations(),
+            // `portal_enabled` rides along so the sheet can warn when the picked (or
+            // default) owner's customer portal is off — see the hint under the "Im
+            // Kundenportal anzeigen" switch in GroupSheet.vue.
+            'organizations' => $organizations->map(fn (Organization $o) => [
+                'id' => $o->id,
+                'name' => $o->name,
+                'slug' => $o->slug,
+                'portal_enabled' => $o->portal_enabled,
+            ])->all(),
             // The URL form with both slugs left open — the create sheet previews an address
             // for a registry that does not exist yet and must not invent the form for it.
             // The path only: the sheet shows it against the browser's own origin, which is
             // the host the operator is actually talking to.
             'registryUrlTemplate' => $url->template(),
+            // What "Standard (Betreiber)" resolves to — see $defaultOrganizationId above.
+            // Defaults to true (no hint) in the unreachable case where no default org can
+            // be resolved at all, since the alternative is a false alarm on every load.
+            'default_organization_id' => $defaultOrganizationId,
+            'default_organization_portal_enabled' => (bool) ($defaultOrganization->portal_enabled ?? true),
+            // Customer/organization management (admin.organizations.*) is super-admin
+            // only (see EnsureSuperAdmin) — the hint's link to the organization is shown
+            // only to callers who could actually open it.
+            'can_manage_organization' => (bool) $user?->isSuperAdmin(),
         ]);
     }
 
-    public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url): Response
+    public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url, RegistryTypeService $types): Response
     {
         $this->assertAdministersGroup($group);
 
         // `slug` on the organization is load-bearing, not decoration: the setup snippets
-        // address the registry as /r/{orgSlug}/{groupSlug} via RegistryUrl.
-        $group->load(['organization:id,name,slug', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
+        // address the registry as /r/{orgSlug}/{groupSlug} via RegistryUrl. `portal_enabled`
+        // for the hint under the "Im Kundenportal anzeigen" switch below — the org is fixed
+        // here (this group's own), so a single boolean answers it.
+        $group->load(['organization:id,name,slug,portal_enabled', 'domains:id,group_id,hostname', 'upstreams', 'tokens']);
 
         return Inertia::render('admin/groups/Show', [
             'group' => [
@@ -86,6 +127,11 @@ class GroupController extends Controller
                 'portal_enabled' => $group->portal_enabled,
                 'organization' => $group->organization?->name,
                 'organization_id' => $group->organization_id,
+                // Whether the OWNING organization's customer portal exists at all — not
+                // this registry's own `portal_enabled` above, which only answers whether it
+                // appears inside that portal. Defaults to true (no hint) in the unreachable
+                // case of a group without an organization.
+                'organization_portal_enabled' => $group->organization !== null ? (bool) $group->organization->portal_enabled : true,
                 // Three statements of the same URL form, all of them made here: the path as
                 // rendered in the header, the canonical URL as it stands today, and that URL
                 // with the slug left open so the confirmation dialog can show what a change
@@ -119,8 +165,15 @@ class GroupController extends Controller
             'upstreams' => $group->upstreams->map(fn (Upstream $u) => ['id' => $u->id, 'type' => $u->type->value, 'url' => CredentialUrl::redact($u->url), 'policy' => $u->policy->value]),
             'tokens' => $group->tokens->map(fn (RegistryToken $t) => ['id' => $t->id, 'name' => $t->name, 'ability' => $t->ability->value, 'last_used_at' => $t->last_used_at?->diffForHumans()]),
             'setup' => $snippets->for($group),
+            // Which ecosystems the Einrichtung tab offers: what this organization MAY serve,
+            // never what its packages happen to be. The page derived it from the package
+            // list, so a registry with no packages — the state every registry is in on the
+            // day it is created — showed no setup instructions at all.
+            'types' => $types->effectiveFor($group->organization),
             'stats' => $this->groupStats($group),
             'activities' => ActivityPresenter::recentFor($group),
+            // Same gate as the create sheet's flag of the same name — see index() above.
+            'can_manage_organization' => (bool) Auth::user()?->isSuperAdmin(),
         ]);
     }
 

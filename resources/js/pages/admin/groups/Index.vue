@@ -30,6 +30,9 @@ interface OrgOption {
     id: string;
     name: string;
     slug: string;
+    // Whether this organization's customer portal exists at all — see
+    // Organization::portal_enabled's docblock. Forwarded to the create sheet's hint.
+    portal_enabled: boolean;
 }
 
 const props = defineProps<{
@@ -38,6 +41,14 @@ const props = defineProps<{
     // The registry URL form with both slugs left open, from RegistryUrl::template().
     // Handed straight to the create sheet, which has no registry to ask about yet.
     registryUrlTemplate: string;
+    // What the create sheet's "Standard (Betreiber)" option resolves to server-side — see
+    // GroupSheet.vue's props of the same name for why this cannot be recomputed from
+    // `organizations` alone.
+    default_organization_id: string | null;
+    default_organization_portal_enabled: boolean;
+    // Whether the current caller may open admin.organizations.show — customer/organization
+    // management is super-admin only (see EnsureSuperAdmin).
+    can_manage_organization: boolean;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [{ title: 'Gruppen', href: '/admin/groups' }];
@@ -182,6 +193,13 @@ function destroyGroup(id: string) {
             </DataTable>
         </div>
 
-        <GroupSheet v-model:open="sheetOpen" :organizations="props.organizations" :url-template="props.registryUrlTemplate" />
+        <GroupSheet
+            v-model:open="sheetOpen"
+            :organizations="props.organizations"
+            :url-template="props.registryUrlTemplate"
+            :default-organization-id="props.default_organization_id"
+            :default-organization-portal-enabled="props.default_organization_portal_enabled"
+            :can-manage-organization="props.can_manage_organization"
+        />
     </AppLayout>
 </template>

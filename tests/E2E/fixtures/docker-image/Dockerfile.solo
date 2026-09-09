@@ -1,0 +1,10 @@
+# A single-layer image with no base image to pull. `scratch` is not a package the daemon
+# fetches from anywhere — it is the builder's own empty starting point — so building this
+# depends on nothing outside the stack, the same property every other ecosystem's default
+# E2E run already has (see tests/E2E/UpstreamTest.php's own docblock on that).
+#
+# Reused for both the plain push/pull test (tests/E2E/DockerTest.php) and the 500 MiB gate:
+# both just write a differently sized `payload.bin` into the same build context before
+# building.
+FROM scratch
+COPY payload.bin /payload.bin

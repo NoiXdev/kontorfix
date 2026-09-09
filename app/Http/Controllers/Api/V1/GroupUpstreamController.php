@@ -8,13 +8,16 @@ use App\Http\Requests\Admin\StoreUpstreamRequest;
 use App\Http\Resources\Api\UpstreamResource;
 use App\Models\Group;
 use App\Models\Upstream;
+use Dedoc\Scramble\Attributes\Group as ApiGroup;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
+#[ApiGroup('Registries')]
 class GroupUpstreamController extends Controller
 {
     use ScopesApiToUser;
 
+    /** Upstreams einer Registry auflisten. */
     public function index(Group $group): AnonymousResourceCollection
     {
         $this->assertCanReadGroup($group);
@@ -22,6 +25,7 @@ class GroupUpstreamController extends Controller
         return UpstreamResource::collection($group->upstreams);
     }
 
+    /** Upstream zu einer Registry hinzufügen. */
     public function store(StoreUpstreamRequest $request, Group $group): JsonResponse
     {
         $this->assertCanWriteGroup($group);
@@ -43,6 +47,7 @@ class GroupUpstreamController extends Controller
         return (new UpstreamResource($upstream))->response()->setStatusCode(201);
     }
 
+    /** Upstream von einer Registry entfernen. */
     public function destroy(Group $group, Upstream $upstream): JsonResponse
     {
         $this->assertCanWriteGroup($group);

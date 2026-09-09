@@ -15,15 +15,18 @@ import {
     Building2,
     CloudDownload,
     Database,
+    DatabaseZap,
     Fingerprint,
     Folder,
     Gauge,
     GitBranch,
     Globe,
+    History,
     KeyRound,
     LayoutGrid,
     Mail as MailIcon,
     Package,
+    Recycle,
     ScrollText,
     Settings as SettingsIcon,
     Users,
@@ -74,6 +77,8 @@ const navSections = computed<NavSection[]>(() => {
                 { title: 'Gruppen', href: '/admin/groups', icon: Boxes },
                 { title: 'Upstreams', href: '/admin/upstreams', icon: CloudDownload },
                 { title: 'Domains', href: '/admin/domains', icon: Globe },
+                // Org admins see the PUBLISHED policies read-only; the operator manages them.
+                { title: 'Retention', href: '/admin/retention-policies', icon: History },
             ],
         },
         {
@@ -81,6 +86,7 @@ const navSections = computed<NavSection[]>(() => {
             items: [
                 { title: 'Tokens', href: '/admin/tokens', icon: KeyRound },
                 { title: 'Git-Tokens', href: '/admin/git-credentials', icon: GitBranch },
+                { title: 'Mirror-Quellen', href: '/admin/mirror-sources', icon: DatabaseZap },
                 // Outgoing webhooks are instance-wide config — super-admin only.
                 ...(isSuper.value ? [{ title: 'Webhooks', href: '/admin/webhooks', icon: Webhook }] : []),
             ],
@@ -102,10 +108,21 @@ const navSections = computed<NavSection[]>(() => {
         sections.push({
             label: 'System',
             items: [
-                { title: 'System', href: '/admin/system', icon: SettingsIcon },
+                {
+                    title: 'System',
+                    href: '/admin/system',
+                    icon: SettingsIcon,
+                    // E-Mail and Storage moved in here as a sub-menu: both are instance-wide
+                    // settings pages one step below "System" in the console's own hierarchy,
+                    // and flattening them alongside it crowded the section for what is, day
+                    // to day, rarely touched configuration.
+                    children: [
+                        { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
+                        { title: 'Storage', href: '/admin/storage', icon: Database },
+                    ],
+                },
+                { title: 'Speicherbereinigung', href: '/admin/oci/sweeper', icon: Recycle },
                 { title: 'Aktivität', href: '/admin/activity', icon: ScrollText },
-                { title: 'E-Mail', href: '/admin/mail', icon: MailIcon },
-                { title: 'Storage', href: '/admin/storage', icon: Database },
             ],
         });
     }

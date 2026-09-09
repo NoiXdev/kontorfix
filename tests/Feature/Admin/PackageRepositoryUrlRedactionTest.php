@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Support\ActivityPresenter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Spatie\Activitylog\Models\Activity;
 
 const LEAKED_PAT = 'ghp_leakedtokenvalue123';
@@ -37,6 +38,25 @@ it('withholds an inline credential from the package detail props', function () {
     expect($response->getContent())->not->toContain(LEAKED_PAT);
     $response->assertInertia(fn ($page) => $page
         ->where('package.repository_url', 'https://***@github.com/acme/tools.git'));
+});
+
+it('does not flash the raw repository token into old-input storage when an unrelated field fails validation', function () {
+    // `mirror_source_id` is `prohibited` on the git/publish update path and is what fails
+    // here, not `repository_token` — a submission that otherwise sails through and gets
+    // included in the redirect's old-input flash like any other field. The only thing
+    // standing between that flash and a raw token sitting in the `sessions` table is
+    // bootstrap/app.php's dontFlash() list.
+    $package = Package::factory()->create(['repository_url' => 'https://github.com/acme/tools.git']);
+
+    $this->actingAs(redactionAdmin())->put("/admin/packages/{$package->id}", [
+        'repository_url' => 'https://github.com/acme/tools.git',
+        'repository_token' => 'ghp_leaked_in_flash',
+        'mirror_source_id' => (string) Str::uuid(),
+    ])->assertSessionHasErrors('mirror_source_id');
+
+    $oldInput = session('_old_input');
+    expect($oldInput)->not->toBeNull();
+    expect($oldInput['repository_token'] ?? '')->not->toContain('ghp_leaked_in_flash');
 });
 
 it('still shows a credential-free repository url in full — the anchor for the case above', function () {

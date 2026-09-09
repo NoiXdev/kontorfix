@@ -11,33 +11,34 @@ export E2E_APP_KEY="base64:$(openssl rand -base64 32)"
 
 # A typo here (e.g. --upstrem) used to be silently ignored: the run would proceed as the
 # default suite and still print "e2e: green" at the end, with nobody having noticed the
-# upstream tests never ran. Any argument other than the one this script understands is now
-# a hard error instead of quietly falling through — including a second one, which used to
-# pass straight through unchecked (e.g. `bin/e2e --upstream junk` ran the full stack and
-# still printed "e2e: green").
-case "${1:-}" in
-    '')
-        ;;
-    --upstream)
-        export E2E_UPSTREAM=1
-        echo "e2e: upstream tests enabled"
-        ;;
-    *)
-        echo "e2e: unrecognized argument '${1}'" >&2
-        echo "usage: bin/e2e [--upstream]" >&2
-        exit 1
-        ;;
-esac
+# upstream tests never ran. Any argument this script does not recognize is a hard error
+# instead of quietly falling through — including a second or third one, which used to pass
+# straight through unchecked (e.g. `bin/e2e --upstream junk` ran the full stack and still
+# printed "e2e: green"). Looping over "$@" rather than the old two-position case statement
+# is what lets --upstream and --large-layer combine in either order
+# (`bin/e2e --upstream --large-layer`), instead of only ever accepting one flag in the
+# first position and rejecting a second one outright.
+usage() {
+    echo "usage: bin/e2e [--upstream] [--large-layer]" >&2
+}
 
-case "${2:-}" in
-    '')
-        ;;
-    *)
-        echo "e2e: unrecognized argument '${2}'" >&2
-        echo "usage: bin/e2e [--upstream]" >&2
-        exit 1
-        ;;
-esac
+for arg in "$@"; do
+    case "$arg" in
+        --upstream)
+            export E2E_UPSTREAM=1
+            echo "e2e: upstream tests enabled"
+            ;;
+        --large-layer)
+            export E2E_LARGE_LAYER=1
+            echo "e2e: large-layer gate enabled (builds, pushes and pulls a >500 MiB layer)"
+            ;;
+        *)
+            echo "e2e: unrecognized argument '${arg}'" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
 
 dump_logs() {
     echo "----- app + worker logs -----" >&2

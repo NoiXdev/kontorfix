@@ -103,6 +103,8 @@ class Package extends Model
         'repository_url',
         'repository_token',
         'git_credential_id',
+        'mirror_source_id',
+        'mirror_name',
         'sync_status',
         'sync_error',
         'synced_at',
@@ -110,6 +112,9 @@ class Package extends Model
         'abandoned_at',
         'replacement_package',
         'abandonment_reason',
+        'retention_policy_id',
+        'retention_rules',
+        'auto_created_at',
     ];
 
     /**
@@ -130,6 +135,12 @@ class Package extends Model
             'synced_at' => 'datetime',
             'dist_tags' => 'array',
             'abandoned_at' => 'datetime',
+            // When a `docker push` created this row on its own, and null for every other
+            // origin. Provenance, not a second created_at — see the migration.
+            'auto_created_at' => 'datetime',
+            // Anonymous inline retention rules — tier 0 of the resolution chain. Null is
+            // the ordinary state and means "ask the next tier".
+            'retention_rules' => 'array',
             'shared' => 'bool',
             // Encrypted at rest; decrypted transparently when building git auth.
             'repository_token' => 'encrypted',
@@ -148,10 +159,28 @@ class Package extends Model
         return $this->source_mode === PackageSourceMode::Git;
     }
 
-    /** Whether this package is populated by pushing artifacts (npm publish / twine upload). */
+    /**
+     * Whether this package is populated by pushing artifacts (npm publish / twine upload).
+     *
+     * Reads the stored mode directly rather than `! isGitSourced()` — that used to be
+     * equivalent when Publish and Git were the only two modes, but Mirror made it false:
+     * a mirror-sourced package is not git-sourced either, yet it is populated by
+     * MirrorImporter reaching out to a foreign registry, not by a client pushing artifacts,
+     * so it must answer false here too.
+     */
     public function isPublishSourced(): bool
     {
-        return ! $this->isGitSourced();
+        return $this->source_mode === PackageSourceMode::Publish;
+    }
+
+    /**
+     * Whether this package is populated by mirroring a foreign Composer/npm/PyPI registry
+     * through a reusable, org-level MirrorSource — see PackageSourceMode's doc comment for
+     * how this mode relates to the other two.
+     */
+    public function isMirrorSourced(): bool
+    {
+        return $this->source_mode === PackageSourceMode::Mirror;
     }
 
     /** Whether an operator has retired this package. */
@@ -196,6 +225,55 @@ class Package extends Model
     }
 
     /**
+     * OCI manifests pushed to this repository. Only ever populated for PackageType::Docker.
+     *
+     * @return HasMany<OciManifest, $this>
+     */
+    public function ociManifests(): HasMany
+    {
+        return $this->hasMany(OciManifest::class);
+    }
+
+    /**
+     * OCI tags in this repository. Only ever populated for PackageType::Docker.
+     *
+     * @return HasMany<OciTag, $this>
+     */
+    public function ociTags(): HasMany
+    {
+        return $this->hasMany(OciTag::class);
+    }
+
+    /**
+     * Blob upload sessions currently open against this repository. Only ever populated for
+     * PackageType::Docker.
+     *
+     * Read by the storage sweeper, which must not delete an empty push-created repository
+     * while a session a client may still resume is attached to it: the package delete
+     * cascades to `oci_blob_uploads`, so it would take the session with it.
+     *
+     * @return HasMany<OciBlobUpload, $this>
+     */
+    public function ociBlobUploads(): HasMany
+    {
+        return $this->hasMany(OciBlobUpload::class);
+    }
+
+    /**
+     * The retention policy this package selects, if any.
+     *
+     * Null is the ordinary state and means "ask the next tier", not "keep everything" —
+     * App\Services\Oci\Retention\RetentionPolicyResolver owns that chain. Nothing should
+     * read this relation to decide what applies to a package; read the resolver.
+     *
+     * @return BelongsTo<RetentionPolicy, $this>
+     */
+    public function retentionPolicy(): BelongsTo
+    {
+        return $this->belongsTo(RetentionPolicy::class);
+    }
+
+    /**
      * The organization that owns this package. A package may only be attached to
      * registries of this organization — see GuardsPackageAttachment.
      *
@@ -225,6 +303,18 @@ class Package extends Model
     }
 
     /**
+     * The reusable, org-level mirror source this package imports versions from. Only ever
+     * populated for a mirror-sourced package (isMirrorSourced()); nullOnDelete means this
+     * can go null again if the source is later deleted, without taking the package with it.
+     *
+     * @return BelongsTo<MirrorSource, $this>
+     */
+    public function mirrorSource(): BelongsTo
+    {
+        return $this->belongsTo(MirrorSource::class);
+    }
+
+    /**
      * Effective git authentication for syncing this package's repository. Prefers an
      * assigned managed credential (with its provider), else the inline per-package token
      * (treated as a GitHub token).
@@ -235,6 +325,18 @@ class Package extends Model
     {
         $credential = $this->gitCredential;
         if ($credential !== null) {
+            // Checked at every sync, not only at assignment time: un-sharing a credential
+            // (dropping is_global, or removing this organization from sharedOrganizations)
+            // must end the grant for the very next sync, not merely for the next time
+            // someone opens the assignment dropdown. SyncPackage::handle() already refuses
+            // this earlier, with a clear German message and without reaching this method at
+            // all — this is the same "last line of defence" gitAuth() already keeps for a
+            // host mismatch below, for any caller that reaches this method without going
+            // through that preflight.
+            if (! $credential->isUsableBy($this->organization)) {
+                return ['token' => null, 'provider' => $credential->provider, 'username' => $credential->username];
+            }
+
             // Last line of defence: a credential is bound to one host, so a repository URL
             // that no longer matches gets no token rather than leaking it to that host.
             if (! $credential->permits($this->repository_url)) {

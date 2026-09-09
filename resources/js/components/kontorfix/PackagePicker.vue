@@ -14,7 +14,7 @@ import { computed, onUnmounted, ref, watch } from 'vue';
 interface Pkg {
     id: string;
     name: string;
-    type: 'composer' | 'npm' | 'python';
+    type: 'composer' | 'npm' | 'python' | 'docker';
     // Marked by App\Http\Controllers\Admin\PackageSearchController. A shared package is
     // owned by the operator organization and may be assigned to any registry — assigning
     // one hands a customer something other tenants receive too, so it is marked wherever it
@@ -45,18 +45,24 @@ let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 let requestToken = 0;
 
 const creating = ref(false);
-const createForm = ref<{ name: string; type: 'composer' | 'npm' | 'python'; repository_url: string; repository_token: string }>({
+const createForm = ref<{ name: string; type: 'composer' | 'npm' | 'python' | 'docker'; repository_url: string; repository_token: string }>({
     name: '',
     type: 'composer',
     repository_url: '',
     repository_token: '',
 });
 
-// Publish-based types (npm, python) have no git repository to probe, just a name.
-const { isPublishBased } = useRegistryTypes();
+// Publish-based types (npm, python, docker) have no git repository to probe, just a name.
+const { isPublishBased, meta } = useRegistryTypes();
 const isPublishType = computed(() => isPublishBased(createForm.value.type));
 const createErrors = ref<Record<string, string>>({});
 const createSubmitting = ref(false);
+// The enum-driven type list (PackageType::metadata(), shared via `registryTypeMeta`) —
+// not a hardcoded array. A hardcoded `['composer', 'npm', 'python']` here is exactly what
+// left Docker repositories uncreatable through this quick-add for as long as it existed:
+// PackageType's own docblock promises that adding a type means editing that enum, not
+// chasing every hardcoded copy of its case list across the admin UI.
+const createTypeOptions = computed(() => meta.value.map((m) => m.value as 'composer' | 'npm' | 'python' | 'docker'));
 
 // Probe-first: the repository is checked and its metadata previewed before creation.
 interface ProbeResult {
@@ -312,7 +318,7 @@ onUnmounted(() => {
                 <Label>Typ</Label>
                 <div class="inline-flex gap-2">
                     <button
-                        v-for="option in ['composer', 'npm', 'python'] as const"
+                        v-for="option in createTypeOptions"
                         :key="option"
                         type="button"
                         :class="
@@ -331,20 +337,20 @@ onUnmounted(() => {
                 <InputError :message="createErrors.type" />
             </div>
 
-            <!-- Publish-based (npm/Python): no git repository, just the reserved name. -->
+            <!-- Publish-based (npm/Python/Docker): no git repository, just the reserved name. -->
             <div v-if="isPublishType" class="grid gap-2">
                 <Label for="new-package-name-py">Name</Label>
                 <Input
                     id="new-package-name-py"
                     v-model="createForm.name"
                     type="text"
-                    :placeholder="createForm.type === 'npm' ? '@scope/name' : 'projektname'"
+                    :placeholder="createForm.type === 'npm' ? '@scope/name' : createForm.type === 'docker' ? 'meinapp' : 'projektname'"
                     autocomplete="off"
                     class="font-mono"
                 />
                 <p class="text-xs text-muted-foreground">
                     Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen/Daten entstehen beim Upload (<code>{{
-                        createForm.type === 'npm' ? 'npm publish' : 'twine upload'
+                        createForm.type === 'npm' ? 'npm publish' : createForm.type === 'docker' ? 'docker push' : 'twine upload'
                     }}</code
                     >) — kein Repository.
                 </p>

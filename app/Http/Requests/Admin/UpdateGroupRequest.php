@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Models\Group;
+use App\Rules\AddressableSlug;
 use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -44,7 +45,11 @@ class UpdateGroupRequest extends FormRequest
                 'required',
                 'string',
                 'max:190',
-                'regex:/^[a-z0-9-]+$/',
+                // The registry's CURRENT slug passes through as `$unchanged`, so a registry
+                // created before AddressableSlug existed can still be edited without being
+                // forced to rename itself; only a NEW value has to be OCI-addressable, since
+                // it becomes a path component of a repository name under path addressing.
+                new AddressableSlug($group?->slug),
                 Rule::unique('groups', 'slug')
                     ->where('organization_id', $group?->organization_id)
                     ->ignore($group?->id),

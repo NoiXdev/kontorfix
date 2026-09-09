@@ -18,12 +18,13 @@ use UnexpectedValueException;
  * no build/prepare scripts are run, so publish mode remains the way to ship pre-built
  * artifacts.
  *
- * npm is never git-sourced (`PackageSourceMode::allowedFor(PackageType::Npm)` excludes
- * `Git`, enforced on both create paths and, as a backstop for rows that predate the rule,
- * in `SyncPackage::handle()` before this class is ever reached) — a built npm tarball is
- * not the repository tree, so mirroring tags would silently ship the wrong content. The
- * `PackageType::Npm` arm below exists only to keep this match exhaustive and to fail loudly
- * if that invariant is ever broken upstream.
+ * npm and Docker are never git-sourced (`PackageSourceMode::allowedFor()` excludes `Git`
+ * for both, enforced on both create paths and, as a backstop for rows that predate the
+ * rule, in `SyncPackage::handle()` before this class is ever reached) — a built npm
+ * tarball or a pushed Docker image is not the repository tree, so mirroring tags would
+ * silently ship the wrong content. The `PackageType::Npm` and `PackageType::Docker` arms
+ * below exist only to keep this match exhaustive and to fail loudly if that invariant is
+ * ever broken upstream.
  */
 class GitSourceImporter
 {
@@ -42,6 +43,7 @@ class GitSourceImporter
                 PackageType::Composer => $this->importManifestVersion($package, $repo, $tag, $normalized, 'composer.json'),
                 PackageType::Npm => throw new \LogicException('npm packages are never git-sourced; SyncPackage::handle() must guard this before calling import().'),
                 PackageType::Python => $this->importPythonDist($package, $repo, $tag),
+                PackageType::Docker => throw new \LogicException('docker packages are never git-sourced; SyncPackage::handle() must guard this before calling import().'),
             };
         }
     }
@@ -64,6 +66,24 @@ class GitSourceImporter
                 'source_reference' => $repo->commitFor($tag),
                 'metadata' => $manifest,
                 'released_at' => $repo->committedAt($tag),
+                // Explicitly reset on every (re)sync, not left alone: dist_path now also
+                // doubles as ComposerController::dist()'s signal that a version's archive
+                // is already on the artifacts disk and can be served without going through
+                // the git-clone-and-archive path at all (see MirrorImporter/ComposerMirrorImport,
+                // which populate it for a genuinely mirror-imported version). For a
+                // git-mirrored version it is set only as a side effect of that lazy build,
+                // keyed by the commit sha at build time — a resync that lands a new commit
+                // (e.g. a force-push) must not leave a stale dist_path pointing at the old
+                // commit's archive, which is exactly what dist() would otherwise serve
+                // without ever noticing source_reference moved on.
+                'dist_path' => null,
+                // dist_size is dist_path's own sidecar (the size of the file dist_path
+                // names) and is displayed on the package detail page's version list
+                // independently of whether the archive has actually been rebuilt yet —
+                // left alone here, a force-push resync would keep showing the OLD archive's
+                // size next to a version whose dist_path (and so whose next-download
+                // archive) has already moved on.
+                'dist_size' => null,
             ],
         );
     }

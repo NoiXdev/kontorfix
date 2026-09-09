@@ -49,4 +49,22 @@ class PackageFactory extends Factory
     {
         return $this->state(fn (): array => ['organization_id' => $group->organization_id]);
     }
+
+    /**
+     * An image repository.
+     *
+     * Sets `type` and NOTHING else. `source_mode` is deliberately not restated here even
+     * though every Docker row carries `publish`: definition() already derives it from the
+     * type through PackageSourceMode::defaultFor(), which is documented as the single
+     * source of truth for that mapping. A second copy here would be a rule that agrees
+     * until somebody changes the enum.
+     *
+     * It also leaves `organization_id` alone, so it composes with inOrgOf() in either
+     * order — overriding the organization here would silently defeat the scoping the OCI
+     * tenancy tests are built on.
+     */
+    public function docker(): static
+    {
+        return $this->state(fn (): array => ['type' => PackageType::Docker]);
+    }
 }

@@ -1,9 +1,11 @@
 <?php
 
 // twine upload + PEP 503/691 simple API + downloads for the Python registry.
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Models\Group;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
@@ -46,6 +48,32 @@ it('accepts a twine upload and stores the distribution file', function () {
         ->and($dist->size)->toBe(strlen($bytes))
         ->and($dist->requires_python)->toBe('>=3.9');
     Storage::disk('artifacts')->assertExists($dist->path);
+});
+
+// The guard used to be isGitSourced(), which a mirror-sourced project (populated from a
+// foreign PyPI index via MirrorSource, not from a git repository) sailed straight through —
+// uploading into it would collide with the next mirror sync exactly the same way it would
+// for a git-mirror project. isPublishSourced() covers both non-publish modes.
+it('rejects a twine upload into a mirror-sourced project with 409', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz', 'public' => true]);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'type' => PackageType::Python]);
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'type' => PackageType::Python,
+        'name' => 'My.Package',
+        'repository_url' => null,
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'My.Package',
+    ]);
+    $group->packages()->attach($pkg);
+    $file = UploadedFile::fake()->createWithContent('my_package-1.0.0.tar.gz', 'bytes');
+
+    $this->withHeaders(publishHeaderFor($group))->post(registryPath($group).'/', [
+        'name' => 'My.Package', 'version' => '1.0.0', 'content' => $file,
+    ])->assertStatus(409);
+
+    expect($pkg->fresh()->pythonDists()->count())->toBe(0);
 });
 
 it('infers a wheel filetype from the filename', function () {

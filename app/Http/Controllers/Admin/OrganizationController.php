@@ -13,6 +13,7 @@ use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\Portal\PortalUrl;
+use App\Services\Registry\OciSettings;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
@@ -41,7 +42,7 @@ class OrganizationController extends Controller
         ]);
     }
 
-    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url, PortalUrl $portal): Response
+    public function show(Organization $organization, RegistryTypeService $types, RegistryUrl $url, PortalUrl $portal, OciSettings $oci): Response
     {
         return Inertia::render('admin/organizations/Show', [
             'organization' => [
@@ -51,6 +52,11 @@ class OrganizationController extends Controller
                 'is_operator' => $organization->is_operator,
                 'portal_enabled' => $organization->portal_enabled,
                 'notification_cadence' => $organization->notification_cadence,
+                // Three states, and the page renders all three: null = inherit the
+                // instance setting, true/false = this organization's own answer. Never
+                // coalesced to a boolean here — that would make "inherit" unrepresentable
+                // and the form would write an explicit false on its first save.
+                'oci_auto_create_repositories' => $organization->oci_auto_create_repositories,
                 // Changing the slug moves the URL of every registry this organization owns
                 // (the organization segment is the first path component of all of them) —
                 // the console confirms that before submitting, naming exactly how many.
@@ -76,6 +82,13 @@ class OrganizationController extends Controller
                 'global' => $types->globalTypes(),
                 'effective' => $types->effectiveFor($organization),
                 'overridden' => $organization->enabled_registry_types !== null,
+            ],
+            // Push-time repository creation: the instance ceiling and what it currently
+            // resolves to for this organization, so the page can say what "Erben" means
+            // right now instead of leaving the operator to look the ceiling up.
+            'ociAutoCreate' => [
+                'global' => $oci->autoCreateGloballyEnabled(),
+                'effective' => $oci->autoCreateEnabledFor($organization),
             ],
             // `organization:id,name,slug` alongside `domains`: RegistryUrl::path() reads
             // `$group->organization->slug` — a column-restricted eager load that omitted it

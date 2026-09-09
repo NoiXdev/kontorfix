@@ -147,9 +147,12 @@ class NpmController extends Controller
             ->first();
         abort_if($pkg === null || ! $this->access->packageBelongsToGroup($group, $pkg), 404);
 
-        // A git-mirror package derives its versions from tags — publishing into it would
-        // collide with the next sync, so reject it.
-        abort_if($pkg->isGitSourced(), 409, 'This package mirrors a git repository and cannot be published to.');
+        // A git-mirror or foreign-registry-mirror package derives its versions from
+        // somewhere else (git tags, or a MirrorSource) — publishing into it would collide
+        // with the next sync, so reject it. isPublishSourced() rather than isGitSourced()
+        // now that a third mode exists: both non-publish modes must be refused here, not
+        // only git.
+        abort_if(! $pkg->isPublishSourced(), 409, 'This package mirrors a git repository or a foreign registry and cannot be published to.');
 
         try {
             $this->publisher->publish($pkg, $request->json()->all());

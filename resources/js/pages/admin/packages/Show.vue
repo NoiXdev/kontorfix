@@ -98,12 +98,37 @@ const props = defineProps<{
         replacement_package: string | null;
         abandonment_reason: string | null;
         shared: boolean;
+        // The mirror source this package imports from, for a mirror-sourced package; null
+        // for every other source mode (git, publish). See PackageController::show().
+        // `source_id`/`source_name` both go null together when the assigned MirrorSource was
+        // deleted (nullOnDelete) — source_mode stays 'mirror', so `mirror` itself stays
+        // non-null and the retarget form below is the fix path.
+        mirror: { source_id: string | null; source_name: string | null; mirror_name: string } | null;
     };
     versions: VersionRow[];
     pythonDists: PythonDistRow[];
     gitCredentials: { id: string; name: string; provider: string }[];
+    // The retarget form's source picker: reusable mirror sources this package could point
+    // at instead, already scoped server-side to its own organization and type. Null for
+    // every non-mirror package — see PackageController::show().
+    mirrorSources: { id: string; name: string }[] | null;
     groups: GroupRow[];
     sharedElsewhere: number;
+    /**
+     * The Installation tab's command, built by `SetupSnippetBuilder::installCommand()` from a
+     * real registry's address — never assembled here.
+     *
+     * It WAS assembled here, as `{composer: …, npm: …, python: `pip install ${name}`}`: the
+     * registry-less pip command that resolves against PyPI and installs a stranger's package
+     * of the same name, still being printed on the operator's side after the portal stopped.
+     * A command needs a registry, and only the server knows which of this package's registries
+     * it is (see PackageController::show()).
+     *
+     * Null when the package is in no registry this viewer can see — there is no address to
+     * build one from, and no command is the honest answer. Docker never arrives here: show()
+     * redirects a Docker repository to its own page.
+     */
+    install: string | null;
     stats: { downloads: number; storage_bytes: number; versions: number };
     activities: ActivityRow[];
     // Whether the viewer holds the share-packages ability — passed from the server rather
@@ -123,12 +148,6 @@ const selectedVersion = ref<string>(props.versions[0]?.version ?? '');
 const currentVersion = computed(() => props.versions.find((v) => v.version === selectedVersion.value) ?? null);
 
 const versionOptions = computed(() => props.versions.map((v) => ({ value: v.version, label: v.version })));
-
-const installCommand = {
-    composer: `composer require ${props.package.name}`,
-    npm: `npm install ${props.package.name}`,
-    python: `pip install ${props.package.name}`,
-}[props.package.type];
 
 function depCount(deps: Record<string, string>): number {
     return Object.keys(deps).length;
@@ -181,6 +200,46 @@ const resyncForm = useForm({});
 
 function resyncPackage() {
     resyncForm.post(route('admin.packages.resync', props.package.id), { preserveScroll: true });
+}
+
+// --- Retarget mirror source ---
+// The mirror line's "Ändern" affordance — same inline-edit shape as the retention card's
+// "Eigene Regeln bearbeiten" toggle on DockerTags.vue: a ref gates a small form, opening it
+// (re-)seeds the form from the current props rather than trusting useForm's one-time initial
+// snapshot, since a prior successful save already changed what those props hold.
+const editingMirror = ref(false);
+
+const mirrorSourceOptions = computed(() => (props.mirrorSources ?? []).map((s) => ({ value: s.id, label: s.name })));
+
+const mirrorForm = useForm({
+    mirror_source_id: props.package.mirror?.source_id ?? '',
+    mirror_name: props.package.mirror?.mirror_name ?? '',
+});
+
+function openMirrorEdit() {
+    mirrorForm.mirror_source_id = props.package.mirror?.source_id ?? '';
+    mirrorForm.mirror_name = props.package.mirror?.mirror_name ?? '';
+    mirrorForm.clearErrors();
+    editingMirror.value = true;
+}
+
+function cancelMirrorEdit() {
+    mirrorForm.clearErrors();
+    editingMirror.value = false;
+}
+
+// Posts to the same endpoint the create-time probe/save already uses
+// (Admin\PackageController::update() dispatches to updateMirror() for a mirror-sourced
+// package) — no new server route, this is purely the UI this task adds in front of it. A
+// successful save re-dispatches SyncMirrorPackage when the source/name actually changed
+// (updateMirror()'s own job), which the existing sync-status polling below then reflects.
+function saveMirror() {
+    mirrorForm.put(route('admin.packages.update', props.package.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            editingMirror.value = false;
+        },
+    });
 }
 
 // --- Abandonment ---
@@ -291,6 +350,51 @@ useOperatorChannel({
                     {{ props.package.repository_url }}
                 </a>
                 <div v-if="props.package.synced_at" class="text-xs text-muted-foreground">Zuletzt synchronisiert: {{ props.package.synced_at }}</div>
+                <div v-if="props.package.mirror" class="flex flex-col gap-2">
+                    <div class="flex items-center gap-2 text-xs">
+                        <span v-if="props.package.mirror.source_name" class="text-muted-foreground">
+                            Mirror-Quelle: {{ props.package.mirror.source_name }} · Paket: {{ props.package.mirror.mirror_name }}
+                        </span>
+                        <!-- The MirrorSource was deleted (nullOnDelete) — source_mode stays
+                             'mirror', so this branch (not the whole block) is what disappears
+                             once a new source is assigned via the form below. -->
+                        <span v-else class="text-amber-600 dark:text-amber-400">
+                            Mirror-Quelle: gelöscht — bitte neue Quelle zuweisen · Paket: {{ props.package.mirror.mirror_name }}
+                        </span>
+                        <Button v-if="!editingMirror" type="button" variant="link" size="sm" class="h-auto p-0 text-xs" @click="openMirrorEdit">
+                            Ändern
+                        </Button>
+                    </div>
+
+                    <form
+                        v-if="editingMirror"
+                        class="flex max-w-lg flex-wrap items-end gap-3 rounded-md border border-sidebar-border/70 p-3 dark:border-sidebar-border"
+                        @submit.prevent="saveMirror"
+                    >
+                        <div class="grid gap-1">
+                            <Label for="mirror_source_id" class="text-xs">Mirror-Quelle</Label>
+                            <SearchableSelect id="mirror_source_id" v-model="mirrorForm.mirror_source_id" :options="mirrorSourceOptions" class="w-56" />
+                            <p v-if="mirrorForm.errors.mirror_source_id" class="text-xs text-destructive">{{ mirrorForm.errors.mirror_source_id }}</p>
+                        </div>
+                        <div class="grid gap-1">
+                            <Label for="mirror_name" class="text-xs">Name bei der Quelle</Label>
+                            <Input id="mirror_name" v-model="mirrorForm.mirror_name" autocomplete="off" class="w-56 font-mono text-xs" />
+                            <p v-if="mirrorForm.errors.mirror_name" class="text-xs text-destructive">{{ mirrorForm.errors.mirror_name }}</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <Button
+                                type="submit"
+                                size="sm"
+                                :disabled="mirrorForm.processing || !mirrorForm.mirror_source_id || mirrorForm.mirror_name.trim() === ''"
+                            >
+                                Speichern
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" :disabled="mirrorForm.processing" @click="cancelMirrorEdit">
+                                Abbrechen
+                            </Button>
+                        </div>
+                    </form>
+                </div>
                 <div v-if="syncError" class="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
                     {{ syncError }}
                 </div>
@@ -362,8 +466,17 @@ useOperatorChannel({
                 <TabsContent value="installation">
                     <section class="flex flex-col gap-3">
                         <pre
+                            v-if="props.install !== null"
                             class="overflow-x-auto rounded-md border border-sidebar-border/70 bg-muted/50 px-4 py-3 font-mono text-sm dark:border-sidebar-border"
-                            >{{ installCommand }}</pre>
+                            >{{ props.install }}</pre>
+                        <!-- No registry this viewer can see means no address, and a command
+                             without one is what this tab was fixed to stop printing. -->
+                        <div
+                            v-else
+                            class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
+                        >
+                            Dieses Paket ist keiner Registry zugeordnet, daher gibt es keinen Installationsbefehl.
+                        </div>
                     </section>
                 </TabsContent>
 
@@ -635,8 +748,8 @@ useOperatorChannel({
                             <span>
                                 Für andere Organisationen freigeben
                                 <span class="block text-xs text-muted-foreground">
-                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der
-                                    besitzenden Organisation. Nur für Pakete der Betreiber-Organisation möglich.
+                                    Ein geteiltes Paket kann jeder Registry der Instanz zugeordnet werden, nicht nur denen der besitzenden
+                                    Organisation. Nur für Pakete der Betreiber-Organisation möglich.
                                 </span>
                             </span>
                         </label>

@@ -11,12 +11,14 @@ import { computed, inject, ref, watch } from 'vue';
 import {
     canChooseSourceMode,
     isGitMode as computeIsGitMode,
+    isMirrorMode as computeIsMirrorMode,
     describeManifestOutcome,
     describeProbeFailure,
     modesFor,
     packageFormKey,
     type GitCredentialOption,
     type GroupOption,
+    type MirrorSourceOption,
     type PackageFormData,
     type ProbeResult,
     type SourceModeMap,
@@ -26,6 +28,7 @@ const props = defineProps<{
     groups: GroupOption[];
     registryTypes: string[];
     gitCredentials: GitCredentialOption[];
+    mirrorSources: MirrorSourceOption[];
     sourceModes: SourceModeMap;
 }>();
 
@@ -54,15 +57,21 @@ const { options: typeOptionsFor } = useRegistryTypes();
 const typeOptions = computed(() => typeOptionsFor(props.registryTypes));
 // `typeOptionsFor()` is generically `{ value: string; label: string }[]` (it's shared across
 // call sites with different literal-union needs); `form.type` is the narrower
-// `'composer' | 'npm' | 'python'`. This asserts the already-true invariant — the options
-// always come from the registry-type enum — so `SearchableSelect`'s `v-model` lines up.
-const packageTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python'; label: string }[]);
+// `'composer' | 'npm' | 'python' | 'docker'`. This asserts the already-true invariant — the
+// options always come from the registry-type enum — so `SearchableSelect`'s `v-model` lines up.
+const packageTypeOptions = computed(() => typeOptions.value as { value: 'composer' | 'npm' | 'python' | 'docker'; label: string }[]);
 
 const modesForType = computed(() => modesFor(props.sourceModes, form.type));
 // Same reasoning as `packageTypeOptions` above.
 const sourceModeOptions = computed(() => modesForType.value as { value: 'publish' | 'git'; label: string }[]);
 const canChooseSource = computed(() => canChooseSourceMode(props.sourceModes, form.type));
 const isGitMode = computed(() => computeIsGitMode(props.sourceModes, form.type, form.source_mode));
+const isMirrorMode = computed(() => computeIsMirrorMode(props.sourceModes, form.type, form.source_mode));
+
+// Mirror sources are typed (Composer/npm/Python) the same way packages are — a Composer
+// package cannot mirror an npm source — so the server-scoped `mirrorSources` prop (own
+// organization) is narrowed here to the currently selected package type.
+const mirrorSourceOptions = computed(() => props.mirrorSources.filter((s) => s.type === form.type).map((s) => ({ value: s.id, label: s.name })));
 
 function resetProbe() {
     probeResult.value = null;
@@ -77,13 +86,25 @@ function onTypeChange() {
 }
 
 // Leaving git-mirror mode discards the repository config so a publish package isn't created
-// with stale git fields.
+// with stale git fields; leaving mirror mode does the same for the mirror-source fields.
+// Since a type change always lands on that type's DEFAULT mode (never 'mirror' —
+// PackageSourceMode::allowedFor() always lists Git or Publish first), this alone also covers
+// a type switch made while mirror mode was selected.
 function onSourceModeChange() {
     if (!isGitMode.value) {
         form.repository_url = '';
         form.is_private = false;
         form.repository_token = '';
         form.git_credential_id = '';
+    }
+    if (!isMirrorMode.value) {
+        form.mirror_source_id = '';
+        form.mirror_name = '';
+    } else if (form.mirror_name.trim() === '') {
+        // Defaults the "Name bei der Quelle" field to the package name — the common case
+        // where the local name matches the upstream one — without overwriting a value the
+        // operator already typed.
+        form.mirror_name = form.name;
     }
     resetProbe();
 }
@@ -179,6 +200,53 @@ async function probeRepository() {
     }
 }
 
+// Probe-first for mirror mode too, cloning probeRepository()'s fetch/result handling above:
+// the same shared `probeResult` (so Create.vue's submit gate needs no mirror-specific branch)
+// and the same failure-rendering helper, against the mirror endpoint instead of the git one.
+const probingMirror = ref(false);
+
+async function probeMirrorSource() {
+    if (probingMirror.value || !form.mirror_source_id || form.mirror_name.trim() === '') {
+        return;
+    }
+    probingMirror.value = true;
+    probeResult.value = null;
+    form.clearErrors();
+
+    try {
+        const response = await fetch('/admin/packages/probe-mirror', {
+            method: 'POST',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                mirror_source_id: form.mirror_source_id,
+                mirror_name: form.mirror_name,
+            }),
+        });
+
+        if (!response.ok) {
+            await showProbeFailure(response);
+            return;
+        }
+
+        const result: ProbeResult = await response.json();
+        probeResult.value = result;
+        if (result.ok && result.name) {
+            form.name = result.name;
+        }
+    } catch {
+        // No response at all (offline, DNS, aborted): the one case a retry can fix.
+        await showProbeFailure(null);
+    } finally {
+        probingMirror.value = false;
+    }
+}
+
 function toggleGroup(groupId: string, checked: boolean) {
     if (checked) {
         form.group_ids.push(groupId);
@@ -212,7 +280,7 @@ function toggleGroup(groupId: string, checked: boolean) {
         <Input
             id="name"
             v-model="form.name"
-            :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname' }[form.type]"
+            :placeholder="{ composer: 'vendor/paket', npm: '@scope/name', python: 'projektname', docker: 'meinapp' }[form.type]"
             autocomplete="off"
         />
         <p v-if="isGitMode" class="text-xs text-muted-foreground">Wird beim „Prüfen" automatisch aus dem Repository übernommen.</p>
@@ -221,13 +289,13 @@ function toggleGroup(groupId: string, checked: boolean) {
 
     <!-- Publish-based: no git repo — the name is the reserved identifier; versions/metadata
          arrive with each upload. -->
-    <p v-if="!isGitMode" class="text-xs text-muted-foreground">
+    <p v-if="!isGitMode && !isMirrorMode" class="text-xs text-muted-foreground">
         Publish-basiert: Der Name ist der <strong>reservierte Paketname</strong>. Versionen und Metadaten entstehen beim Upload (<code>{{
-            form.type === 'npm' ? 'npm publish' : 'twine upload'
+            form.type === 'npm' ? 'npm publish' : form.type === 'docker' ? 'docker push' : 'twine upload'
         }}</code
         >) — kein Repository nötig.
     </p>
-    <template v-else>
+    <template v-else-if="isGitMode">
         <div class="grid gap-2">
             <Label for="repository_url">Repository-URL</Label>
             <div class="flex gap-2">
@@ -254,7 +322,12 @@ function toggleGroup(groupId: string, checked: boolean) {
         <template v-if="form.is_private">
             <div v-if="props.gitCredentials.length" class="grid gap-2">
                 <Label for="git_credential_id">Gespeicherter Token</Label>
-                <SearchableSelect id="git_credential_id" v-model="form.git_credential_id" :options="credentialOptions" @update:model-value="resetProbe" />
+                <SearchableSelect
+                    id="git_credential_id"
+                    v-model="form.git_credential_id"
+                    :options="credentialOptions"
+                    @update:model-value="resetProbe"
+                />
                 <p class="text-xs text-muted-foreground">
                     Verwaltete Git-Tokens unter „Git-Tokens" (org-weit wiederverwendbar). Oder unten ein Einmal-Token einfügen.
                 </p>
@@ -274,13 +347,18 @@ function toggleGroup(groupId: string, checked: boolean) {
             </div>
         </template>
 
-        <div v-if="probeResult && !probeResult.ok" class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div
+            v-if="probeResult && !probeResult.ok"
+            class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
             {{ probeResult.error ?? 'Repository konnte nicht gelesen werden.' }}
         </div>
         <div v-else-if="probeResult && probeResult.ok" class="space-y-1 rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
             <div>
                 <span class="font-medium text-verdigris">Repository erreichbar.</span>
-                <span v-if="probeResult.versions.length" class="text-muted-foreground"> {{ probeResult.versions.length }} Version(en) gefunden. </span>
+                <span v-if="probeResult.versions.length" class="text-muted-foreground">
+                    {{ probeResult.versions.length }} Version(en) gefunden.
+                </span>
                 <span v-else class="text-muted-foreground">Keine Tags gefunden — Sync läuft nach dem Anlegen trotzdem.</span>
             </div>
             <!-- Reachable is only half the answer: the probe also reads the manifest to fill
@@ -290,6 +368,58 @@ function toggleGroup(groupId: string, checked: boolean) {
             </div>
         </div>
         <p v-else class="text-xs text-muted-foreground">Repository zuerst „Prüfen", dann anlegen.</p>
+    </template>
+    <template v-else-if="isMirrorMode">
+        <div class="grid gap-2">
+            <Label for="mirror_source_id">Mirror-Quelle</Label>
+            <SearchableSelect id="mirror_source_id" v-model="form.mirror_source_id" :options="mirrorSourceOptions" @update:model-value="resetProbe" />
+            <p v-if="mirrorSourceOptions.length === 0" class="text-xs text-muted-foreground">
+                Keine passende Mirror-Quelle vorhanden. Unter „Mirror-Quellen" eine für diesen Pakettyp anlegen.
+            </p>
+            <InputError :message="form.errors.mirror_source_id" />
+        </div>
+
+        <div class="grid gap-2">
+            <Label for="mirror_name">Name bei der Quelle</Label>
+            <div class="flex gap-2">
+                <Input
+                    id="mirror_name"
+                    v-model="form.mirror_name"
+                    autocomplete="off"
+                    @update:model-value="resetProbe"
+                    @keyup.enter.prevent="probeMirrorSource"
+                />
+                <Button
+                    type="button"
+                    variant="outline"
+                    :disabled="probingMirror || !form.mirror_source_id || form.mirror_name.trim() === ''"
+                    @click="probeMirrorSource"
+                >
+                    {{ probingMirror ? 'Prüfe…' : 'Prüfen' }}
+                </Button>
+            </div>
+            <InputError :message="form.errors.mirror_name" />
+        </div>
+
+        <div
+            v-if="probeResult && !probeResult.ok"
+            class="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+            {{ probeResult.error ?? 'Quelle konnte nicht gelesen werden.' }}
+        </div>
+        <div v-else-if="probeResult && probeResult.ok" class="space-y-1 rounded-md border border-verdigris/30 bg-verdigris/10 px-3 py-2 text-sm">
+            <div>
+                <span class="font-medium text-verdigris">Quelle erreichbar.</span>
+                <span v-if="probeResult.versions.length" class="text-muted-foreground">
+                    {{ probeResult.versions.length }} Version(en) gefunden.
+                </span>
+                <span v-else class="text-muted-foreground">Keine Versionen gefunden — Sync läuft nach dem Anlegen trotzdem.</span>
+            </div>
+            <!-- The mirror probe never sends a token over a plain-http source (see
+                 UpstreamClient::isEncrypted()) — silently, unless this is shown. -->
+            <div v-if="probeResult.warning" class="font-medium text-destructive">{{ probeResult.warning }}</div>
+        </div>
+        <p v-else class="text-xs text-muted-foreground">Quelle zuerst „Prüfen", dann anlegen.</p>
     </template>
 
     <div class="grid gap-2">

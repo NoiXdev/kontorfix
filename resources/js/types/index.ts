@@ -83,6 +83,9 @@ export interface NavItem {
     href: string;
     icon?: LucideIcon;
     isActive?: boolean;
+    // A nested sub-menu (rendered via SidebarMenuSub) — e.g. "System" holding "E-Mail" and
+    // "Storage". Only ever one level deep; NavMain.vue does not recurse further.
+    children?: NavItem[];
 }
 
 export interface SharedData {

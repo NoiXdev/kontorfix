@@ -31,3 +31,41 @@ export function offersMinting(mayMint?: boolean): boolean {
 export function offersPublishing(mayPublish?: boolean): boolean {
     return mayPublish !== false;
 }
+
+/**
+ * Which setup steps to render, given the ecosystems the organization MAY serve
+ * (`RegistryTypeService::effectiveFor()`, sent as the `types` prop).
+ *
+ * THERE IS NO FALLBACK HERE, and that absence is the point. The component used to read
+ * `types.length ? types : ['composer', 'npm', 'python']`, written while the prop meant "the
+ * types of the packages present" — where an empty list was merely a young registry. The
+ * prop now means "the types this organization is PERMITTED to serve", and an empty list is
+ * a definite answer: nothing. Substituting three ecosystems for it printed Composer,
+ * auth.json, npm, pip and twine instructions for a registry whose every endpoint answers
+ * 404 through EnsureRegistryTypeEnabled — the same defect as offering a Docker snippet
+ * against a switched-off OCI endpoint, which RegistrySetupTest already pins on the server
+ * side. An organization with `enabled_registry_types = []` is a state the console accepts
+ * and stores, so this is reachable, not theoretical.
+ *
+ * Generic over the step shape so the step table itself can stay in the component next to
+ * the markup that renders it; all this function owns is the selection rule.
+ */
+export function stepsForEcosystems<T extends { eco: string }>(steps: readonly T[], types: readonly string[]): T[] {
+    return steps.filter((step) => types.includes(step.eco));
+}
+
+/**
+ * What the Einrichtung tab says when the selection above comes back empty: the honest
+ * answer, in place of instructions that would not work.
+ *
+ * One string for both audiences, unlike dockerDomainNote() — that one splits because its
+ * operator half names Registry → Domains, a console page a portal account gets 403 from.
+ * This sentence names no page at all, so there is nothing for a customer to be sent to in
+ * vain and nothing an operator would be told twice.
+ */
+export function noEcosystemMessage(): string {
+    return (
+        'Für diese Registry ist derzeit kein Paket-Typ freigeschaltet. Einrichtungs-Schritte finden Sie hier, ' +
+        'sobald mindestens ein Typ freigegeben ist — bis dahin beantwortet die Registry jede Client-Anfrage mit 404.'
+    );
+}

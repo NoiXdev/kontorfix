@@ -10,6 +10,11 @@ export interface GitCredentialFormData {
     // Blank keeps the stored token on edit; a value replaces it. Never pre-filled from the
     // server (see GitCredentialController::edit()) — the token is write-only from the UI.
     token: string;
+    // Sharing is operator-only — the server drops both fields outright for any other
+    // organization (see GitCredentialController::store()/update()) — but the form always
+    // carries them so a toggle on an operator credential round-trips normally.
+    is_global: boolean;
+    shared_organization_ids: string[];
 }
 
 // Create.vue / Edit.vue own the Inertia form — they still need `form.processing` and

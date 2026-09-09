@@ -1,0 +1,157 @@
+# A trimmed copy of the base FrankenPHP image's own /etc/frankenphp/Caddyfile (same
+# structure, same env-var hooks), with rules that reject a request body before PHP ever
+# sees it, for every route except the OCI registry.
+#
+# Why this file exists instead of the previous `frankenphp php-server -r public/ --listen
+# :8080` command: `php-server` has no way to configure any body-size limit at all, and this
+# file is what draws the line Caddy CAN draw — a declared-length cap in front of every
+# route except the OCI registry — before request bodies ever reach PHP at all. It does NOT
+# lean on `post_max_size` for that: docker/php.ini pins it well BELOW `memory_limit`
+# instead, specifically so PHP itself never buffers a body large enough to matter — see
+# that file's own comment for why "raise post_max_size to cover a 500 MiB OCI layer" is
+# exactly the mistake this project shipped once already (a Critical review finding, not a
+# hypothetical). Either way, post_max_size never gates an OCI blob: confirmed directly,
+# both the monolithic POST and the chunked PATCH read their body via `php://input`/
+# `getContent(asResource: true)`, which post_max_size does not touch — it only ever governs
+# whether PHP auto-populates `$_POST`/`$_FILES`.
+#
+# What this does NOT use, and why: Caddy's own `request_body { max_size ... }` directive
+# looks like the obvious fit, but it does not protect a route handled by FrankenPHP's own
+# `php`/`php_server` handler. Verified directly, twice, against this exact image: (1) with
+# `request_body { max_size 10 }` in front of `php_server`, a 140-byte POST to `/login`
+# still reached Laravel and got a normal Laravel response — the ten-byte cap had zero
+# effect; (2) even against a trivial `respond "ok"` handler that never reads the body at
+# all, an oversized request still got a 200, because `request_body`'s `max_size` is a LAZY
+# check (Go's `http.MaxBytesReader`): it only errors once something actually reads past the
+# limit, and produces no rejection at all if nothing reads that far or if the reader it
+# wrapped is never the one the eventual handler reads through.
+#
+# What IS used, and its one confirmed hole: a preflight check on the declared
+# `Content-Length` header — answered by `respond` before any handler, PHP included, ever
+# touches the connection — refuses a POST/PUT/PATCH outside `/v2/*` whose declared length
+# exceeds 256 MiB (see `@oversized` below). This is real admission control, not a lazy
+# reader: confirmed with the same probe used to rule out `request_body` above, a rejection
+# happens with zero bytes of the body consumed. The cap sits ABOVE every application-level
+# upload limit this instance configures (`config/kontorfix.php`'s `npm_max_tarball_bytes` =
+# 100 MiB, `python_max_dist_bytes` = 200 MiB — and matches `upload_max_filesize` in
+# docker/php.ini) on purpose: this exists to stop an absurd body from reaching PHP at all,
+# not to enforce the real per-ecosystem limits, which belong to the application and come
+# with a proper JSON error body — a bare 413 from Caddy has none.
+#
+# `Content-Length` is the one signal a preflight check has, and a CHUNKED body declares no
+# length at all — this file previously carried a second rule trying to catch that case by
+# checking `{http.request.header.Transfer-Encoding}` for a chunked request. That rule could
+# never fire: Go's `net/http` server strips `Transfer-Encoding` from the parsed request's
+# header map once it has consumed the chunked framing, so the placeholder is always empty
+# by the time Caddy evaluates it — confirmed by sending a real chunked request over a raw
+# socket (not curl's own framing) and reading back what both a Caddy `respond` template and
+# PHP's own `$_SERVER` saw: neither ever contains it. Checked every registered Caddy
+# matcher module (`frankenphp list-modules | grep http.matchers`) for anything else that
+# might expose it — `client_ip`, `expression`, `file`, `header`, `header_regexp`, `host`,
+# `method`, `not`, `path`, `path_regexp`, `protocol`, `query`, `remote_ip`, `tls`, `vars`,
+# `vars_regexp` — none of them read anything but the same stripped header map or metadata
+# unrelated to transfer encoding. There is no Caddyfile-level way to detect a chunked body.
+# The rule was removed rather than left in place looking like protection it cannot provide.
+#
+# What actually bounds an undeclared-length (chunked) body, verified against this image
+# rather than assumed, is PHP itself — NOT `post_max_size`, which was confirmed by the same
+# probes to only ever produce a warning for method POST and nothing at all for PUT/PATCH,
+# never truncating the read either way:
+#
+#   - `multipart/form-data` (the one real anonymous-adjacent upload shape in this app,
+#     twine's wheel/sdist) is parsed by PHP's own C multipart parser, which enforces
+#     `upload_max_filesize` DURING parsing regardless of chunking — confirmed by sending a
+#     30 MiB chunked multipart file against a 20 MiB cap and observing `$_FILES` report
+#     `UPLOAD_ERR_INI_SIZE`, size 0, nothing ever written to a temp file. `max_file_uploads`
+#     (docker/php.ini) is pinned to 1 for the same reason: nothing in this app sends more
+#     than one file per request, so there is no reason to let a client multiply that
+#     per-file cap by twenty.
+#   - `application/x-www-form-urlencoded` (a real login form's actual shape) is a route
+#     THIS FILE cannot see the length of when it is chunked, but `post_max_size` in
+#     docker/php.ini can: it is a request-startup check against whatever length PHP has
+#     actually received so far, not against the `Content-Length` header this file's own
+#     `@oversized` rule is limited to, so it catches an undeclared-length body too —
+#     confirmed by sending a 500 MiB CHUNKED urlencoded body against a low post_max_size
+#     and seeing PHP refuse to populate `$_POST` at all, the same as it does for a declared
+#     body of the same size. `memory_limit` (docker/php.ini) is the backstop behind that,
+#     not the primary guard: it is what a request UNDER post_max_size but still large
+#     enough to matter would eventually hit while PHP builds `$_POST` from it, and
+#     docker/php.ini's own comment has the full account, including the shape that guard
+#     failed in before post_max_size was corrected to sit below it.
+#   - Any OTHER content type (raw JSON, `application/octet-stream`, …) is never read by PHP
+#     at all unless application code explicitly asks for it — confirmed by sending a 500
+#     MiB chunked body of such a type to a route that touches neither `$_POST` nor
+#     `php://input` and getting an instant, clean response; the bytes are never buffered
+#     anywhere. Under `/v2/*`, every controller action calls `ociWritableRepository()` /
+#     `ociRepository()` — which throws for an anonymous or invalid token — BEFORE it ever
+#     reads the request body, so an anonymous, non-multipart push never reaches the point
+#     where anything would read it either.
+#
+# `@ociMultipart` below closes the one gap that ordering does not: PHP's multipart parser
+# runs during request bootstrap, before `registry.auth` (a Laravel middleware) gets a
+# chance to run at all — so an anonymous multipart POST under `/v2/*` would otherwise still
+# make PHP write to a temp file pre-auth. An OCI blob or manifest is never sent as
+# multipart (the distribution spec always uses raw `application/octet-stream`/JSON), so
+# refusing that content type there costs nothing real.
+{
+	skip_install_trust
+
+	{$CADDY_GLOBAL_OPTIONS}
+
+	frankenphp {
+		{$FRANKENPHP_CONFIG}
+	}
+}
+
+{$CADDY_EXTRA_CONFIG}
+
+{$SERVER_NAME:localhost} {
+	root {$SERVER_ROOT:public/}
+	encode zstd br gzip
+
+	{$CADDY_SERVER_EXTRA_DIRECTIVES}
+
+	# `path_regexp`, not the bare `path` matcher, for every `/v2/` exclusion below: Caddy's
+	# `path` matcher is case-insensitive, so `path /v2/*` would let a request to `/V2/foo`
+	# skip both rules here — it matches no Laravel route (routes/registry.php registers the
+	# lowercase form only), but it is a free bypass of caps that exist for a reason.
+	# `^/v2/` is anchored and case-sensitive by default (Go regex, no `(?i)` flag).
+	#
+	# Scoped to methods that can legitimately carry a body: a GET or HEAD (the healthcheck's
+	# `/up` among them) has none and legitimately carries no Content-Length at all. Caught
+	# while verifying this file, not hypothetically: a bare `method POST PUT PATCH` line as
+	# its own matcher key, sitting alongside an `expression` key in the same matcher set,
+	# took `/up` down anyway — with a 500, not even a clean pass-through. Caddy's matcher set
+	# does not short-circuit across matcher TYPES: the `expression` matcher still gets
+	# evaluated for a GET with no Content-Length, `int("")` panics inside CEL, and that panic
+	# surfaces as a 500 before "the method matcher would have said no" ever gets consulted.
+	# Folding the method check into a leading `&&` term of the SAME expression (below) is
+	# what actually fixes it: CEL's `&&` is specified to short-circuit, unlike Caddy's own
+	# cross-matcher-type AND.
+	#
+	# DELETE and OPTIONS are listed alongside POST/PUT/PATCH, not left out: nothing in this
+	# app sends a body on either, but a client-supplied one is not this preflight's business
+	# to assume away — the same declared-Content-Length admission control applies to any
+	# method capable of carrying one, not only the methods this app happens to use today.
+	@oversized {
+		not path_regexp ^/v2/
+		expression {http.request.method} in ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"] && {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 268435456
+	}
+	respond @oversized 413
+
+	@ociMultipart {
+		path_regexp ^/v2/
+		method POST PUT PATCH
+		header Content-Type multipart/form-data*
+	}
+	respond @ociMultipart 415
+
+	php_server
+}
+
+# Restored from the base FrankenPHP image's own Caddyfile (see `docker run --rm
+# dunglas/frankenphp:1-php8.4 cat /etc/frankenphp/Caddyfile`), silently dropped when this
+# file was trimmed down to add the OCI-aware directives above: an operator extension point
+# for site config that does not belong inside this project's own Caddyfile — dropped
+# `.caddyfile` files under Caddyfile.d/ are picked up with no further edit here needed.
+import Caddyfile.d/*.caddyfile

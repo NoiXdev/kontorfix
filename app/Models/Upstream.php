@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PackageType;
 use App\Enums\UpstreamPolicy;
+use App\Services\Upstream\UpstreamEndpoint;
 use Database\Factories\UpstreamFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Upstream extends Model
+class Upstream extends Model implements UpstreamEndpoint
 {
     /** @use HasFactory<UpstreamFactory> */
     use HasFactory, HasUuids;
@@ -82,5 +83,15 @@ class Upstream extends Model
     public function metadataCache(): HasMany
     {
         return $this->hasMany(UpstreamMetadataCache::class);
+    }
+
+    public function endpointUrl(): string
+    {
+        return $this->url;
+    }
+
+    public function endpointToken(): ?string
+    {
+        return $this->auth_token;
     }
 }

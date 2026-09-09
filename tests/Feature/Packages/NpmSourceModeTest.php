@@ -74,21 +74,25 @@ function composerPayload(string $groupId, array $overrides = []): array
     ], $overrides);
 }
 
-it('advertises one source mode for npm and two for python', function () {
+it('advertises the allowed source modes per type, in order', function () {
     [$admin] = sourceModeFixture();
 
     $this->actingAs($admin)
         ->get('/admin/packages')
         ->assertInertia(fn ($page) => $page
-            ->count('sourceModes.npm', 1)
+            ->count('sourceModes.npm', 2)
             ->where('sourceModes.npm.0.value', 'publish')
-            ->count('sourceModes.python', 2)
-            ->count('sourceModes.composer', 1)
+            ->where('sourceModes.npm.1.value', 'mirror')
+            ->count('sourceModes.python', 3)
+            ->count('sourceModes.composer', 2)
             // Order matters, not just membership: the dialog's onTypeChange() seeds
             // form.source_mode from sourceModes[type][0].value, so the first entry is
             // what gets submitted when the user never touches the selector.
             ->where('sourceModes.composer.0.value', 'git')
+            ->where('sourceModes.composer.1.value', 'mirror')
             ->where('sourceModes.python.0.value', 'publish')
+            ->where('sourceModes.python.1.value', 'git')
+            ->where('sourceModes.python.2.value', 'mirror')
         );
 });
 

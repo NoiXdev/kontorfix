@@ -8,15 +8,18 @@ use App\Http\Requests\Admin\StoreOrganizationRequest;
 use App\Http\Resources\Api\OrganizationResource;
 use App\Models\Organization;
 use App\Services\Slugs\SlugClaimGuard;
+use Dedoc\Scramble\Attributes\Group;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
 
+#[Group('Organisationen')]
 class OrganizationController extends Controller
 {
     use ClampsPageSize;
 
+    /** Organisationen auflisten (instanzweit, nur Super-Admin). */
     public function index(Request $request): AnonymousResourceCollection
     {
         return OrganizationResource::collection(
@@ -24,11 +27,13 @@ class OrganizationController extends Controller
         );
     }
 
+    /** Organisationsdetails abrufen. */
     public function show(Organization $organization): OrganizationResource
     {
         return new OrganizationResource($organization);
     }
 
+    /** Neue Organisation anlegen. */
     public function store(StoreOrganizationRequest $request, SlugClaimGuard $slugs): JsonResponse
     {
         // Same authoritative re-check as Admin\OrganizationController::store() — both reach
@@ -42,6 +47,12 @@ class OrganizationController extends Controller
         return (new OrganizationResource($org))->response()->setStatusCode(201);
     }
 
+    /**
+     * Organisation löschen.
+     *
+     * Nur möglich, wenn die Organisation kein Betreiber ist und keine Nutzer, Registries
+     * oder Pakete mehr besitzt.
+     */
     public function destroy(Organization $organization): JsonResponse
     {
         // Packages too, not only users and registries — the same four conditions the console

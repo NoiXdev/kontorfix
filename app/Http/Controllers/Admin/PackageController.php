@@ -4,27 +4,42 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
+use App\Enums\RetentionRuleType;
+use App\Http\Controllers\Concerns\GuardsMirrorSourceAssignment;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\MirrorSource;
+use App\Models\OciManifest;
+use App\Models\OciTag;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
+use App\Models\RetentionPolicy;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Services\Mirror\MirrorProbe;
+use App\Services\Oci\BlobStore;
+use App\Services\Oci\Retention\RetentionRunner;
 use App\Services\Package\PackageDependencies;
 use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
+use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
 use App\Support\RepositoryUrlRules;
+use App\Support\Retention\RetentionDecision;
+use App\Support\Retention\RetentionRule;
+use App\Support\Retention\RetentionRuleSetValidator;
 use App\Support\VersionOrder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -38,7 +53,7 @@ use Inertia\Response;
 
 class PackageController extends Controller
 {
-    use ScopesToAdministeredOrgs;
+    use GuardsMirrorSourceAssignment, ScopesToAdministeredOrgs;
 
     // The sort column never comes from the request — only a key that selects one. This
     // route takes untrusted query-string values and is not throttled, and this controller
@@ -68,7 +83,12 @@ class PackageController extends Controller
         $packages = $this->scopePackageQuery(Package::query())
             ->withCount('groups')
             ->when($q !== '', fn ($query) => $query->where('name', 'ilike', '%'.addcslashes($q, '%_\\').'%'))
-            ->when(in_array($type, ['composer', 'npm', 'python'], true), fn ($query) => $query->where('type', $type))
+            // PackageType::tryFrom(), not a hardcoded list: the enum's own docblock
+            // promises that adding a type means editing PackageType, not chasing every
+            // hardcoded copy of its case list — this one silently left Docker unfilterable
+            // (selecting it in the enum-driven dropdown returned the UNFILTERED list,
+            // rather than an empty or Docker-only one) until it was found.
+            ->when(is_string($type) && PackageType::tryFrom($type) !== null, fn ($query) => $query->where('type', $type))
             ->when(in_array($status, ['pending', 'syncing', 'synced', 'failed'], true), fn ($query) => $query->where('sync_status', $status))
             // `group` is a plain query-string value on a route with no throttle, and it
             // lands on a Postgres `uuid` comparison: a malformed one raised
@@ -131,9 +151,14 @@ class PackageController extends Controller
             // hides the selector for it rather than offering a rejected choice.
             'sourceModes' => $this->sourceModesPayload(),
             // Managed git credentials the user may assign (never exposes the token).
-            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
-                ->orderBy('name')->get(['id', 'name', 'provider'])
-                ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
+            'gitCredentials' => $this->gitCredentialOptions(),
+            // Reusable mirror sources the mirror-mode field may select. Scoped to the active
+            // console scope the same way gitCredentialOptions() is — the package's eventual
+            // owner is not known until the registry selection is submitted — and further
+            // narrowed client-side to the currently selected package type, since a mirror
+            // source is itself typed (Composer/npm/Python) and a Composer package cannot
+            // mirror an npm source.
+            'mirrorSources' => $this->mirrorSourceOptions(),
         ]);
     }
 
@@ -153,15 +178,35 @@ class PackageController extends Controller
             ->all();
     }
 
-    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl): Response
+    public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl, SetupSnippetBuilder $snippets): Response
     {
         $this->assertCanTouchPackage($package);
+
+        // A Docker repository has nothing in common with the other three types' detail
+        // page: no versions, no git source, no sync job (isPublishBased() covers it, but
+        // there is no PackageVersion row to point "Versionen" at either) — and it needs a
+        // page the other three have no use for at all, plate 2's tag table with its
+        // occupied/shared size composition. Branching here, before any of the generic
+        // payload below is assembled, keeps that composition logic (and the size rule
+        // that goes with it) out of a method that would otherwise carry every type's
+        // concerns at once.
+        if ($package->type === PackageType::Docker) {
+            return $this->showDocker($request, $package, $registryUrl);
+        }
 
         // `groups.organization:id,slug` on top of the group's own columns: the registry list
         // below prints each registry's URL, and RegistryUrl reads the organization's slug for
         // the first segment. Without the relation this would be one lazy load per row; without
         // `slug` in it, a silent null and a /r//{groupSlug} on screen.
-        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug']);
+        // `groups.domains` on top: the install command below is built for one of these
+        // registries, and RegistryUrl reads the domain rows to decide whether that registry is
+        // addressed on its own host or on the instance host with a path prefix. Without the
+        // relation it would be one lazy load per group inside that decision.
+        // `mirrorSource:id,name` on top: the sync card below names the source a mirror-sourced
+        // package points at. Selecting only `id, name` (never `auth_token`, which is `$hidden`
+        // on the model anyway, but explicit is cheaper to audit) keeps the eager load to the
+        // one column the card actually prints.
+        $package->load(['versions', 'groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains', 'mirrorSource:id,name']);
         $package->setRelation('versions', VersionOrder::sort($package->versions));
 
         // `assertCanTouchPackage()` asserts that the package's OWNER is in the active scope
@@ -176,6 +221,24 @@ class PackageController extends Controller
         $visibleGroups = $scope->spansAllOrganizations()
             ? $package->groups
             : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
+
+        // ONE SOURCE FOR THE COMMAND, ON THE OPERATOR'S SIDE TOO. This tab used to assemble
+        // `{composer: …, npm: …, python: `pip install ${name}`}` in the `.vue` file — the exact
+        // registry-less pip command this whole change removed from the portal, still being
+        // printed one page over. `pip install kernmodul` does not fail: it resolves against
+        // PyPI and installs whatever a stranger published under that name.
+        //
+        // A command needs a registry, and a package can be in several. The rule is
+        // showDocker()'s, so the two halves of this controller pick the same one: a registry
+        // with a custom domain first, because its address is the shorter one, then the first
+        // visible registry, addressed on the instance host. Deterministic either way —
+        // Collection::first() preserves the `groups` query's own order.
+        //
+        // Null when the package is in NO registry this viewer can see. There is no address to
+        // build a command from then, and the tab says so instead of printing a registry-less
+        // one. Docker never reaches this: show() redirects to showDocker() above.
+        $installGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
+            ?? $visibleGroups->first();
 
         // Python is file-centric (multiple dists per version), so its "versions" and stats
         // come from the python_dists table rather than package_versions.
@@ -208,15 +271,43 @@ class PackageController extends Controller
                 'replacement_package' => $package->replacement_package,
                 'abandonment_reason' => $package->abandonment_reason,
                 'shared' => $package->shared,
+                // The sync card's mirror line: which reusable MirrorSource this package
+                // imports from, and what it is called there. Null for every other source
+                // mode — never an object with null members, so the template can gate on
+                // presence alone rather than re-deriving isMirrorSourced() on the client.
+                //
+                // `source_id`/`source_name` both go null together when the source was
+                // deleted (nullOnDelete — see MirrorSourceController::destroy()):
+                // isMirrorSourced() reads source_mode alone, so it stays true, but
+                // mirror_source_id and the mirrorSource relation both go null. The retarget
+                // form below (mirrorSources prop) is the fix path for exactly that state, and
+                // needs source_id to know the select should start empty rather than showing a
+                // stale id nothing resolves to.
+                'mirror' => $package->isMirrorSourced() ? [
+                    'source_id' => $package->mirror_source_id,
+                    'source_name' => $package->mirrorSource?->name,
+                    'mirror_name' => $package->mirror_name,
+                ] : null,
             ],
             // Whether the viewer holds the share-packages ability at all — passed rather
             // than re-derived in Vue so the front end never restates the gate's rule (the
             // instance setting it reads is not itself exposed to the client).
             'canSharePackages' => (bool) $request->user()?->can('share-packages'),
-            // Managed credentials assignable to this package (never exposes the token).
-            'gitCredentials' => GitCredential::whereIn('organization_id', $this->scopedOrgIds())
+            // Managed credentials assignable to this package: own, global, or explicitly
+            // shared to the package's owning organization (never exposes the token).
+            'gitCredentials' => GitCredential::usableBy($package->organization)
                 ->orderBy('name')->get(['id', 'name', 'provider'])
                 ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
+            // The retarget form's source picker: reusable mirror sources this specific
+            // package could point at instead — its own organization (a MirrorSource is never
+            // shared across organizations, see the model's docblock) and its own type (a
+            // Composer package cannot mirror an npm source, same rule
+            // GuardsMirrorSourceAssignment::assertMirrorSourceUsable() enforces on save).
+            // Unlike create()'s mirrorSources (scoped to the whole active console scope,
+            // because the package's eventual owner is not known yet and narrowed to type only
+            // client-side), both are already known here, so this is scoped tightly server-side.
+            // Null for every non-mirror package — the form has nothing to retarget.
+            'mirrorSources' => $package->isMirrorSourced() ? $this->mirrorSourceOptionsFor($package) : null,
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
@@ -236,6 +327,10 @@ class PackageController extends Controller
             ]),
             'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
             'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
+            // The Installation tab's whole content — see $installGroup above.
+            'install' => $installGroup === null
+                ? null
+                : $snippets->installCommand($installGroup, $package->type, $package->name),
             'stats' => $isPython ? [
                 'downloads' => (int) $dists->sum('download_count'),
                 'storage_bytes' => (int) $dists->sum('size'),
@@ -247,6 +342,468 @@ class PackageController extends Controller
             ],
             'activities' => ActivityPresenter::recentFor($package),
         ]);
+    }
+
+    /**
+     * A Docker repository's detail page (plate 2 of the approved mockups): the tag table,
+     * with its own size composition, plus the same ownership/assignment/sharing/activity
+     * surfaces every other package type gets from show() above.
+     *
+     * The size composition is the point of this method, not an afterthought, and it
+     * measures actual DISK bytes — the blobs (layers and config) a manifest references —
+     * never the manifest DOCUMENT's own byte size. `OciManifest::size` is
+     * `strlen($payload)`: the JSON that names a layer, typically a few hundred bytes,
+     * regardless of whether that layer is 4 KiB or 800 MiB. Summing THAT into an "occupied"
+     * total (an earlier version of this method did exactly that) displays a
+     * multi-hundred-megabyte image as a few hundred bytes — wrong by six orders of
+     * magnitude, not a rounding difference.
+     *
+     * Two tags can point at the same manifest (a `latest` alias next to the version it
+     * currently means), and a manifest is counted once regardless of how many tags name
+     * it — an occupied total that counted every tag's manifest in full would double real
+     * disk usage for every alias. `shared_bytes` is the subset of `occupied_bytes` that
+     * belongs to a manifest more than one tag points at (the SAME manifest under two
+     * names) — deliberately narrower than "any blob two different images happen to share",
+     * which `occupied_bytes` itself already dedupes away (see reachableBlobDigests()) but
+     * which no single tag ROW could sensibly be credited or blamed for. A tag on such a
+     * manifest reports `size_bytes` null (never a share of the total, which would be
+     * inventing a number the template cannot state a source for) and the template renders
+     * that as "geteilt".
+     *
+     * A manifest no tag points to directly — the per-platform child manifests of a
+     * multi-arch index, which buildx pushes BY DIGEST, never by tag (spec §2) — is still
+     * counted, but only when it is reachable from a manifest that IS tagged:
+     * reachableBlobDigests() walks an index's own `manifests[]` entries to the child
+     * OciManifest rows they name, so an index's real multi-platform disk footprint is
+     * counted under the ONE tag that names the index, not left out because the children
+     * themselves carry no tag of their own. A manifest reachable from NO tag at all — a
+     * fully orphaned digest push, or an index whose own tag was later moved elsewhere — is
+     * not counted anywhere on this page, the same as before this fix: "occupied" here means
+     * what this repository's tags currently serve, not an audit of everything the database
+     * still holds a row for. That is the blob sweeper's job (Plan B), not this page's.
+     */
+    private function showDocker(Request $request, Package $package, RegistryUrl $registryUrl): Response
+    {
+        // `groups.domains`: since ResolveOciContext every one of this package's registries
+        // can address it, so the panel below asks a narrower question — which of them has a
+        // hostname of its own, because that is the SHORTER address and the absence of one is
+        // what puts the note under the snippet. See the comment on `$dockerGroup`.
+        $package->load(['groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
+
+        // Same visibility rule show() applies above: a cross-organization row for a shared
+        // package is not this caller's business beyond a count. See that method's comment.
+        $scope = app(OrgScope::class);
+        $visibleGroups = $scope->spansAllOrganizations()
+            ? $package->groups
+            : $package->groups->whereIn('organization_id', $this->scopedOrgIds());
+
+        $tags = $package->ociTags()->with('manifest')->orderByDesc('updated_at')->get();
+
+        // How many tags point at each manifest — the one fact both the header total and
+        // every row's "own bytes or shared" answer are built from.
+        $tagsPerManifest = $tags->groupBy('manifest_id')->map->count();
+
+        // Each manifest counted once, by id, however many tags name it — not once per tag.
+        $uniqueManifests = $tags->pluck('manifest')->filter()->unique('id');
+
+        $blobStore = app(BlobStore::class);
+        $organizationId = (string) $package->organization_id;
+
+        // One BlobStore lookup per DISTINCT digest referenced by any tagged manifest,
+        // memoized so a base layer shared across many tags/manifests costs one query, not
+        // one per reference — the same read-count discipline platformFor() below already
+        // applies to config blobs (Task 8's own fix round: platform used to be read once
+        // per TAG rather than once per unique manifest).
+        $blobSizeCache = [];
+        $sizeOf = function (string $digest) use (&$blobSizeCache, $blobStore, $organizationId): int {
+            if (! array_key_exists($digest, $blobSizeCache)) {
+                $blob = $blobStore->find($organizationId, $digest);
+                $blobSizeCache[$digest] = $blob === null ? 0 : $blob->size;
+            }
+
+            return $blobSizeCache[$digest];
+        };
+
+        $digestsByManifest = $uniqueManifests->mapWithKeys(
+            fn (OciManifest $m): array => [$m->id => array_values(array_unique($this->reachableBlobDigests($m, $package)))]
+        );
+        $bytesByManifest = $digestsByManifest->map(
+            fn (array $digests): int => array_sum(array_map($sizeOf, $digests))
+        );
+
+        // Repository-wide total: every distinct blob digest reachable from ANY tagged
+        // manifest, counted once — not the sum of $bytesByManifest, which would
+        // double-count a base layer two DIFFERENT (non-aliased) tags both build on. The
+        // real disk holds one copy of that layer regardless of how many images reference
+        // it, so the total does too.
+        $occupiedBytes = (int) $digestsByManifest->flatten()->unique()->sum($sizeOf);
+
+        $sharedBytes = (int) $uniqueManifests
+            ->filter(fn (OciManifest $m): bool => ($tagsPerManifest->get($m->id) ?? 0) > 1)
+            ->sum(fn (OciManifest $m): int => $bytesByManifest->get($m->id) ?? 0);
+
+        // Computed once per UNIQUE manifest (over `$uniqueManifests`, the same collection
+        // the size composition above already deduplicated to), never once per tag. Two
+        // tags aliasing one manifest — `latest` next to the version it currently means, the
+        // exact shape the shared-bytes test below sets up — share one BlobStore read of the
+        // config blob, not two: the read count scales with distinct manifests, not with how
+        // many names point at them.
+        $platformByManifest = $uniqueManifests->mapWithKeys(
+            fn (OciManifest $m): array => [$m->id => $this->platformFor($m, $organizationId, $blobStore)]
+        );
+
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest): array {
+            $manifest = $tag->manifest;
+            $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
+
+            return [
+                'name' => $tag->name,
+                'digest' => $manifest?->digest,
+                'platform' => $manifest !== null ? $platformByManifest->get($manifest->id) : null,
+                // Null exactly when the manifest is shared — never the manifest's full size
+                // repeated for every tag that names it, and never a fabricated fraction of
+                // it either (see this method's doc comment).
+                'size_bytes' => $shared || $manifest === null ? null : $bytesByManifest->get($manifest->id),
+                'shared' => $shared,
+                'pushed_at' => $tag->updated_at?->diffForHumans(),
+            ];
+        });
+
+        // A Docker repository can be assigned to more than one registry, and since
+        // ResolveOciContext every one of them is a working `docker pull` address — so this
+        // is a choice between addresses, not between an address and nothing. A registry with
+        // a custom domain is preferred because its reference is the shorter one; failing
+        // that, the first visible registry, addressed on the instance host. Deterministic
+        // either way (Collection::first() preserves the `groups` query's own order); a
+        // repository shared across several domained registries is a real but rare shape this
+        // page does not need to disambiguate further.
+        //
+        // Null only when the repository is in NO registry this viewer can see — the one
+        // remaining case with no address at all, which dockerSetup.ts's
+        // dockerNoRegistryMessage() states.
+        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
+            ?? $visibleGroups->first();
+
+        return Inertia::render('admin/packages/DockerTags', [
+            'package' => [
+                'id' => $package->id,
+                'type' => $package->type->value,
+                'name' => $package->name,
+                'description' => $package->description,
+                'abandoned_at' => $package->abandoned_at?->toDateString(),
+                'replacement_package' => $package->replacement_package,
+                'abandonment_reason' => $package->abandonment_reason,
+                'shared' => $package->shared,
+            ],
+            'canSharePackages' => (bool) $request->user()?->can('share-packages'),
+            'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
+            'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
+            // Plate 1's access panel, package-scoped: where a Docker client reaches THIS
+            // repository. The same three facts SetupSnippetBuilder states for the
+            // registry-level tab, from the same two RegistryUrl methods, so the two surfaces
+            // cannot disagree about one registry's address.
+            //
+            // `host` used to be null for a registry without a domain, and the page rendered
+            // an empty state saying images were impossible there. Both were made false by
+            // path addressing. Null now means only "this repository is in no registry this
+            // viewer can see", which is the one case with genuinely nothing to print.
+            'access' => [
+                'host' => $dockerGroup !== null ? $registryUrl->dockerHost($dockerGroup) : null,
+                'repository_prefix' => $dockerGroup !== null ? $registryUrl->dockerRepositoryPrefix($dockerGroup) : null,
+                'has_domain' => $dockerGroup !== null && $dockerGroup->domains->isNotEmpty(),
+            ],
+            'tags' => $tagRows->values(),
+            'stats' => [
+                'tag_count' => $tags->count(),
+                'occupied_bytes' => $occupiedBytes,
+                'shared_bytes' => $sharedBytes,
+            ],
+            'activities' => ActivityPresenter::recentFor($package),
+            'retention' => $this->retentionCard($request, $package),
+        ]);
+    }
+
+    /**
+     * The retention card's payload: which policy (or inline rule set) resolves for this
+     * repository, from which tier, what the next run would remove — and, for whoever
+     * administers the owning organization, the selector and the inline-rule editor.
+     *
+     * `policies` carries only PUBLISHED (is_global) policies for a non-super caller: which
+     * other rule sets exist on the instance is operator configuration, and the card must not
+     * double as a catalogue of it. A super-admin sees every policy.
+     *
+     * @return array<string, mixed>
+     */
+    private function retentionCard(Request $request, Package $package): array
+    {
+        $runner = app(RetentionRunner::class);
+        $report = $runner->dryRun($package);
+        $resolution = $report?->resolution;
+
+        $user = $request->user();
+        $isSuper = (bool) $user?->isSuperAdmin();
+        // The owning organization's admin may set the package tier — the operator decision
+        // that made the instance default a default. administers() short-circuits true for
+        // a super-admin, so one check covers both.
+        $canAssign = (bool) $user?->administers((string) $package->organization_id);
+
+        return [
+            'policy' => $resolution?->policy === null ? null : ['id' => $resolution->policy->id, 'name' => $resolution->policy->name],
+            'tier' => $resolution?->tier,
+            'label' => $resolution?->label(),
+            'rules' => $resolution === null ? [] : $resolution->describedRules(),
+            'dry_run' => $report?->toArray(),
+            'can_assign' => $canAssign,
+            'selected_policy_id' => $package->retention_policy_id,
+            'inline_rules' => $package->retention_rules,
+            'rule_types' => RetentionRuleType::options(),
+            // A non-super caller sees only PUBLISHED policies — which other rule sets exist
+            // on the instance is operator configuration.
+            'policies' => $canAssign
+                ? RetentionPolicy::query()
+                    ->when(! $isSuper, fn ($query) => $query->where('is_global', true))
+                    ->orderBy('name')
+                    ->get(['id', 'name'])
+                    ->map(fn (RetentionPolicy $policy): array => ['id' => (string) $policy->id, 'name' => $policy->name])
+                    ->all()
+                : [],
+        ];
+    }
+
+    /**
+     * A repository's retention: the named policy it selects, and/or its anonymous inline
+     * rules. In the ORG-SCOPED group since the operator decision that the package tier
+     * wins unconditionally — the owning organization's admin sets it, and the instance
+     * default became a default rather than a mandate. Two guards remain:
+     *
+     *   - assertCanTouchPackage(): only the owning organization (or a super-admin).
+     *   - A non-super caller may select only PUBLISHED (is_global) policies. Naming an
+     *     existing but unpublished policy is refused 403 — the same abort_unless() shape
+     *     assertCanTouchPackage() itself uses — not folded into validation: this is an
+     *     authorization decision (who this policy is for), not a "does this id exist" one,
+     *     and the two must not share a status code.
+     */
+    public function updateRetention(Request $request, Package $package): RedirectResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        // 409, not validation: the route resolved a real package, but retention operates
+        // on tags and only Docker repositories have any — the same reason the resolver
+        // answers null for every other type.
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $data = $request->validate([
+            'retention_policy_id' => ['sometimes', 'nullable', 'uuid', 'exists:retention_policies,id'],
+            'retention_rules' => ['sometimes', 'nullable', 'array', 'min:1', RetentionRuleSetValidator::rule()],
+        ]);
+
+        $isSuper = (bool) $request->user()?->isSuperAdmin();
+
+        if (! $isSuper && array_key_exists('retention_policy_id', $data) && $data['retention_policy_id'] !== null) {
+            $isGlobal = RetentionPolicy::whereKey($data['retention_policy_id'])->value('is_global');
+            abort_unless((bool) $isGlobal, 403, 'Diese Richtlinie ist nicht veröffentlicht.');
+        }
+
+        $update = [];
+        if (array_key_exists('retention_policy_id', $data)) {
+            $update['retention_policy_id'] = $data['retention_policy_id'];
+        }
+        if (array_key_exists('retention_rules', $data)) {
+            $update['retention_rules'] = $data['retention_rules'] === null
+                ? null
+                : RetentionRuleSetValidator::normalise($data['retention_rules']);
+        }
+
+        abort_if($update === [], 422, 'Nichts zu ändern.');
+
+        $package->update($update);
+
+        return back()->with('success', 'Aufbewahrung aktualisiert.');
+    }
+
+    /**
+     * The card's "Anwenden": one repository, re-resolved at apply time, with the caller as
+     * causer. Org-scoped, same boundary as updateRetention() — the owning organization's
+     * admin (or a super-admin) may run it, since applying is the other half of the same
+     * lever assignment is.
+     */
+    public function applyRetention(Request $request, Package $package, RetentionRunner $runner): RedirectResponse
+    {
+        // Whoever may edit the package's retention may run it — the same boundary as
+        // updateRetention(), for the same reason.
+        $this->assertCanTouchPackage($package);
+
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $report = $runner->apply($package, $request->user());
+
+        return back()->with('success', sprintf(
+            '%d Tag(s) entfernt. Speicherplatz wird erst von der Speicherbereinigung freigegeben, nach Ablauf der Schonfrist.',
+            $report === null ? 0 : count($report->removed()),
+        ));
+    }
+
+    /**
+     * The inline-rules editor's live preview: the UNSAVED rules currently in the editor,
+     * tried against THIS package — no repository picker, unlike the policy form's preview,
+     * because the package being edited IS the one repository there is to try them against.
+     * Same boundary as updateRetention()/applyRetention(): whoever may edit or apply this
+     * package's retention may preview it too.
+     *
+     * Never writes `retention_rules` — the whole point is trying a rule set out before
+     * deciding to save it.
+     */
+    public function previewRetention(Request $request, Package $package, RetentionRunner $runner): JsonResponse
+    {
+        $this->assertCanTouchPackage($package);
+
+        abort_if($package->type !== PackageType::Docker, 409, 'Aufbewahrungsrichtlinien gibt es nur für Image-Repositories.');
+
+        $data = $request->validate([
+            'retention_rules' => ['required', 'array', 'min:1', RetentionRuleSetValidator::rule()],
+        ]);
+
+        return response()->json([
+            'summary' => RetentionRule::describeAll($data['retention_rules']),
+            'tags' => array_map(
+                fn (RetentionDecision $decision): array => $decision->toArray(),
+                $runner->previewWithRules($package, $data['retention_rules']),
+            ),
+        ]);
+    }
+
+    /**
+     * Every blob digest reachable from $manifest within $package: its own config and
+     * layer digests for an image manifest, plus — recursively — the same for every
+     * per-platform CHILD manifest a multi-arch index names, matched by digest against
+     * this package's own oci_manifests rows (buildx pushes each platform's manifest by
+     * digest, untagged, before the index itself — see showDocker()'s own doc comment on
+     * why an untagged child still counts here even though it counts nowhere as its OWN
+     * top-level row). A child digest with no matching row (never pushed, or a database
+     * restore older than the manifest) is skipped rather than guessed at, the same
+     * "display nicety, not an audit" stance platformFor() below takes.
+     *
+     * $visited guards a pathological index naming itself, or a cycle across two indexes
+     * naming each other, as one of its own children — neither is valid OCI, but this
+     * method must not infinite-loop on a malformed payload a client managed to push.
+     *
+     * @param  array<string, true>  $visited
+     * @return list<string>
+     */
+    private function reachableBlobDigests(OciManifest $manifest, Package $package, array &$visited = []): array
+    {
+        if (isset($visited[$manifest->id])) {
+            return [];
+        }
+        $visited[$manifest->id] = true;
+
+        $payload = json_decode($manifest->payload, true);
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $digests = [];
+
+        $configDigest = $payload['config']['digest'] ?? null;
+        if (is_string($configDigest)) {
+            $digests[] = $configDigest;
+        }
+
+        foreach ($payload['layers'] ?? [] as $layer) {
+            $layerDigest = is_array($layer) ? ($layer['digest'] ?? null) : null;
+            if (is_string($layerDigest)) {
+                $digests[] = $layerDigest;
+            }
+        }
+
+        foreach ($payload['manifests'] ?? [] as $child) {
+            $childDigest = is_array($child) ? ($child['digest'] ?? null) : null;
+            if (! is_string($childDigest)) {
+                continue;
+            }
+
+            $childManifest = OciManifest::where('package_id', $package->id)->where('digest', $childDigest)->first();
+            if ($childManifest !== null) {
+                array_push($digests, ...$this->reachableBlobDigests($childManifest, $package, $visited));
+            }
+        }
+
+        return $digests;
+    }
+
+    /**
+     * Best-effort platform ("os/architecture") for one manifest, or null when it cannot be
+     * answered — never a guess. Two shapes are understood:
+     *
+     *   - A multi-arch index: its own payload lists one descriptor per platform directly,
+     *     no blob read needed. Summarised as "multi-arch" once more than one distinct
+     *     platform is named, since the column has room for one answer, not a list.
+     *   - A single image manifest: the OCI Image Manifest carries no platform field of its
+     *     own — it lives in the config blob the manifest points at (`config.digest`), the
+     *     Image Configuration spec's `os`/`architecture` fields — so this reads that blob
+     *     via BlobStore, the one class that touches the artifacts disk for OCI content.
+     *
+     * A missing blob, unparsable JSON, or an unrecognised shape all fall through to null
+     * rather than raising: this is a display nicety on an admin table, and a config blob
+     * genuinely can be absent (a database restore older than the artifacts volume) without
+     * that being this page's problem to surface as an error.
+     */
+    private function platformFor(OciManifest $manifest, string $organizationId, BlobStore $blobStore): ?string
+    {
+        $payload = json_decode($manifest->payload, true);
+        if (! is_array($payload)) {
+            return null;
+        }
+
+        if (isset($payload['manifests']) && is_array($payload['manifests'])) {
+            $platforms = collect($payload['manifests'])
+                ->map(function ($entry) {
+                    $platform = is_array($entry) ? ($entry['platform'] ?? null) : null;
+                    if (! is_array($platform)) {
+                        return null;
+                    }
+                    $os = $platform['os'] ?? null;
+                    $arch = $platform['architecture'] ?? null;
+
+                    return (is_string($os) && is_string($arch)) ? "{$os}/{$arch}" : null;
+                })
+                ->filter()
+                ->unique()
+                ->values();
+
+            return match (true) {
+                $platforms->isEmpty() => null,
+                $platforms->count() === 1 => $platforms->first(),
+                default => 'multi-arch',
+            };
+        }
+
+        $configDigest = $payload['config']['digest'] ?? null;
+        if (! is_string($configDigest)) {
+            return null;
+        }
+
+        $blob = $blobStore->find($organizationId, $configDigest);
+        if ($blob === null) {
+            return null;
+        }
+
+        $stream = $blobStore->readStream($blob);
+        if ($stream === null) {
+            return null;
+        }
+
+        $config = json_decode(stream_get_contents($stream) ?: '', true);
+        fclose($stream);
+
+        if (! is_array($config)) {
+            return null;
+        }
+
+        $os = $config['os'] ?? null;
+        $arch = $config['architecture'] ?? null;
+
+        return (is_string($os) && is_string($arch)) ? "{$os}/{$arch}" : null;
     }
 
     /**
@@ -299,8 +856,10 @@ class PackageController extends Controller
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);
             // Refuse loudly rather than silently probing without the credential: a
-            // reference to a foreign organization's secret is never a legitimate request.
-            $this->assertAdministersOrg($credential->organization_id);
+            // reference to a credential no organization in the active scope may use is
+            // never a legitimate request. Own, global and shared all qualify — the same
+            // set the create page's dropdown offers.
+            $this->assertCredentialUsableInScope($credential);
             // A stored token is bound to one host and may not be probed against another.
             $this->assertCredentialPermits($credential, $data['repository_url']);
 
@@ -320,6 +879,41 @@ class PackageController extends Controller
             'user_id' => $request->user()?->id,
             'repository_url' => CredentialUrl::redact($data['repository_url']),
             'git_credential_id' => $data['git_credential_id'] ?? null,
+            'ok' => $result['ok'],
+        ]);
+
+        return response()->json($result);
+    }
+
+    /**
+     * The mirror counterpart of probe() above: confirm a package exists at a MirrorSource and
+     * show its discovered name/description/versions before anything is persisted — the create
+     * mask's precondition for saving a mirror-mode package, the same way probe() gates a
+     * git-mode one. Throttled identically (`throttle:10,1`, see routes/web.php) since this,
+     * too, makes the instance dial an address the caller only indirectly controls.
+     */
+    public function probeMirror(Request $request, MirrorProbe $probe): JsonResponse
+    {
+        $data = $request->validate([
+            'mirror_source_id' => ['required', 'uuid', 'exists:mirror_sources,id'],
+            'mirror_name' => ['required', 'string', 'max:255'],
+        ]);
+
+        $source = MirrorSource::findOrFail($data['mirror_source_id']);
+        // A mirror source is never shared across organizations (see its docblock) — usable
+        // only by the active scope's own organizations, the same boundary MirrorSourceController
+        // itself enforces.
+        $this->assertAdministersOrg($source->organization_id);
+
+        $result = $probe->probe($source, $data['mirror_name']);
+
+        // Same audit rationale as probe() above: this endpoint makes the instance dial an
+        // address the caller only indirectly controls (via the chosen MirrorSource), and
+        // leaving no trace made a Maintainer's probing indistinguishable from nobody having
+        // used the console.
+        Log::info('Mirror probe.', [
+            'user_id' => $request->user()?->id,
+            'mirror_source_id' => $source->id,
             'ok' => $result['ok'],
         ]);
 
@@ -347,18 +941,30 @@ class PackageController extends Controller
             (string) $request->validated('name'),
         );
 
-        // A referenced credential must belong to an organization the user administers,
+        // A referenced credential must be usable by the package's owning organization —
+        // its own, global, or explicitly shared to it (see GitCredential::isUsableBy()) —
         // and may only be paired with a repository on the host it is bound to.
         if ($request->filled('git_credential_id')) {
             $credential = GitCredential::findOrFail($request->validated('git_credential_id'));
-            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialUsableBy($credential, $request->ownerOrganizationId());
             $this->assertCredentialPermits($credential, $request->validated('repository_url'));
+        }
+
+        $type = PackageType::from($request->validated('type'));
+        $sourceMode = $request->effectiveSourceMode($type);
+
+        // A referenced mirror source must belong to the package's owning organization and
+        // match its type — checked (and refused) before anything is persisted, the same
+        // guarantee the credential checks above give the git path.
+        if ($sourceMode === PackageSourceMode::Mirror) {
+            $mirrorSource = MirrorSource::findOrFail($request->validated('mirror_source_id'));
+            $this->assertMirrorSourceUsable($mirrorSource, $request->ownerOrganizationId(), $type);
         }
 
         // The source mode is authoritative (Composer is always git; npm/Python honour the
         // submitted mode) so the stored column is truthful regardless of what was sent.
         $attributes = $request->safe()->except('group_ids');
-        $attributes['source_mode'] = $request->effectiveSourceMode(PackageType::from($request->validated('type')))->value;
+        $attributes['source_mode'] = $sourceMode->value;
         // The owner is the organization the selected registries belong to; the request has
         // already refused a selection spanning more than one.
         $attributes['organization_id'] = $request->ownerOrganizationId();
@@ -366,10 +972,12 @@ class PackageController extends Controller
         $package = Package::create($attributes);
         $package->groups()->sync($groupIds);
 
-        // Only git-sourced packages have something to sync; publish-based packages (npm,
-        // Python) are filled by pushing artifacts — skip the (doomed) sync job.
+        // Only git- and mirror-sourced packages have something to sync; publish-based
+        // packages (npm, Python) are filled by pushing artifacts — skip the (doomed) sync job.
         if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
+        } elseif ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
         }
 
         // The PackagePicker creates packages inline via fetch and needs the
@@ -402,6 +1010,12 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
+        // A mirror-sourced package has no repository of its own to edit here — it points at
+        // a MirrorSource instead — so it gets its own, much narrower, write path.
+        if ($package->isMirrorSourced()) {
+            return $this->updateMirror($request, $package);
+        }
+
         // The detail page is now shown the redacted URL like every other reader, and its
         // form posts back whatever it was given. A redacted value byte-identical to the
         // redaction of what is stored is that echo — it means "unchanged", not "erase the
@@ -425,6 +1039,10 @@ class PackageController extends Controller
             'repository_token' => ['nullable', 'string', 'max:500'],
             'git_credential_id' => ['nullable', 'uuid', 'exists:git_credentials,id'],
             'remove_token' => ['sometimes', 'boolean'],
+            // This is the git/publish path: mirror_source_id/mirror_name belong to a
+            // mirror-sourced package only, which is refused above before reaching here.
+            'mirror_source_id' => ['prohibited'],
+            'mirror_name' => ['prohibited'],
         ], RepositoryUrlRules::messages());
 
         // `??` could not express "clear it". An emptied field arrives as null (the global
@@ -436,7 +1054,7 @@ class PackageController extends Controller
 
         if (! empty($data['git_credential_id'])) {
             $credential = GitCredential::findOrFail($data['git_credential_id']);
-            $this->assertAdministersOrg($credential->organization_id);
+            $this->assertCredentialUsableBy($credential, $package->organization_id);
             $this->assertCredentialPermits($credential, $url);
         }
 
@@ -468,6 +1086,45 @@ class PackageController extends Controller
         // Re-sync git-sourced packages so a changed URL/token takes effect immediately.
         if ($package->isGitSourced() && $package->repository_url !== null) {
             SyncPackage::dispatch($package);
+        }
+
+        return back()->with('success', 'Paket aktualisiert.');
+    }
+
+    /**
+     * update()'s mirror-mode counterpart: the only two fields a mirror-sourced package's
+     * "Quelle" ever has are which MirrorSource it points at and what it is called there. Git
+     * fields are prohibited here — a mirror-sourced package authenticates through its
+     * MirrorSource, never through a per-package git token — so posting them is refused the
+     * same way mirror fields are refused on the git/publish path above.
+     *
+     * Re-dispatches SyncMirrorPackage only when something actually changed: an operator
+     * re-submitting the same source/name (e.g. the form's own success round-trip) must not
+     * spend another sync run for nothing.
+     */
+    private function updateMirror(Request $request, Package $package): RedirectResponse
+    {
+        $data = $request->validate([
+            'mirror_source_id' => ['required', 'uuid', 'exists:mirror_sources,id'],
+            'mirror_name' => ['required', 'string', 'max:255'],
+            'repository_url' => ['prohibited'],
+            'repository_token' => ['prohibited'],
+            'git_credential_id' => ['prohibited'],
+        ]);
+
+        $source = MirrorSource::findOrFail($data['mirror_source_id']);
+        $this->assertMirrorSourceUsable($source, $package->organization_id, $package->type);
+
+        $changed = $package->mirror_source_id !== $data['mirror_source_id']
+            || $package->mirror_name !== $data['mirror_name'];
+
+        $package->update([
+            'mirror_source_id' => $data['mirror_source_id'],
+            'mirror_name' => $data['mirror_name'],
+        ]);
+
+        if ($changed) {
+            SyncMirrorPackage::dispatch($package);
         }
 
         return back()->with('success', 'Paket aktualisiert.');
@@ -590,9 +1247,16 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
-        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
+        // Publish-based packages (npm, Python) are filled by pushing artifacts, not by
+        // syncing from anywhere — git-sourced and mirror-sourced packages both have
+        // something to resync against, so only isPublishSourced() is refused.
+        abort_if($package->isPublishSourced(), 409, 'Dieses Paket ist publish-basiert und kann nicht synchronisiert werden.');
 
-        SyncPackage::dispatch($package);
+        if ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
+        } else {
+            SyncPackage::dispatch($package);
+        }
 
         return back()->with('success', 'Synchronisierung wurde eingereiht.');
     }
@@ -608,6 +1272,92 @@ class PackageController extends Controller
                 'repository_url' => $credential->hostMismatchMessage(),
             ]);
         }
+    }
+
+    /**
+     * Aborts 403 unless $organizationId may USE the credential — its own, global, or
+     * explicitly shared to it (see GitCredential::isUsableBy()). Replaces a stricter "must
+     * administer the credential's own organization" check: with shared/global credentials
+     * the two organizations are allowed to differ, e.g. the operator's own credential
+     * assigned to a customer's package. A plain foreign credential (neither global nor
+     * shared) still refuses, exactly as it did before.
+     */
+    private function assertCredentialUsableBy(GitCredential $credential, string $organizationId): void
+    {
+        abort_unless($credential->isUsableBy(Organization::findOrFail($organizationId)), 403);
+    }
+
+    /**
+     * The probe endpoint has no package (and so no owning organization) to check against
+     * yet — it is reached from the create page before any registry has been submitted.
+     * Refuses unless the credential is usable by at least one organization in the active
+     * console scope, the same set the create page's dropdown offers via
+     * gitCredentialOptions() below — both delegate to GitCredential::scopeUsableByAny()
+     * rather than each restating the own/global/shared OR.
+     */
+    private function assertCredentialUsableInScope(GitCredential $credential): void
+    {
+        $usable = GitCredential::query()
+            ->whereKey($credential->id)
+            ->usableByAny($this->scopedOrgIds())
+            ->exists();
+
+        abort_unless($usable, 403);
+    }
+
+    /**
+     * Credentials assignable from the create page's dropdown: own (within the active
+     * scope) plus global/shared ones. Widened to every organization in scope, not just
+     * one, because the package's eventual owner is not known until the registry selection
+     * is submitted — GitCredential::scopeUsableByAny() applied to every scoped organization
+     * at once, rather than GitCredential::scopeUsableBy() applied to one already-known
+     * package.
+     *
+     * @return array<int, array{id: string, name: string, provider: string}>
+     */
+    private function gitCredentialOptions(): array
+    {
+        return GitCredential::query()
+            ->usableByAny($this->scopedOrgIds())
+            ->orderBy('name')->get(['id', 'name', 'provider'])
+            ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value])
+            ->all();
+    }
+
+    /**
+     * Mirror sources assignable from the create page's mirror-mode field: those owned within
+     * the active scope. Unlike GitCredential, a MirrorSource is never shared across
+     * organizations (see its docblock) — so, unlike gitCredentialOptions() above, this is a
+     * plain ownership filter, not an own/global/shared union.
+     *
+     * @return array<int, array{id: string, name: string, type: string}>
+     */
+    private function mirrorSourceOptions(): array
+    {
+        return MirrorSource::query()
+            ->whereIn('organization_id', $this->scopedOrgIds())
+            ->orderBy('name')->get(['id', 'name', 'type'])
+            ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name, 'type' => $s->type->value])
+            ->all();
+    }
+
+    /**
+     * mirrorSourceOptions()'s show()-page counterpart: sources $package could retarget to.
+     * Both the organization and the type are already fixed once a package exists, so this is
+     * scoped tightly to exactly the sources assertMirrorSourceUsable() would accept, rather
+     * than the whole active console scope narrowed by type on the client the way create()'s
+     * picker is (the package's eventual owner is not known yet there).
+     *
+     * @return array<int, array{id: string, name: string}>
+     */
+    private function mirrorSourceOptionsFor(Package $package): array
+    {
+        return MirrorSource::query()
+            ->where('organization_id', $package->organization_id)
+            ->where('type', $package->type)
+            ->orderBy('name')->get(['id', 'name'])
+            ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name])
+            ->all();
     }
 
     /**

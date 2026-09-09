@@ -98,4 +98,64 @@ class RegistryUrl
     {
         return $group->domains->isNotEmpty() ? '' : $this->path($group);
     }
+
+    /**
+     * The host a Docker client addresses — `docker login <this>`.
+     *
+     * Never null, and that is the change ResolveOciContext made: the OCI Distribution Spec
+     * puts `/v2/` at the root of a host, so a registry used to need a domain of its own
+     * before any Docker client could reach it. It no longer does. The instance's own host
+     * serves `/v2/` too, and the organization and registry slugs ride along as the leading
+     * segments of the repository name (see dockerRepositoryPrefix() below). A custom domain
+     * is now the SHORTER address, not the price of entry.
+     *
+     * On the instance-host branch the port is kept, unlike host(): an image reference is
+     * written host-and-port or not at all, and an instance published on a non-default port is
+     * the ordinary development case. The custom-domain branch delegates to host() and would
+     * therefore DROP a port — harmless only because the `domains` column holds a bare
+     * hostname with no port in it and base() hardcodes `https://`, so a custom domain is
+     * :443 by assumption. A domain row that ever carries a port would have to be handled
+     * here, not left to host().
+     */
+    public function dockerHost(Group $group): string
+    {
+        return $group->domains->isNotEmpty() ? $this->host($group) : $this->authority($this->origin());
+    }
+
+    /**
+     * What a repository name carries in front of it on that host: nothing on a custom
+     * domain, `{organization}/{registry}/` on the instance host.
+     *
+     * This is the ONE statement of the writing end of ResolveOciContext's split — that
+     * middleware strips exactly these two leading segments back off again — so the two forms
+     * cannot drift. Note it is NOT path(): `/r/…` is the Composer/npm/Python address, and
+     * neither the `/r` nor a leading slash belongs in an image reference.
+     */
+    public function dockerRepositoryPrefix(Group $group): string
+    {
+        if ($group->domains->isNotEmpty()) {
+            return '';
+        }
+
+        return $group->organization->slug.'/'.$group->slug.'/';
+    }
+
+    /**
+     * Everything a `docker pull` writes before the repository name, without a trailing
+     * slash — host and namespace as one string, for the callers that only ever concatenate
+     * the two (SetupSnippetBuilder::installCommand() among them).
+     */
+    public function dockerImagePrefix(Group $group): string
+    {
+        return rtrim($this->dockerHost($group).'/'.$this->dockerRepositoryPrefix($group), '/');
+    }
+
+    /** Host plus `:port` when the URL names one — parse_url's PHP_URL_HOST drops it. */
+    private function authority(string $url): string
+    {
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        $port = parse_url($url, PHP_URL_PORT);
+
+        return $port === null ? $host : $host.':'.$port;
+    }
 }

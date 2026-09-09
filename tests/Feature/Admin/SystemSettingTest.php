@@ -38,3 +38,30 @@ it('exposes the registration flag to the frontend for the login page', function 
 
     $this->get('/login')->assertInertia(fn ($page) => $page->where('registrationEnabled', true));
 });
+
+it('exposes push-time repository creation to the settings page, off by default', function () {
+    $this->actingAs(systemAdmin())->get('/admin/system')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('settings.oci_auto_create_repositories', false));
+});
+
+it('toggles push-time repository creation', function () {
+    expect(SystemSetting::current()->oci_auto_create_repositories)->toBeFalse();
+
+    $this->actingAs(systemAdmin())
+        ->put('/admin/system', ['registration_enabled' => false, 'oci_auto_create_repositories' => true])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect(SystemSetting::current()->oci_auto_create_repositories)->toBeTrue();
+});
+
+it('leaves push-time repository creation alone for a payload that never mentions it', function () {
+    // The `sometimes` rule, which is why three partial callers of this endpoint are not
+    // 422s: an omitted field must neither fail validation nor be written as false.
+    SystemSetting::current()->update(['oci_auto_create_repositories' => true]);
+
+    $this->actingAs(systemAdmin())->put('/admin/system', ['registration_enabled' => true])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    expect(SystemSetting::current()->oci_auto_create_repositories)->toBeTrue();
+});

@@ -10,6 +10,7 @@ import { gitCredentialFormKey, type GitCredentialFormData } from './gitCredentia
 interface OrganizationOption {
     id: string;
     name: string;
+    is_operator: boolean;
 }
 
 interface ProviderOption {
@@ -20,6 +21,7 @@ interface ProviderOption {
 
 const props = defineProps<{
     organizations: OrganizationOption[];
+    shareableOrganizations: { id: string; name: string }[];
     providers: ProviderOption[];
 }>();
 
@@ -35,6 +37,8 @@ const form = useForm<GitCredentialFormData>({
     host: '',
     username: '',
     token: '',
+    is_global: false,
+    shared_organization_ids: [],
 });
 
 provide(gitCredentialFormKey, form);
@@ -53,7 +57,12 @@ function submit() {
                 <h1 class="text-xl font-semibold">Git-Token hinterlegen</h1>
 
                 <form class="space-y-4" @submit.prevent="submit">
-                    <Form :organizations="props.organizations" :providers="props.providers" mode="create" />
+                    <Form
+                        :organizations="props.organizations"
+                        :shareable-organizations="props.shareableOrganizations"
+                        :providers="props.providers"
+                        mode="create"
+                    />
 
                     <div class="flex justify-end gap-2">
                         <Button as-child variant="outline">

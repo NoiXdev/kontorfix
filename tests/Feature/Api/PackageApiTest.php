@@ -1,8 +1,11 @@
 <?php
 
 use App\Enums\ApiKeyPermission;
+use App\Enums\PackageType;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\ApiKey;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
@@ -74,6 +77,85 @@ it('refuses a resync request against a publish-based package with a reference-on
         ->assertStatus(409);
 
     Queue::assertNothingPushed();
+});
+
+it('dispatches SyncMirrorPackage for a mirror-sourced package resync request', function () {
+    Queue::fake();
+    $plain = operatorWriteToken();
+    $source = MirrorSource::factory()->create(['type' => PackageType::Composer]);
+    $package = Package::factory()->create([
+        'organization_id' => $source->organization_id,
+        'type' => PackageType::Composer,
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/demo',
+        'repository_url' => null,
+    ]);
+
+    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")->assertOk();
+
+    Queue::assertPushed(SyncMirrorPackage::class, fn (SyncMirrorPackage $job): bool => $job->package->is($package));
+    Queue::assertNotPushed(SyncPackage::class);
+});
+
+it('creates a mirror-sourced package via the api and dispatches a mirror sync', function () {
+    Queue::fake();
+    $org = Organization::factory()->create(['is_operator' => true]);
+    $admin = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+    [, $plain] = ApiKey::issue($admin, 'w', ApiKeyPermission::Write);
+    $source = MirrorSource::factory()->create(['organization_id' => $org->id, 'type' => PackageType::Composer]);
+
+    $this->withToken($plain)->postJson('/api/v1/packages', [
+        'type' => 'composer',
+        'name' => 'acme/mirrored',
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/upstream-name',
+        'group_ids' => [homeRegistryId($admin)],
+    ])->assertCreated()->assertJsonPath('data.name', 'acme/mirrored');
+
+    $pkg = Package::where('name', 'acme/mirrored')->firstOrFail();
+    Queue::assertPushed(SyncMirrorPackage::class, fn (SyncMirrorPackage $job) => $job->package->is($pkg));
+});
+
+it('refuses to create an api package pointed at a mirror source of another organization, and persists no row', function () {
+    Queue::fake();
+    $org = Organization::factory()->create(['is_operator' => true]);
+    $admin = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+    [, $plain] = ApiKey::issue($admin, 'w', ApiKeyPermission::Write);
+    $foreignSource = MirrorSource::factory()->create(['type' => PackageType::Composer]);
+
+    $this->withToken($plain)->postJson('/api/v1/packages', [
+        'type' => 'composer',
+        'name' => 'acme/foreign',
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $foreignSource->id,
+        'mirror_name' => 'acme/foreign',
+        'group_ids' => [homeRegistryId($admin)],
+    ])->assertForbidden();
+
+    expect(Package::where('name', 'acme/foreign')->exists())->toBeFalse();
+    Queue::assertNotPushed(SyncMirrorPackage::class);
+});
+
+it('refuses to create an api package pointed at a mirror source of a mismatched type, and persists no row', function () {
+    Queue::fake();
+    $org = Organization::factory()->create(['is_operator' => true]);
+    $admin = User::factory()->create(['organization_id' => $org->id, 'role' => 'admin']);
+    [, $plain] = ApiKey::issue($admin, 'w', ApiKeyPermission::Write);
+    $npmSource = MirrorSource::factory()->create(['organization_id' => $org->id, 'type' => PackageType::Npm]);
+
+    $this->withToken($plain)->postJson('/api/v1/packages', [
+        'type' => 'composer',
+        'name' => 'acme/mismatch',
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $npmSource->id,
+        'mirror_name' => 'acme/mismatch',
+        'group_ids' => [homeRegistryId($admin)],
+    ])->assertStatus(422);
+
+    expect(Package::where('name', 'acme/mismatch')->exists())->toBeFalse();
+    Queue::assertNotPushed(SyncMirrorPackage::class);
 });
 
 it('lets a member read (scoped) but not write packages', function () {

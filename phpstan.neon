@@ -54,6 +54,16 @@ parameters:
             count: 1
             path: tests/Feature/SyncPackageTest.php
         -
+            # Same rationale as the SyncPackage entry directly above, for its mirror
+            # counterpart: this assertion's entire job is to prove SyncMirrorPackage does
+            # NOT declare a $tries property either (it relies on maxExceptions/retryUntil,
+            # cloned from SyncPackage verbatim — see the test's own comment), so PHPStan
+            # confirming the property does not exist today is the fact under test.
+            message: '#^Call to function property_exists\(\) with App\\Jobs\\SyncMirrorPackage and ''tries'' will always evaluate to false\.$#'
+            identifier: function.impossibleType
+            count: 1
+            path: tests/Feature/Mirror/SyncMirrorPackageTest.php
+        -
             # Deliberately reads the raw environment variable rather than config('logging.default')
             # (see the test's own comment): the point is to prove phpunit.xml itself sets
             # LOG_CHANNEL, not to re-derive it through config/logging.php's fallback. The

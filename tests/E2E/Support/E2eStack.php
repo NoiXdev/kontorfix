@@ -126,6 +126,73 @@ final class E2eStack
     }
 
     /**
+     * Like get(), but against the host root rather than the slug-prefixed registry path —
+     * what tests/E2E/DockerTest.php needs, since `/v2/` is registered at the host root
+     * (routes/registry.php) and never under `/r/{org}/{registry}`: a Docker client reads
+     * everything after the host as the repository name, so it cannot address a
+     * path-PREFIXED registry at all. `AuthenticateRegistry` accepts a Bearer token the same
+     * way for every registry protocol regardless of what a real client of that protocol
+     * actually sends on the wire (Docker itself speaks HTTP Basic — see DockerTest.php), so
+     * this can reuse the exact same Authorization header get() does.
+     *
+     * @return array{status: int, body: string}
+     */
+    public static function getAtHostRoot(string $path, ?string $token = null): array
+    {
+        $client = new Client(['http_errors' => false, 'timeout' => 30]);
+
+        $response = $client->get(self::hostRoot().$path, [
+            'headers' => $token !== null ? ['Authorization' => 'Bearer '.$token] : [],
+        ]);
+
+        return [
+            'status' => $response->getStatusCode(),
+            'body' => (string) $response->getBody(),
+        ];
+    }
+
+    /**
+     * Scheme+host(+port) for the PATH-namespaced address — the host that has no `domains`
+     * row, on which a registry is named by `/v2/<org>/<registry>/<repo>` instead of by the
+     * hostname itself. See E2eSeeder for why the two hostnames must differ as strings.
+     */
+    public static function pathHostRoot(): string
+    {
+        return 'http://'.self::context()['docker_path_host'];
+    }
+
+    /**
+     * The registry's own answer for a manifest's digest, read off the
+     * `Docker-Content-Digest` response header — the same header ManifestController::show()
+     * sets and a real Docker client trusts, rather than a value hashed client-side. Used to
+     * compare against what `docker push`/`docker pull` report on their own stdout,
+     * independently of anything carried over in PHP state from an earlier test — the tests
+     * in one file only share the registry's OWN state, never an in-process variable.
+     *
+     * Null on anything other than 200 (unknown reference, wrong repository, …): the caller
+     * decides what an absent digest means for the assertion at hand.
+     *
+     * `$base` defaults to the registered custom-domain root; pass pathHostRoot() to ask the
+     * same question through the path-namespaced address instead.
+     */
+    public static function ociManifestDigest(string $repository, string $reference, ?string $token = null, ?string $base = null): ?string
+    {
+        $client = new Client(['http_errors' => false, 'timeout' => 30]);
+
+        $response = $client->get(($base ?? self::hostRoot())."/v2/{$repository}/manifests/{$reference}", [
+            'headers' => $token !== null ? ['Authorization' => 'Bearer '.$token] : [],
+        ]);
+
+        if ($response->getStatusCode() !== 200) {
+            return null;
+        }
+
+        $digest = $response->getHeaderLine('Docker-Content-Digest');
+
+        return $digest !== '' ? $digest : null;
+    }
+
+    /**
      * pip's `--index-url` embeds credentials as URL userinfo (`http://x:<token>@host/...`),
      * built here from `base_url` rather than repeated as a literal `app:8080` in every test
      * that needs one. Three call sites (PypiTest.php's install and refusal scripts,
