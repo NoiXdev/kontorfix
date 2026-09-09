@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Exceptions\MirrorSyncFailed;
 use App\Exceptions\UpstreamException;
 use App\Models\MirrorSource;
+use App\Services\Upstream\UpstreamClient;
 use LogicException;
 
 /**
@@ -78,8 +79,6 @@ class MirrorProbe
 
     private function tokenWillBeWithheld(MirrorSource $source): bool
     {
-        $scheme = strtolower((string) parse_url($source->url, PHP_URL_SCHEME));
-
-        return $scheme !== 'https' && $source->auth_token !== null;
+        return ! UpstreamClient::isEncrypted($source->url) && $source->auth_token !== null;
     }
 }

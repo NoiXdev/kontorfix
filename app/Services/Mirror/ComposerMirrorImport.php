@@ -34,15 +34,18 @@ class ComposerMirrorImport
 
     /**
      * Fetches and parses this mirror's Composer-v2 metadata (`/p2/{name}.json`) for $name —
-     * the HTTP fetch + JSON/version parsing lives here once; import() below and
-     * App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a package is even
-     * created) both call this rather than each speaking the protocol themselves.
+     * the HTTP fetch, JSON parsing AND "is this entry a real, importable version" decision
+     * all live here once. import() below iterates exactly the `entries` this returns rather
+     * than re-deriving that decision from the raw feed a second time, so its row set can
+     * never drift from what App\Services\Mirror\MirrorProbe (a cheap, read-only preview
+     * before a package is even created) reports as `versions`.
      *
-     * `raw` carries the expanded per-version metadata array import() needs (dist URL,
-     * shasum, released_at, …) — a preview call throws it away and keeps only the name/
-     * description/versions summary; import() is what actually fetches the dists.
+     * `entries` carries the parsed shape import() actually needs per version (the tag as
+     * Composer wrote it, its normalized form, and the full raw metadata for dist URL/shasum/
+     * released_at/…) — a preview call keeps only `versions` (the tags) and throws the rest
+     * away; import() is what actually fetches the dists.
      *
-     * @return array{name: string, description: string|null, versions: list<string>, raw: array<int, mixed>}
+     * @return array{name: string, description: string|null, versions: list<string>, entries: list<array{tag: string, normalized: string, raw: array<string, mixed>}>}
      */
     public function fetchMetadata(MirrorSource $source, string $name): array
     {
@@ -66,7 +69,7 @@ class ComposerMirrorImport
         $expanded = MetadataMinifier::expand(is_array($minified) ? $minified : []);
 
         $parser = new VersionParser;
-        $tags = [];
+        $entries = [];
         $description = null;
         foreach ($expanded as $version) {
             if (! is_array($version)) {
@@ -77,43 +80,36 @@ class ComposerMirrorImport
                 continue;
             }
             try {
-                $parser->normalize($tag);
+                $normalized = $parser->normalize($tag);
             } catch (UnexpectedValueException) {
-                continue; // not a version tag — skip silently, mirrors import()'s own tolerance
+                continue; // not a version tag — skip silently, mirrors GitSourceImporter's tolerance
             }
-            $tags[] = $tag;
+            $entries[] = ['tag' => $tag, 'normalized' => $normalized, 'raw' => $version];
             if ($description === null && is_string($version['description'] ?? null)) {
                 $description = $version['description'];
             }
         }
 
-        return ['name' => $name, 'description' => $description, 'versions' => $tags, 'raw' => $expanded];
+        return [
+            'name' => $name,
+            'description' => $description,
+            'versions' => array_map(static fn (array $e): string => $e['tag'], $entries),
+            'entries' => $entries,
+        ];
     }
 
     public function import(Package $package, MirrorSource $source): void
     {
         $name = (string) $package->mirror_name;
-        $versions = $this->fetchMetadata($source, $name)['raw'];
+        $entries = $this->fetchMetadata($source, $name)['entries'];
 
-        $parser = new VersionParser;
         $maxBytes = (int) config('kontorfix.composer_max_dist_bytes', 100 * 1024 * 1024);
         $disk = Storage::disk('artifacts');
 
-        foreach ($versions as $version) {
-            if (! is_array($version)) {
-                continue;
-            }
-
-            $tag = $version['version'] ?? null;
-            if (! is_string($tag) || $tag === '') {
-                continue;
-            }
-
-            try {
-                $normalized = $parser->normalize($tag);
-            } catch (UnexpectedValueException) {
-                continue; // not a version tag — skip silently, mirrors GitSourceImporter's tolerance
-            }
+        foreach ($entries as $entry) {
+            $tag = $entry['tag'];
+            $normalized = $entry['normalized'];
+            $version = $entry['raw'];
 
             $dist = $version['dist'] ?? null;
             if (! is_array($dist) || ! isset($dist['url']) || ! is_string($dist['url'])) {

@@ -44,20 +44,28 @@ class PythonMirrorImport
 
     /**
      * Fetches and parses this mirror's PEP 691 project detail feed
-     * (`GET /simple/{normalized}/`) for $name — the HTTP fetch + parsing lives here once;
-     * import() below and App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a
-     * package is even created) both call this rather than each speaking the protocol
-     * themselves.
+     * (`GET /simple/{normalized}/`) for $name — the HTTP fetch, JSON parsing AND "is this
+     * entry a real, fetchable distribution file" decision (safe filename shape, a version
+     * recoverable from it, a URL to fetch) all live here once. import() below iterates
+     * exactly the `entries` this returns rather than re-deriving that decision from the raw
+     * feed a second time, so its row set can never drift from what
+     * App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a package is even
+     * created) reports as `versions`.
      *
-     * `raw` carries the full feed import() needs (the per-file URLs and hashes) — a preview
-     * call throws it away and keeps only the name/description/versions summary; import() is
-     * what actually fetches the distribution files.
+     * A file entry without a usable URL is excluded from `entries` (and so from `versions`)
+     * for exactly the reason import() would otherwise have skipped it anyway: no row can ever
+     * be created for a version nothing can be fetched for.
+     *
+     * `entries` carries the parsed per-file shape import() needs (filename, url, the derived
+     * version/filetype, and the full raw entry for hashes/requires-python/upload-time) — a
+     * preview call keeps only `versions` (deduplicated — an sdist and a wheel can share one)
+     * and throws the rest away; import() is what actually fetches the distribution files.
      *
      * No description: PyPI's PEP 691 feed carries no project-level description field, so this
      * always answers null for it — the same scope decision this class's own docblock states
      * for readme handling.
      *
-     * @return array{name: string, description: string|null, versions: list<string>, raw: array<string, mixed>}
+     * @return array{name: string, description: string|null, versions: list<string>, entries: list<array{filename: string, url: string, version: string, filetype: string, raw: array<string, mixed>}>}
      */
     public function fetchMetadata(MirrorSource $source, string $name): array
     {
@@ -86,37 +94,8 @@ class PythonMirrorImport
         }
 
         $files = is_array($payload['files'] ?? null) ? $payload['files'] : [];
+        $entries = [];
         $versions = [];
-        foreach ($files as $file) {
-            if (! is_array($file)) {
-                continue;
-            }
-            $filename = $file['filename'] ?? null;
-            if (! is_string($filename) || $filename === '') {
-                continue;
-            }
-            if (! preg_match(self::FILENAME_PATTERN, $filename) || str_contains($filename, '..')) {
-                continue;
-            }
-            $filetype = str_ends_with($filename, '.whl') ? 'bdist_wheel' : 'sdist';
-            $version = $this->versionFromFilename($filename, $filetype);
-            if ($version !== null) {
-                $versions[$version] = true; // de-dupe: an sdist and a wheel can share a version
-            }
-        }
-
-        return ['name' => $name, 'description' => null, 'versions' => array_keys($versions), 'raw' => $payload];
-    }
-
-    public function import(Package $package, MirrorSource $source): void
-    {
-        $name = (string) $package->mirror_name;
-        $payload = $this->fetchMetadata($source, $name)['raw'];
-
-        $files = is_array($payload['files'] ?? null) ? $payload['files'] : [];
-        $maxBytes = (int) config('kontorfix.python_max_dist_bytes', 200 * 1024 * 1024);
-        $disk = Storage::disk('artifacts');
-
         foreach ($files as $file) {
             if (! is_array($file)) {
                 continue; // malformed entry — skip silently, mirrors ComposerMirrorImport's tolerance
@@ -136,6 +115,33 @@ class PythonMirrorImport
             if ($version === null) {
                 continue; // could not recover a version from the filename — nothing to record it under
             }
+
+            $entries[] = ['filename' => $filename, 'url' => $url, 'version' => $version, 'filetype' => $filetype, 'raw' => $file];
+            $versions[$version] = true; // de-dupe: an sdist and a wheel can share a version
+        }
+
+        return [
+            'name' => $name,
+            'description' => null,
+            'versions' => array_keys($versions),
+            'entries' => $entries,
+        ];
+    }
+
+    public function import(Package $package, MirrorSource $source): void
+    {
+        $name = (string) $package->mirror_name;
+        $entries = $this->fetchMetadata($source, $name)['entries'];
+
+        $maxBytes = (int) config('kontorfix.python_max_dist_bytes', 200 * 1024 * 1024);
+        $disk = Storage::disk('artifacts');
+
+        foreach ($entries as $entry) {
+            $filename = $entry['filename'];
+            $url = $entry['url'];
+            $version = $entry['version'];
+            $filetype = $entry['filetype'];
+            $file = $entry['raw'];
 
             $hashes = $file['hashes'] ?? null;
             $declaredSha256 = is_array($hashes) && is_string($hashes['sha256'] ?? null) && $hashes['sha256'] !== ''

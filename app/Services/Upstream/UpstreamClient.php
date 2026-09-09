@@ -123,7 +123,7 @@ class UpstreamClient
             }
 
             // Same host AND an encrypted hop — see request().
-            $withAuth = $this->sameHost($url, $endpoint->endpointUrl()) && $this->isEncrypted($url);
+            $withAuth = $this->sameHost($url, $endpoint->endpointUrl()) && self::isEncrypted($url);
             $response = $configure($this->request($endpoint, $withAuth))->withoutRedirecting()->get($url);
 
             if ($response->redirect()) {
@@ -159,8 +159,13 @@ class UpstreamClient
      * attached — matching what GitAuth already does for a stored git token on a non-HTTPS
      * remote. The upstream URL rules still permit http (an internal mirror without TLS is
      * a legitimate setup); what is refused is pairing that with a secret.
+     *
+     * Public and static: App\Services\Mirror\MirrorProbe asks this exact question of a
+     * MirrorSource's URL to warn that its token will not be sent, before this class itself
+     * ever gets a request to make — the scheme check lives here once rather than being
+     * re-derived a second time.
      */
-    private function isEncrypted(string $url): bool
+    public static function isEncrypted(string $url): bool
     {
         return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https';
     }

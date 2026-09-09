@@ -41,16 +41,20 @@ class NpmMirrorImport
 
     /**
      * Fetches and parses this mirror's npm packument (`GET /{name}`, percent-encoded the way
-     * the npm client itself sends a scoped name) for $name — the HTTP fetch + parsing lives
-     * here once; import() below and App\Services\Mirror\MirrorProbe (a cheap, read-only
-     * preview before a package is even created) both call this rather than each speaking the
-     * protocol themselves.
+     * the npm client itself sends a scoped name) for $name — the HTTP fetch, JSON parsing AND
+     * "is this entry a real, importable version" decision all live here once. import() below
+     * iterates exactly the `entries` this returns rather than re-deriving that decision from
+     * the raw packument a second time, so its row set can never drift from what
+     * App\Services\Mirror\MirrorProbe (a cheap, read-only preview before a package is even
+     * created) reports as `versions`.
      *
-     * `raw` carries the full packument import() needs (dist-tags, readme, per-version dist
-     * URLs, …) — a preview call throws it away and keeps only the name/description/versions
-     * summary; import() is what actually fetches the tarballs.
+     * `entries` carries the parsed per-version shape import() needs (the version string and
+     * its full raw metadata — dist URL, shasum, integrity, …); `raw` carries the whole
+     * packument for the two things import() needs beyond individual versions (dist-tags,
+     * readme). A preview call keeps only `versions` (the tags) and throws the rest away;
+     * import() is what actually fetches the tarballs.
      *
-     * @return array{name: string, description: string|null, versions: list<string>, raw: array<string, mixed>}
+     * @return array{name: string, description: string|null, versions: list<string>, entries: list<array{tag: string, raw: array<string, mixed>}>, raw: array<string, mixed>}
      */
     public function fetchMetadata(MirrorSource $source, string $name): array
     {
@@ -74,53 +78,49 @@ class NpmMirrorImport
 
         $versions = is_array($packument['versions'] ?? null) ? $packument['versions'] : [];
         $parser = new VersionParser;
-        $tags = [];
-        foreach ($versions as $tag => $version) {
-            $versionString = (string) $tag;
-            if ($versionString === '') {
-                continue;
-            }
-            try {
-                $parser->normalize($versionString);
-            } catch (UnexpectedValueException) {
-                continue; // not a version tag — skip silently, mirrors import()'s own tolerance
-            }
-            $tags[] = $versionString;
-        }
-
-        $discoveredName = is_string($packument['name'] ?? null) && $packument['name'] !== '' ? $packument['name'] : $name;
-        $description = is_string($packument['description'] ?? null) ? $packument['description'] : null;
-
-        return ['name' => $discoveredName, 'description' => $description, 'versions' => $tags, 'raw' => $packument];
-    }
-
-    public function import(Package $package, MirrorSource $source): void
-    {
-        $name = (string) $package->mirror_name;
-        $packument = $this->fetchMetadata($source, $name)['raw'];
-
-        $versions = is_array($packument['versions'] ?? null) ? $packument['versions'] : [];
-        $times = is_array($packument['time'] ?? null) ? $packument['time'] : [];
-        $parser = new VersionParser;
-        $maxBytes = (int) config('kontorfix.npm_max_tarball_bytes', 100 * 1024 * 1024);
-        $disk = Storage::disk('artifacts');
-        $unscoped = NpmPublishService::unscopedName($package->name);
-
+        $entries = [];
         foreach ($versions as $tag => $version) {
             if (! is_array($version)) {
-                continue;
+                continue; // malformed entry — mirrors import()'s own tolerance
             }
-
             $versionString = (string) $tag;
             if ($versionString === '') {
                 continue;
             }
-
             try {
                 $parser->normalize($versionString);
             } catch (UnexpectedValueException) {
                 continue; // not a version tag — skip silently, mirrors ComposerMirrorImport's tolerance
             }
+            $entries[] = ['tag' => $versionString, 'raw' => $version];
+        }
+
+        $discoveredName = is_string($packument['name'] ?? null) && $packument['name'] !== '' ? $packument['name'] : $name;
+        $description = is_string($packument['description'] ?? null) ? $packument['description'] : null;
+
+        return [
+            'name' => $discoveredName,
+            'description' => $description,
+            'versions' => array_map(static fn (array $e): string => $e['tag'], $entries),
+            'entries' => $entries,
+            'raw' => $packument,
+        ];
+    }
+
+    public function import(Package $package, MirrorSource $source): void
+    {
+        $name = (string) $package->mirror_name;
+        $metadata = $this->fetchMetadata($source, $name);
+        $packument = $metadata['raw'];
+
+        $times = is_array($packument['time'] ?? null) ? $packument['time'] : [];
+        $maxBytes = (int) config('kontorfix.npm_max_tarball_bytes', 100 * 1024 * 1024);
+        $disk = Storage::disk('artifacts');
+        $unscoped = NpmPublishService::unscopedName($package->name);
+
+        foreach ($metadata['entries'] as $entry) {
+            $versionString = $entry['tag'];
+            $version = $entry['raw'];
 
             $dist = $version['dist'] ?? null;
             if (! is_array($dist) || ! isset($dist['tarball']) || ! is_string($dist['tarball']) || $dist['tarball'] === '') {
