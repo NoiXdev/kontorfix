@@ -383,7 +383,14 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
     // so the 520 MiB layer never lands in THIS daemon's own image store, and `docker rmi`
     // therefore has nothing to (fail to) free on the classic store — see this file's own
     // docblock for the store-semantics difference between CI and a developer machine.
-    $script = <<<SH
+    //
+    // Push and pull run as two SEPARATE processes (mirroring the clean-store pull test
+    // above), not one combined script: the pull's own `preg_match` below must only ever see
+    // `docker pull`'s output, not buildx's own build log concatenated in front of it — a
+    // future change to BuildKit's build/push logging (e.g. printing its own manifest digest
+    // line in a matching format) could otherwise silently poison the pull-side match with
+    // whatever the push half happened to print.
+    $pushScript = <<<SH
         set -e
         rm -rf /work/big && mkdir -p /work/big && cd /work/big
         cp /fixtures/docker-image/Dockerfile.solo Dockerfile
@@ -399,21 +406,10 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
         docker buildx create --driver docker-container --driver-opt network=host --name {$builder} --use
         docker buildx build --builder {$builder} --provenance=false --sbom=false -t {$ref} --push .
         docker buildx rm {$builder}
-
-        docker rmi -f {$ref} >/dev/null 2>&1 || true
-        docker pull {$ref}
         SH;
 
-    $process = E2eStack::exec('client-docker', $script, 900);
-
-    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
-
-    // Same reasoning as the plain pull test above: a matching digest is not proof the 520
-    // MiB layer's bytes were actually served, only that resolving the manifest and
-    // whatever layers WERE fetched agree with what was pushed. The layer was never local to
-    // begin with (buildx only pushed, it never loaded), so this line only appears once it
-    // is genuinely fetched.
-    expect($process->getOutput())->toMatch('/Pull complete|Download complete/');
+    $pushProcess = E2eStack::exec('client-docker', $pushScript, 900);
+    expect($pushProcess->isSuccessful())->toBeTrue($pushProcess->getErrorOutput());
 
     // The push side no longer prints a `digest: sha256:…` line the way a plain `docker
     // push` does (buildx's own build output differs), so the push-side digest is read off
@@ -422,7 +418,24 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
     $registryDigest = E2eStack::ociManifestDigest($context['docker_repository'], 'big', $context['read_token']);
     expect($registryDigest)->not->toBeNull();
 
-    preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
+    $pullScript = <<<SH
+        set -e
+        docker rmi -f {$ref} >/dev/null 2>&1 || true
+        DOCKER_CONFIG={$config} docker pull {$ref}
+        SH;
+
+    $pullProcess = E2eStack::exec('client-docker', $pullScript, 900);
+
+    expect($pullProcess->isSuccessful())->toBeTrue($pullProcess->getErrorOutput());
+
+    // Same reasoning as the plain pull test above: a matching digest is not proof the 520
+    // MiB layer's bytes were actually served, only that resolving the manifest and
+    // whatever layers WERE fetched agree with what was pushed. The layer was never local to
+    // begin with (buildx only pushed, it never loaded), so this line only appears once it
+    // is genuinely fetched.
+    expect($pullProcess->getOutput())->toMatch('/Pull complete|Download complete/');
+
+    preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $pullProcess->getOutput(), $matches);
 
     expect($matches[1] ?? null)->toBe($registryDigest);
 });
@@ -582,8 +595,8 @@ it('pushes and pulls through the path address rather than the registered domain'
     // them from it — the pull below can report "Already exists" instead of "Pull complete"
     // there while still genuinely round-tripping a correct digest. That "bytes really came
     // off the registry" guarantee lives in the buildx-pushed tags instead (the clean-store
-    // pull test, the 500 MiB test, and the sweep test's final pull above), whose layers
-    // never enter any daemon's image store to begin with.
+    // pull test and the 500 MiB test above, and the sweep test's final pull below), whose
+    // layers never enter any daemon's image store to begin with.
     expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
 
     preg_match_all('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);

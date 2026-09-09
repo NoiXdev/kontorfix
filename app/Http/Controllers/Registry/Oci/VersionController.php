@@ -59,8 +59,11 @@ use Illuminate\Http\Request;
  *     consumption of a public registry belongs on that registry's OWN domain (step 3),
  *     where anonymous still answers 200.
  *  3. **May this caller see the registry that was named?** Only reached once a registry WAS
- *     named — a domain-mode host, or a path-mode address past the host root. canAccessGroup()
- *     decides, unchanged: a public group still answers anonymous with 200 here.
+ *     named — a domain-mode host. Path mode's own bare `/v2/` never carries a name (this
+ *     controller is registered ONLY at that bare route — see routes/registry.php — every
+ *     path-mode address past the host root is a repository-scoped route that never reaches
+ *     this class at all), so this branch is domain-mode only here. canAccessGroup() decides,
+ *     unchanged: a public group still answers anonymous with 200 here.
  *
  * The resulting table: a credential that resolves to nothing is always 401 with the Basic
  * challenge, regardless of addressing mode. Past that, the host root (no registry named) is
@@ -109,7 +112,8 @@ class VersionController extends Controller
             return $this->acknowledge();
         }
 
-        // A registry WAS named (domain mode, or path mode past the host root): canAccessGroup()
+        // A registry WAS named — domain mode only, since this controller is registered
+        // solely at path mode's bare host-root route (see routes/registry.php): canAccessGroup()
         // decides, unchanged — a public group still answers anonymous with 200 here.
         if (! $this->access->canAccessGroup($token, $group)) {
             throw OciException::unauthorized();
