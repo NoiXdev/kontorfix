@@ -9,6 +9,7 @@ use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
@@ -1108,9 +1109,16 @@ class PackageController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
-        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
+        // Publish-based packages (npm, Python) are filled by pushing artifacts, not by
+        // syncing from anywhere — git-sourced and mirror-sourced packages both have
+        // something to resync against, so only isPublishSourced() is refused.
+        abort_if($package->isPublishSourced(), 409, 'Dieses Paket ist publish-basiert und kann nicht synchronisiert werden.');
 
-        SyncPackage::dispatch($package);
+        if ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
+        } else {
+            SyncPackage::dispatch($package);
+        }
 
         return back()->with('success', 'Synchronisierung wurde eingereiht.');
     }

@@ -93,6 +93,22 @@ it('answers isMirrorSourced() from the stored source mode alone', function () {
         ->and($gitSourced->isMirrorSourced())->toBeFalse();
 });
 
+// isPublishSourced() used to be `! isGitSourced()`, which was correct back when Publish and
+// Git were the only two modes but silently answered true for Mirror as well once a third
+// mode existed — with real consequences: NpmController::publish and PypiController::upload's
+// guard, and Admin/Api PackageController::resync()'s guard, all key off this method to
+// decide whether a package may be written to directly. A mirror-sourced package is exactly
+// as "not writable directly" as a git-sourced one, so this must read false for it, not true.
+it('answers isPublishSourced() false for a mirror-sourced package', function () {
+    $mirrored = Package::factory()->create(['type' => PackageType::Composer, 'source_mode' => PackageSourceMode::Mirror]);
+    $published = Package::factory()->create(['type' => PackageType::Npm, 'source_mode' => PackageSourceMode::Publish]);
+    $gitSourced = Package::factory()->create(['type' => PackageType::Composer, 'source_mode' => PackageSourceMode::Git]);
+
+    expect($mirrored->isPublishSourced())->toBeFalse()
+        ->and($published->isPublishSourced())->toBeTrue()
+        ->and($gitSourced->isPublishSourced())->toBeFalse();
+});
+
 /** Same shape as GroupSlugUniquenessMigrationTest's runScopeGroupSlugMigration(). */
 function runAddMirrorSourcesMigration(): object
 {

@@ -159,10 +159,18 @@ class Package extends Model
         return $this->source_mode === PackageSourceMode::Git;
     }
 
-    /** Whether this package is populated by pushing artifacts (npm publish / twine upload). */
+    /**
+     * Whether this package is populated by pushing artifacts (npm publish / twine upload).
+     *
+     * Reads the stored mode directly rather than `! isGitSourced()` — that used to be
+     * equivalent when Publish and Git were the only two modes, but Mirror made it false:
+     * a mirror-sourced package is not git-sourced either, yet it is populated by
+     * MirrorImporter reaching out to a foreign registry, not by a client pushing artifacts,
+     * so it must answer false here too.
+     */
     public function isPublishSourced(): bool
     {
-        return ! $this->isGitSourced();
+        return $this->source_mode === PackageSourceMode::Publish;
     }
 
     /**

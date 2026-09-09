@@ -2,9 +2,11 @@
 
 // tests/Feature/Registry/NpmPublishTest.php
 // publishBody() and publishHeaderFor() are global helpers in tests/Pest.php.
+use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\TokenAbility;
 use App\Models\Group;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
@@ -53,6 +55,31 @@ it('rejects publish without a publish-ability token', function () {
         ->assertForbidden();
 
     // No side effect: neither the version nor the tarball should have been created.
+    expect($pkg->fresh()->versions()->count())->toBe(0);
+    Storage::disk('artifacts')->assertMissing("tarballs/{$pkg->id}/leftpad-1.0.0.tgz");
+});
+
+// The guard used to be isGitSourced(), which a mirror-sourced package (populated from a
+// foreign registry via MirrorSource, not from a git repository) sailed straight through —
+// publishing into it would collide with the next mirror sync exactly the same way it would
+// for a git-mirror package. isPublishSourced() covers both non-publish modes.
+it('rejects publishing into a mirror-sourced package with 409', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'type' => PackageType::Npm]);
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'type' => PackageType::Npm,
+        'name' => 'leftpad',
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'leftpad',
+    ]);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(publishHeaderFor($group))
+        ->putJson(registryPath($group).'/leftpad', publishBody('leftpad', '1.0.0', 'leftpad-1.0.0.tgz', 'x'))
+        ->assertStatus(409);
+
     expect($pkg->fresh()->versions()->count())->toBe(0);
     Storage::disk('artifacts')->assertMissing("tarballs/{$pkg->id}/leftpad-1.0.0.tgz");
 });

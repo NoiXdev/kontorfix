@@ -3,8 +3,10 @@
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\UserRole;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\Group;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\User;
@@ -45,6 +47,28 @@ it('refuses a publish-based package and queues nothing', function () {
         ->assertStatus(409);
 
     Queue::assertNothingPushed();
+});
+
+it('queues a mirror sync for a mirror-sourced package', function () {
+    Queue::fake();
+    $admin = resyncOperator();
+    $source = MirrorSource::factory()->create(['organization_id' => $admin->organization_id, 'type' => PackageType::Composer]);
+    $package = Package::factory()->create([
+        'organization_id' => $admin->organization_id,
+        'type' => PackageType::Composer,
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/demo',
+    ]);
+
+    $this->actingAs($admin)
+        ->post(route('admin.packages.resync', $package))
+        ->assertRedirect()
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('success', 'Synchronisierung wurde eingereiht.');
+
+    Queue::assertPushed(SyncMirrorPackage::class, fn (SyncMirrorPackage $job): bool => $job->package->is($package));
+    Queue::assertNotPushed(SyncPackage::class);
 });
 
 it('forbids resyncing a package outside the administered org', function () {

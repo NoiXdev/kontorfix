@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
 use App\Http\Requests\Admin\UpdatePackageAbandonmentRequest;
 use App\Http\Resources\Api\PackageResource;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
@@ -130,10 +131,11 @@ class PackageController extends Controller
     }
 
     /**
-     * Erneute Synchronisierung eines git-basierten Pakets anstoßen.
+     * Erneute Synchronisierung eines git- oder mirror-basierten Pakets anstoßen.
      *
-     * Nur für git-basierte Pakete — für Publish-basierte Pakete (npm, Python) antwortet der
-     * Endpunkt mit 409, da diese nicht aus einem Repository synchronisiert werden.
+     * Nur für git- oder mirror-basierte Pakete — für Publish-basierte Pakete (npm, Python)
+     * antwortet der Endpunkt mit 409, da diese nicht aus einem Repository oder einer
+     * fremden Registry synchronisiert werden.
      */
     public function resync(Package $package): PackageResource
     {
@@ -143,12 +145,17 @@ class PackageController extends Controller
         // already succeeded, dispatch *is* the entire point of this endpoint — silently
         // declining it while still returning 200 would tell the caller a resync happened
         // when nothing was queued. A publish-based package (npm, Python) is filled by
-        // pushing artifacts, not synced from a repository, so reject synchronously instead,
+        // pushing artifacts, not synced from anywhere, so reject synchronously instead,
         // matching the 409 convention NpmController/PypiController already use for "this
-        // package's mode forbids this operation".
-        abort_if(! $package->isGitSourced(), 409, 'Dieses Paket ist nicht git-basiert und kann nicht synchronisiert werden.');
+        // package's mode forbids this operation". Git-sourced and mirror-sourced packages
+        // both have something to resync against, so only isPublishSourced() is refused.
+        abort_if($package->isPublishSourced(), 409, 'Dieses Paket ist publish-basiert und kann nicht synchronisiert werden.');
 
-        SyncPackage::dispatch($package);
+        if ($package->isMirrorSourced()) {
+            SyncMirrorPackage::dispatch($package);
+        } else {
+            SyncPackage::dispatch($package);
+        }
 
         return new PackageResource($package);
     }

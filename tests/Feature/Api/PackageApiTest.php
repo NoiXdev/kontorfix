@@ -1,8 +1,11 @@
 <?php
 
 use App\Enums\ApiKeyPermission;
+use App\Enums\PackageType;
+use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\ApiKey;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
@@ -74,6 +77,25 @@ it('refuses a resync request against a publish-based package with a reference-on
         ->assertStatus(409);
 
     Queue::assertNothingPushed();
+});
+
+it('dispatches SyncMirrorPackage for a mirror-sourced package resync request', function () {
+    Queue::fake();
+    $plain = operatorWriteToken();
+    $source = MirrorSource::factory()->create(['type' => PackageType::Composer]);
+    $package = Package::factory()->create([
+        'organization_id' => $source->organization_id,
+        'type' => PackageType::Composer,
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/demo',
+        'repository_url' => null,
+    ]);
+
+    $this->withToken($plain)->postJson("/api/v1/packages/{$package->id}/resync")->assertOk();
+
+    Queue::assertPushed(SyncMirrorPackage::class, fn (SyncMirrorPackage $job): bool => $job->package->is($package));
+    Queue::assertNotPushed(SyncPackage::class);
 });
 
 it('lets a member read (scoped) but not write packages', function () {

@@ -68,8 +68,11 @@ class PypiController extends Controller
             ->first(fn (Package $p): bool => $p->organization_id === $group->organization_id
                 && PythonName::normalize($p->name) === $normalized);
         abort_if($pkg === null, 404, 'Unknown project for this registry.');
-        // A git-mirror project derives its files from tags — reject uploads into it.
-        abort_if($pkg->isGitSourced(), 409, 'This project mirrors a git repository and cannot be uploaded to.');
+        // A git-mirror or foreign-registry-mirror project derives its files from somewhere
+        // else (git tags, or a MirrorSource) — reject uploads into it. isPublishSourced()
+        // rather than isGitSourced() now that a third mode exists: both non-publish modes
+        // must be refused here, not only git.
+        abort_if(! $pkg->isPublishSourced(), 409, 'This project mirrors a git repository or a foreign registry and cannot be uploaded to.');
 
         $file = $request->file('content');
         abort_if(! $file instanceof UploadedFile || ! $file->isValid(), 400, 'Missing distribution file.');
