@@ -10,6 +10,7 @@ use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Services\Scope\OrgScope;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -107,6 +108,22 @@ class MirrorSourceController extends Controller
         $this->assertAdministersOrg($mirrorSource->organization_id);
 
         $data = $request->validated();
+
+        // Changing `type` while a package still points at this source makes MirrorImporter
+        // dispatch on the PACKAGE's (unchanged) type against a feed that no longer matches —
+        // every referencing package's next sync fails with a type mismatch
+        // (assertMirrorSourceUsable() aborts 422 for exactly that shape on the write path
+        // that assigns a source, but nothing previously stopped the source itself from
+        // drifting out from under packages already assigned to it). Same-type resubmission
+        // (the form posting back its own unchanged value) is not a change and stays allowed.
+        if ($data['type'] !== $mirrorSource->type->value) {
+            $packageCount = $mirrorSource->packages()->count();
+            if ($packageCount > 0) {
+                throw ValidationException::withMessages([
+                    'type' => "Der Typ kann nicht geändert werden, solange {$packageCount} Pakete diese Quelle nutzen.",
+                ]);
+            }
+        }
 
         $mirrorSource->fill([
             'name' => $data['name'],

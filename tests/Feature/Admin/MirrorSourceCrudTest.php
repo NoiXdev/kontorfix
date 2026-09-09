@@ -159,6 +159,44 @@ it('keeps the token on update when left blank and replaces it when provided', fu
     expect($source->fresh()->auth_token)->toBe('new-token');
 });
 
+it('refuses a type change while packages still reference the source', function () {
+    $org = Organization::factory()->create();
+    $source = MirrorSource::factory()->for($org)->create(['type' => 'composer']);
+    Package::factory()->count(2)->for($org)->create(['mirror_source_id' => $source->id]);
+
+    $response = $this->actingAs(mirrorAdmin($org))->put("/admin/mirror-sources/{$source->id}", [
+        'name' => $source->name, 'type' => 'npm', 'url' => $source->url,
+    ])->assertSessionHasErrors('type');
+
+    expect($source->fresh()->type)->toBe(PackageType::Composer);
+    $response->assertSessionHas('errors', function ($errors) {
+        return str_contains($errors->get('type')[0] ?? '', '2 Pakete diese Quelle nutzen');
+    });
+});
+
+it('allows resubmitting the same type while packages still reference the source', function () {
+    $org = Organization::factory()->create();
+    $source = MirrorSource::factory()->for($org)->create(['type' => 'composer', 'name' => 'old-name']);
+    Package::factory()->for($org)->create(['mirror_source_id' => $source->id]);
+
+    $this->actingAs(mirrorAdmin($org))->put("/admin/mirror-sources/{$source->id}", [
+        'name' => 'new-name', 'type' => 'composer', 'url' => $source->url,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($source->fresh()->name)->toBe('new-name');
+});
+
+it('allows a type change once no package references the source anymore', function () {
+    $org = Organization::factory()->create();
+    $source = MirrorSource::factory()->for($org)->create(['type' => 'composer']);
+
+    $this->actingAs(mirrorAdmin($org))->put("/admin/mirror-sources/{$source->id}", [
+        'name' => $source->name, 'type' => 'npm', 'url' => $source->url,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($source->fresh()->type)->toBe(PackageType::Npm);
+});
+
 it('forbids portal members from managing mirror sources', function () {
     $this->actingAs(User::factory()->create(['role' => UserRole::Member]))
         ->get('/admin/mirror-sources')->assertForbidden();
