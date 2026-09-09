@@ -36,6 +36,8 @@ class MirrorImporter
 
     public function import(Package $package, MirrorSource $source): void
     {
+        $this->sweepOrphanedStaging($package);
+
         match ($package->type) {
             PackageType::Composer => (new ComposerMirrorImport($this, $this->client))->import($package, $source),
             PackageType::Npm => (new NpmMirrorImport($this, $this->client))->import($package, $source),
@@ -45,6 +47,45 @@ class MirrorImporter
             // and fail loudly if that invariant is ever broken upstream.
             PackageType::Docker => throw new LogicException('Docker packages are never mirror-sourced; the caller must guard this before calling import().'),
         };
+    }
+
+    /**
+     * Deletes leftover staging files in $package's own artifact directories before the real
+     * import runs — the fix for a hard worker kill (a timeout's SIGALRM) landing between
+     * fetchArtifact()'s writeStream() and move(), or, for npm, between its own staging write
+     * (NpmMirrorImport::stagingPath()) and the move past verifyIntegrity(). Neither failure
+     * mode ever throws from inside this class, so nothing else on the artifacts disk ever
+     * revisits that file again.
+     *
+     * Safe to run unconditionally at the start of every sync: SyncMirrorPackage's
+     * WithoutOverlapping($package->id) guarantees this is the only import for $package
+     * running at any given moment, so any staging file already sitting in one of its three
+     * possible artifact directories (only one of which a real package ever populates, by
+     * type) cannot belong to an in-flight sync — it can only be garbage a previous run left
+     * behind before ever reaching its own move(). Sweeping all three unconditionally (rather
+     * than branching on $package->type) costs nothing extra: the other two directories are
+     * simply empty/absent for that package.
+     *
+     * Matches exactly the two staging shapes this class and NpmMirrorImport ever write —
+     * `.` + the final filename + `.` + a random suffix + `.part` (fetchArtifact()) or
+     * `.integrity-check` (NpmMirrorImport::stagingPath()) — never a real artifact, which is
+     * never dot-prefixed.
+     */
+    private function sweepOrphanedStaging(Package $package): void
+    {
+        $disk = Storage::disk('artifacts');
+
+        foreach (['dists', 'tarballs', 'pypi'] as $prefix) {
+            foreach ($disk->files("{$prefix}/{$package->id}") as $file) {
+                $basename = basename($file);
+                if (! str_starts_with($basename, '.')) {
+                    continue;
+                }
+                if (str_ends_with($basename, '.part') || str_ends_with($basename, '.integrity-check')) {
+                    $disk->delete($file);
+                }
+            }
+        }
     }
 
     /**
