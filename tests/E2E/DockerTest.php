@@ -38,17 +38,24 @@ use Tests\E2E\Support\E2eStack;
  * name instead. Two different strings for one loopback address, deliberately — see
  * E2eSeeder's comment on `docker_path_host`.
  *
- * `--provenance=false --sbom=false` appears on exactly one test below (the shared-layer
- * dedup test), not on all of them: it exists there ONLY because that test needs an exact
- * blob-count delta, and a real buildx push attaches a provenance attestation as its own
- * extra manifest+blob by default — confirmed directly, since the dedup test failed with
- * one blob more than expected per image until those flags were added there. Everywhere
- * else in this file, a real buildx push is left to do whatever it does by default (in
- * practice, push an image INDEX carrying a provenance attestation), because that ambient
- * shape is real client behaviour worth covering, not an artifact to suppress. The last
- * test in this file goes further and FORCES an index with both provenance and an SBOM,
- * matching this project's own release workflow — gated behind E2E_ATTESTED_PUSH; see that
- * test's own docblock for why.
+ * `--provenance=false --sbom=false` appears on several tests below, not on all of them, for
+ * two independent reasons rather than one habit. The shared-layer dedup test needs an
+ * exact blob-count delta, and a real buildx push attaches a provenance attestation as its
+ * own extra manifest+blob by default — confirmed directly, since that test failed with one
+ * blob more than expected per image until the flags were added there. The clean-store pull
+ * test, the 500 MiB test, and the sweep test's own tag need the SAME flags for a different
+ * reason: each pushes through the ephemeral `docker-container` buildx builder precisely so
+ * its layers never enter this daemon's own image store (see each test's own comment), and
+ * their assertions compare a single manifest digest — an attestation index in place of a
+ * bare manifest would still round-trip, but a `Docker-Content-Digest` read against it would
+ * be the index's digest, not the one thing under test. Everywhere else in this file — the
+ * plain push/pull test and the path-address test, both a plain `docker build` on the
+ * default driver — a real push is left to do whatever it does by default (in practice, push
+ * an image INDEX carrying a provenance attestation), because that ambient shape is real
+ * client behaviour worth covering, not an artifact to suppress. The attested-push test goes
+ * further still and FORCES an index with both provenance and an SBOM, matching this
+ * project's own release workflow — gated behind E2E_ATTESTED_PUSH; see that test's own
+ * docblock for why.
  */
 function dockerRef(string $tag): string
 {
@@ -104,7 +111,9 @@ function dockerBlobCount(): int
 }
 
 afterAll(function () {
-    $refs = implode(' ', array_map('dockerRef', ['v1', 'dedup-a', 'dedup-b', 'big', 'attest']));
+    $refs = implode(' ', array_map('dockerRef', [
+        'v1', 'dedup-a', 'dedup-b', 'big', 'attest', 'pullback', 'sweep',
+    ]));
 
     E2eStack::exec('client-docker', "docker rmi -f {$refs} >/dev/null 2>&1 || true", 60);
 
@@ -112,14 +121,17 @@ afterAll(function () {
     // image reference and the sweep above does not cover it.
     E2eStack::exec('client-docker', 'docker rmi -f '.dockerPathRef('pathmode').' >/dev/null 2>&1 || true', 60);
 
-    // Safety net, not the primary cleanup path: the attested-push test removes its own
-    // buildx builder (and the sibling buildkit container backing it) in its own body once
-    // the build succeeds, but a failure partway through that test's script would leave
-    // `e2e-attest-builder` — and the running `buildx_buildkit_e2e-attest-builder0`
-    // container it owns — behind on the shared host daemon otherwise. A no-op when the
-    // builder was never created (E2E_ATTESTED_PUSH unset, or the test never got far enough
-    // to create it), same as the `docker rmi` above.
-    E2eStack::exec('client-docker', 'docker buildx rm e2e-attest-builder >/dev/null 2>&1 || true', 60);
+    // Safety net, not the primary cleanup path: every test below that drives an ephemeral
+    // `docker-container` buildx builder removes it in its own body once the build succeeds,
+    // but a failure partway through one of those scripts (`set -e` aborts before the `docker
+    // buildx rm` line runs) would leave the builder — and the sibling
+    // `buildx_buildkit_<name>0` container it owns — behind on the shared host daemon
+    // otherwise. A no-op for any builder never created (its test skipped, or never got far
+    // enough to create it), same as the `docker rmi` above.
+    $builders = implode(' ', [
+        'e2e-attest-builder', 'e2e-pullback-builder', 'e2e-big-builder', 'e2e-sweep-builder',
+    ]);
+    E2eStack::exec('client-docker', "for b in {$builders}; do docker buildx rm \$b >/dev/null 2>&1 || true; done", 60);
 });
 
 it('pushes an image with the real docker client', function () {
@@ -170,48 +182,81 @@ it('pushes an image with the real docker client', function () {
 
 it('pulls it back into a clean local store and the digest matches', function () {
     $context = E2eStack::context();
-    $ref = dockerRef('v1');
-    $config = dockerConfigDir('pull');
+    $ref = dockerRef('pullback');
+    $pushConfig = dockerConfigDir('pullback-push');
+    $pullConfig = dockerConfigDir('pullback-pull');
+    $builder = 'e2e-pullback-builder';
 
-    // Read off the registry directly rather than carried over from the push test's own
-    // in-memory state: the two tests share only what the registry itself now holds, the
-    // same way NpmTest.php's install test never reuses anything the publish test computed.
-    $registryDigest = E2eStack::ociManifestDigest($context['docker_repository'], 'v1', $context['read_token']);
-    expect($registryDigest)->not->toBeNull();
-
-    $script = <<<SH
+    // Pushed through the ephemeral `docker-container` buildx builder — exactly like the
+    // attested-push test below, and for the identical reason: `--push` sends the built
+    // image straight to the registry without ever loading it into THIS daemon's own image
+    // store, so it cannot leave anything behind for `docker rmi` to (fail to) clean up in
+    // the first place. That is what makes the "clean local store" this test's name promises
+    // actually true on the classic (overlay2/graphdriver) store CI runs on: a `docker
+    // build` + `docker push` here would load the image locally, and on that store `docker
+    // rmi` does not free layers BuildKit's own build cache still references — the very next
+    // `docker pull` would then report "Already exists" instead of "Pull complete", passing
+    // for the wrong reason (see this file's own docblock and the path-address test below,
+    // which is the one place that trade-off is accepted instead of avoided).
+    //
+    // `--provenance=false --sbom=false`: this test compares a single manifest digest, not
+    // an index shape, so a default buildx push's extra attestation manifest would only be
+    // noise here.
+    $pushScript = <<<SH
         set -e
-        mkdir -p {$config}
-        echo '{$context['read_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
+        rm -rf /work/pullback && mkdir -p /work/pullback && cd /work/pullback
+        cp /fixtures/docker-image/Dockerfile.solo Dockerfile
+        dd if=/dev/urandom of=payload.bin bs=1024 count=64 2>/dev/null
 
-        # A clean local store: remove whatever the push test's own build left behind, so
-        # this pull genuinely has to fetch from the registry rather than resolving
-        # instantly against an image that was never gone from the local daemon.
-        docker rmi -f {$ref} >/dev/null 2>&1 || true
+        mkdir -p {$pushConfig}
+        export DOCKER_CONFIG={$pushConfig}
+        echo '{$context['publish_token']}' | docker login {$context['docker_host']} -u x --password-stdin
 
-        DOCKER_CONFIG={$config} docker pull {$ref}
+        docker buildx create --driver docker-container --driver-opt network=host --name {$builder} --use
+        docker buildx build --builder {$builder} --provenance=false --sbom=false -t {$ref} --push .
+        docker buildx rm {$builder}
         SH;
 
-    $process = E2eStack::exec('client-docker', $script, 300);
+    $pushProcess = E2eStack::exec('client-docker', $pushScript, 300);
+    expect($pushProcess->isSuccessful())->toBeTrue($pushProcess->getErrorOutput());
 
-    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
+    // Read off the registry directly rather than parsed from the push output: a buildx
+    // `--push` build does not print the same `digest: sha256:…` line a plain `docker push`
+    // does, and the attest test below establishes the same pattern — the registry's own
+    // `Docker-Content-Digest` header is the authority either way.
+    $registryDigest = E2eStack::ociManifestDigest($context['docker_repository'], 'pullback', $context['read_token']);
+    expect($registryDigest)->not->toBeNull();
+
+    $pullScript = <<<SH
+        set -e
+        mkdir -p {$pullConfig}
+        echo '{$context['read_token']}' | DOCKER_CONFIG={$pullConfig} docker login {$context['docker_host']} -u x --password-stdin
+
+        # Never actually present locally (the build above only pushed, it never loaded),
+        # but harmless either way — the point is that nothing local can rescue this pull.
+        docker rmi -f {$ref} >/dev/null 2>&1 || true
+
+        DOCKER_CONFIG={$pullConfig} docker pull {$ref}
+        SH;
+
+    $pullProcess = E2eStack::exec('client-docker', $pullScript, 300);
+
+    expect($pullProcess->isSuccessful())->toBeTrue($pullProcess->getErrorOutput());
 
     // A matching digest alone is not proof that any bytes actually came off the registry:
-    // `docker rmi -f` drops the image's tag reference, but not necessarily every layer's
-    // content from the daemon's underlying (containerd-snapshotter) store, so a manifest
-    // resolve followed by "every layer already exists" would still print a correct,
-    // matching `Digest:` line even if `BlobController::show()` answered every blob request
-    // with a 500 — pull would report each layer already present and never notice. "Pull
-    // complete" (or "Download complete", printed just before it once bytes have actually
-    // been received) only appears once a layer is genuinely fetched, which is exactly the
-    // case here: the tag was removed immediately above, so the pull has nothing to resolve
-    // against locally and must actually fetch. Verified by deliberately breaking
-    // BlobController::show() to return 500 for every request: this test (and the 500 MiB
-    // one below, which removes the local image the same way) both went red, rather than
-    // quietly missing the regression the way an "always exists" pull would have.
-    expect($process->getOutput())->toMatch('/Pull complete|Download complete/');
+    // a manifest resolve followed by "every layer already exists" would still print a
+    // correct, matching `Digest:` line even if `BlobController::show()` answered every blob
+    // request with a 500 — pull would report each layer already present and never notice.
+    // "Pull complete" (or "Download complete", printed just before it once bytes have
+    // actually been received) only appears once a layer is genuinely fetched — and now
+    // genuinely does on BOTH store types, because this image's layers never entered any
+    // daemon's store to be "already exists"-cached against. Verified by deliberately
+    // breaking BlobController::show() to return 500 for every request: this test (and the
+    // 500 MiB one below, converted the same way) both went red, rather than quietly missing
+    // the regression the way an "always exists" pull would have.
+    expect($pullProcess->getOutput())->toMatch('/Pull complete|Download complete/');
 
-    preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
+    preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $pullProcess->getOutput(), $matches);
 
     expect($matches[1] ?? null)->toBe($registryDigest);
 });
@@ -331,7 +376,13 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
     $context = E2eStack::context();
     $ref = dockerRef('big');
     $config = dockerConfigDir('big');
+    $builder = 'e2e-big-builder';
 
+    // Same conversion as the plain "clean local store" pull test above, and for the same
+    // reason: pushed through the ephemeral `docker-container` buildx builder with `--push`
+    // so the 520 MiB layer never lands in THIS daemon's own image store, and `docker rmi`
+    // therefore has nothing to (fail to) free on the classic store — see this file's own
+    // docblock for the store-semantics difference between CI and a developer machine.
     $script = <<<SH
         set -e
         rm -rf /work/big && mkdir -p /work/big && cd /work/big
@@ -342,12 +393,15 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
         dd if=/dev/urandom of=payload.bin bs=1M count=520 2>/dev/null
 
         mkdir -p {$config}
-        echo '{$context['publish_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
+        export DOCKER_CONFIG={$config}
+        echo '{$context['publish_token']}' | docker login {$context['docker_host']} -u x --password-stdin
 
-        DOCKER_CONFIG={$config} docker build -t {$ref} .
-        DOCKER_CONFIG={$config} docker push {$ref}
-        docker rmi -f {$ref}
-        DOCKER_CONFIG={$config} docker pull {$ref}
+        docker buildx create --driver docker-container --driver-opt network=host --name {$builder} --use
+        docker buildx build --builder {$builder} --provenance=false --sbom=false -t {$ref} --push .
+        docker buildx rm {$builder}
+
+        docker rmi -f {$ref} >/dev/null 2>&1 || true
+        docker pull {$ref}
         SH;
 
     $process = E2eStack::exec('client-docker', $script, 900);
@@ -356,16 +410,21 @@ it('pushes and pulls a layer above 500 MiB with the digest intact', function () 
 
     // Same reasoning as the plain pull test above: a matching digest is not proof the 520
     // MiB layer's bytes were actually served, only that resolving the manifest and
-    // whatever layers WERE fetched agree with what was pushed. The local image is removed
-    // before this pull (same as the plain pull test), so the layer has nothing to resolve
-    // against locally and this line only appears once it is genuinely re-downloaded.
+    // whatever layers WERE fetched agree with what was pushed. The layer was never local to
+    // begin with (buildx only pushed, it never loaded), so this line only appears once it
+    // is genuinely fetched.
     expect($process->getOutput())->toMatch('/Pull complete|Download complete/');
 
-    preg_match_all('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
+    // The push side no longer prints a `digest: sha256:…` line the way a plain `docker
+    // push` does (buildx's own build output differs), so the push-side digest is read off
+    // the registry directly instead — the same authority the attest test and the plain
+    // pull test above both use.
+    $registryDigest = E2eStack::ociManifestDigest($context['docker_repository'], 'big', $context['read_token']);
+    expect($registryDigest)->not->toBeNull();
 
-    // Two digest lines — one from the push, one from the pull — and they must agree.
-    expect($matches[1])->toHaveCount(2)
-        ->and($matches[1][0])->toBe($matches[1][1]);
+    preg_match('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
+
+    expect($matches[1] ?? null)->toBe($registryDigest);
 });
 
 /**
@@ -514,8 +573,18 @@ it('pushes and pulls through the path address rather than the registered domain'
 
     $process = E2eStack::exec('client-docker', $script, 300);
 
-    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput())
-        ->and($process->getOutput())->toMatch('/Pull complete|Download complete/');
+    // No `/Pull complete|Download complete/` assertion here, unlike every other pull in
+    // this file: this is the one test whose PUSH goes through a plain `docker build` on the
+    // shared daemon (deliberately — it is the only coverage a classic engine's PATH-
+    // addressed push actually authenticates at all now, see VersionController and this
+    // file's own docblock), so its layers sit in the daemon's BuildKit build cache even
+    // after `docker rmi`, and on the classic (overlay2) store `docker rmi` does not free
+    // them from it — the pull below can report "Already exists" instead of "Pull complete"
+    // there while still genuinely round-tripping a correct digest. That "bytes really came
+    // off the registry" guarantee lives in the buildx-pushed tags instead (the clean-store
+    // pull test, the 500 MiB test, and the sweep test's final pull above), whose layers
+    // never enter any daemon's image store to begin with.
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
 
     preg_match_all('/[Dd]igest: (sha256:[0-9a-f]{64})/', $process->getOutput(), $matches);
 
@@ -544,6 +613,38 @@ it('pushes and pulls through the path address rather than the registered domain'
 
 it('sweeps an abandoned upload session but never a layer a pull still needs', function () {
     $context = E2eStack::context();
+
+    // A tag of its own, pushed through the ephemeral `docker-container` buildx builder
+    // BEFORE the aging step below — never through `docker build`, so its layers never sit
+    // in this daemon's own image store for the final pull to (mis)resolve against. Pushed
+    // first, not after aging, so the aging step below (which ages EVERY OciBlob/OciManifest
+    // row, this one included) actually exercises the property this test is about: the
+    // sweep must leave content a tag still reaches alone BECAUSE it is referenced, not
+    // merely because it is young. Its own tag (not `v1`, which the earlier push test
+    // already built with a plain `docker build` and which the classic store's BuildKit
+    // build cache can therefore satisfy a `docker pull` from without a genuine fetch — see
+    // this file's own docblock).
+    $ref = dockerRef('sweep');
+    $config = dockerConfigDir('sweep');
+    $builder = 'e2e-sweep-builder';
+
+    $pushScript = <<<SH
+        set -e
+        rm -rf /work/sweep && mkdir -p /work/sweep && cd /work/sweep
+        cp /fixtures/docker-image/Dockerfile.solo Dockerfile
+        dd if=/dev/urandom of=payload.bin bs=1024 count=64 2>/dev/null
+
+        mkdir -p {$config}
+        export DOCKER_CONFIG={$config}
+        echo '{$context['publish_token']}' | docker login {$context['docker_host']} -u x --password-stdin
+
+        docker buildx create --driver docker-container --driver-opt network=host --name {$builder} --use
+        docker buildx build --builder {$builder} --provenance=false --sbom=false -t {$ref} --push .
+        docker buildx rm {$builder}
+        SH;
+
+    $pushProcess = E2eStack::exec('client-docker', $pushScript, 300);
+    expect($pushProcess->isSuccessful())->toBeTrue($pushProcess->getErrorOutput());
 
     // A REAL abandoned upload: POST opens the session, nothing ever finishes it. Basic
     // auth, the same form docker login itself hands the registry.
@@ -589,17 +690,19 @@ it('sweeps an abandoned upload session but never a layer a pull still needs', fu
 
     // THE gate: everything a tag still reaches survived a sweep whose grace period the
     // aging above genuinely put it past. A hand-built fixture cannot rule out the sweeper
-    // deleting something reachable — only a real pull after a real sweep can. A clean
-    // local store, same reasoning as the plain pull test.
-    $ref = dockerRef('v1');
-    $config = dockerConfigDir('sweep-pull');
+    // deleting something reachable — only a real pull after a real sweep can. Pulling the
+    // buildx-pushed tag from above, whose layers never entered any daemon's image store, so
+    // "Pull complete" below is genuine registry-fetch proof on both store types rather than
+    // something BuildKit's build cache could satisfy for a tag `docker build` once loaded
+    // locally.
+    $pullConfig = dockerConfigDir('sweep-pull');
 
     $script = <<<SH
         set -e
-        mkdir -p {$config}
-        echo '{$context['read_token']}' | DOCKER_CONFIG={$config} docker login {$context['docker_host']} -u x --password-stdin
+        mkdir -p {$pullConfig}
+        echo '{$context['read_token']}' | DOCKER_CONFIG={$pullConfig} docker login {$context['docker_host']} -u x --password-stdin
         docker rmi -f {$ref} >/dev/null 2>&1 || true
-        DOCKER_CONFIG={$config} docker pull {$ref}
+        DOCKER_CONFIG={$pullConfig} docker pull {$ref}
         SH;
 
     $process = E2eStack::exec('client-docker', $script, 300);
