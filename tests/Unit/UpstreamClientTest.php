@@ -33,12 +33,28 @@ it('returns null on upstream 404', function () {
     expect(app(UpstreamClient::class)->getJson($up, '/p2/x/y.json'))->toBeNull();
 });
 
-it('throws UpstreamException on a 500', function () {
+it('throws UpstreamException on a 500, carrying the status as a language-neutral fact', function () {
     Http::fake(['repo.test/*' => Http::response('boom', 500)]);
     $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => null]);
 
-    expect(fn () => app(UpstreamClient::class)->getJson($up, '/p2/x/y.json'))
-        ->toThrow(UpstreamException::class);
+    $thrown = fn () => app(UpstreamClient::class)->getJson($up, '/p2/x/y.json');
+    // @phpstan-ignore-next-line argument.type (Pest's stub is stricter than what it actually accepts at runtime)
+    expect($thrown)->toThrow(function (UpstreamException $e) {
+        // status() is what a caller (e.g. MirrorSyncFailed) should read instead of
+        // getMessage(), which is English prose not meant to be shown to an operator.
+        expect($e->status())->toBe(500);
+    });
+});
+
+it('leaves status() null for a transport-level refusal that never got an upstream response', function () {
+    $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => null]);
+    Http::fake(['repo.test/*' => Http::response('', 302, ['Location' => ''])]);
+
+    $thrown = fn () => app(UpstreamClient::class)->getJson($up, '/p2/x/y.json');
+    // @phpstan-ignore-next-line argument.type (Pest's stub is stricter than what it actually accepts at runtime)
+    expect($thrown)->toThrow(function (UpstreamException $e) {
+        expect($e->status())->toBeNull();
+    });
 });
 
 it('fetches raw bytes for an artifact url', function () {

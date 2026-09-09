@@ -175,6 +175,51 @@ it('throws MirrorSyncFailed when the mirror has no Composer-v2 metadata for the 
     expect($pkg->versions()->count())->toBe(0);
 });
 
+it('keeps the metadata-fetch failure message entirely German, never splicing in UpstreamException\'s English text', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test']);
+    $pkg = mirroredComposerPackage($group, $source, 'acme/demo');
+
+    Http::fake(['*/p2/acme/demo.json' => Http::response('boom', 500)]);
+
+    $thrown = fn () => app(MirrorImporter::class)->import($pkg, $source);
+    // @phpstan-ignore-next-line argument.type (Pest's stub is stricter than what it actually accepts at runtime)
+    expect($thrown)->toThrow(function (MirrorSyncFailed $e) {
+        expect($e->getMessage())
+            ->toContain('HTTP 500')
+            ->not->toContain('Upstream')
+            ->not->toContain('returned');
+    });
+});
+
+it('keeps the dist-fetch failure message entirely German, never splicing in UpstreamException\'s English text', function () {
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $source = MirrorSource::factory()->create(['organization_id' => $group->organization_id, 'url' => 'https://repo.test']);
+    $pkg = mirroredComposerPackage($group, $source, 'acme/demo');
+
+    Http::fake([
+        '*/p2/acme/demo.json' => Http::response([
+            'packages' => ['acme/demo' => MetadataMinifier::minify([
+                composerMirrorVersion('acme/demo', 'v1.0.0', '1.0.0.0', 'https://repo.test/dist/a.zip'),
+            ])],
+        ], 200),
+        '*/dist/a.zip' => Http::response('boom', 500),
+    ]);
+
+    $thrown = fn () => app(MirrorImporter::class)->import($pkg, $source);
+    // @phpstan-ignore-next-line argument.type (Pest's stub is stricter than what it actually accepts at runtime)
+    expect($thrown)->toThrow(function (MirrorSyncFailed $e) {
+        expect($e->getMessage())
+            ->toContain('HTTP 500')
+            ->not->toContain('Upstream')
+            ->not->toContain('returned');
+    });
+
+    expect($pkg->versions()->count())->toBe(0);
+});
+
 it('refuses an oversize dist and creates neither artifact nor row for it', function () {
     Storage::fake('artifacts');
     config(['kontorfix.composer_max_dist_bytes' => 16]);

@@ -26,7 +26,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException('Upstream '.CredentialUrl::redact($endpoint->endpointUrl())." returned {$response->status()} for {$path}.");
+            throw new UpstreamException('Upstream '.CredentialUrl::redact($endpoint->endpointUrl())." returned {$response->status()} for {$path}.", $response->status());
         }
 
         return $response->json();
@@ -40,7 +40,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.");
+            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.", $response->status());
         }
 
         return $response->body();
@@ -74,7 +74,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.");
+            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.", $response->status());
         }
 
         $declared = $response->header('Content-Length');

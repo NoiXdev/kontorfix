@@ -66,7 +66,12 @@ class MirrorImporter
         try {
             $fetched = $this->client->getStream($endpoint, $url);
         } catch (UpstreamException $e) {
-            throw MirrorSyncFailed::because("Artefakt konnte nicht von der Quelle geladen werden: {$url} ({$e->getMessage()})");
+            // $e->status() is a language-neutral fact (an HTTP status code, or null for a
+            // transport-level refusal); $e->getMessage() is English prose and MUST NOT be
+            // spliced in here — this message is shown to operators as Package::sync_error
+            // and is otherwise entirely German.
+            $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
+            throw MirrorSyncFailed::because("Artefakt konnte nicht von der Quelle geladen werden: {$url}{$suffix}");
         }
         if ($fetched === null) {
             throw MirrorSyncFailed::because("Artefakt bei der Quelle nicht gefunden: {$url}");

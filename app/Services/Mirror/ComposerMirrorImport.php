@@ -39,7 +39,12 @@ class ComposerMirrorImport
         try {
             $payload = $this->client->getJson($source, "/p2/{$name}.json");
         } catch (UpstreamException $e) {
-            throw MirrorSyncFailed::because("Composer-v2-Metadaten für „{$name}“ konnten nicht geladen werden: {$e->getMessage()}");
+            // $e->status() is a language-neutral fact (an HTTP status code, or null for a
+            // transport-level refusal); $e->getMessage() is English prose and MUST NOT be
+            // spliced in here — this message is shown to operators as Package::sync_error
+            // and is otherwise entirely German.
+            $suffix = $e->status() !== null ? " (HTTP {$e->status()})" : '';
+            throw MirrorSyncFailed::because("Composer-v2-Metadaten für „{$name}“ konnten nicht geladen werden{$suffix}.");
         }
 
         if ($payload === null) {
