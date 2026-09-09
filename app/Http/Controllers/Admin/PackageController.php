@@ -275,7 +275,16 @@ class PackageController extends Controller
                 // imports from, and what it is called there. Null for every other source
                 // mode — never an object with null members, so the template can gate on
                 // presence alone rather than re-deriving isMirrorSourced() on the client.
+                //
+                // `source_id`/`source_name` both go null together when the source was
+                // deleted (nullOnDelete — see MirrorSourceController::destroy()):
+                // isMirrorSourced() reads source_mode alone, so it stays true, but
+                // mirror_source_id and the mirrorSource relation both go null. The retarget
+                // form below (mirrorSources prop) is the fix path for exactly that state, and
+                // needs source_id to know the select should start empty rather than showing a
+                // stale id nothing resolves to.
                 'mirror' => $package->isMirrorSourced() ? [
+                    'source_id' => $package->mirror_source_id,
                     'source_name' => $package->mirrorSource?->name,
                     'mirror_name' => $package->mirror_name,
                 ] : null,
@@ -289,6 +298,16 @@ class PackageController extends Controller
             'gitCredentials' => GitCredential::usableBy($package->organization)
                 ->orderBy('name')->get(['id', 'name', 'provider'])
                 ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
+            // The retarget form's source picker: reusable mirror sources this specific
+            // package could point at instead — its own organization (a MirrorSource is never
+            // shared across organizations, see the model's docblock) and its own type (a
+            // Composer package cannot mirror an npm source, same rule
+            // GuardsMirrorSourceAssignment::assertMirrorSourceUsable() enforces on save).
+            // Unlike create()'s mirrorSources (scoped to the whole active console scope,
+            // because the package's eventual owner is not known yet and narrowed to type only
+            // client-side), both are already known here, so this is scoped tightly server-side.
+            // Null for every non-mirror package — the form has nothing to retarget.
+            'mirrorSources' => $package->isMirrorSourced() ? $this->mirrorSourceOptionsFor($package) : null,
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
@@ -1319,6 +1338,25 @@ class PackageController extends Controller
             ->whereIn('organization_id', $this->scopedOrgIds())
             ->orderBy('name')->get(['id', 'name', 'type'])
             ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name, 'type' => $s->type->value])
+            ->all();
+    }
+
+    /**
+     * mirrorSourceOptions()'s show()-page counterpart: sources $package could retarget to.
+     * Both the organization and the type are already fixed once a package exists, so this is
+     * scoped tightly to exactly the sources assertMirrorSourceUsable() would accept, rather
+     * than the whole active console scope narrowed by type on the client the way create()'s
+     * picker is (the package's eventual owner is not known yet there).
+     *
+     * @return array<int, array{id: string, name: string}>
+     */
+    private function mirrorSourceOptionsFor(Package $package): array
+    {
+        return MirrorSource::query()
+            ->where('organization_id', $package->organization_id)
+            ->where('type', $package->type)
+            ->orderBy('name')->get(['id', 'name'])
+            ->map(fn (MirrorSource $s) => ['id' => $s->id, 'name' => $s->name])
             ->all();
     }
 

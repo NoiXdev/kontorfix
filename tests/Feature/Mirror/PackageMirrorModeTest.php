@@ -371,9 +371,9 @@ it('carries the mirror source in the show payload for a mirror package', functio
     $group->packages()->attach($pkg);
 
     $this->actingAs($admin)->get("/admin/packages/{$pkg->id}")
-        ->assertInertia(function ($page) {
+        ->assertInertia(function ($page) use ($source) {
             $page->component('admin/packages/Show')
-                ->where('package.mirror', ['source_name' => 'Acme Mirror', 'mirror_name' => 'acme/upstream']);
+                ->where('package.mirror', ['source_id' => $source->id, 'source_name' => 'Acme Mirror', 'mirror_name' => 'acme/upstream']);
 
             // Walk the whole payload: the mirror source's auth token must appear nowhere.
             $payload = json_encode($page->toArray());
@@ -393,4 +393,77 @@ it('carries a null mirror in the show payload for a non-mirror package', functio
 
     $this->actingAs($admin)->get("/admin/packages/{$pkg->id}")
         ->assertInertia(fn ($page) => $page->component('admin/packages/Show')->where('package.mirror', null));
+});
+
+// --- show() payload: mirrorSources (retarget form) and the deleted-source fallback ---
+
+it('carries the mirror source picker, scoped to the package\'s own organization and type, for a mirror package', function () {
+    $admin = mirrorModeAdmin();
+    $group = Group::factory()->create(['organization_id' => $admin->organization_id]);
+    $source = MirrorSource::factory()->create([
+        'organization_id' => $admin->organization_id, 'name' => 'Composer Mirror', 'type' => PackageType::Composer, 'auth_token' => 'top-secret',
+    ]);
+    // Same org, different type — must be excluded: a Composer package cannot mirror an npm source.
+    MirrorSource::factory()->create(['organization_id' => $admin->organization_id, 'name' => 'Npm Mirror', 'type' => PackageType::Npm]);
+    // Same type, foreign org — must be excluded: a mirror source is never shared cross-org.
+    MirrorSource::factory()->create(['name' => 'Foreign Mirror', 'type' => PackageType::Composer]);
+
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'organization_id' => $admin->organization_id,
+        'type' => PackageType::Composer,
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/upstream',
+        'repository_url' => null,
+    ]);
+    $group->packages()->attach($pkg);
+
+    $this->actingAs($admin)->get("/admin/packages/{$pkg->id}")
+        ->assertInertia(function ($page) {
+            $page->component('admin/packages/Show')
+                ->has('mirrorSources', 1)
+                ->where('mirrorSources.0.name', 'Composer Mirror');
+
+            $payload = json_encode($page->toArray());
+            expect($payload)->not->toContain('top-secret')->not->toContain('auth_token');
+        });
+});
+
+it('carries no mirror source picker (null) for a non-mirror package', function () {
+    $admin = mirrorModeAdmin();
+    $group = Group::factory()->create(['organization_id' => $admin->organization_id]);
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'organization_id' => $admin->organization_id,
+        'type' => PackageType::Npm,
+        'source_mode' => PackageSourceMode::Publish,
+    ]);
+    $group->packages()->attach($pkg);
+
+    $this->actingAs($admin)->get("/admin/packages/{$pkg->id}")
+        ->assertInertia(fn ($page) => $page->component('admin/packages/Show')->where('mirrorSources', null));
+});
+
+it('reports a null source_name (not an omitted key) when the mirror package\'s source was deleted', function () {
+    $admin = mirrorModeAdmin();
+    $group = Group::factory()->create(['organization_id' => $admin->organization_id]);
+    $source = MirrorSource::factory()->create(['organization_id' => $admin->organization_id, 'type' => PackageType::Composer]);
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'organization_id' => $admin->organization_id,
+        'type' => PackageType::Composer,
+        'source_mode' => PackageSourceMode::Mirror,
+        'mirror_source_id' => $source->id,
+        'mirror_name' => 'acme/upstream',
+        'repository_url' => null,
+    ]);
+    $group->packages()->attach($pkg);
+
+    // nullOnDelete: deleting the source orphans the package rather than cascading (see
+    // MirrorSourceController::destroy()) — source_mode stays 'mirror', mirror_source_id and
+    // the mirrorSource relation both go null.
+    $source->delete();
+
+    $this->actingAs($admin)->get("/admin/packages/{$pkg->id}")
+        ->assertInertia(fn ($page) => $page->component('admin/packages/Show')
+            ->where('package.mirror', ['source_id' => null, 'source_name' => null, 'mirror_name' => 'acme/upstream'])
+            ->where('mirrorSources', []));
 });
