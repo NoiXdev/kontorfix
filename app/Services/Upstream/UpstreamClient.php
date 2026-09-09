@@ -3,7 +3,6 @@
 namespace App\Services\Upstream;
 
 use App\Exceptions\UpstreamException;
-use App\Models\Upstream;
 use App\Support\CredentialUrl;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -14,28 +13,28 @@ class UpstreamClient
     /**
      * @return array<string, mixed>|null null on 404
      */
-    public function getJson(Upstream $upstream, string $path): ?array
+    public function getJson(UpstreamEndpoint $endpoint, string $path): ?array
     {
-        $url = rtrim($upstream->url, '/').'/'.ltrim($path, '/');
+        $url = rtrim($endpoint->endpointUrl(), '/').'/'.ltrim($path, '/');
 
         // Like getBytes: follow redirects manually and re-check each hop against the
         // SSRF rules — a malicious upstream must not be able to redirect a metadata
         // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
-        $response = $this->follow($upstream, $url, fn (PendingRequest $req) => $req->acceptJson());
+        $response = $this->follow($endpoint, $url, fn (PendingRequest $req) => $req->acceptJson());
 
         if ($response->status() === 404) {
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException('Upstream '.CredentialUrl::redact($upstream->url)." returned {$response->status()} for {$path}.");
+            throw new UpstreamException('Upstream '.CredentialUrl::redact($endpoint->endpointUrl())." returned {$response->status()} for {$path}.");
         }
 
         return $response->json();
     }
 
-    public function getBytes(Upstream $upstream, string $absoluteUrl): ?string
+    public function getBytes(UpstreamEndpoint $endpoint, string $absoluteUrl): ?string
     {
-        $response = $this->follow($upstream, $absoluteUrl, fn (PendingRequest $req) => $req);
+        $response = $this->follow($endpoint, $absoluteUrl, fn (PendingRequest $req) => $req);
 
         if ($response->status() === 404) {
             return null;
@@ -63,10 +62,10 @@ class UpstreamClient
      *
      * @return array{stream: resource, length: int|null}|null null on 404
      */
-    public function getStream(Upstream $upstream, string $absoluteUrl): ?array
+    public function getStream(UpstreamEndpoint $endpoint, string $absoluteUrl): ?array
     {
         $response = $this->follow(
-            $upstream,
+            $endpoint,
             $absoluteUrl,
             fn (PendingRequest $req) => $req->withOptions(['stream' => true]),
         );
@@ -103,7 +102,7 @@ class UpstreamClient
      *
      * @param  callable(PendingRequest): PendingRequest  $configure
      */
-    private function follow(Upstream $upstream, string $url, callable $configure): Response
+    private function follow(UpstreamEndpoint $endpoint, string $url, callable $configure): Response
     {
         for ($hop = 0; $hop < 5; $hop++) {
             if (! UrlSafety::isSafeResolving($url)) {
@@ -111,8 +110,8 @@ class UpstreamClient
             }
 
             // Same host AND an encrypted hop — see request().
-            $withAuth = $this->sameHost($url, $upstream->url) && $this->isEncrypted($url);
-            $response = $configure($this->request($upstream, $withAuth))->withoutRedirecting()->get($url);
+            $withAuth = $this->sameHost($url, $endpoint->endpointUrl()) && $this->isEncrypted($url);
+            $response = $configure($this->request($endpoint, $withAuth))->withoutRedirecting()->get($url);
 
             if ($response->redirect()) {
                 $location = (string) $response->header('Location');
@@ -130,11 +129,12 @@ class UpstreamClient
         throw new UpstreamException('Too many redirects fetching upstream URL '.CredentialUrl::redact($url).'.');
     }
 
-    private function request(Upstream $upstream, bool $withAuth = true): PendingRequest
+    private function request(UpstreamEndpoint $endpoint, bool $withAuth = true): PendingRequest
     {
         $req = Http::timeout(30)->connectTimeout(10);
-        if ($withAuth && $upstream->auth_token) {
-            $req = $req->withToken($upstream->auth_token);
+        $token = $endpoint->endpointToken();
+        if ($withAuth && $token) {
+            $req = $req->withToken($token);
         }
 
         return $req;

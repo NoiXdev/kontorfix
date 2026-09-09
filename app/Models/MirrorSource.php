@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PackageType;
+use App\Services\Upstream\UpstreamEndpoint;
 use Database\Factories\MirrorSourceFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -24,7 +25,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $auth_token
  * @property Carbon|null $last_used_at
  */
-class MirrorSource extends Model
+class MirrorSource extends Model implements UpstreamEndpoint
 {
     /** @use HasFactory<MirrorSourceFactory> */
     use HasFactory, HasUuids;
@@ -89,5 +90,15 @@ class MirrorSource extends Model
     public function scopeOwnedBy(Builder $query, string $organizationId): Builder
     {
         return $query->where('organization_id', $organizationId);
+    }
+
+    public function endpointUrl(): string
+    {
+        return $this->url;
+    }
+
+    public function endpointToken(): ?string
+    {
+        return $this->auth_token;
     }
 }
