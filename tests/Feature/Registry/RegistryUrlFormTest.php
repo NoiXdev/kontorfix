@@ -19,3 +19,11 @@ it('keeps pathPrefix empty for a registry served on its own domain', function ()
     expect(app(RegistryUrl::class)->pathPrefix($group->fresh()))->toBe('')
         ->and(app(RegistryUrl::class)->path($group->fresh()))->toBe('/r/kunde/tools');
 });
+
+it('states the org-endpoint path form as a bare path, the same shape pathFor() uses', function () {
+    // Absolute path only — no scheme, no host — exactly like pathFor()'s '/r/{org}/{registry}'.
+    // SetupSnippetBuilder::forOrganization() is the consumer this exists for.
+    $organization = Organization::factory()->create(['slug' => 'kunde']);
+
+    expect(app(RegistryUrl::class)->orgPath($organization))->toBe('/o/kunde');
+});

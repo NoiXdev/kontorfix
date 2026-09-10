@@ -3,6 +3,7 @@
 namespace App\Services\Registry;
 
 use App\Models\Group;
+use App\Models\Organization;
 
 class RegistryUrl
 {
@@ -93,6 +94,21 @@ class RegistryUrl
         return $this->pathFor(self::ORGANIZATION_PLACEHOLDER, self::REGISTRY_PLACEHOLDER);
     }
 
+    /**
+     * The org-level endpoint's path prefix: `/o/{slug}`, absolute like pathFor() — no scheme,
+     * no host, so the two slugs of a single-registry address and the one slug of the
+     * org-wide address are built the same way.
+     *
+     * App\Http\Controllers\Registry\ResolvesRegistryPackage::registryPathPrefixForOrganization()
+     * states the identical literal for the org endpoint's own responses; its doc comment
+     * names this exact method as the shared builder to introduce once a second caller
+     * needed the shape. SetupSnippetBuilder::forOrganization() is that caller.
+     */
+    public function orgPath(Organization $organization): string
+    {
+        return '/o/'.$organization->slug;
+    }
+
     /** Path prefix for a specific access path: empty for a custom domain, else path(). */
     public function pathPrefix(Group $group): string
     {
@@ -119,7 +135,19 @@ class RegistryUrl
      */
     public function dockerHost(Group $group): string
     {
-        return $group->domains->isNotEmpty() ? $this->host($group) : $this->authority($this->origin());
+        return $group->domains->isNotEmpty() ? $this->host($group) : $this->instanceDockerHost();
+    }
+
+    /**
+     * The Docker host every domain-less registry's dockerHost() resolves to — the instance's
+     * own authority, port included. Stated once here so SetupSnippetBuilder::forOrganization()
+     * (which prints ONE shared Docker host for every registry in an organization, not a
+     * per-registry fact) can ask for it without going through a particular Group whose own
+     * domain state would be irrelevant to the answer.
+     */
+    public function instanceDockerHost(): string
+    {
+        return $this->authority($this->origin());
     }
 
     /**

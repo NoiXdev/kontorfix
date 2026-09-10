@@ -4,7 +4,6 @@ use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
-use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -16,7 +15,7 @@ beforeEach(function () {
 
 it('builds composer, auth and npm snippets for a slug-based registry', function () {
     $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
-    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+    $snips = app(SetupSnippetBuilder::class)->for($group->fresh());
 
     expect($snips['composer'])->toContain('"type": "composer"')
         ->toContain('https://reg.example.test/r/kunde/acme');
@@ -31,7 +30,7 @@ it('builds composer, auth and npm snippets for a slug-based registry', function 
 
 it('builds pip and twine snippets for the Python registry', function () {
     $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
-    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+    $snips = app(SetupSnippetBuilder::class)->for($group->fresh());
 
     expect($snips['pip'])
         ->toContain('--index-url')
@@ -54,7 +53,7 @@ it('addresses docker on the instance host, with both slugs, when the registry ha
     // instance's own host serves `/v2/`, and the two slugs ride along as the leading
     // segments of the repository name.
     $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
-    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+    $snips = app(SetupSnippetBuilder::class)->for($group->fresh());
 
     expect($snips['dockerHost'])->toBe('reg.example.test')
         // NOT `/r/kunde/acme`: that is the Composer/npm/Python address. An image reference
@@ -70,7 +69,7 @@ it('keeps the port of a development instance in the docker host', function () {
     // not, which is why the two are separate methods rather than one.
     config(['app.url' => 'http://localhost:8099']);
     $group = Group::factory()->for(Organization::factory()->create(['slug' => 'kunde']))->create(['slug' => 'acme']);
-    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+    $snips = app(SetupSnippetBuilder::class)->for($group->fresh());
 
     expect($snips['dockerHost'])->toBe('localhost:8099');
 });
@@ -81,7 +80,7 @@ it('drops the namespace and uses the domain once the registry has one', function
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => 'docker', 'name' => 'meinapp']);
     $group->packages()->attach($pkg);
 
-    $snips = (new SetupSnippetBuilder(app(RegistryUrl::class)))->for($group->fresh());
+    $snips = app(SetupSnippetBuilder::class)->for($group->fresh());
 
     expect($snips['dockerHost'])->toBe('images.acme.test')
         // Empty, not `kunde/acme/`: a custom domain is the registry root, so the repository
@@ -90,4 +89,98 @@ it('drops the namespace and uses the domain once the registry has one', function
         ->and($snips['dockerRepositoryPrefix'])->toBe('')
         ->and($snips['dockerHasDomain'])->toBeTrue()
         ->and($snips['dockerExample'])->toBe('meinapp');
+});
+
+describe('forOrganization', function () {
+    it('builds composer, auth, npm and pip snippets pointing at the org path', function () {
+        $organization = Organization::factory()->create(['slug' => 'kunde']);
+        Group::factory()->for($organization)->create(['slug' => 'acme']);
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        expect($snips['composer'])->toContain('"type": "composer"')
+            ->toContain('https://reg.example.test/o/kunde');
+        expect($snips['auth'])->toContain('reg.example.test')
+            ->toContain('<token>');
+        expect($snips['npm'])->toContain('@<scope>:registry=https://reg.example.test/o/kunde/')
+            ->and($snips['npm'])->toContain('//reg.example.test/o/kunde/:_authToken=<token>');
+        expect($snips['pip'])->toContain('--index-url')
+            ->toContain('https://token:<token>@reg.example.test/o/kunde/simple/')
+            ->toContain("index-url = https://reg.example.test/o/kunde/simple/\n")
+            ->toContain('machine reg.example.test');
+    });
+
+    it('derives npm scopes from packages reachable anywhere in the organization', function () {
+        $organization = Organization::factory()->create(['slug' => 'kunde']);
+        $groupA = Group::factory()->for($organization)->create(['slug' => 'acme']);
+        $groupB = Group::factory()->for($organization)->create(['slug' => 'other']);
+        $pkg = Package::factory()->inOrgOf($groupA)->create(['type' => 'npm', 'name' => '@acme/widget']);
+        $groupB->packages()->attach($pkg);
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        expect($snips['npm'])->toContain('@acme:registry=https://reg.example.test/o/kunde/')
+            ->and($snips['npm'])->not->toContain('@<scope>');
+    });
+
+    // Publish is per-registry (a token minted here cannot say which one of the org's
+    // registries an upload should target), so the org-wide snippet set never offers a
+    // twine block at all — unlike for(Group), which always includes one. This must hold
+    // even with Python enabled, which is exactly what this case builds.
+    it('never includes a twine section for the organization-wide snippet set', function () {
+        $organization = Organization::factory()->create(['enabled_registry_types' => ['python']]);
+        Group::factory()->for($organization)->create();
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        expect($snips)->toHaveKey('pip')->not->toHaveKey('twine');
+    });
+
+    it('lists every group of the organization for docker, collection groups included', function () {
+        $organization = Organization::factory()->create(['slug' => 'kunde']);
+        $visible = Group::factory()->for($organization)->create(['slug' => 'acme', 'portal_enabled' => true]);
+        $collection = Group::factory()->for($organization)->create(['slug' => 'intern', 'portal_enabled' => false]);
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        expect($snips['dockerHost'])->toBe('reg.example.test');
+        $groups = collect($snips['dockerGroups'])->keyBy('slug');
+        expect($groups)->toHaveCount(2)
+            ->and($groups['acme'])->toMatchArray([
+                'name' => $visible->name,
+                'slug' => 'acme',
+                'portal_enabled' => true,
+                'dockerRepositoryPrefix' => 'kunde/acme/',
+            ])
+            // The collection group — invisible in the portal — is still listed here,
+            // flagged by portal_enabled=false so the Vue layer can label it "Sammlung"
+            // rather than silently dropping it from the org-wide token's reach.
+            ->and($groups['intern'])->toMatchArray([
+                'name' => $collection->name,
+                'slug' => 'intern',
+                'portal_enabled' => false,
+                'dockerRepositoryPrefix' => 'kunde/intern/',
+            ]);
+    });
+
+    it('gates a disabled ecosystem out of the organization snippet set', function () {
+        $organization = Organization::factory()->create(['enabled_registry_types' => ['composer', 'python']]);
+        Group::factory()->for($organization)->create();
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        expect($snips)->toHaveKey('composer')
+            ->toHaveKey('auth')
+            ->toHaveKey('pip')
+            ->not->toHaveKey('npm')
+            ->not->toHaveKey('dockerHost')
+            ->not->toHaveKey('dockerGroups');
+    });
+
+    it('drops every ecosystem section when the organization has no enabled type', function () {
+        $organization = Organization::factory()->create(['enabled_registry_types' => []]);
+        Group::factory()->for($organization)->create();
+
+        expect(app(SetupSnippetBuilder::class)->forOrganization($organization->fresh()))->toBe([]);
+    });
 });
