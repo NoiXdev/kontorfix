@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\Registry\ProxyDownloadController;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 
 // The German copy is pinned verbatim by the org-level-registry spec — any drift here is a
 // spec violation, not a wording preference.
@@ -121,8 +123,11 @@ it('structurally refuses every non-GET/HEAD route under /o/, not just the three 
         ->filter(fn ($route) => str_starts_with((string) $route->getName(), 'registry.org.'));
 
     // Fails loudly if route naming itself regresses (e.g. the 'registry.org.' prefix stops
-    // being applied) rather than passing vacuously over an empty collection.
-    expect($orgRoutes)->toHaveCount(16);
+    // being applied) rather than passing vacuously over an empty collection. 13, not 16: the
+    // three proxy-download routes (composer.proxy, npm.proxy, npm.proxy-scoped) are excluded
+    // from this mount entirely — see the dedicated "registers no proxy routes at all" case
+    // below for why, and routes/registry.php's `if (! $readOnly)` guard around them.
+    expect($orgRoutes)->toHaveCount(13);
 
     $writeRoutes = $orgRoutes->filter(function ($route) {
         $readMethods = array_diff($route->methods(), ['HEAD']);
@@ -142,4 +147,46 @@ it('structurally refuses every non-GET/HEAD route under /o/, not just the three 
         expect($route->getAction('uses'))
             ->toBeInstanceOf(Closure::class);
     }
+});
+
+it('registers no proxy-download route at all under the /o/ org mount', function () {
+    // Review finding: ProxyDownloadController::composer()/npm()/npmScoped() all resolve
+    // their group via the non-nullable ResolvesRegistryPackage::registryGroup($request),
+    // which is never set under `/o/{orgSlug}` (registryOrganization is set instead) — so
+    // any of the three actions reached there threw an uncaught TypeError -> a 500,
+    // reachable anonymously on a predictable URL. Fixed by excluding these routes from the
+    // org mount entirely (routes/registry.php's `if (! $readOnly)` guard) rather than
+    // teaching the controller an org branch it has no coherent answer for (a cached proxy
+    // artifact belongs to one group's specific upstream, with no org-wide analog).
+    //
+    // Asserted against the actual registered route collection, filtered to the org mount by
+    // its 'registry.org.' name prefix (the same mechanism the structural write-route test
+    // above uses), rather than by hard-coding the three known route names — so a FUTURE
+    // proxy-shaped route added to the shared closure without the guard fails this test too,
+    // without needing to know its name in advance.
+    $orgProxyRoutes = collect(Route::getRoutes()->getRoutes())
+        ->filter(fn ($route) => str_starts_with((string) $route->getName(), 'registry.org.'))
+        ->filter(function ($route) {
+            $uses = $route->getAction('uses');
+
+            return is_array($uses) && ($uses[0] ?? null) === ProxyDownloadController::class;
+        });
+
+    expect($orgProxyRoutes)->toHaveCount(0);
+});
+
+it('answers 404, not 500, for the composer proxy URL shape under /o/', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    $this->getJson("/o/{$org->slug}/proxy/composer/".Str::uuid().'/acme/demo/1.0.0.0')
+        ->assertNotFound();
+});
+
+it('answers 404, not 500, for the npm proxy URL shape (bare and scoped) under /o/', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+
+    $this->getJson("/o/{$org->slug}/proxy/npm/".Str::uuid().'/leftpad/-/leftpad-1.0.0.tgz')
+        ->assertNotFound();
+    $this->getJson("/o/{$org->slug}/proxy/npm/".Str::uuid().'/@acme/ui-kit/-/ui-kit-1.0.0.tgz')
+        ->assertNotFound();
 });

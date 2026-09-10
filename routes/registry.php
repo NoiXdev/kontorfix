@@ -101,7 +101,7 @@ $registryEndpoints = function (bool $readOnly = false, ?string $namePrefix = nul
         // Composer — gated by the composer type being enabled for the group's organization.
         // No writes at all in this block (composer install is read-only), so $readOnly
         // changes nothing here.
-        Route::middleware('registry.type:composer')->group(function () use ($uuid, $namePrefix, $named) {
+        Route::middleware('registry.type:composer')->group(function () use ($namePrefix, $named) {
             $named(Route::get('/packages.json', [ComposerController::class, 'root']), $namePrefix, 'composer.root');
             $named(
                 Route::get('/p2/{vendor}/{name}.json', [ComposerController::class, 'metadata'])
@@ -120,34 +120,53 @@ $registryEndpoints = function (bool $readOnly = false, ?string $namePrefix = nul
                 $namePrefix,
                 'composer.dist',
             );
-
-            // Proxy downloads: {upstream} is a UUID, deliberately NOT resolved via route model
-            // binding but manually in the controller — this keeps the group-ownership check
-            // explicit (no token may trigger downloads via a foreign upstream). The UUID shape
-            // is pinned so a non-UUID cannot reach the Postgres uuid comparison and 500.
-            $named(
-                Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
-                    ->where(['upstream' => $uuid, 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']),
-                $namePrefix,
-                'composer.proxy',
-            );
         });
 
-        // Also no writes — the proxy download routes are GET only.
-        Route::middleware('registry.type:npm')->group(function () use ($uuid, $namePrefix, $named) {
-            $named(
-                Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
-                    ->where(['upstream' => $uuid, 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
-                $namePrefix,
-                'npm.proxy-scoped',
-            );
-            $named(
-                Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
-                    ->where(['upstream' => $uuid, 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
-                $namePrefix,
-                'npm.proxy',
-            );
-        });
+        // Proxy-download routes (Composer + npm): EXCLUDED under $readOnly, i.e. under the
+        // `/o/{orgSlug}` org mount — the same factory parameter the write routes below use to
+        // opt themselves out of that mount, reused here for the same reason: this is scope
+        // the org mount must never reach at all, rather than a controller decision.
+        //
+        // ProxyDownloadController::composer()/npm()/npmScoped() all resolve their group via
+        // the non-nullable ResolvesRegistryPackage::registryGroup($request); under `/o/` that
+        // attribute is never set (registryOrganization is set instead, registryGroup stays
+        // null), so reaching any of these three actions there threw an uncaught TypeError -> a
+        // 500, reachable anonymously on a fully predictable URL (found live in review, both
+        // ecosystems). Fixed by exclusion, not by teaching ProxyDownloadController an org
+        // branch: a cached proxy artifact is defined by one group's specific upstream and has
+        // no organization-wide analog — there is no single "the upstream" to proxy for an org
+        // aggregate spanning several groups, each with its own (or no) upstream. Composer's and
+        // npm's own org branches reach the identical conclusion for their non-proxy read paths
+        // (see ComposerController::root()'s docblock and NpmController's org branches), and
+        // this fix keeps that answer consistent for the proxy paths instead of inventing a
+        // second, different one. Excluding the routes here also removes the whole class of "a
+        // shared closure route forgot the org context" for this controller going forward,
+        // rather than relying on every action inside it to remember to check.
+        if (! $readOnly) {
+            Route::middleware('registry.type:composer')->group(function () use ($uuid, $namePrefix, $named) {
+                $named(
+                    Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
+                        ->where(['upstream' => $uuid, 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']),
+                    $namePrefix,
+                    'composer.proxy',
+                );
+            });
+
+            Route::middleware('registry.type:npm')->group(function () use ($uuid, $namePrefix, $named) {
+                $named(
+                    Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
+                        ->where(['upstream' => $uuid, 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                    $namePrefix,
+                    'npm.proxy-scoped',
+                );
+                $named(
+                    Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
+                        ->where(['upstream' => $uuid, 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                    $namePrefix,
+                    'npm.proxy',
+                );
+            });
+        }
 
         // PyPI (Python) — registered before the greedy npm catch-all so `/simple` and
         // `/pypi/...` are not swallowed by the bare packument route. twine uploads land on
