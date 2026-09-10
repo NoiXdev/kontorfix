@@ -304,14 +304,23 @@ class SetupSnippetBuilder
      *    endpoint does not serve Docker at all (deliberate: an image reference under `/o/`
      *    would be ambiguous about which of the organization's registries it names), so
      *    there is no single `docker pull` this method could print. Instead: every one of the
-     *    organization's groups, each with the Docker facts installCommand() would use for
-     *    it (RegistryUrl::dockerRepositoryPrefix()), so the reader can address whichever
-     *    registry they actually mean — collection groups (portal_enabled=false) included,
-     *    since the org-wide token reaches them exactly as it reaches a portal-visible one,
-     *    and the flag is what lets Task 7 label them "Sammlung" instead of hiding them.
-     *    `dockerHost` is the one fact every domain-less registry in the list shares
-     *    (RegistryUrl::instanceDockerHost()); a registry with its own domain still reaches
-     *    Docker at that domain instead, same as it always has.
+     *    organization's groups, each with the SAME Docker facts installCommand() would use
+     *    for it — its own `dockerHost` (RegistryUrl::dockerHost()) alongside its
+     *    `dockerRepositoryPrefix` — so the reader can address whichever registry they
+     *    actually mean. Collection groups (portal_enabled=false) are included, since the
+     *    org-wide token reaches them exactly as it reaches a portal-visible one, and the
+     *    flag is what lets Task 7 label them "Sammlung" instead of hiding them.
+     *
+     *    A per-entry `dockerHost` — NOT one shared value substituted for every entry — is
+     *    the fix for a defect a review caught before Task 7 ever rendered this: a
+     *    domain-bound group has an EMPTY `dockerRepositoryPrefix` (its own domain is the
+     *    registry root, exactly as for(Group) states it), so pairing it with the shared
+     *    instance host would print a `docker login`/`pull` against a host that group is not
+     *    served from at all. The top-level `dockerHost` stays as the instance's shared
+     *    authority — every domain-less entry's own `dockerHost` equals it, so it still
+     *    reads as "the address to use unless a row says otherwise" — but no consumer may
+     *    build a command from the top-level value and a per-entry prefix; the two must be
+     *    read together from the SAME entry.
      *
      * 3. Every remaining section is gated by RegistryTypeService::effectiveFor() — for(),
      *    by contrast, always returns all of its keys and leaves the gating to the `types`
@@ -322,7 +331,7 @@ class SetupSnippetBuilder
      *
      * @return array{composer?: string, auth?: string, npm?: string, pip?: string,
      *     dockerHost?: string, dockerGroups?: list<array{name: string, slug: string,
-     *     portal_enabled: bool, dockerRepositoryPrefix: string}>}
+     *     portal_enabled: bool, dockerHost: string, dockerRepositoryPrefix: string}>}
      */
     public function forOrganization(Organization $organization): array
     {
@@ -383,6 +392,11 @@ class SetupSnippetBuilder
                     'name' => $g->name,
                     'slug' => $g->slug,
                     'portal_enabled' => $g->portal_enabled,
+                    // Own host AND own prefix, read together — never the top-level
+                    // dockerHost paired with this prefix (see the doc comment above): a
+                    // domain-bound group's prefix is empty precisely because ITS OWN host
+                    // is the registry root, not because the instance host is.
+                    'dockerHost' => $this->url->dockerHost($g),
                     'dockerRepositoryPrefix' => $this->url->dockerRepositoryPrefix($g),
                 ])
                 ->values()

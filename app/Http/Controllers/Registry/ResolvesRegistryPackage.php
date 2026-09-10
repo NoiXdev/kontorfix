@@ -83,14 +83,14 @@ trait ResolvesRegistryPackage
     /**
      * Path prefix for org-endpoint metadata URLs: `/o/{orgSlug}`.
      *
-     * Stated here rather than on RegistryUrl (which owns every per-group URL form) because
-     * that class gains its own `orgPath()` builder later, for the portal setup snippets —
-     * this is the one read path that needs the shape today, so it is not worth introducing
-     * the shared builder ahead of that consumer just to save this one line.
+     * Delegates to RegistryUrl::orgPath() — the shared builder this comment used to say
+     * would arrive once a second caller needed the shape. SetupSnippetBuilder::
+     * forOrganization() is that caller, so the literal now lives in exactly one place
+     * rather than two that could drift.
      */
     protected function registryPathPrefixForOrganization(Organization $organization): string
     {
-        return '/o/'.$organization->slug;
+        return app(RegistryUrl::class)->orgPath($organization);
     }
 
     /**

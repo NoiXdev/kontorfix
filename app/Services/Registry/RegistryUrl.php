@@ -99,10 +99,10 @@ class RegistryUrl
      * no host, so the two slugs of a single-registry address and the one slug of the
      * org-wide address are built the same way.
      *
+     * The one statement of the literal: both
      * App\Http\Controllers\Registry\ResolvesRegistryPackage::registryPathPrefixForOrganization()
-     * states the identical literal for the org endpoint's own responses; its doc comment
-     * names this exact method as the shared builder to introduce once a second caller
-     * needed the shape. SetupSnippetBuilder::forOrganization() is that caller.
+     * (the org endpoint's own responses) and SetupSnippetBuilder::forOrganization() (the
+     * portal's org-wide setup snippets) ask here rather than each spelling `/o/` again.
      */
     public function orgPath(Organization $organization): string
     {

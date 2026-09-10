@@ -150,6 +150,7 @@ describe('forOrganization', function () {
                 'name' => $visible->name,
                 'slug' => 'acme',
                 'portal_enabled' => true,
+                'dockerHost' => 'reg.example.test',
                 'dockerRepositoryPrefix' => 'kunde/acme/',
             ])
             // The collection group — invisible in the portal — is still listed here,
@@ -159,7 +160,32 @@ describe('forOrganization', function () {
                 'name' => $collection->name,
                 'slug' => 'intern',
                 'portal_enabled' => false,
+                'dockerHost' => 'reg.example.test',
                 'dockerRepositoryPrefix' => 'kunde/intern/',
+            ]);
+    });
+
+    // A domain-bound group's dockerRepositoryPrefix is empty because ITS OWN domain is the
+    // registry root (RegistryUrl::dockerRepositoryPrefix()'s existing rule) — pairing that
+    // empty prefix with the top-level shared dockerHost would print a docker login/pull
+    // against a host the group is not served from at all. Each entry must carry its own
+    // host, read together with its own prefix, never the top-level one.
+    it('gives a domain-bound group in the docker list its own host, not the shared instance one', function () {
+        $organization = Organization::factory()->create(['slug' => 'kunde']);
+        $domainless = Group::factory()->for($organization)->create(['slug' => 'acme']);
+        $domainBound = Group::factory()->for($organization)->create(['slug' => 'images']);
+        Domain::factory()->for($domainBound)->create(['hostname' => 'images.acme.test']);
+
+        $snips = app(SetupSnippetBuilder::class)->forOrganization($organization->fresh());
+
+        $groups = collect($snips['dockerGroups'])->keyBy('slug');
+        expect($groups['acme'])->toMatchArray([
+            'dockerHost' => 'reg.example.test',
+            'dockerRepositoryPrefix' => 'kunde/acme/',
+        ])
+            ->and($groups['images'])->toMatchArray([
+                'dockerHost' => 'images.acme.test',
+                'dockerRepositoryPrefix' => '',
             ]);
     });
 
