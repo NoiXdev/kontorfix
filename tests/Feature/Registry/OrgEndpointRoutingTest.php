@@ -96,3 +96,50 @@ it('answers 405 with the German message for pypi upload under /o/', function () 
         ->assertStatus(405)
         ->assertJsonPath('message', ORG_WRITE_DENIED_MESSAGE);
 });
+
+it('structurally refuses every non-GET/HEAD route under /o/, not just the three this suite already knows about', function () {
+    // A regression net for the failure mode the three tests above cannot catch by
+    // themselves: they each hard-code one specific write URI, so a write route added to
+    // the shared $registryEndpoints closure in routes/registry.php in the future — without
+    // remembering the `$readOnly ? $orgWriteDenied : [...]` ternary — would silently ship
+    // as a live write endpoint under /o/, and none of those three tests would fail, since
+    // none of them would exercise the new route at all.
+    //
+    // This asserts against the ACTUAL registered route collection instead: every route
+    // named under the 'registry.org.' prefix (see routes/registry.php's $named() helper —
+    // every route the org mount registers gets one) whose method set is anything other than
+    // GET/HEAD must resolve to a Closure action, not a controller action. `$orgWriteDenied`
+    // is the only Closure ever registered in this closure; a real controller action is
+    // always `[Controller::class, 'method']`. So a future write route that forgets the
+    // ternary — and therefore keeps its controller action — fails this assertion instead of
+    // silently shipping, without this test needing to know that route's URI in advance.
+    // `collect(Route::getRoutes())` defeats PHPStan's template inference for
+    // `collect()` (the RouteCollection is Traversable but not a generic type PHPStan can
+    // read key/value types from) — routed through the collection's own `->getRoutes()`,
+    // a plain `array`, instead.
+    $orgRoutes = collect(Route::getRoutes()->getRoutes())
+        ->filter(fn ($route) => str_starts_with((string) $route->getName(), 'registry.org.'));
+
+    // Fails loudly if route naming itself regresses (e.g. the 'registry.org.' prefix stops
+    // being applied) rather than passing vacuously over an empty collection.
+    expect($orgRoutes)->toHaveCount(16);
+
+    $writeRoutes = $orgRoutes->filter(function ($route) {
+        $readMethods = array_diff($route->methods(), ['HEAD']);
+
+        return $readMethods !== ['GET'];
+    });
+
+    // Pins the three known writes so this test also fails if one of them ever stops being
+    // treated as a write (e.g. a typo'd method).
+    expect($writeRoutes->map(fn ($route) => $route->getName())->values()->all())->toEqualCanonicalizing([
+        'registry.org.pypi.upload',
+        'registry.org.npm.publish-scoped',
+        'registry.org.npm.publish',
+    ]);
+
+    foreach ($writeRoutes as $route) {
+        expect($route->getAction('uses'))
+            ->toBeInstanceOf(Closure::class);
+    }
+});

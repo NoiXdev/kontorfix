@@ -73,69 +73,144 @@ $orgWriteDenied = fn () => abort(405, 'Veröffentlichen ist nur je Registry mög
 // (register the write routes a second time, after the fact, to override them) was rejected:
 // it would depend on undocumented "last registration for this method+URI wins" router
 // behaviour instead of a single, obvious source of truth for what each mount does.
-$registryEndpoints = function (bool $readOnly = false) use ($uuid, $orgWriteDenied) {
-    return function () use ($uuid, $readOnly, $orgWriteDenied) {
+//
+// $namePrefix (also factory-bound, same reason) opts a mount into per-route names. It
+// defaults to null so the two existing mounts stay exactly as unnamed as they always were.
+// The `/o/{orgSlug}` mount below passes 'registry.org.' — every route it registers gets an
+// explicit, distinct name via the $named() helper. This is NOT cosmetic: an earlier version
+// of this mount instead called ->name('registry.org.') on the *group* wrapping
+// ->group($registryEndpoints(true)) while leaving every individual route unnamed. Laravel's
+// group-name merging assigns an unnamed route's action['as'] directly from the enclosing
+// group's 'as' attribute — it does not require a route to opt in by calling ->name() itself
+// — so every one of the ~16 routes in this closure silently collapsed onto the single
+// literal name "registry.org.", and route('registry.org.') resolved to whichever route
+// happened to be registered LAST (verified via `artisan route:list` before this fix; it had
+// also already leaked into resources/js/ziggy.d.ts as one bogus entry). Naming each route
+// explicitly here, with the prefix baked into the full name up front, sidesteps that
+// group-merge behaviour entirely rather than depending on it.
+$named = function ($route, ?string $namePrefix, string $suffix) {
+    if ($namePrefix !== null) {
+        $route->name($namePrefix.$suffix);
+    }
+
+    return $route;
+};
+
+$registryEndpoints = function (bool $readOnly = false, ?string $namePrefix = null) use ($uuid, $orgWriteDenied, $named) {
+    return function () use ($uuid, $readOnly, $orgWriteDenied, $namePrefix, $named) {
         // Composer — gated by the composer type being enabled for the group's organization.
         // No writes at all in this block (composer install is read-only), so $readOnly
         // changes nothing here.
-        Route::middleware('registry.type:composer')->group(function () use ($uuid) {
-            Route::get('/packages.json', [ComposerController::class, 'root']);
-            Route::get('/p2/{vendor}/{name}.json', [ComposerController::class, 'metadata'])
-                ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.~-]+']);
+        Route::middleware('registry.type:composer')->group(function () use ($uuid, $namePrefix, $named) {
+            $named(Route::get('/packages.json', [ComposerController::class, 'root']), $namePrefix, 'composer.root');
+            $named(
+                Route::get('/p2/{vendor}/{name}.json', [ComposerController::class, 'metadata'])
+                    ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.~-]+']),
+                $namePrefix,
+                'composer.metadata',
+            );
             // `{version}` is interpolated into a storage key. `[^/]+` was not enough: Flysystem
             // normalises `\` to `/` before collapsing `..`, so a backslash escaped the intended
             // directory. Constrain it to the character set real Composer versions actually use
             // (digits, dots, dashes, underscores, `+` build metadata, `dev-` prefixes) — a `/`
             // was never matchable here anyway, so no version that used to resolve stops doing so.
-            Route::get('/dists/{vendor}/{name}/{version}.zip', [ComposerController::class, 'dist'])
-                ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
+            $named(
+                Route::get('/dists/{vendor}/{name}/{version}.zip', [ComposerController::class, 'dist'])
+                    ->where(['vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']),
+                $namePrefix,
+                'composer.dist',
+            );
 
             // Proxy downloads: {upstream} is a UUID, deliberately NOT resolved via route model
             // binding but manually in the controller — this keeps the group-ownership check
             // explicit (no token may trigger downloads via a foreign upstream). The UUID shape
             // is pinned so a non-UUID cannot reach the Postgres uuid comparison and 500.
-            Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
-                ->where(['upstream' => $uuid, 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']);
+            $named(
+                Route::get('/proxy/composer/{upstream}/{vendor}/{name}/{version}', [ProxyDownloadController::class, 'composer'])
+                    ->where(['upstream' => $uuid, 'vendor' => '[a-z0-9_.-]+', 'name' => '[a-z0-9_.-]+', 'version' => '[A-Za-z0-9._+~-]+']),
+                $namePrefix,
+                'composer.proxy',
+            );
         });
 
         // Also no writes — the proxy download routes are GET only.
-        Route::middleware('registry.type:npm')->group(function () use ($uuid) {
-            Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
-                ->where(['upstream' => $uuid, 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
-            Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
-                ->where(['upstream' => $uuid, 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
+        Route::middleware('registry.type:npm')->group(function () use ($uuid, $namePrefix, $named) {
+            $named(
+                Route::get('/proxy/npm/{upstream}/{scope}/{package}/-/{file}', [ProxyDownloadController::class, 'npmScoped'])
+                    ->where(['upstream' => $uuid, 'scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                $namePrefix,
+                'npm.proxy-scoped',
+            );
+            $named(
+                Route::get('/proxy/npm/{upstream}/{package}/-/{file}', [ProxyDownloadController::class, 'npm'])
+                    ->where(['upstream' => $uuid, 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                $namePrefix,
+                'npm.proxy',
+            );
         });
 
         // PyPI (Python) — registered before the greedy npm catch-all so `/simple` and
         // `/pypi/...` are not swallowed by the bare packument route. twine uploads land on
         // the registry root via POST — the one WRITE in this block.
-        Route::middleware('registry.type:python')->group(function () use ($uuid, $readOnly, $orgWriteDenied) {
-            Route::post('/', $readOnly ? $orgWriteDenied : [PypiController::class, 'upload']);
-            Route::get('/simple', [PypiController::class, 'simpleRoot']);
-            Route::get('/simple/{project}', [PypiController::class, 'simpleProject'])
-                ->where(['project' => '[A-Za-z0-9._-]+']);
-            Route::get('/pypi/files/{package}/{filename}', [PypiController::class, 'download'])
-                ->where(['package' => $uuid, 'filename' => '[A-Za-z0-9][A-Za-z0-9._+-]*\.(whl|tar\.gz|zip)']);
+        Route::middleware('registry.type:python')->group(function () use ($uuid, $readOnly, $orgWriteDenied, $namePrefix, $named) {
+            $named(Route::post('/', $readOnly ? $orgWriteDenied : [PypiController::class, 'upload']), $namePrefix, 'pypi.upload');
+            $named(Route::get('/simple', [PypiController::class, 'simpleRoot']), $namePrefix, 'pypi.simple-root');
+            $named(
+                Route::get('/simple/{project}', [PypiController::class, 'simpleProject'])
+                    ->where(['project' => '[A-Za-z0-9._-]+']),
+                $namePrefix,
+                'pypi.simple-project',
+            );
+            $named(
+                Route::get('/pypi/files/{package}/{filename}', [PypiController::class, 'download'])
+                    ->where(['package' => $uuid, 'filename' => '[A-Za-z0-9][A-Za-z0-9._+-]*\.(whl|tar\.gz|zip)']),
+                $namePrefix,
+                'pypi.download',
+            );
         });
 
         // npm — after the Composer routes (first match protects packages.json/p2/dists).
         // The `/-/` tarball path doesn't collide with any Composer route, so the tarball
         // routes don't need a packages.json lookahead — only the bare packument catch-all below does.
-        Route::middleware('registry.type:npm')->group(function () use ($readOnly, $orgWriteDenied) {
-            Route::get('/{scope}/{package}/-/{file}', [NpmController::class, 'tarballScoped'])
-                ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
-            Route::get('/{package}/-/{file}', [NpmController::class, 'tarball'])
-                ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']);
-            Route::get('/{scope}/{package}', [NpmController::class, 'packumentScoped'])
-                ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
-            Route::get('/{package}', [NpmController::class, 'packument'])
-                ->where(['package' => '(?!packages\.json$)[a-z0-9._-]+']);
+        Route::middleware('registry.type:npm')->group(function () use ($readOnly, $orgWriteDenied, $namePrefix, $named) {
+            $named(
+                Route::get('/{scope}/{package}/-/{file}', [NpmController::class, 'tarballScoped'])
+                    ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                $namePrefix,
+                'npm.tarball-scoped',
+            );
+            $named(
+                Route::get('/{package}/-/{file}', [NpmController::class, 'tarball'])
+                    ->where(['package' => '[a-z0-9._-]+', 'file' => '[a-z0-9._~-]+\.tgz']),
+                $namePrefix,
+                'npm.tarball',
+            );
+            $named(
+                Route::get('/{scope}/{package}', [NpmController::class, 'packumentScoped'])
+                    ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']),
+                $namePrefix,
+                'npm.packument-scoped',
+            );
+            $named(
+                Route::get('/{package}', [NpmController::class, 'packument'])
+                    ->where(['package' => '(?!packages\.json$)[a-z0-9._-]+']),
+                $namePrefix,
+                'npm.packument',
+            );
 
             // The two WRITE routes in this block: npm publish.
-            Route::put('/{scope}/{package}', $readOnly ? $orgWriteDenied : [NpmController::class, 'publishScoped'])
-                ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']);
-            Route::put('/{package}', $readOnly ? $orgWriteDenied : [NpmController::class, 'publish'])
-                ->where(['package' => '[a-z0-9._-]+']);
+            $named(
+                Route::put('/{scope}/{package}', $readOnly ? $orgWriteDenied : [NpmController::class, 'publishScoped'])
+                    ->where(['scope' => '@[a-z0-9._-]+', 'package' => '[a-z0-9._-]+']),
+                $namePrefix,
+                'npm.publish-scoped',
+            );
+            $named(
+                Route::put('/{package}', $readOnly ? $orgWriteDenied : [NpmController::class, 'publish'])
+                    ->where(['package' => '[a-z0-9._-]+']),
+                $namePrefix,
+                'npm.publish',
+            );
         });
     };
 };
@@ -235,17 +310,22 @@ Route::middleware(['registry.context', 'registry.auth'])->group($registryEndpoin
 // than one specific registry. ResolveRegistryContext resolves `{orgSlug}` alone (no
 // `{groupSlug}` here, unlike the slug-access mount above) and sets `registryOrganization`
 // instead of `registryGroup` — see the middleware for why the group stays null there.
-// Read-only: `$registryEndpoints(true)` swaps in a 405 for the three write routes (npm
-// publish, npm publishScoped, pypi upload) instead of registering their real controller
-// actions, because this prefix cannot say which one registry inside the organization a
-// publish would target. `registry.org.` names the mount for future tasks (Task 3+ wire the
-// underlying controllers), even though none of the closure's own routes are named yet —
-// consistent with the two mounts above, which have never named their routes either.
+// Read-only: `$registryEndpoints(true, 'registry.org.')` swaps in a 405 for the three write
+// routes (npm publish, npm publishScoped, pypi upload) instead of registering their real
+// controller actions, because this prefix cannot say which one registry inside the
+// organization a publish would target.
+//
+// The second argument, 'registry.org.', is NOT set via ->name() on this group — see the
+// long comment above $registryEndpoints for why that (the seemingly obvious way to do it)
+// silently collapses every route in the closure onto one shared name instead of prefixing
+// each one individually. Every route this closure registers under this mount gets its own
+// full, distinct name instead (e.g. 'registry.org.composer.root',
+// 'registry.org.npm.publish'), unlike the two mounts above, which stay unnamed exactly as
+// before.
 Route::prefix('/o/{orgSlug}')
     ->where(['orgSlug' => '[a-z0-9-]+'])
     ->middleware(['registry.context', 'registry.auth'])
-    ->name('registry.org.')
-    ->group($registryEndpoints(true));
+    ->group($registryEndpoints(true, 'registry.org.'));
 
 // Legacy slug access, registered last on purpose — see LegacySlugRedirectController.
 // GET/HEAD for composer.json/.npmrc/pip.conf reads, PUT for npm publish, POST for twine
