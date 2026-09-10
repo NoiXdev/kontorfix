@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Exceptions\VersionConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
@@ -37,16 +38,38 @@ class NpmController extends Controller
 
     public function packument(Request $request, string $package): JsonResponse
     {
-        return $this->respondPackument($request, $this->registryGroup($request), $package);
+        return $this->respondPackument($request, $package);
     }
 
     public function packumentScoped(Request $request, string $scope, string $package): JsonResponse
     {
-        return $this->respondPackument($request, $this->registryGroup($request), "{$scope}/{$package}");
+        return $this->respondPackument($request, "{$scope}/{$package}");
     }
 
-    private function respondPackument(Request $request, Group $group, string $name): JsonResponse
+    private function respondPackument(Request $request, string $name): JsonResponse
     {
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+            $this->assertProxyableName(...explode('/', $name));
+            $pkg = $this->access->organizationPackage($organization, PackageType::Npm, $name);
+
+            // No upstream fallthrough here (unlike the group path below): the org aggregate
+            // has no single upstream to ask, and spec's error table treats "not visible to
+            // the org" the same as the group path's "not accessible" — a plain 404. Mirrors
+            // ComposerController::metadata()'s org branch.
+            if ($pkg === null) {
+                abort(404);
+            }
+
+            // NpmMetadataBuilder::build() takes no Group — unlike ComposerMetadataBuilder,
+            // there is no buildForOrganization() twin to introduce here; the same method
+            // already serves both branches once given a Package and a base URL.
+            return response()->json($this->metadata->build($pkg, $this->registryBaseUrlForOrganization($request, $organization)));
+        }
+
+        $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $this->assertProxyableName(...explode('/', $name));
         $pkg = $this->findLocal($request, $group, PackageType::Npm, $name);
@@ -85,18 +108,31 @@ class NpmController extends Controller
 
     public function tarball(Request $request, string $package, string $file): StreamedResponse
     {
-        return $this->respondTarball($request, $this->registryGroup($request), $package, $file);
+        return $this->respondTarball($request, $package, $file);
     }
 
     public function tarballScoped(Request $request, string $scope, string $package, string $file): StreamedResponse
     {
-        return $this->respondTarball($request, $this->registryGroup($request), "{$scope}/{$package}", $file);
+        return $this->respondTarball($request, "{$scope}/{$package}", $file);
     }
 
-    private function respondTarball(Request $request, Group $group, string $name, string $file): StreamedResponse
+    private function respondTarball(Request $request, string $name, string $file): StreamedResponse
     {
-        $this->authorizeGroup($request, $group);
-        $pkg = $this->findAccessible($request, $group, PackageType::Npm, $name);
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+            $pkg = $this->access->organizationPackage($organization, PackageType::Npm, $name);
+            abort_if($pkg === null, 404);
+        } else {
+            $group = $this->registryGroup($request);
+            $this->authorizeGroup($request, $group);
+            $pkg = $this->findAccessible($request, $group, PackageType::Npm, $name);
+        }
+
+        // version_constraint is not enforced at serve time on any path today (see
+        // NpmMetadataBuilder) — so there is nothing to additionally filter here either.
+        // Unchanged group behavior; the org branch matches it.
         $version = $pkg->versions()->where('dist_tarball_name', $file)->firstOrFail();
 
         $disk = Storage::disk('artifacts');
