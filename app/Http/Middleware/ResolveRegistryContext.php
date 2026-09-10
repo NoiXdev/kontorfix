@@ -74,6 +74,22 @@ class ResolveRegistryContext
             // positional controller dispatch would shift every later route parameter.
             $request->route()->forgetParameter('orgSlug');
             $request->route()->forgetParameter('groupSlug');
+        } elseif ($orgSlug !== null) {
+            // Org access: /o/{orgSlug}/... — no {groupSlug} segment at all, unlike slug
+            // access above. This prefix lists every registry the organization owns rather
+            // than resolving one, so there is no group to set here: `registryGroup` stays
+            // null on purpose, which is also what keeps EnsureRegistryTypeEnabled's existing
+            // "no group -> pass through" branch behaving the same way it already documents
+            // for the OCI handshake case. Task 3+ wires the org-level controllers to read
+            // `registryOrganization` directly instead.
+            $organization = Organization::where('slug', $orgSlug)->first();
+            abort_if($organization === null, 404);
+
+            $request->attributes->set('registryOrganization', $organization);
+            $request->attributes->set('registryGroup', null);
+            $request->attributes->set('registryDomainMode', false);
+
+            $request->route()->forgetParameter('orgSlug');
         } else {
             // Domain access: registry at the host root. Unknown host -> 404
             // (protects the main app: foreign hosts fall through cleanly).
