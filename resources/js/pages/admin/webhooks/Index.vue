@@ -28,6 +28,9 @@ interface WebhookRow {
     events: string[];
     enabled: boolean;
     has_secret: boolean;
+    // Null for legacy webhooks predating the organization column — only ever shown
+    // to a caller viewing "all organizations", never to an org-scoped admin.
+    organization: string | null;
     recent_deliveries: DeliveryRow[];
 }
 
@@ -150,6 +153,7 @@ const incomingTable = useTableState<IncomingRow>({
 // so it searches over `url` only and filters on `enabled` only.
 const outgoingColumns: ColumnDef<WebhookRow>[] = [
     { key: 'url', label: 'URL' },
+    { key: 'organization', label: 'Organisation', sortValue: (row) => row.organization ?? '—' },
     { key: 'events', label: 'Events', sortable: false },
     { key: 'has_secret', label: 'Auth', sortValue: (row) => (row.has_secret ? 'Signiert' : '—') },
     { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
@@ -348,6 +352,7 @@ function destroyIncoming(id: string) {
                                 class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                             >
                                 <td class="px-4 py-3 font-mono text-xs">{{ webhook.url }}</td>
+                                <td class="px-4 py-3 text-muted-foreground">{{ webhook.organization ?? '—' }}</td>
                                 <td class="px-4 py-3">
                                     <div class="flex flex-wrap gap-1">
                                         <span

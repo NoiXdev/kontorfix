@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\RegistryToken;
 use App\Services\Portal\PortalContext;
 use App\Services\Portal\PortalPackages;
 use App\Services\Portal\PortalRegistryAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
+use App\Services\Scope\OrgScope;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -211,6 +213,20 @@ class PackageController extends Controller
         // 200 with nothing in it.
         if ($organization === null) {
             return Inertia::render('portal/NoOrganization');
+        }
+
+        // The admin console's sidebar scope, when it points at an organization other than
+        // the viewer's own, wins: "Kundenportal" then previews the SELECTED organization's
+        // portal rather than always bouncing back to the viewer's own. This is safe without
+        // an extra authorization check here because OrgScope::set() already clamps the active
+        // id to organizations the user administers — a plain org-admin can only ever select
+        // their own single org (activeId() always equals their own org_id in that case), so
+        // this can never widen which portal an org-admin reaches. A super-admin (or an
+        // operator-org admin, grandfathered the same reach) may select any organization, and
+        // ResolvePortalContext's own gate re-checks that on arrival regardless.
+        $activeOrgId = app(OrgScope::class)->activeId();
+        if ($activeOrgId !== null && $activeOrgId !== $organization->id) {
+            $organization = Organization::find($activeOrgId) ?? $organization;
         }
 
         // The dead end the portal switch leaves behind. ResolvePortalContext answers 404 for

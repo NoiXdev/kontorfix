@@ -20,6 +20,9 @@ class StoreWebhookRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Only ever read by the API controller (`resolveWriteOrg`) — the admin console
+            // form has no such field and always attributes to the active console scope.
+            'organization_id' => ['nullable', 'uuid', 'exists:organizations,id'],
             'url' => [
                 'required', 'string', 'max:500', 'url:https,http', 'starts_with:https://,http://',
                 // Immediate feedback for obviously internal targets (private/reserved IPs,

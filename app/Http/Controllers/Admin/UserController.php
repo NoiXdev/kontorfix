@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Notifications\UserInvitation;
 use App\Services\RegistryTokenLifecycleService;
+use App\Services\Scope\OrgScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -24,8 +25,16 @@ class UserController extends Controller
 
     public function index(): Response
     {
+        // Instance-wide directory by default (only a super-admin/operator-org admin reaches
+        // this route at all). When the console's sidebar scope has an active organization
+        // selected, narrow the listing to it — the independent client-side org dropdown
+        // below stays for fine-filtering within whatever the server already sent.
+        $activeOrgId = app(OrgScope::class)->activeId();
+
         return Inertia::render('admin/users/Index', [
-            'users' => User::with(['organization:id,name', 'organizations:id,name'])->orderBy('name')->get()
+            'users' => User::with(['organization:id,name', 'organizations:id,name'])
+                ->when($activeOrgId !== null, fn ($q) => $q->where('organization_id', $activeOrgId))
+                ->orderBy('name')->get()
                 ->map(fn (User $user) => [
                     'id' => $user->id,
                     'name' => $user->name,
@@ -41,7 +50,10 @@ class UserController extends Controller
                         'role' => $org->getRelationValue('pivot')?->getAttribute('role') ?? UserRole::Member->value,
                     ])->values(),
                 ]),
-            'organizations' => Organization::orderBy('name')->get(['id', 'name'])
+            // Restricted to the active scope when one is selected, so the dropdown never
+            // offers an organization the server-side filter above already excludes.
+            'organizations' => Organization::when($activeOrgId !== null, fn ($q) => $q->whereKey($activeOrgId))
+                ->orderBy('name')->get(['id', 'name'])
                 ->map(fn (Organization $org) => [
                     'id' => $org->id,
                     'name' => $org->name,

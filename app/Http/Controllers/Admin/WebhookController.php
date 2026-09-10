@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreIncomingWebhookRequest;
 use App\Http\Requests\Admin\StoreWebhookRequest;
@@ -9,6 +10,7 @@ use App\Models\IncomingWebhook;
 use App\Models\IncomingWebhookEvent;
 use App\Models\Webhook;
 use App\Models\WebhookDelivery;
+use App\Services\Scope\OrgScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -16,17 +18,37 @@ use Inertia\Response;
 
 class WebhookController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     public function index(): Response
     {
+        // Outgoing webhooks carry an organization (nullable — legacy, instance-wide config
+        // predates the column). A super-admin viewing "all orgs" sees everything, including
+        // those legacy rows; anyone scoped to specific organizations only sees rows owned by
+        // one of them, so a null-org legacy row never leaks into a customer-org admin's view.
+        $spansAll = app(OrgScope::class)->spansAllOrganizations();
+        $orgIds = $this->scopedOrgIds();
+
+        $webhooksQuery = Webhook::with(['organization:id,name', 'deliveries' => fn ($q) => $q->latest('delivered_at')->limit(5)])
+            ->latest();
+        if (! $spansAll) {
+            $webhooksQuery->whereIn('organization_id', $orgIds);
+        }
+
+        $outgoingAuditQuery = WebhookDelivery::with('webhook:id,url,organization_id')->latest()->limit(50);
+        if (! $spansAll) {
+            $outgoingAuditQuery->whereHas('webhook', fn ($q) => $q->whereIn('organization_id', $orgIds));
+        }
+
         return Inertia::render('admin/webhooks/Index', [
-            'webhooks' => Webhook::with(['deliveries' => fn ($q) => $q->latest('delivered_at')->limit(5)])
-                ->latest()->get()
+            'webhooks' => $webhooksQuery->get()
                 ->map(fn (Webhook $w) => [
                     'id' => $w->id,
                     'url' => $w->url,
                     'events' => $w->events,
                     'enabled' => $w->enabled,
                     'has_secret' => (bool) $w->secret,
+                    'organization' => $w->organization?->name,
                     'recent_deliveries' => $w->deliveries->map(fn (WebhookDelivery $d) => [
                         'event' => $d->event,
                         'status_code' => $d->status_code,
@@ -35,6 +57,10 @@ class WebhookController extends Controller
                         'delivered_at' => $d->delivered_at?->diffForHumans(),
                     ])->values()->all(),
                 ]),
+            // Incoming webhook endpoints have no organization dimension at all (no
+            // `organization_id` column): one secret per git host/repo can match packages
+            // across several organizations, so they stay instance-wide regardless of scope —
+            // same for their audit feed below.
             'incoming' => IncomingWebhook::latest()->get()->map(fn (IncomingWebhook $w) => [
                 'id' => $w->id,
                 'name' => $w->name,
@@ -73,8 +99,7 @@ class WebhookController extends Controller
                         'payload' => $e->payload,
                         'received_at' => $e->created_at?->diffForHumans(),
                     ]),
-                'outgoing' => WebhookDelivery::with('webhook:id,url')
-                    ->latest()->limit(50)->get()
+                'outgoing' => $outgoingAuditQuery->get()
                     ->map(fn (WebhookDelivery $d) => [
                         'id' => $d->id,
                         'url' => $d->webhook?->url,
@@ -100,7 +125,7 @@ class WebhookController extends Controller
         $data = $request->validated();
 
         Webhook::create([
-            'organization_id' => $request->user()->organization_id,
+            'organization_id' => $this->resolveCreationOrg(null),
             'url' => $data['url'],
             'secret' => $data['secret'] ?? null ?: null,
             'events' => $data['events'],
@@ -114,9 +139,33 @@ class WebhookController extends Controller
 
     public function destroy(Webhook $webhook): RedirectResponse
     {
+        $this->assertCanTouchWebhook($webhook);
+
         $webhook->delete();
 
         return back()->with('success', 'Webhook gelöscht.');
+    }
+
+    /**
+     * Aborts 403 unless the webhook is owned within the active scope. Deliberately asks
+     * `scopedOrgIds()` (active scope ∩ administered orgs) rather than `assertAdministersOrg()`:
+     * the latter answers "does this account administer that org at all", which is true for
+     * every org once an account is a super-admin — it would let a super-admin who has
+     * deliberately scoped down to one organization still delete another one's webhook. A
+     * null-org (legacy) webhook is instance-wide config and is only touchable while
+     * unscoped, the same visibility rule index() applies, so nothing can be deleted that
+     * could not be seen.
+     */
+    private function assertCanTouchWebhook(Webhook $webhook): void
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            return;
+        }
+
+        abort_unless(
+            $webhook->organization_id !== null && in_array($webhook->organization_id, $this->scopedOrgIds(), true),
+            403,
+        );
     }
 
     public function createIncoming(): Response

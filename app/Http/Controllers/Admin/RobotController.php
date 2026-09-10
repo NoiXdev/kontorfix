@@ -9,6 +9,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ApiKey;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Scope\OrgScope;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -19,8 +20,15 @@ class RobotController extends Controller
 {
     public function index(): Response
     {
+        // Same rule as UserController::index(): instance-wide by default, narrowed to the
+        // active console scope's organization when one is selected.
+        $activeOrgId = app(OrgScope::class)->activeId();
+
         return Inertia::render('admin/robots/Index', [
-            'robots' => User::where('account_type', AccountType::Robot)->with('organization:id,name')->withCount('apiKeys')->orderBy('name')->get()
+            'robots' => User::where('account_type', AccountType::Robot)
+                ->with('organization:id,name')->withCount('apiKeys')
+                ->when($activeOrgId !== null, fn ($q) => $q->where('organization_id', $activeOrgId))
+                ->orderBy('name')->get()
                 ->map(fn (User $u) => [
                     'id' => $u->id,
                     'name' => $u->name,
@@ -31,7 +39,8 @@ class RobotController extends Controller
                     'organization_id' => $u->organization_id,
                     'keys_count' => $u->api_keys_count,
                 ]),
-            'organizations' => Organization::orderBy('name')->get(['id', 'name']),
+            'organizations' => Organization::when($activeOrgId !== null, fn ($q) => $q->whereKey($activeOrgId))
+                ->orderBy('name')->get(['id', 'name']),
         ]);
     }
 

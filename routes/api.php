@@ -81,9 +81,12 @@ Route::prefix('v1')
             Route::delete('registry-tokens/{registryToken}', [RegistryTokenController::class, 'destroy'])->name('registry-tokens.destroy');
         });
 
-        // Instance-wide administration and monitoring — super-admin only. Outgoing
-        // webhooks, the organization/user/robot directory and the system health status
-        // have no per-organization dimension.
+        // Instance-wide administration and monitoring — super-admin only. The
+        // organization/user/robot directory and the system health status have no
+        // per-organization dimension. Outgoing webhooks DO carry an organization
+        // (Webhook::organization_id) and are scoped to what the caller administers
+        // (ScopesApiToUser); today only super-admins reach this group at all, so that
+        // filter is defensive rather than load-bearing.
         Route::middleware('super')->group(function () {
             // A registry hostname is globally unique and unprovable from inside the app —
             // see the matching web route for the full reasoning.

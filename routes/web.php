@@ -136,9 +136,13 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
         ->middleware('throttle:10,1')->name('packages.retention.preview');
 });
 
-// Instance-wide administration: only the global super-admin. These surfaces have no
-// per-organization dimension (or span all of them) — global system config, the user and
-// organization directories, robots, outgoing/incoming webhooks and instance health.
+// Instance-wide administration: only the global super-admin. Global system config, OIDC,
+// storage/mail and instance health genuinely have no per-organization dimension. Outgoing
+// webhooks and notification recipients DO carry an organization (WebhookController,
+// NotificationRecipientController) and are filtered by the active sidebar scope like the
+// operator group above; incoming webhooks have no organization column at all and stay
+// instance-wide. The user, robot and organization directories are listed instance-wide by
+// default but narrow to the active scope's organization when one is selected.
 Route::middleware(['auth', 'super'])->prefix('admin')->name('admin.')->group(function () {
     // Attaching a registry hostname is instance-wide, not per-organization: `domains.hostname`
     // is globally unique and the row alone decides whose packages are served at that host

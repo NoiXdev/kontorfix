@@ -17,6 +17,7 @@ interface RecipientRow {
     name: string | null;
     events: string[];
     enabled: boolean;
+    organization: string | null;
 }
 
 const props = defineProps<{
@@ -40,6 +41,7 @@ const activeOptions = [
 const columns: ColumnDef<RecipientRow>[] = [
     { key: 'email', label: 'E-Mail' },
     { key: 'name', label: 'Name', sortValue: (row) => row.name ?? '' },
+    { key: 'organization', label: 'Organisation', sortValue: (row) => row.organization ?? '' },
     { key: 'events', label: 'Events', sortable: false },
     { key: 'enabled', label: 'Aktiv', sortValue: (row) => (row.enabled ? 'Ja' : 'Nein') },
     { key: 'actions', label: 'Aktionen', sortable: false },
@@ -106,6 +108,7 @@ function destroyRecipient(id: string) {
                     >
                         <td class="px-4 py-3 font-mono text-xs">{{ recipient.email }}</td>
                         <td class="px-4 py-3">{{ recipient.name ?? '—' }}</td>
+                        <td class="px-4 py-3 text-muted-foreground">{{ recipient.organization ?? '—' }}</td>
                         <td class="px-4 py-3">
                             <div class="flex flex-wrap gap-1">
                                 <span
