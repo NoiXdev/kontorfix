@@ -168,6 +168,32 @@ it('refuses a group-bound token of the same organization with the exact German m
     expect($res->getContent())->not->toContain('very-secret-name');
 });
 
+it('gives a denied caller the identical 403 for a nonexistent project name as for an existing one — no existence oracle', function () {
+    // Same property, same reasoning, as OrgComposerEndpointTest's/OrgNpmEndpointTest's
+    // identically-shaped case: a caller canAccessOrganization() refuses must not be able to
+    // tell, from status or message, whether the project name they asked about exists. If
+    // project resolution ever ran before authorization, a denied caller would get 404 for an
+    // unregistered name but 403 for an existing-but-forbidden one — the split itself is the
+    // leak.
+    $org = Organization::factory()->create();
+    $group = Group::factory()->for($org)->create();
+    $secret = Package::factory()->for($org)->create(['type' => PackageType::Python, 'name' => 'very-secret-name', 'repository_url' => null]);
+    $group->packages()->attach($secret);
+
+    [, $plain] = RegistryToken::issue($org, 'group-bound', $group);
+    $headers = ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
+
+    $existingRes = $this->withHeaders($headers)->getJson(orgRegistryPath($org).'/simple/very-secret-name/');
+    $missingRes = $this->withHeaders($headers)->getJson(orgRegistryPath($org).'/simple/does-not-exist/');
+
+    $existingRes->assertForbidden();
+    $missingRes->assertForbidden();
+    expect($missingRes->status())->toBe($existingRes->status());
+    expect($missingRes->json('message'))->toBe($existingRes->json('message'));
+    expect($existingRes->getContent())->not->toContain('very-secret-name');
+    expect($missingRes->getContent())->not->toContain('does-not-exist');
+});
+
 it('refuses a foreign organization\'s org-wide token with the generic German message, before any project lookup', function () {
     $org = Organization::factory()->create();
     $group = Group::factory()->for($org)->create();

@@ -140,6 +140,37 @@ it('refuses a group-bound token of the same organization with the exact German m
     expect($res->getContent())->not->toContain('very-secret-name');
 });
 
+it('gives a denied caller the identical 403 for a nonexistent package name as for an existing one — no existence oracle', function () {
+    // The property authorizeOrganization()'s ordering exists to guarantee, stated directly
+    // rather than only through the "before any package lookup" test above: a caller
+    // canAccessOrganization() refuses must not be able to tell, from the response alone,
+    // whether the package name they asked about exists. If package resolution ever ran
+    // BEFORE authorization, a denied caller would get 404 for a name nobody registered but
+    // 403 for one that exists and is merely off-limits — the 404-vs-403 split itself would
+    // be the leak, independent of anything the response body says. Asserted here as an
+    // equality between the two responses (status AND message), not merely "both happen to
+    // be 403 individually", so a regression that changed one but not the other still reddens
+    // this.
+    $org = Organization::factory()->create();
+    $group = Group::factory()->for($org)->create();
+    $secret = Package::factory()->for($org)->create(['name' => 'acme/very-secret-name']);
+    PackageVersion::factory()->for($secret)->create();
+    $group->packages()->attach($secret);
+
+    [, $plain] = RegistryToken::issue($org, 'group-bound', $group);
+    $headers = ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
+
+    $existingRes = $this->withHeaders($headers)->getJson(orgRegistryPath($org).'/p2/acme/very-secret-name.json');
+    $missingRes = $this->withHeaders($headers)->getJson(orgRegistryPath($org).'/p2/acme/does-not-exist.json');
+
+    $existingRes->assertForbidden();
+    $missingRes->assertForbidden();
+    expect($missingRes->status())->toBe($existingRes->status());
+    expect($missingRes->json('message'))->toBe($existingRes->json('message'));
+    expect($existingRes->getContent())->not->toContain('very-secret-name');
+    expect($missingRes->getContent())->not->toContain('does-not-exist');
+});
+
 it('refuses a foreign organization\'s org-wide token with the generic German message, before any package lookup', function () {
     $org = Organization::factory()->create();
     $group = Group::factory()->for($org)->create();
