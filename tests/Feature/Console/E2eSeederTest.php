@@ -32,6 +32,7 @@ it('creates the fixture world and prints a parsable context line', function () {
     expect($context)->toBeArray()
         ->and(array_keys($context))->toEqualCanonicalizing([
             'base_url', 'host_base_url', 'read_token', 'publish_token',
+            'org_read_token', 'org_base_url',
             'composer_package', 'npm_package', 'python_package', 'python_module',
             'docker_repository', 'docker_host', 'docker_path_host', 'docker_path_repository',
             'version',
@@ -41,6 +42,13 @@ it('creates the fixture world and prints a parsable context line', function () {
         ->and($context['read_token'])->toStartWith('kfx_')
         ->and($context['publish_token'])->toStartWith('kfx_')
         ->and($context['read_token'])->not->toBe($context['publish_token'])
+        // The org-wide (group_id null) token the `/o/{orgSlug}` mount accepts — distinct
+        // from $read_token above, which is bound to the e2e-registry group and is refused
+        // there (RegistryAccessService::canAccessOrganization()). Task 8's ComposerTest.php
+        // E2E case is the only consumer of either new key.
+        ->and($context['org_read_token'])->toStartWith('kfx_')
+        ->and($context['org_read_token'])->not->toBe($context['read_token'])
+        ->and($context['org_base_url'])->toBe('http://app:8080/o/e2e-customer')
         ->and($context['composer_package'])->toBe('kontorfix-e2e/demo')
         ->and($context['npm_package'])->toBe('kontorfix-e2e-demo')
         ->and($context['python_package'])->toBe('kontorfix-e2e-demo')

@@ -146,6 +146,73 @@ it('installs the synced package with the real composer client', function () {
         ->and($installedEntry['version'] ?? null)->toBe(composerTagVersion($context['version']));
 });
 
+it('installs the synced package through the org-wide address with an org-wide token', function () {
+    $context = E2eStack::context();
+
+    // The same install this file already proves through the registry-scoped `/r/{org}/
+    // {group}` address, resolved instead through the org-wide `/o/{orgSlug}` aggregate
+    // mount with E2eSeeder's second token — one whose `group_id` is null, the only shape
+    // RegistryAccessService::canAccessOrganization() accepts there (the registry-scoped
+    // `read_token` above is refused on this mount with the group-bound 403). Composer only,
+    // per Task 8's brief: the Feature suite (tests/Feature/Registry/OrgComposerEndpointTest.php,
+    // plus its npm/PyPI analogues) already pins every access rule at the HTTP layer: this
+    // case exists to prove a real Composer client can resolve install → metadata → dist
+    // through the org mount end to end, not to re-litigate those rules.
+    //
+    // A fresh project directory (/work/org-proj), distinct from the plain install test's
+    // /work/proj: client-composer is one container reused across every test in this file,
+    // and a leftover composer.json/vendor from the earlier test must not be what makes this
+    // one pass.
+    $script = <<<SH
+        set -e
+        rm -rf /work/org-proj && mkdir -p /work/org-proj && cd /work/org-proj
+        export COMPOSER_AUTH='{"http-basic":{"app:8080":{"username":"x","password":"{$context['org_read_token']}"}}}'
+        composer init -n --name=kontorfix-e2e/org-consumer > /dev/null
+        composer config secure-http false
+        composer config repositories.packagist.org false
+        composer config repositories.kontorfix composer {$context['org_base_url']}
+        composer require {$context['composer_package']}:^1.0 --no-interaction --no-progress
+        echo ===MANIFEST===
+        cat vendor/{$context['composer_package']}/composer.json
+        echo ===MANIFEST-END===
+        test -f vendor/{$context['composer_package']}/src/Demo.php && echo DEMO_PHP_PRESENT || echo DEMO_PHP_MISSING
+        SH;
+
+    $process = E2eStack::exec('client-composer', $script, 600);
+
+    expect($process->isSuccessful())->toBeTrue($process->getErrorOutput());
+
+    $output = $process->getOutput();
+    $manifest = json_decode(extractBetween($output, '===MANIFEST===', '===MANIFEST-END==='), true);
+
+    expect($manifest['name'])->toBe($context['composer_package'])
+        ->and($output)->toContain('DEMO_PHP_PRESENT');
+
+    // Registry side, same two assertions the plain install test makes: the org endpoint's
+    // p2 metadata advertises a dist, and that dist URL is actually servable — through the
+    // org address, read from the host over the published loopback port. getAtHostRoot()
+    // rather than get(): the latter's `host_base_url` carries the registry-scoped `/r/{org}/
+    // {group}` prefix, not the org one, so it cannot address `/o/{orgSlug}` at all.
+    $orgPath = (string) parse_url($context['org_base_url'], PHP_URL_PATH);
+    $metadata = E2eStack::getAtHostRoot("{$orgPath}/p2/{$context['composer_package']}.json", $context['org_read_token']);
+    expect($metadata['status'])->toBe(200);
+
+    $versions = json_decode($metadata['body'], true)['packages'][$context['composer_package']] ?? [];
+    $distUrl = $versions[0]['dist']['url'] ?? null;
+    expect($distUrl)->not->toBeNull();
+
+    // Not pathFromRegistryUrl(): that helper strips the registry's own path prefix because
+    // get() (the plain install test's caller) reaches the stack through `host_base_url`,
+    // which already carries that prefix. getAtHostRoot() addresses the host root with no
+    // prefix at all, so the dist URL's full path — org prefix included — is what belongs
+    // here, taken from the URL exactly as ComposerMetadataBuilder built it.
+    $distFetch = E2eStack::getAtHostRoot(
+        (string) parse_url($distUrl, PHP_URL_PATH),
+        $context['org_read_token'],
+    );
+    expect($distFetch['status'])->toBe(200);
+});
+
 it('refuses an anonymous composer read with 401 and installs nothing', function () {
     $context = E2eStack::context();
 

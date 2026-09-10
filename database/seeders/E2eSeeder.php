@@ -209,7 +209,13 @@ class E2eSeeder extends Seeder
         [, $readToken] = RegistryToken::issue($customer, 'e2e-read', $group, TokenAbility::Read);
         [, $publishToken] = RegistryToken::issue($customer, 'e2e-publish', $group, TokenAbility::Publish);
 
+        // Org-wide (group_id null): the credential the `/o/{orgSlug}` aggregate mount
+        // accepts (RegistryAccessService::canAccessOrganization()) — unlike $readToken
+        // above, which is bound to $group and is refused there with the group-bound 403.
+        [, $orgReadToken] = RegistryToken::issue($customer, 'e2e-org-read', null, TokenAbility::Read);
+
         $base = '/r/e2e-customer/e2e-registry';
+        $orgBase = '/o/e2e-customer';
 
         // A single line the runner greps out of `artisan db:seed`'s own chatter. The tokens
         // never touch the repository: bin/e2e writes this to tests/E2E/.context.json, which
@@ -219,6 +225,8 @@ class E2eSeeder extends Seeder
             'host_base_url' => 'http://127.0.0.1:8099'.$base,
             'read_token' => $readToken,
             'publish_token' => $publishToken,
+            'org_read_token' => $orgReadToken,
+            'org_base_url' => 'http://app:8080'.$orgBase,
             'composer_package' => 'kontorfix-e2e/demo',
             'npm_package' => 'kontorfix-e2e-demo',
             'python_package' => 'kontorfix-e2e-demo',
