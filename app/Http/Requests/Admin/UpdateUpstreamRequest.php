@@ -4,8 +4,10 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageType;
 use App\Enums\UpstreamPolicy;
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Models\Upstream;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Services\Scope\OrgScope;
 use App\Support\CredentialUrl;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -46,16 +48,42 @@ class UpdateUpstreamRequest extends FormRequest
      * Authorization cannot be left to the controller here, the way it is for every other
      * request in this namespace: `withValidator()` below reads the route-bound upstream's
      * `auth_token`, and Laravel resolves the FormRequest before the controller's
-     * `assertAdministersOrg` ever runs. A foreign tenant would get a 422 naming
+     * `assertAdministersOrgInScope()` ever runs. A foreign tenant would get a 422 naming
      * `auth_token` when the upstream holds a mirror credential and a 403 when it does
      * not — one bit about someone else's upstream, for free.
+     *
+     * Has to be SCOPE-aware, not just `administers()`: a super-admin (or grandfathered
+     * operator-org admin) administers every organization at once, so a bare `administers()`
+     * here would open the exact same oracle for one who has deliberately scoped the console
+     * down to a different organization — `withValidator()` still runs before any
+     * controller guard sees the request, on the strength of this method alone returning
+     * true. See {@see administersInScope()}.
      */
     public function authorize(): bool
     {
         $upstream = $this->route('upstream');
 
-        return $upstream instanceof Upstream
-            && $this->user()?->administers($upstream->group?->organization_id) === true;
+        return $upstream instanceof Upstream && $this->administersInScope($upstream->group?->organization_id);
+    }
+
+    /**
+     * Same boundary as {@see ScopesToAdministeredOrgs::assertAdministersOrgInScope()}
+     * — deliberately duplicated here rather than shared via that trait, because the trait
+     * is written for controllers (it pulls in `GuardsPackageAttachment`) and this decision
+     * has to run at the FormRequest layer, before any controller exists to ask it.
+     */
+    private function administersInScope(?string $organizationId): bool
+    {
+        if ($organizationId === null) {
+            return false;
+        }
+
+        $scope = app(OrgScope::class);
+        if ($scope->spansAllOrganizations()) {
+            return $this->user()?->administers($organizationId) === true;
+        }
+
+        return in_array($organizationId, $scope->ids(), true);
     }
 
     /**

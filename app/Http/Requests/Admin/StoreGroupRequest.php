@@ -74,8 +74,9 @@ class StoreGroupRequest extends FormRequest
      * The organization the registry will be created in — the same value the controller
      * resolves through resolveCreationOrg(): an explicit choice first, then the active
      * console scope, then the user's own home organization. Returns an empty string when
-     * none of them yields one, which makes the uniqueness rule above match nothing; the
-     * controller then refuses the request outright (assertAdministersOrg).
+     * none of them yields one, which makes the uniqueness rule above match nothing;
+     * resolveCreationOrg() then refuses the request outright via its own internal
+     * assertAdministersOrg() call.
      *
      * Deliberately not validated for administerability here — that decision stays in one
      * place, the controller — so this value only ever narrows a uniqueness check.

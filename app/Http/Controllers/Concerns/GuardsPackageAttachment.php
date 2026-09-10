@@ -72,7 +72,7 @@ use Illuminate\Support\Facades\Auth;
  * and no name left suppressed against an upstream that anyone can still address. Deleting the
  * registry the assignment lives in is not a way to take the assignment away from someone —
  * it is the same act, one level up, and it is already guarded as such by
- * assertAdministersGroup(). A guard here would only refuse the customer their own registry
+ * assertAdministersGroupInScope(). A guard here would only refuse the customer their own registry
  * because the operator had put something in it.
  *
  * Neither question is the whole of the shared decision: a shared package may also not shadow

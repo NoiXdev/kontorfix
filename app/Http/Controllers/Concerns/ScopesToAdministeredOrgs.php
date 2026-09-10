@@ -35,12 +35,6 @@ trait ScopesToAdministeredOrgs
         abort_unless($organizationId !== null && Auth::user()?->administers($organizationId), 403);
     }
 
-    /** Aborts 403 unless the current user may administer the registry's organization. */
-    protected function assertAdministersGroup(Group $group): void
-    {
-        $this->assertAdministersOrg($group->organization_id);
-    }
-
     /**
      * Aborts 403 unless the given organization is within the ACTIVE SCOPE — deliberately
      * narrower than {@see assertAdministersOrg()}, which only asks "does this account
