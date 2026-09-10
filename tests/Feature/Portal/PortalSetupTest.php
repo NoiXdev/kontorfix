@@ -100,3 +100,71 @@ it('still refuses a plain member minting a publish-ability org-wide token', func
 
     expect(RegistryToken::count())->toBe(0);
 });
+
+/*
+ * The Einrichtung tab's own token list needs a revoke path — `portal.tokens.destroy`
+ * already exists (RegistryController::show()'s per-registry token list uses it) and
+ * TokenController::destroy() + RegistryTokenPolicy::delete() do not read `group_id` at
+ * all: the policy branches on organization membership plus either token ownership
+ * (personal) or `administers()` (org-shared, ownerless), both of which are exactly as
+ * meaningful for a `group_id IS NULL` row as for a group-bound one. These cases pin that
+ * down directly, rather than trusting the per-group tests to generalize to it.
+ */
+it('lets the owner revoke their own org-wide token, and it leaves the setup tabs list', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->for($org)->create(['role' => UserRole::Member]);
+    [$token] = RegistryToken::issue($org, 'ci-org-wide', null, owner: $user);
+
+    $this->actingAs($user)
+        ->delete(route('portal.tokens.destroy', [$org->slug, $token->id]))
+        ->assertRedirect();
+
+    expect(RegistryToken::find($token->id))->toBeNull();
+
+    $this->actingAs($user)->get(route('portal.setup', $org->slug))
+        ->assertInertia(fn ($page) => $page->has('tokens', 0));
+});
+
+it('refuses a member revoking another members org-wide token', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $owner = User::factory()->for($org)->create(['role' => UserRole::Member]);
+    $other = User::factory()->for($org)->create(['role' => UserRole::Member]);
+    [$token] = RegistryToken::issue($org, 'ci-org-wide', null, owner: $owner);
+
+    $this->actingAs($other)
+        ->delete(route('portal.tokens.destroy', [$org->slug, $token->id]))
+        ->assertForbidden();
+
+    // The status alone would not distinguish a refusal from one that still deleted the row.
+    expect(RegistryToken::find($token->id))->not->toBeNull();
+});
+
+it('refuses revoking an org-wide token of another organization through this portals address', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $other = Organization::factory()->create();
+    $admin = User::factory()->for($org)->create(['role' => UserRole::Admin]);
+    $admin->organizations()->attach($other->id, ['role' => 'admin']);
+    [$foreignToken] = RegistryToken::issue($other, 'foreign-org-wide', null, owner: $admin);
+
+    // TokenController::destroy() binds the token to the organization the URL names, ahead
+    // of the policy — the same rule PortalTokenIsolationTest already pins for a group-bound
+    // token, exercised here against one with `group_id === null`.
+    $this->actingAs($admin)
+        ->delete(route('portal.tokens.destroy', [$org->slug, $foreignToken->id]))
+        ->assertForbidden();
+
+    expect(RegistryToken::find($foreignToken->id))->not->toBeNull();
+});
+
+it('still excludes a group-bound token from the setup tabs list after an org-wide one is revoked', function () {
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $group = Group::factory()->for($org)->create();
+    $user = User::factory()->for($org)->create(['role' => UserRole::Member]);
+    [$orgWide] = RegistryToken::issue($org, 'ci-org-wide', null, owner: $user);
+    RegistryToken::issue($org, 'ci-group-bound', $group, owner: $user);
+
+    $this->actingAs($user)->delete(route('portal.tokens.destroy', [$org->slug, $orgWide->id]))->assertRedirect();
+
+    $this->actingAs($user)->get(route('portal.setup', $org->slug))
+        ->assertInertia(fn ($page) => $page->has('tokens', 0));
+});
