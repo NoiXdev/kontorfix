@@ -81,7 +81,12 @@ it('carries the address of both portal areas on the landing page', function () {
 
     $this->actingAs($user)->get('/c/acme')
         ->assertInertia(fn ($page) => $page->component('portal/Packages')
-            ->where('portal.areas', ['packages' => '/c/acme', 'registries' => '/c/acme/registries']));
+            ->where('portal.areas', [
+                'packages' => '/c/acme',
+                'registries' => '/c/acme/registries',
+                // Task 7's organization-wide Einrichtung tab — a third area.
+                'setup' => '/c/acme/setup',
+            ]));
 });
 
 it('addresses the areas of the organization in the url, not a fixed one', function () {
@@ -94,7 +99,11 @@ it('addresses the areas of the organization in the url, not a fixed one', functi
 
     $this->actingAs($user)->get('/c/beispiel-ag')
         ->assertInertia(fn ($page) => $page
-            ->where('portal.areas', ['packages' => '/c/beispiel-ag', 'registries' => '/c/beispiel-ag/registries']));
+            ->where('portal.areas', [
+                'packages' => '/c/beispiel-ag',
+                'registries' => '/c/beispiel-ag/registries',
+                'setup' => '/c/beispiel-ag/setup',
+            ]));
 });
 
 it('opens the registries area at the address the empty landing page hands out', function () {

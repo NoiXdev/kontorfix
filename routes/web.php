@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Portal\PackageController;
 use App\Http\Controllers\Portal\RegistryController;
+use App\Http\Controllers\Portal\SetupController as PortalSetupController;
 use App\Http\Controllers\Portal\TokenController;
 use App\Http\Controllers\SetupController;
 use App\Http\Middleware\ConfirmPasswordOnEmailChange;
@@ -257,6 +258,11 @@ Route::middleware(['auth', 'verified', 'portal.context'])
         Route::get('registries', [RegistryController::class, 'index'])->name('registries.index');
         Route::get('registries/{group}', [RegistryController::class, 'show'])->name('registries.show');
         Route::get('registries/{group}/packages/{package}', [RegistryController::class, 'showPackage'])->name('registries.package');
+        // Task 7: the organization-wide Einrichtung tab, addressed as its own page rather
+        // than a tab of `registries.show` — it has no single group to key a URL off, and
+        // its snippet set (SetupSnippetBuilder::forOrganization()) is a different payload
+        // entirely, not a per-group one with a wider token.
+        Route::get('setup', [PortalSetupController::class, 'show'])->name('setup');
         // The portal mints exactly the credential `settings/tokens` mints, so it carries the
         // same `password.confirm` gate — gating one surface and not the other would only tell
         // a session thief which URL to use. `destroy` stays ungated so that revoking a token

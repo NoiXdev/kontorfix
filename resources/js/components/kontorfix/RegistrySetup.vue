@@ -9,24 +9,40 @@ import { useForm, usePage } from '@inertiajs/vue3';
 import { Check, Copy, Plus } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import { type ParameterValue, type RouteList } from 'ziggy-js';
-import { dockerDomainNote, dockerSetupSnippet, dockerStepTitle, type SetupAudience } from './dockerSetup';
+import { dockerDomainNote, dockerOrgSetupSnippet, dockerSetupSnippet, dockerStepTitle, type OrgDockerGroup, type SetupAudience } from './dockerSetup';
 import { noEcosystemMessage, offersMinting, offersPublishing, stepsForEcosystems } from './registrySetup';
 
 interface Snippets {
-    composer: string;
-    auth: string;
-    npm: string;
-    pip: string;
-    twine: string;
-    // Docker's raw facts, not a finished snippet — see SetupSnippetBuilder::for()'s doc
-    // comment. Required, not optional: `dockerHost` stopped being nullable when
-    // ResolveOciContext gave every registry a working address on the instance host, and an
-    // optional field here would let a caller silently forward a payload that no longer
-    // carries them.
-    dockerHost: string;
-    dockerRepositoryPrefix: string;
-    dockerHasDomain: boolean;
+    // composer/auth/npm/pip: present for a single registry's snippet set (for(Group)) and,
+    // individually, for the organization-wide one (forOrganization()) whenever the
+    // corresponding ecosystem is enabled — see that method's doc comment, point 3. Optional
+    // here so the SAME interface fits both payloads; `steps` below drops a step outright
+    // when its field is absent rather than rendering a blank block.
+    composer?: string;
+    auth?: string;
+    npm?: string;
+    pip?: string;
+    // ABSENT ENTIRELY from the organization-wide snippet set, even when Python is enabled:
+    // publishing targets one registry, never the organization as a whole, so there is no
+    // ~/.pypirc block to offer there (see SetupSnippetBuilder::forOrganization()'s doc
+    // comment, point 1). This is the one field whose absence does NOT follow from `types`
+    // alone — python enabled still means no twine — so the twine step is gated on this
+    // field being present, not on `types` including python the way the pip step is.
+    twine?: string;
+    // Docker's raw facts for ONE registry, not a finished snippet — see
+    // SetupSnippetBuilder::for()'s doc comment. Present together for a single registry's
+    // snippet set; ABSENT together — replaced by `dockerGroups` below — for the
+    // organization-wide one, which has no single registry to compute them for.
+    dockerHost?: string;
+    dockerRepositoryPrefix?: string;
+    dockerHasDomain?: boolean;
     dockerExample?: string | null;
+    // The organization-wide Docker section (Task 7): every registry of the organization,
+    // each entry self-consistent (its own dockerHost paired with its own
+    // dockerRepositoryPrefix — never the `dockerHost` above paired with a different entry's
+    // prefix, see SetupSnippetBuilder::forOrganization()'s doc comment, point 2). Present
+    // only for the organization-wide payload.
+    dockerGroups?: OrgDockerGroup[];
 }
 
 interface PersonalToken {
@@ -72,6 +88,12 @@ const props = defineProps<{
     // choice the server answers 403 to — the refusal PublishTokenEscalationTest already
     // pins.
     mayPublish?: boolean;
+    // A sentence shown beside the mint form, or omitted for none — the console and the
+    // per-registry portal tab both omit it, since a token minted THERE carries the one
+    // group's id and reaches nowhere else. Task 7's organization-wide tab passes
+    // `orgTokenScopeWarning()`: a token minted there carries no group at all and resolves
+    // against every registry of the organization, including one this portal never lists.
+    tokenScopeNote?: string;
 }>();
 
 const mayMint = computed(() => offersMinting(props.mayMint));
@@ -147,17 +169,22 @@ function createAndInsert() {
 }
 
 /**
- * The five snippets a minted token gets substituted into. Deliberately NOT `Snippets`: the
- * Docker step's fields are raw facts rather than text, they carry no `<token>` at all
+ * The five text snippets a minted token gets substituted into. Deliberately NOT `Snippets`:
+ * the Docker step's fields are raw facts rather than text, they carry no `<token>` at all
  * (`docker login` prompts for the password instead of taking it on a command line that
- * lands in the shell history), and typing this as the whole payload would force four fields
- * to be copied through a map that has nothing to do with them.
+ * lands in the shell history), and typing this as the whole payload would force four (or,
+ * for `dockerGroups`, a whole list of) fields to be copied through a map that has nothing to
+ * do with them.
  */
 type TextSnippetKey = 'composer' | 'auth' | 'npm' | 'pip' | 'twine';
 
-const substituted = computed<Record<TextSnippetKey, string>>(() => {
+// Partial, not `Record<TextSnippetKey, string>`: the organization-wide payload
+// (forOrganization()) omits `twine` always and `composer`/`auth`/`npm`/`pip` whenever the
+// corresponding ecosystem is disabled — see Snippets' own doc comments. `undefined` here is
+// what tells `steps` below to drop the step rather than render a blank block.
+const substituted = computed<Partial<Record<TextSnippetKey, string>>>(() => {
     const t = activeToken.value;
-    const sub = (s: string) => (t ? s.split(PLACEHOLDER).join(t) : s);
+    const sub = (s?: string) => (s === undefined ? undefined : t ? s.split(PLACEHOLDER).join(t) : s);
     return {
         composer: sub(props.snippets.composer),
         auth: sub(props.snippets.auth),
@@ -182,29 +209,73 @@ interface Step {
     title: string;
     /** The copyable block. Every step has one — there is no address-less state left. */
     content: string;
-    /** A sentence under the block, or '' for none. Today only the Docker step sets it, on a
-     *  registry with no custom domain: the commands above work as they stand, and this says
-     *  what a hostname of its own would change. */
+    /** A sentence under the block, or '' for none. Today only the per-registry Docker step
+     *  sets it, on a registry with no custom domain: the commands above work as they stand,
+     *  and this says what a hostname of its own would change. */
     note: string;
 }
 
-const steps = computed<Step[]>(() =>
-    stepsForEcosystems(stepDefs, props.types).map((s) => {
-        if (s.key === 'docker') {
-            return {
-                key: s.key,
-                title: s.title,
-                // Built from the raw facts rather than read out of `substituted`: this
-                // block carries no <token> to replace at all — `docker login` prompts
-                // for the password instead of taking it on a command line that lands
-                // in the shell history.
-                content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix, props.snippets.dockerExample),
-                note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
-            };
+/**
+ * The Docker step, or null when there is genuinely nothing to show — which is null's ONLY
+ * meaning here: a per-registry payload always has one (every registry has a working Docker
+ * address, per SetupSnippetBuilder::for()'s own doc comment), and an organization-wide one
+ * has none only when the organization has no registry at all yet.
+ *
+ * `dockerGroups` (organization-wide, Task 7) is checked FIRST and independently of
+ * `dockerHost`: forOrganization() sets both `dockerHost` and `dockerGroups` together (see its
+ * doc comment), so branching on `dockerHost` alone would print the per-registry block — built
+ * from that shared top-level host and no prefix at all — for a payload that has a whole list
+ * of registries to name instead.
+ */
+function dockerStep(): Step | null {
+    if (props.snippets.dockerGroups !== undefined) {
+        if (props.snippets.dockerGroups.length === 0) {
+            return null;
         }
 
-        return { key: s.key, title: s.title, content: substituted.value[s.key], note: '' };
-    }),
+        return {
+            key: 'docker',
+            title: dockerStepTitle(),
+            content: dockerOrgSetupSnippet(props.snippets.dockerGroups),
+            // No domain note here: each entry's own `dockerHost` already accounts for a
+            // custom domain (RegistryUrl::dockerHost() per group), so there is no single
+            // "this registry has no domain yet" sentence that could describe the whole list.
+            note: '',
+        };
+    }
+
+    if (props.snippets.dockerHost === undefined) {
+        return null;
+    }
+
+    return {
+        key: 'docker',
+        title: dockerStepTitle(),
+        // Built from the raw facts rather than read out of `substituted`: this block
+        // carries no <token> to replace at all — `docker login` prompts for the password
+        // instead of taking it on a command line that lands in the shell history.
+        content: dockerSetupSnippet(props.snippets.dockerHost, props.snippets.dockerRepositoryPrefix ?? '', props.snippets.dockerExample),
+        note: props.snippets.dockerHasDomain ? '' : dockerDomainNote(props.audience),
+    };
+}
+
+const steps = computed<Step[]>(() =>
+    stepsForEcosystems(stepDefs, props.types)
+        .map((s): Step | null => {
+            if (s.key === 'docker') {
+                return dockerStep();
+            }
+
+            const content = substituted.value[s.key];
+
+            // undefined, not an empty string: the organization-wide payload's `twine` is
+            // absent even when `types` includes python (see Snippets' doc comment on that
+            // field), and gating on the field's presence — not merely on `types` — is what
+            // drops the step rather than rendering a block for a section the builder never
+            // sent.
+            return content === undefined ? null : { key: s.key, title: s.title, content, note: '' };
+        })
+        .filter((s): s is Step => s !== null),
 );
 
 const copiedKey = ref<string | null>(null);
@@ -258,6 +329,14 @@ function selectSession(value: string) {
                 <p v-if="mayMint" class="text-xs text-muted-foreground">
                     Aus Sicherheitsgründen wird ein Token nur einmal im Klartext angezeigt. Vorhandene Tokens lassen sich daher nicht erneut einsetzen
                     — erstellen Sie ein neues, um es direkt in die Snippets zu übernehmen.
+                </p>
+                <!-- Absent for the console and the per-registry portal tab, which never pass
+                     it: a token minted THERE carries that one registry's id and reaches
+                     nowhere else. Task 7's organization-wide tab passes
+                     orgTokenScopeWarning() here, because a token minted there carries no
+                     group at all. -->
+                <p v-if="mayMint && tokenScopeNote" class="text-xs font-medium text-copper-hi">
+                    {{ tokenScopeNote }}
                 </p>
             </div>
 

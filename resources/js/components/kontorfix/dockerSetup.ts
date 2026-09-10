@@ -99,6 +99,58 @@ export function dockerDomainNote(audience: SetupAudience): string {
 }
 
 /**
+ * One row of the organization-wide Docker list — SetupSnippetBuilder::forOrganization()'s
+ * `dockerGroups` entries verbatim, each self-consistent (its own `dockerHost` paired with
+ * its own `dockerRepositoryPrefix`; see that method's doc comment for why a domain-bound
+ * group cannot be paired with the shared instance host).
+ */
+export interface OrgDockerGroup {
+    name: string;
+    slug: string;
+    /** Whether this registry appears in the portal — false labels it "Sammlung" below. */
+    portal_enabled: boolean;
+    dockerHost: string;
+    dockerRepositoryPrefix: string;
+}
+
+/**
+ * The heading over one group's block in the organization-wide Docker section: its name, or
+ * its name plus "(Sammlung)" for a registry the portal itself does not list.
+ *
+ * "Sammlung" (collection), not "versteckt" (hidden) or omitting the row outright: the org-wide
+ * token reaches this registry exactly as it reaches a portal-visible one (Task 6's builder
+ * lists it for that reason), so a reader relying only on this tab must be told it exists and
+ * what to call it — an omitted row would be a registry the org-wide token can push to and this
+ * page never mentions.
+ */
+export function dockerOrgGroupLabel(group: Pick<OrgDockerGroup, 'name' | 'portal_enabled'>): string {
+    return group.portal_enabled ? group.name : `${group.name} (Sammlung)`;
+}
+
+/**
+ * The organization-wide Docker step's whole content: one heading plus one login/pull/tag/push
+ * block per group, in the order the server already sorted them (by name).
+ *
+ * PER-GROUP, unlike dockerSetupSnippet() alone: the org endpoint serves no Docker traffic of
+ * its own (SetupSnippetBuilder::forOrganization()'s doc comment states why — an image
+ * reference under `/o/{slug}` would be ambiguous about which registry it names), so there is
+ * no single command this could print. Every entry gets dockerSetupSnippet() called with ITS
+ * OWN host and prefix — never the shared top-level `dockerHost` paired with another entry's
+ * prefix, which is exactly the defect a review caught in the builder before this ever
+ * rendered (see forOrganization()'s doc comment).
+ *
+ * No example repository is passed through: `dockerGroups` carries no `dockerExample` field at
+ * all (only for(Group) derives one, from that one registry's own packages), so every block
+ * falls back to the `<repository>` placeholder dockerSetupSnippet() already produces for a
+ * registry with none yet.
+ */
+export function dockerOrgSetupSnippet(groups: OrgDockerGroup[]): string {
+    return groups
+        .map((g) => `# ${dockerOrgGroupLabel(g)}\n${dockerSetupSnippet(g.dockerHost, g.dockerRepositoryPrefix)}`)
+        .join('\n\n');
+}
+
+/**
  * Shown in place of the snippet on the package-level Docker page when the repository is in
  * no registry this viewer can see — the one case where there is genuinely no address to
  * print, and the only reason that page still has a branch without commands at all.

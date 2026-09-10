@@ -70,7 +70,8 @@ export interface PortalAreaLink {
 }
 
 /**
- * The portal's area navigation: the package list and the registries, in that order.
+ * The portal's area navigation: the package list, the registries, and — as of Task 7 —
+ * Einrichtung, in that order.
  *
  * SPEC §3 CALLS REGISTRIES "THE SECOND AREA", and for most of this branch it was an area with
  * no way in. Task 1 made `/c/{org}/registries` the landing page and pointed the sidebar there;
@@ -80,35 +81,45 @@ export interface PortalAreaLink {
  * the Composer, npm and pip snippets or the token form from the interface at all, and that is
  * the exact moment the portal exists for.
  *
+ * Task 7 adds Einrichtung as a THIRD area rather than a tab of the second: it is not about one
+ * registry the way `registries.show`'s own Einrichtung tab is — it is the organization-wide
+ * snippet set and the org-wide token, reachable independently of which (if any) registry the
+ * customer opens first.
+ *
  * IN THE HEADER rather than on the package list, because an area is not a row on another
  * area's page. The sidebar cannot hold it: it renders application-wide with no organization in
  * hand, which is why both of its portal entries point at `portal.home` and resolve the viewer's
- * own. The header is mounted by all four portal pages, so the entry point survives whatever the
+ * own. The header is mounted by every portal page, so the entry point survives whatever the
  * landing page becomes next.
  *
  * The hrefs are the server's (`portal.areas`), never assembled here — see the comment on that
  * prop. The LABELS are German and therefore live in this module rather than in the template:
  * they are the words the customer navigates by, and German inside a `<template>` is the part of
- * this codebase nothing can check. They are the two headings the pages already carry, so the
- * navigation and the page a viewer lands on name the same thing.
+ * this codebase nothing can check. Pakete and Registries are the two headings the pages already
+ * carry, so the navigation and the page a viewer lands on name the same thing; Einrichtung
+ * matches the tab of the same name on the per-registry page, so the word means one thing on
+ * both surfaces.
  *
  * `current` is derived from the PATH alone, with everything from the first `?` or `#` cut off
- * in one statement. Both of the portal's list pages write their table state into the query
+ * in one statement. The portal's list pages write their table state into the query
  * (`pkg_search`, `pkg_type`), so a navigation that read the whole URL would stop marking itself
  * the moment the customer typed in a search box — worse than one that never marked itself.
  *
  * Registries wins on a PREFIX, so the registry detail and the package detail below it — both
- * addressed under `/registries/…` — stay in the area they belong to; everything else is the
- * package list, which is what `/c/{org}` is. The prefix is also what leaves the truncation
- * measurable in exactly one shape, `/c/{org}/registries?…`: the package list has nothing to
- * match either way, and a detail URL keeps its `/` before the query.
+ * addressed under `/registries/…` — stay in the area they belong to; everything else that is
+ * not Einrichtung is the package list, which is what `/c/{org}` is. The prefix is also what
+ * leaves the truncation measurable in exactly one shape, `/c/{org}/registries?…`: the package
+ * list has nothing to match either way, and a detail URL keeps its `/` before the query.
+ * Einrichtung has no sub-pages of its own, so an exact match is enough for it.
  */
 export function portalAreaLinks(areas: PortalAreaPaths, currentUrl: string): PortalAreaLink[] {
     const path = currentUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
     const inRegistries = path === areas.registries || path.startsWith(`${areas.registries}/`);
+    const inSetup = path === areas.setup;
 
     return [
-        { label: 'Pakete', href: areas.packages, current: !inRegistries },
+        { label: 'Pakete', href: areas.packages, current: !inRegistries && !inSetup },
         { label: 'Registries', href: areas.registries, current: inRegistries },
+        { label: 'Einrichtung', href: areas.setup, current: inSetup },
     ];
 }

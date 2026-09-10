@@ -4,7 +4,7 @@ import { offersSwitcher, operatorBannerNote, portalAreaLinks, switcherOptions } 
 const HOME = { name: 'Home', slug: 'home' };
 const OTHER = { name: 'Other', slug: 'other' };
 const CUSTOMER = { name: 'Acme GmbH', slug: 'acme' };
-const AREAS = { packages: '/c/acme', registries: '/c/acme/registries' };
+const AREAS = { packages: '/c/acme', registries: '/c/acme/registries', setup: '/c/acme/setup' };
 
 describe('operatorBannerNote', () => {
     it('names the customer and says which affordance the operator does not have', () => {
@@ -82,26 +82,33 @@ describe('offersSwitcher', () => {
 });
 
 describe('portalAreaLinks', () => {
-    it('names both areas, in order, and marks the package list on the landing page', () => {
+    it('names all three areas, in order, and marks the package list on the landing page', () => {
         // toEqual on the WHOLE list. The registries area spent this branch with no link into
         // it anywhere in resources/js — the setup snippets and the token form were unreachable
         // for a customer whose package list is empty — so the assertion that matters is that
         // the second entry is there at all, with the right address. A per-key check on the
-        // first entry would have passed throughout the regression.
+        // first entry would have passed throughout the regression. Einrichtung is Task 7's
+        // third area, added the same way.
         expect(portalAreaLinks(AREAS, '/c/acme')).toEqual([
             { label: 'Pakete', href: '/c/acme', current: true },
             { label: 'Registries', href: '/c/acme/registries', current: false },
+            { label: 'Einrichtung', href: '/c/acme/setup', current: false },
         ]);
     });
 
     it('marks the registries area on the registries list', () => {
         // The other side of `current`. Without it the flag is indistinguishable from the
-        // constant `true` on the first row and `false` on the second, which is what a landing
+        // constant `true` on the first row and `false` on the rest, which is what a landing
         // page assertion alone leaves it as.
         expect(portalAreaLinks(AREAS, '/c/acme/registries')).toEqual([
             { label: 'Pakete', href: '/c/acme', current: false },
             { label: 'Registries', href: '/c/acme/registries', current: true },
+            { label: 'Einrichtung', href: '/c/acme/setup', current: false },
         ]);
+    });
+
+    it('marks the einrichtung area on the organization-wide setup tab', () => {
+        expect(portalAreaLinks(AREAS, '/c/acme/setup').map((a) => a.current)).toEqual([false, false, true]);
     });
 
     it('keeps a registry detail page inside the registries area', () => {
@@ -109,14 +116,14 @@ describe('portalAreaLinks', () => {
         // addressed under /registries/…, and equality would drop the marking the moment the
         // customer clicked a card — leaving the navigation pointing at Pakete on a page that is
         // not the package list.
-        expect(portalAreaLinks(AREAS, '/c/acme/registries/019-abc/packages/019-def').map((a) => a.current)).toEqual([false, true]);
+        expect(portalAreaLinks(AREAS, '/c/acme/registries/019-abc/packages/019-def').map((a) => a.current)).toEqual([false, true, false]);
     });
 
     it('ignores the package list search and filter keys', () => {
         // useTableState writes `pkg_search` and `pkg_type` into the URL, so the landing page's
         // own address carries a query string as soon as the customer types. A navigation that
         // stopped marking itself there would be worse than one that never marked itself.
-        expect(portalAreaLinks(AREAS, '/c/acme?pkg_search=tools&pkg_type=composer').map((a) => a.current)).toEqual([true, false]);
+        expect(portalAreaLinks(AREAS, '/c/acme?pkg_search=tools&pkg_type=composer').map((a) => a.current)).toEqual([true, false, false]);
     });
 
     it('still marks the registries area when its address carries a query', () => {
@@ -125,18 +132,19 @@ describe('portalAreaLinks', () => {
         // and the second keeps its trailing slash before the `?` — so this exact shape is the
         // only one where reading the raw URL flips the marking, onto Pakete, on a page that is
         // the registries list.
-        expect(portalAreaLinks(AREAS, '/c/acme/registries?ref=mail').map((a) => a.current)).toEqual([false, true]);
+        expect(portalAreaLinks(AREAS, '/c/acme/registries?ref=mail').map((a) => a.current)).toEqual([false, true, false]);
     });
 
     it('carries a different organization through', () => {
         // The interpolation's absent case: the assertions above are equally satisfied by two
         // literals with `acme` typed into them, which would send every other customer into a
         // stranger's portal.
-        const other = { packages: '/c/beispiel-ag', registries: '/c/beispiel-ag/registries' };
+        const other = { packages: '/c/beispiel-ag', registries: '/c/beispiel-ag/registries', setup: '/c/beispiel-ag/setup' };
 
         expect(portalAreaLinks(other, '/c/beispiel-ag')).toEqual([
             { label: 'Pakete', href: '/c/beispiel-ag', current: true },
             { label: 'Registries', href: '/c/beispiel-ag/registries', current: false },
+            { label: 'Einrichtung', href: '/c/beispiel-ag/setup', current: false },
         ]);
     });
 });

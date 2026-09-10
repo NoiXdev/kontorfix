@@ -36,10 +36,14 @@ export interface SwitchableOrganization {
     slug: string;
 }
 
-/** Where each of the portal's two areas lives, as HandleInertiaRequests shares it. */
+/** Where each of the portal's three areas lives, as HandleInertiaRequests shares it. */
 export interface PortalAreaPaths {
     packages: string;
     registries: string;
+    // Task 7's organization-wide Einrichtung tab (`portal.setup`) — a third area rather than
+    // a fourth tab of `registries`, since it addresses every registry the org-wide token can
+    // reach at once rather than one.
+    setup: string;
 }
 
 /**
@@ -49,8 +53,9 @@ export interface PortalAreaPaths {
 export interface PortalContext {
     organization: SwitchableOrganization;
     /**
-     * The portal's two areas (spec §3), as paths the server built from the routes. The header
-     * renders the navigation from these rather than assembling `/c/…` itself.
+     * The portal's areas (spec §3, plus Task 7's Einrichtung tab), as paths the server built
+     * from the routes. The header renders the navigation from these rather than assembling
+     * `/c/…` itself.
      */
     areas: PortalAreaPaths;
     /** The viewer's OWN memberships whose portal is switched on — never a broader set. */

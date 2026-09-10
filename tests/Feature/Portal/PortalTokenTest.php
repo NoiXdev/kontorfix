@@ -158,3 +158,23 @@ it('still lets a member of the organization mint a token', function () {
     expect(RegistryToken::count())->toBe(1)
         ->and(RegistryToken::sole()->organization_id)->toBe($org->id);
 });
+
+it('mints an org-wide token when no group_id is submitted, for the Einrichtung tabs form', function () {
+    // Task 7's setup tab POSTs to this exact route with no `group_id` field at all — this is
+    // that shape, pinned by name rather than only exercised in passing by the test above,
+    // which asserts the organization but never the group. `group_id === null` is what makes
+    // RegistryToken::issue() write an org-wide credential (see its own doc comment); a token
+    // scoped to some incidental group would still pass every assertion that test makes.
+    $org = Organization::factory()->create(['slug' => 'acme']);
+    $user = User::factory()->create(['organization_id' => $org->id, 'role' => 'member']);
+
+    $this->actingAs($user)
+        ->post('/c/acme/tokens', ['name' => 'org-wide'])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('plainTextToken');
+
+    $token = RegistryToken::sole();
+    expect($token->organization_id)->toBe($org->id)
+        ->and($token->group_id)->toBeNull();
+});

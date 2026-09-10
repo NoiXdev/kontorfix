@@ -90,7 +90,7 @@ class HandleInertiaRequests extends Middleware
     /**
      * The portal header's props, or null on a request that addresses no portal.
      *
-     * @return array{organization: array{name: string, slug: string}, areas: array{packages: string, registries: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool, may_publish_tokens: bool}|null
+     * @return array{organization: array{name: string, slug: string}, areas: array{packages: string, registries: string, setup: string}, switchable: list<array{name: string, slug: string}>, viewing_as_operator: bool, may_mint_tokens: bool, may_publish_tokens: bool}|null
      */
     private function portal(Request $request, ?User $user): ?array
     {
@@ -146,6 +146,10 @@ class HandleInertiaRequests extends Middleware
             'areas' => [
                 'packages' => route('portal.packages.index', $organization->slug, absolute: false),
                 'registries' => route('portal.registries.index', $organization->slug, absolute: false),
+                // Task 7's organization-wide Einrichtung tab — a third area, not a fourth
+                // per-group tab, since its snippet set (SetupSnippetBuilder::forOrganization())
+                // addresses every registry the org-wide token can reach at once.
+                'setup' => route('portal.setup', $organization->slug, absolute: false),
             ],
             // Built from the viewer's OWN memberships, never a broader set: feeding this the
             // customer directory would make that directory a by-product of navigation, and

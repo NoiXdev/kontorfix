@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dockerDomainNote, dockerNoRegistryMessage, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
+import { dockerDomainNote, dockerNoRegistryMessage, dockerOrgGroupLabel, dockerOrgSetupSnippet, dockerSetupSnippet, dockerStepTitle } from './dockerSetup';
 
 describe('dockerStepTitle', () => {
     it('names the step', () => {
@@ -140,6 +140,58 @@ describe('dockerDomainNote', () => {
             expect(dockerDomainNote(audience)).not.toContain('kein Image-Betrieb');
             expect(dockerDomainNote(audience)).not.toContain('nicht ansprechen');
         }
+    });
+});
+
+describe('dockerOrgGroupLabel', () => {
+    it('names a portal-visible registry plainly', () => {
+        expect(dockerOrgGroupLabel({ name: 'Intern', portal_enabled: true })).toBe('Intern');
+    });
+
+    it('labels a collection group, not merely hiding it', () => {
+        // Task 6's builder lists a portal_enabled=false group in `dockerGroups` on purpose —
+        // the org-wide token reaches it exactly as it reaches a visible one — so the label
+        // names what it is rather than the row disappearing.
+        expect(dockerOrgGroupLabel({ name: 'CI-Only', portal_enabled: false })).toBe('CI-Only (Sammlung)');
+    });
+});
+
+describe('dockerOrgSetupSnippet', () => {
+    it('prints one heading and one login/pull/tag/push block per group, in order', () => {
+        expect(
+            dockerOrgSetupSnippet([
+                { name: 'Acme', slug: 'acme', portal_enabled: true, dockerHost: 'reg.example.test', dockerRepositoryPrefix: 'kunde/acme/' },
+                { name: 'Intern', slug: 'intern', portal_enabled: false, dockerHost: 'reg.example.test', dockerRepositoryPrefix: 'kunde/intern/' },
+            ]),
+        ).toBe(
+            [
+                '# Acme',
+                dockerSetupSnippet('reg.example.test', 'kunde/acme/'),
+                '',
+                '# Intern (Sammlung)',
+                dockerSetupSnippet('reg.example.test', 'kunde/intern/'),
+            ].join('\n'),
+        );
+    });
+
+    it('reads each groups own host together with its own prefix, never the shared one', () => {
+        // The defect a review caught in the builder before this ever rendered: a domain-bound
+        // group has an EMPTY dockerRepositoryPrefix because its own domain is the registry
+        // root, so pairing it with a different group's host would print a login/pull against
+        // a host that group is not served from at all.
+        const snippet = dockerOrgSetupSnippet([
+            { name: 'Acme', slug: 'acme', portal_enabled: true, dockerHost: 'reg.example.test', dockerRepositoryPrefix: 'kunde/acme/' },
+            { name: 'Images', slug: 'images', portal_enabled: true, dockerHost: 'images.acme.test', dockerRepositoryPrefix: '' },
+        ]);
+
+        expect(snippet).toContain('docker login reg.example.test -u token');
+        expect(snippet).toContain('docker pull reg.example.test/kunde/acme/<repository>:<tag>');
+        expect(snippet).toContain('docker login images.acme.test -u token');
+        expect(snippet).toContain('docker pull images.acme.test/<repository>:<tag>');
+    });
+
+    it('is empty for an organization with no groups at all', () => {
+        expect(dockerOrgSetupSnippet([])).toBe('');
     });
 });
 
