@@ -80,6 +80,48 @@ it('persists the global registry-type setting from the system page', function ()
     expect(svc()->globalTypes())->toBe(['composer', 'python']);
 });
 
+it('404s the org-level composer endpoint for a globally disabled type', function () {
+    SystemSetting::current()->update(['enabled_registry_types' => ['npm']]); // composer off
+    $org = Organization::factory()->create();
+    $group = Group::factory()->for($org)->create();
+    $pkg = Package::factory()->for($org)->create(['type' => PackageType::Composer, 'name' => 'acme/demo']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/packages.json')->assertNotFound();
+});
+
+it('404s the org-level composer endpoint for a type disabled only for that org', function () {
+    // composer globally on, but this org restricts itself to npm only.
+    $org = Organization::factory()->create(['enabled_registry_types' => ['npm']]);
+    $group = Group::factory()->for($org)->create();
+    $pkg = Package::factory()->for($org)->create(['type' => PackageType::Composer, 'name' => 'acme/demo']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/packages.json')->assertNotFound();
+});
+
+it('still serves the org-level composer endpoint when the type is enabled', function () {
+    $org = Organization::factory()->create(['enabled_registry_types' => ['composer', 'npm']]);
+    $group = Group::factory()->for($org)->create();
+    $pkg = Package::factory()->for($org)->create(['type' => PackageType::Composer, 'name' => 'acme/demo']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/packages.json')->assertOk();
+});
+
+it('leaves group-path type gating unaffected by the org branch', function () {
+    // The group-path assertions above (line 43+) already pin this, but re-asserted here,
+    // right next to the org-branch cases, so a future edit to EnsureRegistryTypeEnabled that
+    // breaks the group `if` while "fixing" the new `elseif` shows up in the same file.
+    SystemSetting::current()->update(['enabled_registry_types' => ['composer']]); // npm off
+    $group = Group::factory()->for(Organization::factory())->create(['public' => true]);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    $group->packages()->attach($pkg);
+
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/leftpad')->assertNotFound();
+    $this->withHeaders(tokenHeaderFor($group))->get(registryPath($group).'/packages.json')->assertOk();
+});
+
 it('clamps a per-org override to the global ceiling', function () {
     SystemSetting::current()->update(['enabled_registry_types' => ['composer', 'npm']]); // python off
     $admin = User::factory()->for(Organization::factory()->create(['is_operator' => true]))->create(['role' => UserRole::Admin]);

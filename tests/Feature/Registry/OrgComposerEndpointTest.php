@@ -7,9 +7,10 @@
 // ComposerController and ResolvesRegistryPackage for the branching pattern itself.
 //
 // This is the reference implementation Tasks 4 (npm) and 5 (PyPI) copy: the two 403
-// messages, the 401-before-403-before-package-lookup ordering, the version-constraint
-// union and the "org with zero packages still answers a valid empty response" case all
-// pin behavior those tasks are expected to reproduce for their own ecosystem.
+// messages, the 401-before-403-before-package-lookup ordering, the "version_constraint is
+// not enforced on any path" pin and the "org with zero packages still answers a valid empty
+// response" case all pin behavior those tasks are expected to reproduce for their own
+// ecosystem.
 use App\Enums\TokenAbility;
 use App\Models\Group;
 use App\Models\Organization;
@@ -60,39 +61,32 @@ it('serves p2 metadata for a package visible through the org', function () {
         ->assertOk()->assertJsonStructure(['packages' => ['acme/demo']]);
 });
 
-it('serves the union of two groups\' version constraints for a package assigned to both', function () {
+it('serves every version on /o/ regardless of version_constraint on the assignment, same as the group endpoint (unfiltered on every path today)', function () {
+    // group_package.version_constraint is not enforced at serve time on ANY path — see
+    // ComposerMetadataBuilder's docblock. The spec's "union of what any single group would
+    // serve" therefore reduces to "everything", because that is what the (unfiltered) group
+    // endpoint already serves. Pinned here as an equality against the group endpoint's own
+    // response for the same package, rather than against a hardcoded version list, so this
+    // test breaks the day either path starts enforcing the column without the other.
     $org = Organization::factory()->create();
-    $groupA = Group::factory()->for($org)->create();
-    $groupB = Group::factory()->for($org)->create();
+    $group = Group::factory()->for($org)->create();
     $pkg = Package::factory()->for($org)->create(['name' => 'acme/lib']);
     PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
     PackageVersion::factory()->for($pkg)->create(['version' => '2.0.0.0', 'version_pretty' => 'v2.0.0']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '3.0.0.0', 'version_pretty' => 'v3.0.0']);
-    $groupA->packages()->attach($pkg, ['version_constraint' => '^1.0']);
-    $groupB->packages()->attach($pkg, ['version_constraint' => '^2.0']);
+    // A constraint IS present on the assignment — proving it has no effect, not merely
+    // absent from this scenario.
+    $group->packages()->attach($pkg, ['version_constraint' => '^1.0']);
 
-    $res = $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/p2/acme/lib.json');
+    $orgRes = $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/p2/acme/lib.json');
+    $groupRes = $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/p2/acme/lib.json');
 
-    $res->assertOk();
-    $versions = collect(MetadataMinifier::expand($res->json('packages')['acme/lib']))->pluck('version');
-    expect($versions)->toContain('v1.0.0', 'v2.0.0')->not->toContain('v3.0.0');
-});
+    $orgRes->assertOk();
+    $groupRes->assertOk();
+    $orgVersions = collect(MetadataMinifier::expand($orgRes->json('packages')['acme/lib']))->pluck('version')->sort()->values()->all();
+    $groupVersions = collect(MetadataMinifier::expand($groupRes->json('packages')['acme/lib']))->pluck('version')->sort()->values()->all();
 
-it('serves every version unfiltered when at least one group assigns the package with no constraint', function () {
-    $org = Organization::factory()->create();
-    $groupA = Group::factory()->for($org)->create();
-    $groupB = Group::factory()->for($org)->create();
-    $pkg = Package::factory()->for($org)->create(['name' => 'acme/lib']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '3.0.0.0', 'version_pretty' => 'v3.0.0']);
-    $groupA->packages()->attach($pkg, ['version_constraint' => '^1.0']);
-    $groupB->packages()->attach($pkg); // no constraint at all
-
-    $res = $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/p2/acme/lib.json');
-
-    $res->assertOk();
-    $versions = collect(MetadataMinifier::expand($res->json('packages')['acme/lib']))->pluck('version');
-    expect($versions)->toContain('v1.0.0', 'v3.0.0');
+    expect($orgVersions)->toBe(['v1.0.0', 'v2.0.0']);
+    expect($orgVersions)->toBe($groupVersions);
 });
 
 it('serves a dist download through the org endpoint', function () {

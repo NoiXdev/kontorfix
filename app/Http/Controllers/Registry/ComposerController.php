@@ -96,9 +96,7 @@ class ComposerController extends Controller
                 abort(404);
             }
 
-            $constraints = $this->access->versionConstraintsForOrganization($organization, $package);
-
-            return response()->json($this->metadata->buildForOrganization($package, $this->registryBaseUrlForOrganization($request, $organization), $constraints));
+            return response()->json($this->metadata->buildForOrganization($package, $this->registryBaseUrlForOrganization($request, $organization)));
         }
 
         $group = $this->registryGroup($request);
@@ -165,11 +163,9 @@ class ComposerController extends Controller
             $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
         }
 
-        // Not constraint-filtered, in either branch: version_constraint has never gated a
-        // dist download, only which versions a package's METADATA lists (see
-        // ComposerMetadataBuilder). A version a group's/the org's constraint would hide from
-        // packages.json is still fetchable by exact URL once a client already knows about
-        // it — unchanged group behavior, deliberately not tightened for the org branch either.
+        // version_constraint is not enforced at serve time on any path today, metadata
+        // included (see ComposerMetadataBuilder) — so there is nothing to additionally
+        // filter here either. Unchanged group behavior; the org branch matches it.
         $pkgVersion = $package->versions()->where('version', $version)->first();
 
         if ($pkgVersion === null) {

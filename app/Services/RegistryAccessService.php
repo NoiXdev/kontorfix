@@ -164,40 +164,6 @@ class RegistryAccessService
     }
 
     /**
-     * The raw material for the org endpoint's version-constraint union (spec decision 7):
-     * every unexpired `group_package.version_constraint` value assigned to $package across
-     * ALL of the organization's groups. A `null` entry means at least one such group assigns
-     * the package with no restriction at all — the CALLER must check for that (e.g. via
-     * `in_array(null, $result, true)`) before treating the rest of the list as constraints
-     * to OR together, because decision 7 makes a null entry win outright rather than merely
-     * widen the union.
-     *
-     * A plain array rather than a Collection: the two nullable-value generic types involved
-     * (`Collection<int, string|null>` on both this method's return and its one caller's
-     * parameter) are template-invariant in Larastan's stubs, which flags the identical type
-     * on both sides as a mismatch — a known false positive with no clean per-call fix. A
-     * `list<string|null>` sidesteps the whole class of error.
-     *
-     * Scoped to $organization's groups only (mirrors availablePackages()'s per-group version):
-     * a package may be assigned to groups of several organizations at once when it is
-     * `shared`, and a sibling organization's constraint on the same package is none of this
-     * organization's business.
-     *
-     * @return list<string|null>
-     */
-    public function versionConstraintsForOrganization(Organization $organization, Package $package): array
-    {
-        return $package->groups()
-            ->where('groups.organization_id', $organization->id)
-            ->where(fn ($q) => $q
-                ->whereNull('group_package.available_until')
-                ->orWhere('group_package.available_until', '>', now()))
-            ->pluck('group_package.version_constraint')
-            ->values()
-            ->all();
-    }
-
-    /**
      * The query shared by packagesForOrganization() and organizationPackage(): every
      * package assigned (unexpired) to any group of the organization, owned by that
      * organization or shared — the same predicate availablePackages() states for a single
