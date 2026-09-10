@@ -42,6 +42,42 @@ trait ScopesToAdministeredOrgs
     }
 
     /**
+     * Aborts 403 unless the given organization is within the ACTIVE SCOPE — deliberately
+     * narrower than {@see assertAdministersOrg()}, which only asks "does this account
+     * administer that org at all". That question is true for every organization at once a
+     * caller is any kind of super-admin, so it would let a super-admin who has scoped the
+     * console down to organization A still open, edit or delete organization B's registry
+     * (or anything hanging off it) by URL — exactly the gap the org-scope fixes to the
+     * webhook and notification-recipient surfaces closed, and the same reasoning applies
+     * here: switching the scope back to "all" (or to the other organization) is the
+     * intended escape hatch, silently reaching past the active scope is not.
+     *
+     * Existing, already-persisted rows only (view/update/delete of a registry, upstream,
+     * mirror source, git credential, …) — creation still resolves its organization through
+     * {@see resolveCreationOrg()}, which is scope-aware from the other direction (it reads
+     * the target org FROM the scope rather than checking a caller-supplied one against it).
+     */
+    protected function assertAdministersOrgInScope(?string $organizationId): void
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            // Still must actually administer it — spansAllOrganizations() is only ever true
+            // for a super-admin, who administers every organization anyway, but this keeps
+            // the method correct in isolation rather than relying on that always holding.
+            $this->assertAdministersOrg($organizationId);
+
+            return;
+        }
+
+        abort_unless($organizationId !== null && in_array($organizationId, $this->scopedOrgIds(), true), 403);
+    }
+
+    /** Aborts 403 unless the registry's organization is within the active scope. */
+    protected function assertAdministersGroupInScope(Group $group): void
+    {
+        $this->assertAdministersOrgInScope($group->organization_id);
+    }
+
+    /**
      * Constrains a Group query to the active scope. A super-admin viewing "all orgs"
      * gets no filter; everyone else is clamped to their administered organizations.
      *

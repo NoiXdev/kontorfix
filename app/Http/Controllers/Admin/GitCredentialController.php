@@ -148,7 +148,7 @@ class GitCredentialController extends Controller
 
     public function edit(GitCredential $gitCredential): Response
     {
-        $this->assertAdministersOrg($gitCredential->organization_id);
+        $this->assertAdministersOrgInScope($gitCredential->organization_id);
 
         $isOperatorCredential = (bool) $gitCredential->organization?->is_operator;
 
@@ -182,7 +182,7 @@ class GitCredentialController extends Controller
 
     public function update(Request $request, GitCredential $gitCredential): RedirectResponse
     {
-        $this->assertAdministersOrg($gitCredential->organization_id);
+        $this->assertAdministersOrgInScope($gitCredential->organization_id);
 
         $data = $request->validate([
             'name' => ['required', 'string', 'max:190'],
@@ -237,7 +237,7 @@ class GitCredentialController extends Controller
 
     public function destroy(GitCredential $gitCredential): RedirectResponse
     {
-        $this->assertAdministersOrg($gitCredential->organization_id);
+        $this->assertAdministersOrgInScope($gitCredential->organization_id);
 
         $gitCredential->delete();
 
@@ -247,7 +247,7 @@ class GitCredentialController extends Controller
     /** Verifies the credential can reach a given repository (git ls-remote). */
     public function test(Request $request, GitCredential $gitCredential, RepositoryProbe $probe): JsonResponse
     {
-        $this->assertAdministersOrg($gitCredential->organization_id);
+        $this->assertAdministersOrgInScope($gitCredential->organization_id);
 
         $data = $request->validate([
             'repository_url' => ['required', 'string', 'max:500', 'url:https', 'starts_with:https://'],

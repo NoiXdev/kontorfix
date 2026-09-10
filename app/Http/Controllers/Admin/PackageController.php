@@ -903,7 +903,7 @@ class PackageController extends Controller
         // A mirror source is never shared across organizations (see its docblock) — usable
         // only by the active scope's own organizations, the same boundary MirrorSourceController
         // itself enforces.
-        $this->assertAdministersOrg($source->organization_id);
+        $this->assertAdministersOrgInScope($source->organization_id);
 
         $result = $probe->probe($source, $data['mirror_name']);
 
@@ -926,7 +926,7 @@ class PackageController extends Controller
         // never be slipped into another organization's registry.
         $groupIds = $request->validated('group_ids', []);
         foreach ($groupIds as $groupId) {
-            $this->assertAdministersGroup(Group::findOrFail($groupId));
+            $this->assertAdministersGroupInScope(Group::findOrFail($groupId));
         }
 
         // A package must not claim a name one of these registries already serves through a

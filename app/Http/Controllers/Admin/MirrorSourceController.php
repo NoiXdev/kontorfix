@@ -85,7 +85,7 @@ class MirrorSourceController extends Controller
 
     public function edit(MirrorSource $mirrorSource): Response
     {
-        $this->assertAdministersOrg($mirrorSource->organization_id);
+        $this->assertAdministersOrgInScope($mirrorSource->organization_id);
 
         // The stored token itself is deliberately excluded — it must never travel back to
         // the browser to pre-fill a field; the edit page's token input starts blank and
@@ -105,7 +105,7 @@ class MirrorSourceController extends Controller
 
     public function update(MirrorSourceRequest $request, MirrorSource $mirrorSource): RedirectResponse
     {
-        $this->assertAdministersOrg($mirrorSource->organization_id);
+        $this->assertAdministersOrgInScope($mirrorSource->organization_id);
 
         $data = $request->validated();
 
@@ -140,7 +140,7 @@ class MirrorSourceController extends Controller
 
     public function destroy(MirrorSource $mirrorSource): RedirectResponse
     {
-        $this->assertAdministersOrg($mirrorSource->organization_id);
+        $this->assertAdministersOrgInScope($mirrorSource->organization_id);
 
         // Deletion is allowed even when packages still reference this source: the foreign
         // key is nullOnDelete (see the mirror_sources migration), so a referencing package

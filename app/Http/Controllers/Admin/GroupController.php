@@ -110,7 +110,7 @@ class GroupController extends Controller
 
     public function show(Group $group, SetupSnippetBuilder $snippets, RegistryUrl $url, RegistryTypeService $types): Response
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         // `slug` on the organization is load-bearing, not decoration: the setup snippets
         // address the registry as /r/{orgSlug}/{groupSlug} via RegistryUrl. `portal_enabled`
@@ -402,7 +402,7 @@ class GroupController extends Controller
 
     public function update(UpdateGroupRequest $request, Group $group, SlugClaimGuard $slugs): RedirectResponse
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         $attributes = [
             'name' => $request->validated('name'),
@@ -431,7 +431,7 @@ class GroupController extends Controller
 
     public function attachPackages(Request $request, Group $group, SharedAssignment $sharedAssignment): RedirectResponse
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         $data = $request->validate([
             'package_ids' => ['required', 'array', 'min:1'],
@@ -499,7 +499,7 @@ class GroupController extends Controller
      */
     public function updateAssignment(Request $request, Group $group, Package $package, SharedAssignment $sharedAssignment): RedirectResponse
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         // Without this the request would silently succeed against no row at all —
         // updateExistingPivot() reports zero affected rows and returns.
@@ -552,7 +552,7 @@ class GroupController extends Controller
      */
     public function detachPackage(Group $group, Package $package): RedirectResponse
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         // detach() leaves the current assignment minus this package. A package the registry
         // does not carry leaves the set alone and is the no-op it has always been.
@@ -569,7 +569,7 @@ class GroupController extends Controller
 
     public function destroy(Group $group): RedirectResponse
     {
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         $group->delete();
 
