@@ -38,13 +38,11 @@ trait ScopesToAdministeredOrgs
     /**
      * Aborts 403 unless the given organization is within the ACTIVE SCOPE — deliberately
      * narrower than {@see assertAdministersOrg()}, which only asks "does this account
-     * administer that org at all". That question is true for every organization at once a
-     * caller is any kind of super-admin, so it would let a super-admin who has scoped the
-     * console down to organization A still open, edit or delete organization B's registry
-     * (or anything hanging off it) by URL — exactly the gap the org-scope fixes to the
-     * webhook and notification-recipient surfaces closed, and the same reasoning applies
-     * here: switching the scope back to "all" (or to the other organization) is the
-     * intended escape hatch, silently reaching past the active scope is not.
+     * administer that org at all" (true for every organization at once a caller is any
+     * kind of super-admin). The predicate itself lives on {@see
+     * OrgScope::administersInScope()}, THE mutation boundary — shared with
+     * `UpdateUpstreamRequest::authorize()`, which cannot wait for this controller-layer
+     * wrapper because Laravel resolves a FormRequest before the controller ever runs.
      *
      * Existing, already-persisted rows only (view/update/delete of a registry, upstream,
      * mirror source, git credential, …) — creation still resolves its organization through
@@ -53,16 +51,7 @@ trait ScopesToAdministeredOrgs
      */
     protected function assertAdministersOrgInScope(?string $organizationId): void
     {
-        if (app(OrgScope::class)->spansAllOrganizations()) {
-            // Still must actually administer it — spansAllOrganizations() is only ever true
-            // for a super-admin, who administers every organization anyway, but this keeps
-            // the method correct in isolation rather than relying on that always holding.
-            $this->assertAdministersOrg($organizationId);
-
-            return;
-        }
-
-        abort_unless($organizationId !== null && in_array($organizationId, $this->scopedOrgIds(), true), 403);
+        abort_unless(app(OrgScope::class)->administersInScope($organizationId), 403);
     }
 
     /** Aborts 403 unless the registry's organization is within the active scope. */

@@ -4,7 +4,6 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\PackageType;
 use App\Enums\UpstreamPolicy;
-use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Models\Upstream;
 use App\Rules\NotRedactedCredentialUrl;
 use App\Services\Scope\OrgScope;
@@ -52,38 +51,20 @@ class UpdateUpstreamRequest extends FormRequest
      * `auth_token` when the upstream holds a mirror credential and a 403 when it does
      * not — one bit about someone else's upstream, for free.
      *
-     * Has to be SCOPE-aware, not just `administers()`: a super-admin (or grandfathered
-     * operator-org admin) administers every organization at once, so a bare `administers()`
-     * here would open the exact same oracle for one who has deliberately scoped the console
-     * down to a different organization — `withValidator()` still runs before any
-     * controller guard sees the request, on the strength of this method alone returning
-     * true. See {@see administersInScope()}.
+     * Delegates to {@see OrgScope::administersInScope()}, THE mutation boundary, rather
+     * than the plain `administers()` a bare authorization check would reach for: a
+     * super-admin (or grandfathered operator-org admin) administers every organization at
+     * once, so `administers()` alone would open the exact same oracle for one who has
+     * deliberately scoped the console down to a different organization —
+     * `withValidator()` still runs before any controller guard sees the request, on the
+     * strength of this method alone returning true.
      */
     public function authorize(): bool
     {
         $upstream = $this->route('upstream');
 
-        return $upstream instanceof Upstream && $this->administersInScope($upstream->group?->organization_id);
-    }
-
-    /**
-     * Same boundary as {@see ScopesToAdministeredOrgs::assertAdministersOrgInScope()}
-     * — deliberately duplicated here rather than shared via that trait, because the trait
-     * is written for controllers (it pulls in `GuardsPackageAttachment`) and this decision
-     * has to run at the FormRequest layer, before any controller exists to ask it.
-     */
-    private function administersInScope(?string $organizationId): bool
-    {
-        if ($organizationId === null) {
-            return false;
-        }
-
-        $scope = app(OrgScope::class);
-        if ($scope->spansAllOrganizations()) {
-            return $this->user()?->administers($organizationId) === true;
-        }
-
-        return in_array($organizationId, $scope->ids(), true);
+        return $upstream instanceof Upstream
+            && app(OrgScope::class)->administersInScope($upstream->group?->organization_id);
     }
 
     /**

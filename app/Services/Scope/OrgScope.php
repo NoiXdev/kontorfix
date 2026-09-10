@@ -116,6 +116,44 @@ class OrgScope
     }
 
     /**
+     * THE mutation boundary for an existing, already-persisted row: whether the given
+     * organization is within the ACTIVE SCOPE, not merely administered somewhere. Every
+     * admin surface that views, edits or deletes a row it does not own — a registry, a
+     * webhook, an upstream, a git credential, a mirror source, a token, a domain, … —
+     * delegates to this one method, both from {@see
+     * \App\Http\Controllers\Concerns\ScopesToAdministeredOrgs::assertAdministersOrgInScope()}
+     * (the controller layer) and directly from a FormRequest's own `authorize()` when
+     * Laravel would otherwise resolve validation before any controller guard runs (see
+     * `UpdateUpstreamRequest`). There must be exactly one copy of this predicate: a second
+     * one drifts, silently, the moment either copy is touched without the other.
+     *
+     * Deliberately narrower than "does this account administer that org at all"
+     * (`User::administers()`), which is true for EVERY organization at once an account is
+     * any kind of super-admin (including the grandfathered operator-org admin) — asking
+     * only that would let a super-admin who has scoped the console down to organization A
+     * still reach organization B's row by id/URL. Switching the scope back to "all" (or to
+     * the other organization) is the intended escape hatch; silently reaching past the
+     * active scope is not.
+     *
+     * `spansAllOrganizations()` still re-confirms real membership rather than returning
+     * true unconditionally: that flag is only ever true for a super-admin, who administers
+     * every organization anyway, but this keeps the method correct in isolation rather than
+     * relying on that always holding.
+     */
+    public function administersInScope(?string $organizationId): bool
+    {
+        if ($organizationId === null) {
+            return false;
+        }
+
+        if ($this->spansAllOrganizations()) {
+            return (bool) $this->user()?->administers($organizationId);
+        }
+
+        return in_array($organizationId, $this->ids(), true);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function share(): array
