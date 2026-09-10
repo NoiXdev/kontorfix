@@ -38,7 +38,7 @@ class DomainController extends Controller
         $data = $request->validated();
 
         $group = Group::findOrFail($data['group_id']);
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         $domain = Domain::create([
             'group_id' => $group->id,
@@ -50,7 +50,7 @@ class DomainController extends Controller
 
     public function destroy(Domain $domain): RedirectResponse
     {
-        $this->assertAdministersOrg($domain->group?->organization_id);
+        $this->assertAdministersOrgInScope($domain->group?->organization_id);
 
         $domain->delete();
 

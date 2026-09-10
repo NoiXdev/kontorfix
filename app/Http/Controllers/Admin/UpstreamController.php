@@ -57,7 +57,7 @@ class UpstreamController extends Controller
         $data = $request->validated();
 
         $group = Group::findOrFail($data['group_id']);
-        $this->assertAdministersGroup($group);
+        $this->assertAdministersGroupInScope($group);
 
         $upstream = Upstream::create([
             'group_id' => $group->id,
@@ -94,7 +94,7 @@ class UpstreamController extends Controller
 
     public function edit(Upstream $upstream): Response
     {
-        $this->assertAdministersOrg($upstream->group?->organization_id);
+        $this->assertAdministersOrgInScope($upstream->group?->organization_id);
 
         // Loaded fresh from the record, not from the index listing's mapped row: this page
         // is reached directly (URL, bookmark, back button), so it cannot rely on anything
@@ -123,7 +123,7 @@ class UpstreamController extends Controller
 
     public function update(UpdateUpstreamRequest $request, Upstream $upstream): RedirectResponse
     {
-        $this->assertAdministersOrg($upstream->group?->organization_id);
+        $this->assertAdministersOrgInScope($upstream->group?->organization_id);
 
         $data = $request->validated();
 
@@ -159,7 +159,7 @@ class UpstreamController extends Controller
 
     public function destroy(Upstream $upstream): RedirectResponse
     {
-        $this->assertAdministersOrg($upstream->group?->organization_id);
+        $this->assertAdministersOrgInScope($upstream->group?->organization_id);
 
         $upstream->delete();
 

@@ -79,7 +79,7 @@ class TokenController extends Controller
 
     public function destroy(RegistryToken $token): RedirectResponse
     {
-        $this->assertAdministersOrg($token->organization_id);
+        $this->assertAdministersOrgInScope($token->organization_id);
 
         $token->delete();
 
