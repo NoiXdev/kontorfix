@@ -174,6 +174,30 @@ function tokenPlainTextFor(Group $group, TokenAbility $ability = TokenAbility::R
 }
 
 /**
+ * The org-level registry's path prefix (`/o/{orgSlug}`) — the org-endpoint counterpart of
+ * registryPath(). Not read from RegistryUrl: that class's org-level builder is introduced
+ * later for the portal setup snippets, and no controller-facing test needs it before then.
+ */
+function orgRegistryPath(Organization $organization): string
+{
+    return '/o/'.$organization->slug;
+}
+
+/**
+ * An org-wide token's Basic-auth header — the `group: null` counterpart of
+ * tokenHeaderFor(), which the org-endpoint feature tests (Composer today; npm/pypi copy
+ * this) use to exercise the org-wide-token-only access rule.
+ *
+ * @return array<string, string>
+ */
+function orgTokenHeaderFor(Organization $organization): array
+{
+    [, $plain] = RegistryToken::issue($organization, 'test', null);
+
+    return ['Authorization' => 'Basic '.base64_encode('token:'.$plain)];
+}
+
+/**
  * @return array<string, string>
  */
 function publishHeaderFor(Group $group): array

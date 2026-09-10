@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Registry;
 use App\Enums\PackageType;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\PackageVersion;
 use App\Models\Upstream;
 use App\Services\Composer\ComposerMetadataBuilder;
@@ -39,6 +40,21 @@ class ComposerController extends Controller
 
     public function root(Request $request): JsonResponse
     {
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+
+            // No upstream branch here, unlike the group path below: the org aggregate spans
+            // every group of the organization, each with its own (possibly different, possibly
+            // absent) Composer upstream, so there is no single "the upstream" to suppress
+            // available-packages for. The org endpoint therefore always lists what it hosts.
+            return response()->json([
+                'metadata-url' => $this->registryPathPrefixForOrganization($organization).'/p2/%package%.json',
+                'available-packages' => $this->access->packagesForOrganization($organization)->pluck('name')->unique()->sort()->values(),
+            ]);
+        }
+
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $prefix = $this->registryPathPrefix($request, $group);
@@ -65,6 +81,26 @@ class ComposerController extends Controller
 
     public function metadata(Request $request, string $vendor, string $name): JsonResponse
     {
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+            $this->assertProxyableName($vendor, $name);
+            $fullName = "{$vendor}/{$name}";
+            $package = $this->access->organizationPackage($organization, PackageType::Composer, $fullName);
+
+            // No upstream fallthrough here (unlike the group path below): the org aggregate
+            // has no single upstream to ask, and spec's error table treats "not visible to
+            // the org" the same as the group path's "not accessible" — a plain 404.
+            if ($package === null) {
+                abort(404);
+            }
+
+            $constraints = $this->access->versionConstraintsForOrganization($organization, $package);
+
+            return response()->json($this->metadata->buildForOrganization($package, $this->registryBaseUrlForOrganization($request, $organization), $constraints));
+        }
+
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
         $this->assertProxyableName($vendor, $name);
@@ -117,9 +153,23 @@ class ComposerController extends Controller
 
     public function dist(Request $request, string $vendor, string $name, string $version): StreamedResponse
     {
-        $group = $this->registryGroup($request);
-        $this->authorizeGroup($request, $group);
-        $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+            $package = $this->access->organizationPackage($organization, PackageType::Composer, "{$vendor}/{$name}");
+            abort_if($package === null, 404);
+        } else {
+            $group = $this->registryGroup($request);
+            $this->authorizeGroup($request, $group);
+            $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
+        }
+
+        // Not constraint-filtered, in either branch: version_constraint has never gated a
+        // dist download, only which versions a package's METADATA lists (see
+        // ComposerMetadataBuilder). A version a group's/the org's constraint would hide from
+        // packages.json is still fetchable by exact URL once a client already knows about
+        // it — unchanged group behavior, deliberately not tightened for the org branch either.
         $pkgVersion = $package->versions()->where('version', $version)->first();
 
         if ($pkgVersion === null) {

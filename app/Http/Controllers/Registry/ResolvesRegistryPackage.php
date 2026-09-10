@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Registry;
 
 use App\Enums\PackageType;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Http\AppUrl;
@@ -31,6 +32,65 @@ trait ResolvesRegistryPackage
         $group = $request->attributes->get('registryGroup');
 
         return $group;
+    }
+
+    /**
+     * The org-context counterpart of authorizeGroup() — the branching every org read
+     * endpoint (Composer today; npm/pypi copy this) must run BEFORE any package-name
+     * resolution, so a caller without the right token can never use a 403 to learn whether
+     * a name exists (spec's "no enumeration oracle" requirement).
+     *
+     * Three outcomes, in order:
+     *  - access granted (an org-wide token of this organization) → return.
+     *  - no token at all → 401, same message/shape authorizeGroup() sends for its own
+     *    anonymous case, so an org caller and a group caller see the same challenge.
+     *  - a token that does NOT grant access → 403, with ONE of two exact German messages
+     *    (spec's error table): a token that IS for this organization but is group-bound
+     *    names the org-wide-token requirement; anything else (a foreign organization's
+     *    token, group-bound or not) gets the generic refusal. These are the only two ways
+     *    canAccessOrganization() can be false for a non-null token, so the branch below is
+     *    exhaustive.
+     */
+    protected function authorizeOrganization(Request $request, Organization $organization): void
+    {
+        /** @var RegistryToken|null $token */
+        $token = $request->attributes->get('registryToken');
+
+        if ($this->access()->canAccessOrganization($token, $organization)) {
+            return;
+        }
+
+        abort_if($token === null, 401, 'Authentication required for this registry.');
+
+        if ($token->organization_id === $organization->id && $token->group_id !== null) {
+            abort(403, 'Dieses Token gilt nur für eine einzelne Registry — für die organisationsweite Quelle wird ein organisationsweites Token benötigt.');
+        }
+
+        abort(403, 'Kein Zugriff auf diese Organisation.');
+    }
+
+    /**
+     * Absolute base for org-endpoint download URLs — the org-context counterpart of
+     * registryBaseUrl(). No domain-mode branch here on purpose: the org endpoint has no
+     * custom-domain address at all (spec non-goal), so ResolveRegistryContext never sets
+     * `registryDomainMode` true alongside `registryOrganization`.
+     */
+    protected function registryBaseUrlForOrganization(Request $request, Organization $organization): string
+    {
+        return (AppUrl::root() ?? $request->getSchemeAndHttpHost()).$this->registryPathPrefixForOrganization($organization);
+    }
+
+    /**
+     * Path prefix for org-endpoint metadata URLs: `/o/{orgSlug}`.
+     *
+     * Stated here rather than on RegistryUrl (which owns every per-group URL form) because
+     * that class gains its own `orgPath()` builder later, for the portal setup snippets —
+     * this is the one read path that needs the shape today, so it is not worth introducing
+     * the shared builder ahead of that consumer just to save this one line.
+     */
+    protected function registryPathPrefixForOrganization(Organization $organization): string
+    {
+        return '/o/'.$organization->slug;
     }
 
     /**
