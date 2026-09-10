@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Exceptions\VersionConflictException;
 use App\Http\Controllers\Controller;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Services\Python\PythonName;
@@ -29,6 +30,14 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * PyPI-compatible registry: twine upload (distutils "file_upload"), the PEP 503 / PEP 691
  * "simple" repository API that pip consumes, and file downloads. Serving is scoped to the
  * resolved group; unknown projects fall through to a configured Python upstream.
+ *
+ * The read paths (simpleRoot/simpleProject/download) additionally branch on
+ * `registryOrganization` for the `/o/{orgSlug}` org-wide aggregate (see
+ * ResolvesRegistryPackage::authorizeOrganization()): the union of every project visible
+ * through any of the organization's groups, with NO upstream fallthrough — an org aggregate
+ * spans several groups, each with its own (or no) Python upstream, so there is no single
+ * "the upstream" an org-mode miss could redirect to. Uploads remain group-only; the org
+ * mount answers a twine upload with a flat 405 (see routes/registry.php).
  */
 class PypiController extends Controller
 {
@@ -91,6 +100,32 @@ class PypiController extends Controller
     /** Root simple index: every Python project readable in this registry. */
     public function simpleRoot(Request $request): Response
     {
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+
+            // The org aggregate's package pool spans every PackageType, unlike
+            // pythonPackagesOfGroup() below, which is scoped to Python by its own query —
+            // packagesForOrganization() has no type argument, so the filter happens here.
+            // unique()->sort() lives inside rootHtml() itself (see PythonSimpleIndexBuilder),
+            // the same builder both branches call, so this list is not de-duplicated twice —
+            // it mirrors simpleRoot()'s existing "not de-duplicated here" comment below for
+            // the group branch: two rows (a customer's own project and a shared one of the
+            // same PEP 503 name) may still normalise to one name, and the builder's own
+            // unique() is what collapses that, not a second one added here.
+            $names = $this->access->packagesForOrganization($organization)
+                ->filter(fn (Package $p): bool => $p->type === PackageType::Python)
+                ->map(fn (Package $p): string => PythonName::normalize($p->name))
+                ->values();
+
+            return response(
+                $this->builder->rootHtml($names, $this->registryBaseUrlForOrganization($request, $organization)),
+                200,
+                ['Content-Type' => 'text/html; charset=utf-8'],
+            );
+        }
+
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
 
@@ -118,6 +153,47 @@ class PypiController extends Controller
     /** Project detail page (files), or a redirect to the upstream for unknown projects. */
     public function simpleProject(Request $request, string $project): Response|RedirectResponse|JsonResponse
     {
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+            $this->assertProxyableName($project);
+
+            $normalized = PythonName::normalize($project);
+
+            // packagesForOrganization(), not organizationPackage(): the latter matches
+            // `packages.name` exactly, but a stored Python project name is not guaranteed
+            // to already be in PEP 503 canonical form (twine uploads "My.Package" as-is —
+            // see PypiController::upload()/PythonName::normalize()) — exactly the reason
+            // pythonPackagesOfGroup() below filters in PHP rather than in SQL. Filtered to
+            // Python because the org pool spans every PackageType.
+            $pkg = $this->access->packagesForOrganization($organization)
+                ->first(fn (Package $p): bool => $p->type === PackageType::Python
+                    && PythonName::normalize($p->name) === $normalized);
+
+            // No upstream fallthrough here, unlike the group branch below: a Python upstream
+            // is a row on ONE group's Upstream table, and the org aggregate spans every group
+            // of the organization, each with its own (possibly different, possibly absent)
+            // upstream — there is no single "the upstream" an org-mode miss could redirect
+            // to. Mirrors ComposerController::metadata()'s and NpmController's org branches,
+            // which reach the same conclusion for their own upstream fallthroughs. Spec's
+            // error table treats "not visible to the org" the same as the group path's "not
+            // accessible": a plain 404.
+            if ($pkg === null) {
+                abort(404);
+            }
+
+            $dists = $pkg->pythonDists()->orderBy('filename')->get();
+            $base = $this->registryBaseUrlForOrganization($request, $organization);
+
+            if (str_contains((string) $request->header('Accept'), self::JSON_ACCEPT)) {
+                return response()->json($this->builder->projectJson($pkg, $dists, $base))
+                    ->header('Content-Type', self::JSON_ACCEPT);
+            }
+
+            return response($this->builder->projectHtml($pkg, $dists, $base), 200, ['Content-Type' => 'text/html; charset=utf-8']);
+        }
+
         $group = $this->registryGroup($request);
         $this->authorizeGroup($request, $group);
 
@@ -197,35 +273,53 @@ class PypiController extends Controller
     /** Stream a stored distribution file. */
     public function download(Request $request, string $package, string $filename): StreamedResponse
     {
-        $group = $this->registryGroup($request);
-        $this->authorizeGroup($request, $group);
-
-        /** @var RegistryToken|null $token */
-        $token = $request->attributes->get('registryToken');
-
         // Same reasoning as ProxyDownloadController::resolveUpstream(): whereKey() on a
         // Postgres `uuid` column raises SQLSTATE[22P02] for anything that is not one,
         // and an unrendered QueryException is a 500 plus a logged stack trace. The route
-        // pattern refuses those already; this does not rely on it.
+        // pattern refuses those already; this does not rely on it. Checked before either
+        // branch below, since neither's package lookup is safe to run on a non-UUID value.
         abort_unless(Str::isUuid($package), 404);
 
-        // Scoped like every other read path — own-organization, or shared. A UUID cannot
-        // collide across organizations the way a name can, so this is not closing a guessing
-        // attack — it closes the same cross-organization pivot row the index and project page
-        // refuse, which would otherwise still stream its distributions through the foreign
-        // registry. The shared clause is what lets the files of a project this registry does
-        // serve actually be fetched; without it the project page would link to a 404.
-        //
-        // Redundant since RegistryAccessService::availablePackages() states the same rule, so
-        // canAccessPackage() below already refuses this row. Kept: it costs one predicate, and
-        // it lets this handler be read on its own without tracing into the access service.
-        $pkg = Package::where('type', PackageType::Python)
-            ->where(fn ($q) => $q
-                ->where('packages.organization_id', $group->organization_id)
-                ->orWhere('packages.shared', true))
-            ->whereKey($package)
-            ->first();
-        abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
+        /** @var Organization|null $organization */
+        $organization = $request->attributes->get('registryOrganization');
+        if ($organization !== null) {
+            $this->authorizeOrganization($request, $organization);
+
+            // packagesForOrganization() rather than a raw Package lookup: it already states
+            // "own-organization, or shared, assigned (unexpired) to any group of the
+            // organization" — the same predicate the group branch below spells out by hand
+            // against one group's pivot. Filtered to Python and to this id in PHP, matching
+            // the shape of the group branch's own filter (id lookup, then type).
+            $pkg = $this->access->packagesForOrganization($organization)
+                ->first(fn (Package $p): bool => $p->type === PackageType::Python && $p->id === $package);
+            abort_if($pkg === null, 404);
+        } else {
+            $group = $this->registryGroup($request);
+            $this->authorizeGroup($request, $group);
+
+            /** @var RegistryToken|null $token */
+            $token = $request->attributes->get('registryToken');
+
+            // Scoped like every other read path — own-organization, or shared. A UUID cannot
+            // collide across organizations the way a name can, so this is not closing a
+            // guessing attack — it closes the same cross-organization pivot row the index and
+            // project page refuse, which would otherwise still stream its distributions
+            // through the foreign registry. The shared clause is what lets the files of a
+            // project this registry does serve actually be fetched; without it the project
+            // page would link to a 404.
+            //
+            // Redundant since RegistryAccessService::availablePackages() states the same
+            // rule, so canAccessPackage() below already refuses this row. Kept: it costs one
+            // predicate, and it lets this handler be read on its own without tracing into the
+            // access service.
+            $pkg = Package::where('type', PackageType::Python)
+                ->where(fn ($q) => $q
+                    ->where('packages.organization_id', $group->organization_id)
+                    ->orWhere('packages.shared', true))
+                ->whereKey($package)
+                ->first();
+            abort_if($pkg === null || ! $this->access->canAccessPackage($token, $group, $pkg), 404);
+        }
 
         $dist = $pkg->pythonDists()->where('filename', $filename)->firstOrFail();
 
