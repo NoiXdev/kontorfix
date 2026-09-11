@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 
 // The German copy is pinned verbatim by the org-level-registry spec — any drift here is a
 // spec violation, not a wording preference.
-const ORG_WRITE_DENIED_MESSAGE = 'Veröffentlichen ist nur je Registry möglich — nutzt die Registry-eigene Adresse.';
+const ORG_WRITE_DENIED_MESSAGE = 'Veröffentlichen ist nur je Registry möglich — nutzen Sie die Registry-eigene Adresse.';
 
 it('resolves an organization by slug and sets registryOrganization, leaving registryGroup null', function () {
     // A lightweight probe route rather than a real registry endpoint: the read controllers

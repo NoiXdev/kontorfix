@@ -56,7 +56,7 @@ $ociReference = '[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}|sha256:[a-f0-9]{64}';
 // owns rather than addressing one, so a publish there could never say which registry
 // inside the organization it targets — hence a flat refusal rather than routing it through
 // to a controller that would have to guess.
-$orgWriteDenied = fn () => abort(405, 'Veröffentlichen ist nur je Registry möglich — nutzt die Registry-eigene Adresse.');
+$orgWriteDenied = fn () => abort(405, 'Veröffentlichen ist nur je Registry möglich — nutzen Sie die Registry-eigene Adresse.');
 
 // Write routes (npm publish/publishScoped, pypi upload) are the only ones this closure
 // registers differently per mount: the two existing mounts (`/r/{org}/{group}` and the
