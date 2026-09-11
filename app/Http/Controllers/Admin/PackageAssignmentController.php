@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\AssignmentBoundsRequest;
 use App\Models\Group;
@@ -22,15 +23,24 @@ use Illuminate\Http\Request;
  * Every method here does exactly one thing: resolve the request into the shape
  * {@see AssignmentWriter}'s `assign()`, `write()` and `revoke()` take, then call straight
  * through. Nothing here re-asks any of the questions that class's own docblock lists —
- * whether the caller administers the TARGET registry, whether a shared package's owning
- * organization is who the caller administers, the same-name shadow guard, or the
- * type-aware bounds validation — because those three methods ask every one of them
- * themselves, in the same order, for both this controller and `GroupController`. A
- * refusal here is always the writer's `abort_if`/`abort_unless`/`ValidationException`
- * bubbling straight up, never a second, possibly-drifting copy of the same rule.
+ * whether a shared package's owning organization is who the caller administers, the
+ * same-name shadow guard, or the type-aware bounds validation — because those three
+ * methods ask every one of them themselves, in the same order, for both this controller
+ * and `GroupController`. A refusal here is always the writer's
+ * `abort_if`/`abort_unless`/`ValidationException` bubbling straight up, never a second,
+ * possibly-drifting copy of the same rule.
+ *
+ * The one question this controller DOES ask a second time: update() and destroy() call
+ * {@see ScopesToAdministeredOrgs::assertAdministersGroupInScope()}
+ * themselves, BEFORE checking whether the named assignment row exists at all — see
+ * update()'s own docblock for why that ordering, not merely asking it once inside the
+ * writer, is what keeps a 404 from leaking whether a shared package is assigned to a
+ * registry the caller may not administer.
  */
 class PackageAssignmentController extends Controller
 {
+    use ScopesToAdministeredOrgs;
+
     /**
      * A brand new assignment — the "Registry freigeben" picker's submit. `group_id` names
      * the target registry in the request body rather than the route, because unlike
@@ -67,10 +77,15 @@ class PackageAssignmentController extends Controller
     /**
      * Bounds/period on an assignment that already exists.
      *
-     * Same 404-before-403 ordering `GroupController::updateAssignment()` pins and explains
-     * in its own docblock: a request naming a (package, group) pair with no assignment row
-     * answers 404 before anything about the caller's authority is asked, rather than
-     * leaking — via the status code alone — whether the package is shared.
+     * Same 403-before-404 ordering `GroupController::updateAssignment()` pins and explains
+     * in its own docblock: `assertAdministersGroupInScope()` is asked BEFORE the existence
+     * check, so a caller who may not administer the TARGET registry at all gets the same
+     * 403 whether or not a (package, group) assignment row exists there. Asking existence
+     * first — as this method used to — let exactly that caller distinguish a 404 (no row)
+     * from a 403 (a row exists, refused on some other ground) and thereby learn, from the
+     * status code alone, whether a given customer holds a given shared package. Reachable
+     * with nothing more than a group UUID, which is why the group-scope question has to
+     * come first here as it already does on the registry side.
      *
      * `AssignmentBoundsRequest`'s bounds fields are `sometimes`: an omitted side is merged
      * with whatever is already stored (`$request->has()`, not `filled()` or `??`, is what
@@ -86,6 +101,13 @@ class PackageAssignmentController extends Controller
         AssignmentWriter $writer,
         VersionEntitlement $entitlement,
     ): RedirectResponse {
+        $this->assertAdministersGroupInScope($group);
+
+        // Without this the request would silently succeed against no row at all —
+        // AssignmentWriter::write()'s updateExistingPivot() reports zero affected rows and
+        // returns. write() asks assertAdministersGroupInScope() again afterwards, which is
+        // redundant with the call above, not a behavior change — see this method's own
+        // docblock for why that call has to run first.
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
 
         $data = $request->validated();
@@ -105,12 +127,15 @@ class PackageAssignmentController extends Controller
     }
 
     /**
-     * Ends an assignment outright — the pivot row disappears. Same 404-before-403 ordering
-     * as update(): a pair with no assignment row answers 404 before the writer is ever
-     * asked whether this caller may end it.
+     * Ends an assignment outright — the pivot row disappears. Same 403-before-404 ordering
+     * as update(): the target registry's scope is asked first, so a pair with no
+     * assignment row answers with the same 403 a caller outside that scope would get if
+     * the row existed, rather than leaking existence via 404.
      */
     public function destroy(Package $package, Group $group, AssignmentWriter $writer): RedirectResponse
     {
+        $this->assertAdministersGroupInScope($group);
+
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
 
         $writer->revoke($group, $package);

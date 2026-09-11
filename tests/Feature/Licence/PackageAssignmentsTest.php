@@ -461,3 +461,42 @@ it('refuses a customer admin ending a shared assignment they do not administer t
 
     expect(assignmentRowOf($this->registryA, $this->shared))->not->toBeNull();
 });
+
+// -----------------------------------------------------------------------------------------
+// The 403/404 oracle: a caller outside the target registry's scope must never learn, from
+// the status code alone, whether a (package, group) assignment exists. GroupController's
+// own updateAssignment()/detachPackage() ask assertAdministersGroupInScope() BEFORE any
+// existence check for exactly this reason; these two routes did it the other way round.
+// -----------------------------------------------------------------------------------------
+
+it('gives a caller outside the target registrys scope 403 (never 404) on update, whether or not the assignment exists', function () {
+    // customerAdminB does not administer customerA's organization at all, so they may not
+    // touch registryA — a question that must be answered before anything about the row.
+    $this->actingAs($this->customerAdminB)
+        ->put(route('admin.packages.assignments.update', [$this->own, $this->registryA]), [
+            'available_until' => null,
+        ])
+        ->assertForbidden();
+
+    $this->registryA->packages()->attach($this->own->id);
+
+    $this->actingAs($this->customerAdminB)
+        ->put(route('admin.packages.assignments.update', [$this->own, $this->registryA]), [
+            'available_until' => null,
+        ])
+        ->assertForbidden();
+});
+
+it('gives a caller outside the target registrys scope 403 (never 404) on destroy, whether or not the assignment exists', function () {
+    $this->actingAs($this->customerAdminB)
+        ->delete(route('admin.packages.assignments.destroy', [$this->own, $this->registryA]))
+        ->assertForbidden();
+
+    $this->registryA->packages()->attach($this->own->id);
+
+    $this->actingAs($this->customerAdminB)
+        ->delete(route('admin.packages.assignments.destroy', [$this->own, $this->registryA]))
+        ->assertForbidden();
+
+    expect(assignmentRowOf($this->registryA, $this->own))->not->toBeNull();
+});
