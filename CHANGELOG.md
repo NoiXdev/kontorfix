@@ -1,4 +1,33 @@
-## [0.11.0](https://github.com/NoiXdev/kontorfix/compare/v0.10.0...v) (2026-09-11)
+## [0.12.0](https://github.com/NoiXdev/kontorfix/compare/v0.11.0...v) (2026-09-11)
+
+
+### Features
+
+* **licence:** a PEP 440 version comparator for python bounds ([2ae43d2](https://github.com/NoiXdev/kontorfix/commit/2ae43d25522c78f024c5e1fc3e3070fa2b61aa49))
+* **licence:** composer serves only licensed versions ([d85e27d](https://github.com/NoiXdev/kontorfix/commit/d85e27df32347bdafd51c34931bd3fcd58e014a5))
+* **licence:** confirm before revoking a shared assignment, warn on bounds that exclude everything ([2dbd5f6](https://github.com/NoiXdev/kontorfix/commit/2dbd5f603dceaa8812491f5543bd3a06a6296fff))
+* **licence:** manage a package's customer releases from the package page ([fa92b84](https://github.com/NoiXdev/kontorfix/commit/fa92b84d25972d1d8a04e2e3643436f833cfbf47))
+* **licence:** npm serves only licensed versions, tags repointed ([1df6f4b](https://github.com/NoiXdev/kontorfix/commit/1df6f4bce03ea8e2db44e5e4c17072de26946de6))
+* **licence:** one service decides which versions a licence admits ([6a55b0c](https://github.com/NoiXdev/kontorfix/commit/6a55b0c443822d22c9283a2223959b6378c068e0))
+* **licence:** one writer for assignment period and bounds ([5cf8655](https://github.com/NoiXdev/kontorfix/commit/5cf8655d3b872d83b64fbe4668eba0a32250713b))
+* **licence:** the pypi index respects licence bounds ([b4c9d7d](https://github.com/NoiXdev/kontorfix/commit/b4c9d7da0f62ae07586b4d754acc00afe46e934b))
+* **licence:** version bounds on a package assignment ([c3526a5](https://github.com/NoiXdev/kontorfix/commit/c3526a51b7c18e03505d219041f827c2937225ab))
+* **portal:** show when newer versions are outside the licence ([fe34293](https://github.com/NoiXdev/kontorfix/commit/fe342931ee4f5eec46e528eefedd30a5124cc73d))
+
+
+### Bug Fixes
+
+* **licence:** normalize semver bounds and refuse an empty version window ([6c30ce2](https://github.com/NoiXdev/kontorfix/commit/6c30ce2453ae5893a7c3f49d2cc5b48b3dab408c))
+* **licence:** one query for windowsForOrganization, fail closed on bad bounds, refuse Docker ([0aec7f5](https://github.com/NoiXdev/kontorfix/commit/0aec7f5f9c4832803c720a40fd6b3ef6e8b42988))
+* **licence:** serve npm versions and dist-tags as objects when a licence admits none ([66db52d](https://github.com/NoiXdev/kontorfix/commit/66db52d896262f0c5d363d18fa481014f8a4bdb3))
+* **licence:** stop polling sync status for a viewer who cannot resync ([b08e8bd](https://github.com/NoiXdev/kontorfix/commit/b08e8bd16e10df57cb4e2493fab651c3510d8d92))
+* **licence:** stop the 403/404 assignment-existence oracle ([ae8a048](https://github.com/NoiXdev/kontorfix/commit/ae8a048241ade3a38ee41b1d0bb5d3f4fc0c2d60))
+* **licence:** trim the Freigaben page for a receiving customer, gate row edits by scope ([a561269](https://github.com/NoiXdev/kontorfix/commit/a561269acea2f0507a1e7dc8d1ddedde0c42eece))
+* **licence:** validate effective bounds and pull all assignment guards into the writer ([b182e03](https://github.com/NoiXdev/kontorfix/commit/b182e035415e8c97f1d3339eab097fb4790d848c))
+* **licence:** withhold per-version download and size figures from a receiving customer ([e044d76](https://github.com/NoiXdev/kontorfix/commit/e044d76528a5c2f3d9d99d24ee1dfbe6e3562e54))
+* **licence:** withhold the source reference from a receiving customer ([bc430dc](https://github.com/NoiXdev/kontorfix/commit/bc430dc759f9eff997fc91947b47a4fb812ba2f8))
+
+## [0.11.0](https://github.com/NoiXdev/kontorfix/compare/v0.10.0...v0.11.0) (2026-09-11)
 
 
 ### Features
