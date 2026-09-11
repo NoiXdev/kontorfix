@@ -2,21 +2,34 @@
 
 /*
  * AssignmentWriter — the single writer of `group_package.available_until`, `version_min`
- * and `version_max` (see Group::assignedPackages()'s docblock). Two independent guards
- * every one of its three methods carries, per the design spec:
+ * and `version_max` (see Group::assignedPackages()'s docblock). Every one of its three
+ * methods carries the full guarantee itself (fix round 1 pulled the last two guards in
+ * from the controller that used to ask them on the writer's behalf):
  *
+ *   - the caller administers the TARGET GROUP's organization at all
+ *     (assertAdministersGroupInScope);
  *   - a SHARED package's assignment may only be created/edited/ended by someone who
- *     administers the OWNING organization (assertMayEditSharedAssignment);
- *   - anything else (an own package) only requires assertCanTouchPackage — ownership
- *     within the caller's active console scope.
+ *     administers the OWNING organization (assertMayEditSharedAssignment); anything else
+ *     (an own package) only requires assertCanTouchPackage — ownership within the
+ *     caller's active console scope;
+ *   - the resulting assignment does not shadow, and is not shadowed by, a same-named
+ *     package of the other kind (SharedAssignment::assertAssignable(), run on EVERY
+ *     write() and assign(), not only ones that change membership);
+ *   - (write()/assign() only) the EFFECTIVE bounds — the merged, post-controller-preserve
+ *     pair actually about to be persisted, not merely what one caller's request
+ *     submitted — are syntactically valid for the package's type, ordered, and absent for
+ *     a Docker package.
  *
  * `write()` and `revoke()` operate on an existing pivot row; `assign()` creates one and so
  * also asks the reachability question (own-org or shared) a fresh row still has to answer.
  *
- * The bounds SYNTAX/ordering rules (type-aware parseability, min < max, no bounds on
- * Docker) live in AssignmentBoundsRequest so both admin surfaces share them — exercised
- * here through Admin\GroupController::updateAssignment(), the one route currently wired to
- * it, since a FormRequest's rules() are never tested standalone in this codebase.
+ * The bounds fix is pinned directly: two tests below submit only ONE side of a pair against
+ * a STORED value on the other side that makes the merged pair impossible (`min > max`) —
+ * the exact shape of the incident this replaced, where a check run on the raw, pre-merge
+ * request missed it. The remaining bounds SHAPE-only rules (presence, string, length) live
+ * in AssignmentBoundsRequest so both admin surfaces share them — exercised here through
+ * Admin\GroupController::updateAssignment(), the one route currently wired to it, since a
+ * FormRequest's rules() are never tested standalone in this codebase.
  */
 
 use App\Enums\UserRole;
@@ -28,6 +41,7 @@ use App\Models\User;
 use App\Services\Package\AssignmentWriter;
 use App\Support\Licence\VersionBounds;
 use Carbon\CarbonImmutable;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 beforeEach(function () {
@@ -316,4 +330,96 @@ it('preserves the existing bounds when the update route submits only the date', 
     expect($row->version_min)->toBe('1.0.0')
         ->and($row->version_max)->toBe('2.0.0')
         ->and($row->available_until->toDateString())->toBe('2027-05-01');
+});
+
+it('refuses an omitted version_min that would leave an impossible window against the stored one, writing nothing', function () {
+    // Stored min is 5.0.0. Submitting only version_max=3.0.0 (min omitted) must validate
+    // the EFFECTIVE pair after the controller's "omitted = keep stored" merge — 5.0.0 is
+    // not < 3.0.0, an impossible window that admits no version at all.
+    $this->registry->packages()->attach($this->own->id, ['version_min' => '5.0.0']);
+
+    $this->actingAs($this->customerAdmin)
+        ->put(route('admin.groups.packages.update', [$this->registry, $this->own]), [
+            'available_until' => null,
+            'version_max' => '3.0.0',
+        ])
+        ->assertSessionHasErrors(['version_min' => 'Die Untergrenze muss kleiner als die Obergrenze sein.']);
+
+    $row = writerAssignmentOf($this->registry, $this->own);
+    expect($row->version_min)->toBe('5.0.0')
+        ->and($row->version_max)->toBeNull();
+});
+
+it('refuses an omitted version_max that would leave an impossible window against the stored one, writing nothing', function () {
+    // The symmetric case: stored max is 2.0.0, submitted min (3.0.0, max omitted) is above
+    // it once merged.
+    $this->registry->packages()->attach($this->own->id, ['version_max' => '2.0.0']);
+
+    $this->actingAs($this->customerAdmin)
+        ->put(route('admin.groups.packages.update', [$this->registry, $this->own]), [
+            'available_until' => null,
+            'version_min' => '3.0.0',
+        ])
+        ->assertSessionHasErrors(['version_min' => 'Die Untergrenze muss kleiner als die Obergrenze sein.']);
+
+    $row = writerAssignmentOf($this->registry, $this->own);
+    expect($row->version_min)->toBeNull()
+        ->and($row->version_max)->toBe('2.0.0');
+});
+
+// -----------------------------------------------------------------------------------------
+// Fix round 1 — guards the reviewer found missing from the service itself.
+// -----------------------------------------------------------------------------------------
+
+it('refuses assign() creating a shadowing shared assignment, called directly with no HTTP layer', function () {
+    // The registry already serves its own package under a name; assigning a SHARED
+    // package of the SAME type+name would let the operator's package shadow it — the
+    // collision SharedAssignment exists to refuse, checked directly at the service level
+    // (no controller in between) so a future caller cannot reach assign() without it.
+    $this->registry->packages()->attach($this->own->id);
+
+    $shadowing = Package::factory()->for($this->operator)
+        ->create(['type' => $this->own->type, 'name' => $this->own->name, 'shared' => true]);
+
+    $this->actingAs(writerOperatorStaff($this->customer, $this->operator));
+
+    $thrown = fn () => app(AssignmentWriter::class)->assign(
+        $this->registry,
+        $shadowing,
+        null,
+        VersionBounds::unlimited(),
+    );
+
+    expect($thrown)->toThrow(ValidationException::class);
+
+    expect(writerAssignmentOf($this->registry, $shadowing))->toBeNull();
+});
+
+it('refuses write() by an account with no relationship to the target group, even administering the shared packages owner', function () {
+    // Administering the OWNING organization of a shared package is not administering
+    // every registry it happens to be shared into — the target group is a separate
+    // question the service must ask itself, not rely on the controller to have asked.
+    $this->registry->packages()->attach($this->shared->id, ['available_until' => null]);
+
+    // Maintainer, not Admin: an Admin whose home org is the operator organization is the
+    // grandfathered super-admin (User::isSuperAdmin()) and would administer every
+    // organization, including the target group — defeating the very thing this test
+    // means to isolate.
+    $operatorOnlyAdmin = User::factory()->for($this->operator)->create(['role' => UserRole::Maintainer]);
+    $this->actingAs($operatorOnlyAdmin);
+
+    $thrown = fn () => app(AssignmentWriter::class)->write(
+        $this->registry,
+        $this->shared,
+        CarbonImmutable::parse('2027-06-30')->endOfDay(),
+        VersionBounds::unlimited(),
+    );
+
+    // @phpstan-ignore-next-line argument.type (Pest's stub is stricter than what it actually accepts at runtime)
+    expect($thrown)->toThrow(function (HttpException $e) {
+        expect($e->getStatusCode())->toBe(403);
+    });
+
+    $row = writerAssignmentOf($this->registry, $this->shared);
+    expect($row->available_until)->toBeNull();
 });

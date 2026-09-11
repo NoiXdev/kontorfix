@@ -498,23 +498,27 @@ class GroupController extends Controller
      * Reachability is not re-asserted here. The pivot row already exists, so it passed
      * assertCanAttachPackages() when it was written, and un-sharing is refused while any
      * cross-organization assignment survives — so a foreign row still implies a shared
-     * package. Adding the check back would also mask the guard below in tests: a refusal
-     * would land on the org scope before ever reaching it, the lesson Task 2 recorded.
+     * package.
      *
-     * The actual column write, and the "may this caller touch a SHARED assignment at all"
-     * question this method used to ask directly via assertMayEditSharedAssignment(), now
-     * live in {@see AssignmentWriter::write()} — see its docblock and
-     * Group::assignedPackages()'s, which names it the single writer. AssignmentBoundsRequest
-     * validates `available_until`'s syntax exactly as the inline `$request->validate()`
-     * used to, plus the bounds' syntax and ordering; the console dialog behind this route
-     * does not submit bounds yet, so `$request->has()` distinguishes "omitted, preserve
-     * whatever is stored" from "submitted null, clear it".
+     * EVERYTHING BELOW THE 404 — the group-scope re-check, the "may this caller touch a
+     * SHARED assignment at all" question, the SharedAssignment shadow check, and the
+     * bounds' syntax/ordering/Docker refusal — now lives inside
+     * {@see AssignmentWriter::write()} itself, which is the guarantee its own docblock
+     * states: routing a write through it is what makes it safe, not merely convenient.
+     * This method's own {@see assertAdministersGroupInScope()} call just below is kept
+     * anyway, unchanged in position, so the existing 404-before-403 ordering this class's
+     * tests pin (a request naming a package this registry does not carry answers 404
+     * before anything about the caller's authority is asked) stays exactly as it was —
+     * write() asking the same question again afterwards is redundant, not a behavior
+     * change. AssignmentBoundsRequest validates only `available_until`'s and the two
+     * bounds fields' SHAPE; the console dialog behind this route does not submit bounds
+     * yet, so `$request->has()` distinguishes "omitted, preserve whatever is stored" from
+     * "submitted null, clear it" before the EFFECTIVE pair is handed to write().
      */
     public function updateAssignment(
         AssignmentBoundsRequest $request,
         Group $group,
         Package $package,
-        SharedAssignment $sharedAssignment,
         AssignmentWriter $writer,
         VersionEntitlement $entitlement,
     ): RedirectResponse {
@@ -525,28 +529,14 @@ class GroupController extends Controller
         // returns.
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
 
-        $sharedAssignment->assertAssignable($group, [$package->id]);
-
         $data = $request->validated();
 
         // Whatever is already stored, unless this request explicitly names a side of it —
         // see the FormRequest's docblock for why `has()`, not `filled()` or `??`, is the
-        // right presence check here.
+        // right presence check here. This merged pair — not the raw request — is what
+        // write() validates and persists.
         $current = $entitlement->boundsFor($group, $package);
 
-        // Re-dating or re-bounding a SHARED assignment is a change to how long, and to
-        // what extent, this customer receives the operator's package, which spec §4
-        // reserves to whoever administers the owning organization — asked by write()
-        // itself (assertMayTouchAssignment()), not here.
-        //
-        // Asked THERE rather than left to assertSharedAssignmentsUnchanged(), which cannot
-        // see this write at all: these three columns live on the pivot row, so the set of
-        // assigned package ids is identical before and after and that comparison correctly
-        // finds nothing to refuse. The two halves of spec §4's sentence need two predicates.
-        //
-        // After the 404 above and assertAssignable() just above, so a request naming a
-        // package this registry does not carry still answers "no such assignment" rather
-        // than leaking, by the choice of status code, whether the package is shared.
         $writer->write(
             $group,
             $package,
