@@ -50,6 +50,12 @@ const logOptions = [{ value: '', label: 'Alle Bereiche' }, ...props.logNames.map
 const sizeOptions = computed(() => props.pageSizes.map((size) => ({ value: size, label: `${size} pro Seite` })));
 
 const directionLabel = computed(() => (direction.value === 'desc' ? 'Neueste zuerst' : 'Älteste zuerst'));
+
+// The direction toggle only ever writes `sort=created_at` (see `useActivityQuery`), but the
+// controller also accepts `description` and `log_name` for a hand-edited or bookmarked URL
+// (`ActivityController::SORTABLE`). Under either of those the list is not in time order, so
+// burst folding — which assumes time-adjacent rows are related — must not run.
+const chronological = computed(() => !props.filters.sort || props.filters.sort === 'created_at');
 </script>
 
 <template>
@@ -105,7 +111,7 @@ const directionLabel = computed(() => (direction.value === 'desc' ? 'Neueste zue
             </div>
 
             <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                <ActivityTimeline :activities="props.activities.data" show-subject />
+                <ActivityTimeline :activities="props.activities.data" show-subject :chronological="chronological" />
             </div>
 
             <!-- Pagination -->

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupByDay, timeOfDay, type ActivityEntry } from './activityGroups';
+import { burstOutcome, groupByDay, groupBursts, timeOfDay, type ActivityEntry } from './activityGroups';
 
 const at = (id: number, exact: string): ActivityEntry => ({
     id,
@@ -80,5 +80,162 @@ describe('timeOfDay', () => {
         expect(timeOfDay(undefined)).toBe('—');
         expect(timeOfDay('')).toBe('—');
         expect(timeOfDay('2026-08-19')).toBe('—');
+    });
+});
+
+/** A synced/failed `changes` payload, as `ActivityPresenter` shapes it for a `Package` update. */
+const withSync = (id: number, exact: string, status: 'synced' | 'failed' | 'syncing'): ActivityEntry => ({
+    ...at(id, exact),
+    changes: { attributes: { sync_status: status }, old: { sync_status: 'syncing' } },
+});
+
+describe('groupBursts', () => {
+    it('folds three or more entries sharing minute, log, event, subject type and causer into one burst', () => {
+        const rows = groupBursts(
+            [at(1, '2026-08-19 09:00:10'), at(2, '2026-08-19 09:00:20'), at(3, '2026-08-19 09:00:30')],
+            true,
+        );
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].type).toBe('burst');
+        expect(rows[0].type === 'burst' && rows[0].entries.map((e) => e.id)).toEqual([1, 2, 3]);
+    });
+
+    it('leaves two matching entries flat rather than folding them', () => {
+        const rows = groupBursts([at(1, '2026-08-19 09:00:10'), at(2, '2026-08-19 09:00:20')], true);
+
+        expect(rows).toHaveLength(2);
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('splits a burst across a minute boundary', () => {
+        const rows = groupBursts(
+            [at(1, '2026-08-19 09:00:10'), at(2, '2026-08-19 09:00:50'), at(3, '2026-08-19 09:01:00')],
+            true,
+        );
+
+        // Only two entries share the 09:00 minute — one short of a burst — so nothing folds.
+        expect(rows).toHaveLength(3);
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('splits a burst when a causer differs', () => {
+        const rows = groupBursts(
+            [
+                at(1, '2026-08-19 09:00:10'),
+                at(2, '2026-08-19 09:00:20'),
+                { ...at(3, '2026-08-19 09:00:30'), causer: 'Alex' },
+            ],
+            true,
+        );
+
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('splits a burst when the event differs', () => {
+        const rows = groupBursts(
+            [
+                at(1, '2026-08-19 09:00:10'),
+                at(2, '2026-08-19 09:00:20'),
+                { ...at(3, '2026-08-19 09:00:30'), event: 'created' },
+            ],
+            true,
+        );
+
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('splits a burst when the log_name differs', () => {
+        const rows = groupBursts(
+            [
+                at(1, '2026-08-19 09:00:10'),
+                at(2, '2026-08-19 09:00:20'),
+                { ...at(3, '2026-08-19 09:00:30'), log_name: 'registry' },
+            ],
+            true,
+        );
+
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('splits a burst when the subject type differs', () => {
+        const rows = groupBursts(
+            [
+                at(1, '2026-08-19 09:00:10'),
+                at(2, '2026-08-19 09:00:20'),
+                { ...at(3, '2026-08-19 09:00:30'), subject_type: 'Group' },
+            ],
+            true,
+        );
+
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+
+    it('still folds when the subject type matches but individual subjects differ', () => {
+        // Deliberately not keyed on the individual subject — this is what makes "12 packages
+        // synced" one row instead of twelve, each about a different package.
+        const rows = groupBursts(
+            [
+                { ...at(1, '2026-08-19 09:00:10'), subject_label: 'acme/one' },
+                { ...at(2, '2026-08-19 09:00:20'), subject_label: 'acme/two' },
+                { ...at(3, '2026-08-19 09:00:30'), subject_label: 'acme/three' },
+            ],
+            true,
+        );
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].type).toBe('burst');
+    });
+
+    it('preserves the given order rather than sorting the burst', () => {
+        const rows = groupBursts(
+            [at(3, '2026-08-19 09:00:30'), at(1, '2026-08-19 09:00:10'), at(2, '2026-08-19 09:00:20')],
+            true,
+        );
+
+        expect(rows[0].type === 'burst' && rows[0].entries.map((e) => e.id)).toEqual([3, 1, 2]);
+    });
+
+    it('does not fold a non-chronological list', () => {
+        // Under a sort by description/log_name, time-adjacent rows carry no relationship.
+        const rows = groupBursts(
+            [at(1, '2026-08-19 09:00:10'), at(2, '2026-08-19 09:00:20'), at(3, '2026-08-19 09:00:30')],
+            false,
+        );
+
+        expect(rows).toHaveLength(3);
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+});
+
+describe('burstOutcome', () => {
+    it('counts successes and failures when every entry carries a readable sync_status', () => {
+        expect(
+            burstOutcome([
+                withSync(1, '2026-08-19 09:00:10', 'synced'),
+                withSync(2, '2026-08-19 09:00:20', 'synced'),
+                withSync(3, '2026-08-19 09:00:30', 'failed'),
+            ]),
+        ).toBe('2 erfolgreich, 1 fehlgeschlagen');
+    });
+
+    it('degrades to null — count-only — when an entry carries no derivable outcome', () => {
+        expect(
+            burstOutcome([
+                withSync(1, '2026-08-19 09:00:10', 'synced'),
+                withSync(2, '2026-08-19 09:00:20', 'synced'),
+                at(3, '2026-08-19 09:00:30'),
+            ]),
+        ).toBeNull();
+    });
+
+    it('degrades to null when the status is present but not success/failure', () => {
+        expect(
+            burstOutcome([
+                withSync(1, '2026-08-19 09:00:10', 'synced'),
+                withSync(2, '2026-08-19 09:00:20', 'synced'),
+                withSync(3, '2026-08-19 09:00:30', 'syncing'),
+            ]),
+        ).toBeNull();
     });
 });

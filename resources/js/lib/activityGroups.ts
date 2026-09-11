@@ -115,3 +115,149 @@ export function timeOfDay(exact: string | null | undefined): string {
 
     return exact.slice(11, 16);
 }
+
+/** A run of three or more entries folded into one expandable row. */
+export interface ActivityBurst {
+    type: 'burst';
+    key: string;
+    entries: ActivityEntry[];
+    /** "N erfolgreich, M fehlgeschlagen", or null when that cannot be read off the entries. */
+    outcome: string | null;
+}
+
+/** An entry too rare — alone or in a pair — to be worth folding. */
+export interface ActivitySingle {
+    type: 'single';
+    entry: ActivityEntry;
+}
+
+export type ActivityRow = ActivitySingle | ActivityBurst;
+
+/** Fewer than this many matching entries render individually rather than folding. */
+const MIN_BURST_SIZE = 3;
+
+/**
+ * The bucket an entry belongs to for burst folding, or `null` when it has no timestamp to
+ * bucket by — such an entry never folds with anything, rather than every timestamp-less
+ * entry silently folding into one burst with every other.
+ *
+ * Minute + log_name + event + subject_type + causer, deliberately without the individual
+ * subject: that omission is what turns twelve "package updated" rows about twelve different
+ * packages into one "12 Pakete aktualisiert" row instead of leaving them all separate.
+ */
+function burstKey(entry: ActivityEntry): string | null {
+    if (!entry.created_at_exact || entry.created_at_exact.length < 16) {
+        return null;
+    }
+
+    const minute = entry.created_at_exact.slice(0, 16);
+
+    return [minute, entry.log_name ?? '', entry.event ?? '', entry.subject_type ?? '', entry.causer ?? ''].join('|');
+}
+
+/**
+ * Folds runs of three or more entries that share a minute, log, event, subject type and
+ * causer into one expandable burst; everything else — including a burst of only two — stays
+ * an individual row.
+ *
+ * Only applied when `chronological` is true. The global activity page can be sorted by
+ * `description` or `log_name` (see `useActivityQuery.ts` / `ActivityController::SORTABLE`),
+ * and under those orderings time-adjacent rows carry no relationship to each other — folding
+ * them would present an accidental adjacency as a burst that never happened. The per-subject
+ * tabs are always chronological, so they always pass `true`.
+ *
+ * The order of `entries` is preserved: a burst appears where its first entry did, in the
+ * order the caller gave them, exactly as `groupByDay` treats order as the caller's decision
+ * rather than something to re-sort.
+ */
+export function groupBursts(entries: ActivityEntry[], chronological: boolean): ActivityRow[] {
+    if (!chronological) {
+        return entries.map((entry) => ({ type: 'single', entry }));
+    }
+
+    const buckets = new Map<string, ActivityEntry[]>();
+
+    for (const entry of entries) {
+        const key = burstKey(entry);
+
+        if (key === null) {
+            continue;
+        }
+
+        const bucket = buckets.get(key);
+
+        if (bucket) {
+            bucket.push(entry);
+        } else {
+            buckets.set(key, [entry]);
+        }
+    }
+
+    const rows: ActivityRow[] = [];
+    const emitted = new Set<string>();
+
+    for (const entry of entries) {
+        const key = burstKey(entry);
+        const bucket = key === null ? null : buckets.get(key)!;
+
+        if (!bucket || bucket.length < MIN_BURST_SIZE) {
+            rows.push({ type: 'single', entry });
+            continue;
+        }
+
+        if (emitted.has(key as string)) {
+            continue;
+        }
+
+        emitted.add(key as string);
+        rows.push({ type: 'burst', key: key as string, entries: bucket, outcome: burstOutcome(bucket) });
+    }
+
+    return rows;
+}
+
+/** A plain object, or null for anything else — `changes` is shaped per key by whatever wrote it. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+
+    return value as Record<string, unknown>;
+}
+
+/**
+ * "N erfolgreich, M fehlgeschlagen" for a burst, derived from each entry's `sync_status`
+ * change (Spatie writes the bare event name into `description`, so the entries carry no
+ * text of their own to summarise — this is the only signal available).
+ *
+ * Returns null the moment one entry's outcome cannot be read as a plain success or failure —
+ * missing, mid-flight (`pending`/`syncing`), or simply not a sync event at all. A burst whose
+ * outcome cannot be derived unambiguously shows only its count; guessing a number here would
+ * misreport the log it exists to be an honest record of.
+ */
+export function burstOutcome(entries: ActivityEntry[]): string | null {
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const entry of entries) {
+        const status = asRecord(entry.changes?.attributes)?.sync_status;
+
+        if (status === 'synced') {
+            succeeded += 1;
+        } else if (status === 'failed') {
+            failed += 1;
+        } else {
+            return null;
+        }
+    }
+
+    if (failed === 0) {
+        return `${succeeded} erfolgreich`;
+    }
+
+    if (succeeded === 0) {
+        return `${failed} fehlgeschlagen`;
+    }
+
+    return `${succeeded} erfolgreich, ${failed} fehlgeschlagen`;
+}
