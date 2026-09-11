@@ -256,6 +256,20 @@ class PackageController extends Controller
 
         $canManageAssignments = $this->canManageAssignments($package);
 
+        // `$canManageAssignments` is the OWNERSHIP question, not merely the assignments
+        // tab's: a viewer it says `false` for is, by construction, the one caller
+        // assertCanViewPackage() admits WITHOUT owning the package or administering its
+        // owner — the customer who merely RECEIVES a shared package (see that method's
+        // docblock). Before that widening, every viewer who reached this method owned the
+        // package, so nothing below needed gating on it: the whole payload was the
+        // owner's business by definition. It no longer is. Every key below that is
+        // meaningful only to the OPERATOR side of this package — its git credential, its
+        // sync/repository detail, its mirror source, its activity trail (which carries
+        // OPERATOR EMPLOYEE NAMES), and how many OTHER customers hold it — is trimmed for
+        // that caller, server-side, rather than left for the Vue layer to decide not to
+        // render: an Inertia prop is readable in the page JSON regardless of which tab a
+        // template happens to gate on it. See PackageAssignmentsTest's
+        // "withholds every operator-internal detail…" test for the fixture this closes.
         return Inertia::render('admin/packages/Show', [
             'package' => [
                 'id' => $package->id,
@@ -271,12 +285,15 @@ class PackageController extends Controller
                 // the prior-#10 shared-pool state. Aligned with the five siblings that
                 // already redact; NotRedactedCredentialUrl on the update route refuses the
                 // marker on its way back in, so a withheld value cannot silently destroy
-                // the credential it was withheld from.
-                'repository_url' => CredentialUrl::redact($package->repository_url),
-                'git_credential_id' => $package->git_credential_id,
-                'has_repository_token' => $package->repository_token !== null,
+                // the credential it was withheld from. Withheld outright (not merely
+                // redacted) for a non-managing viewer: even the credential-free HOST this
+                // package syncs from is the owning organization's operational detail, not
+                // this customer's to read.
+                'repository_url' => $canManageAssignments ? CredentialUrl::redact($package->repository_url) : null,
+                'git_credential_id' => $canManageAssignments ? $package->git_credential_id : null,
+                'has_repository_token' => $canManageAssignments && $package->repository_token !== null,
                 'sync_status' => $package->sync_status->value,
-                'sync_error' => $package->sync_error,
+                'sync_error' => $canManageAssignments ? $package->sync_error : null,
                 'synced_at' => $package->synced_at?->diffForHumans(),
                 'abandoned_at' => $package->abandoned_at?->toDateString(),
                 'replacement_package' => $package->replacement_package,
@@ -286,6 +303,10 @@ class PackageController extends Controller
                 // imports from, and what it is called there. Null for every other source
                 // mode — never an object with null members, so the template can gate on
                 // presence alone rather than re-deriving isMirrorSourced() on the client.
+                // Also null outright for a non-managing viewer: the mirror source's name
+                // is another organization's reusable, org-level configuration, never this
+                // customer's to see merely because they receive one of the packages it
+                // feeds.
                 //
                 // `source_id`/`source_name` both go null together when the source was
                 // deleted (nullOnDelete — see MirrorSourceController::destroy()):
@@ -294,7 +315,7 @@ class PackageController extends Controller
                 // form below (mirrorSources prop) is the fix path for exactly that state, and
                 // needs source_id to know the select should start empty rather than showing a
                 // stale id nothing resolves to.
-                'mirror' => $package->isMirrorSourced() ? [
+                'mirror' => $canManageAssignments && $package->isMirrorSourced() ? [
                     'source_id' => $package->mirror_source_id,
                     'source_name' => $package->mirrorSource?->name,
                     'mirror_name' => $package->mirror_name,
@@ -329,10 +350,15 @@ class PackageController extends Controller
             // to pick a target that would only be refused on submit.
             'assignable_groups' => $canManageAssignments ? $this->assignableGroups($package) : [],
             // Managed credentials assignable to this package: own, global, or explicitly
-            // shared to the package's owning organization (never exposes the token).
-            'gitCredentials' => GitCredential::usableBy($package->organization)
-                ->orderBy('name')->get(['id', 'name', 'provider'])
-                ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value]),
+            // shared to the package's owning organization (never exposes the token). Empty
+            // for a non-managing viewer — this is the owning organization's credential
+            // pool, named and usable, not a customer's to browse for a package they merely
+            // receive.
+            'gitCredentials' => $canManageAssignments
+                ? GitCredential::usableBy($package->organization)
+                    ->orderBy('name')->get(['id', 'name', 'provider'])
+                    ->map(fn (GitCredential $c) => ['id' => $c->id, 'name' => $c->name, 'provider' => $c->provider->value])
+                : [],
             // The retarget form's source picker: reusable mirror sources this specific
             // package could point at instead — its own organization (a MirrorSource is never
             // shared across organizations, see the model's docblock) and its own type (a
@@ -341,8 +367,10 @@ class PackageController extends Controller
             // Unlike create()'s mirrorSources (scoped to the whole active console scope,
             // because the package's eventual owner is not known yet and narrowed to type only
             // client-side), both are already known here, so this is scoped tightly server-side.
-            // Null for every non-mirror package — the form has nothing to retarget.
-            'mirrorSources' => $package->isMirrorSourced() ? $this->mirrorSourceOptionsFor($package) : null,
+            // Null for every non-mirror package, and for a non-managing viewer regardless of
+            // source mode — the form has nothing to retarget and nothing this caller may
+            // point the package at anyway.
+            'mirrorSources' => $canManageAssignments && $package->isMirrorSourced() ? $this->mirrorSourceOptionsFor($package) : null,
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
@@ -361,21 +389,38 @@ class PackageController extends Controller
                 'uploaded_at' => $d->uploaded_at?->toDateString(),
             ]),
             'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
-            'sharedElsewhere' => $package->groups->count() - $visibleGroups->count(),
-            // The Installation tab's whole content — see $installGroup above.
+            // How many OTHER organizations hold this package — zero for a non-managing
+            // viewer, who has no legitimate need to know how many other customers this
+            // operator shares it with. Real for the owner: the "Registries" tab's own note
+            // about registries outside the active scope, unrelated to this trim.
+            'sharedElsewhere' => $canManageAssignments ? $package->groups->count() - $visibleGroups->count() : 0,
+            // The Installation tab's whole content — see $installGroup above. Left
+            // unfiltered by ownership: it is built from a registry already in
+            // `$visibleGroups` (this viewer's OWN registry), so it names nothing beyond
+            // what this caller was assigned and is exactly the command they came here for.
             'install' => $installGroup === null
                 ? null
                 : $snippets->installCommand($installGroup, $package->type, $package->name),
-            'stats' => $isPython ? [
-                'downloads' => (int) $dists->sum('download_count'),
-                'storage_bytes' => (int) $dists->sum('size'),
-                'versions' => $dists->pluck('version')->unique()->count(),
-            ] : [
-                'downloads' => (int) $package->versions->sum('download_count'),
-                'storage_bytes' => (int) $package->versions->sum('dist_size'),
-                'versions' => $package->versions->count(),
+            // Aggregate download/storage figures span every customer this package is
+            // assigned to, not just this viewer's own use of it — operator-side reporting,
+            // withheld the same way `sharedElsewhere` is. `versions` (the COUNT) is left
+            // truthful regardless: it is exactly the length of the `versions`/`pythonDists`
+            // arrays above, which are not gated, so zeroing it here would hide nothing a
+            // viewer could not already count themselves.
+            'stats' => [
+                'downloads' => $canManageAssignments
+                    ? (int) ($isPython ? $dists->sum('download_count') : $package->versions->sum('download_count'))
+                    : 0,
+                'storage_bytes' => $canManageAssignments
+                    ? (int) ($isPython ? $dists->sum('size') : $package->versions->sum('dist_size'))
+                    : 0,
+                'versions' => $isPython ? $dists->pluck('version')->unique()->count() : $package->versions->count(),
             ],
-            'activities' => ActivityPresenter::recentFor($package),
+            // The activity trail carries operator EMPLOYEE NAMES (`causer`) and full
+            // before/after values for every logged field, including repository_url —
+            // exactly the kind of operator-internal detail a receiving customer has no
+            // business reading. Empty for a non-managing viewer.
+            'activities' => $canManageAssignments ? ActivityPresenter::recentFor($package) : [],
         ]);
     }
 
@@ -463,7 +508,7 @@ class PackageController extends Controller
      * the one payload key on the page that would otherwise name another customer's
      * registry to a viewer with no business reading it.
      *
-     * @return list<array{organization_id: string, organization_name: string, group_id: string, group_name: string, version_min: ?string, version_max: ?string, available_until: ?string, available_until_iso: ?string, in_force: bool}>
+     * @return list<array{organization_id: string, organization_name: string, group_id: string, group_name: string, version_min: ?string, version_max: ?string, available_until: ?string, available_until_iso: ?string, in_force: bool, can_edit: bool}>
      */
     private function assignmentPayload(Package $package): array
     {
@@ -491,8 +536,10 @@ class PackageController extends Controller
                 : $groups->whereIn('organization_id', $this->scopedOrgIds());
         }
 
+        $scope = app(OrgScope::class);
+
         return $groups
-            ->map(function (Group $group) use ($inForceGroupIds): array {
+            ->map(function (Group $group) use ($inForceGroupIds, $scope): array {
                 $pivot = $group->getRelation('pivot');
 
                 return [
@@ -505,6 +552,21 @@ class PackageController extends Controller
                     'available_until' => $pivot instanceof GroupPackage ? $pivot->available_until?->toDateString() : null,
                     'available_until_iso' => $pivot instanceof GroupPackage ? $pivot->available_until?->toIso8601String() : null,
                     'in_force' => in_array($group->id, $inForceGroupIds, true),
+                    // Whether THIS row, specifically, is editable — a narrower question
+                    // than can_manage_assignments (the PACKAGE-level one, gating whether
+                    // this method is even called). AssignmentWriter's write()/assign()/
+                    // revoke() all call assertAdministersGroupInScope() per row, which
+                    // reads OrgScope::administersInScope() — the caller's ACTIVE SCOPE, not
+                    // the full administered set canManageAssignments() checks. A caller who
+                    // administers a shared package's owner across every organization they
+                    // hold ANY role in can still have the console scoped down to one
+                    // customer, and the writer refuses every row outside it. Reached here,
+                    // for a non-shared package, every row already survived the scope filter
+                    // above (or spansAllOrganizations()), so this and that filter can never
+                    // disagree; for a shared package — deliberately unfiltered above, see
+                    // that comment — this is the one place the active-scope question is
+                    // actually asked, per row, exactly as the writer will ask it.
+                    'can_edit' => $scope->administersInScope($group->organization_id),
                 ];
             })
             ->sortBy(fn (array $row): string => $row['organization_name'].'|'.$row['group_name'])

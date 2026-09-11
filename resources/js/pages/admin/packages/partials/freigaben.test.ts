@@ -25,6 +25,7 @@ function row(overrides: Partial<AssignmentRow> = {}): AssignmentRow {
         available_until: null,
         available_until_iso: null,
         in_force: true,
+        can_edit: true,
         ...overrides,
     };
 }

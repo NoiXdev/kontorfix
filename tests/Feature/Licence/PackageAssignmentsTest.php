@@ -28,8 +28,10 @@
  */
 
 use App\Enums\UserRole;
+use App\Models\GitCredential;
 use App\Models\Group;
 use App\Models\GroupPackage;
+use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
@@ -108,6 +110,131 @@ it('hides every assignment row from a customer who only receives a shared packag
     // The payload must never expose another customer's data to a caller who may not see
     // it — not even the fact that Kunde B's registry exists.
     $response->assertDontSee('Kunde B')->assertDontSee('Registry B');
+});
+
+it('withholds every operator-internal detail from a customer who only receives a shared package', function () {
+    // The widened viewing guard (assertCanViewPackage()) lets this caller reach show() at
+    // all — a customer whose OWN registry carries a shared package. That is deliberate.
+    // What follows is NOT: the fixtures below are all things that exist ONLY on the
+    // operator's side of a package this viewer never touches beyond receiving it — a git
+    // credential, an activity trail naming an OPERATOR EMPLOYEE, and a repository URL —
+    // and the assertions below prove they are gone from the RESPONSE, not merely hidden
+    // by a `v-if` an Inertia payload still carries in full underneath. A prior version of
+    // this test asserted none of this and stayed green while every one of these leaked.
+    $employee = User::factory()->for($this->operator)->create(['name' => 'Betrieb Mitarbeiterin']);
+    $credential = GitCredential::factory()->for($this->operator)->create(['name' => 'Geheimes Operator-Credential']);
+
+    $this->actingAs($employee);
+    $this->shared->update([
+        // `repository_url` is loggable per Package::getActivitylogOptions() — this write
+        // is what puts the employee's name into the activity trail as `causer`, and the
+        // new URL into its logged `changes`. `git_credential_id` is not itself loggable;
+        // it is exercised through the `package.git_credential_id` payload key instead.
+        'repository_url' => 'https://github.com/betrieb/geteilt-intern.git',
+        'git_credential_id' => $credential->id,
+    ]);
+
+    $this->registryA->packages()->attach($this->shared->id, ['version_min' => '2.0.0']);
+    $this->registryB->packages()->attach($this->shared->id);
+
+    $response = $this->actingAs($this->customerAdminA)->get(route('admin.packages.show', $this->shared))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('can_manage_assignments', false)
+            ->where('assignments', [])
+            ->where('gitCredentials', [])
+            ->where('mirrorSources', null)
+            ->where('activities', [])
+            ->where('sharedElsewhere', 0)
+            ->where('package.repository_url', null)
+            ->where('package.git_credential_id', null)
+            ->where('package.has_repository_token', false)
+            ->where('package.sync_error', null)
+            ->etc());
+
+    $response
+        ->assertDontSee('Kunde B')
+        ->assertDontSee('Registry B')
+        ->assertDontSee('Geheimes Operator-Credential')
+        ->assertDontSee('Betrieb Mitarbeiterin')
+        ->assertDontSee('betrieb/geteilt-intern');
+});
+
+it('withholds the mirror source from a customer who only receives a mirror-sourced shared package', function () {
+    $mirrorSource = MirrorSource::factory()->for($this->operator)->create(['name' => 'Geheime Mirror-Quelle']);
+    $mirrorPackage = Package::factory()->for($this->operator)->create([
+        'type' => 'composer',
+        'name' => 'betrieb/mirror-paket',
+        'shared' => true,
+        'source_mode' => 'mirror',
+        'mirror_source_id' => $mirrorSource->id,
+        'mirror_name' => 'upstream/paket',
+    ]);
+    $this->registryA->packages()->attach($mirrorPackage->id);
+
+    $response = $this->actingAs($this->customerAdminA)->get(route('admin.packages.show', $mirrorPackage))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('package.mirror', null)
+            ->where('mirrorSources', null)
+            ->etc());
+
+    $response->assertDontSee('Geheime Mirror-Quelle');
+});
+
+// -----------------------------------------------------------------------------------------
+// Per-row `can_edit` — `can_manage_assignments` is a PACKAGE-level answer
+// (assertMayTouchAssignment's own question), but AssignmentWriter's write()/assign()/
+// revoke() ALSO ask assertAdministersGroupInScope() per row, which reads the caller's
+// ACTIVE SCOPE — narrower than the full administered set canManageAssignments() checks.
+// A caller who administers the shared package's owner but has scoped the console down to
+// one customer organization sees `can_manage_assignments: true` yet would be refused
+// editing a DIFFERENT customer's row — the UI must not offer what the writer refuses.
+// -----------------------------------------------------------------------------------------
+
+it('marks a row uneditable when it falls outside the callers active scope, even though the package itself is manageable', function () {
+    // Administers both the operator (Maintainer, avoiding the isSuperAdmin() grandfather
+    // clause a home-org Admin role would trigger) and the customer (home org, Admin) — the
+    // same combination AssignmentWriterTest's writerOperatorStaff() fixture uses — but has
+    // scoped the console down to just the customer organization.
+    $testUser = User::factory()->for($this->customerA)->create(['role' => UserRole::Admin]);
+    $testUser->organizations()->attach($this->operator->id, ['role' => UserRole::Maintainer->value]);
+
+    $this->registryA->packages()->attach($this->shared->id);
+    $this->registryB->packages()->attach($this->shared->id);
+
+    $this->actingAs($testUser)
+        ->withSession(['admin.scope_org_id' => $this->customerA->id])
+        ->get(route('admin.packages.show', $this->shared))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('can_manage_assignments', true)
+            // Sorted Kunde A, Kunde B (see the grouping test above).
+            ->where('assignments.0.group_name', 'Registry A')
+            ->where('assignments.0.can_edit', true)
+            ->where('assignments.1.group_name', 'Registry B')
+            ->where('assignments.1.can_edit', false)
+            ->etc());
+});
+
+it('marks every row editable for a super-admin spanning every organization', function () {
+    $this->registryA->packages()->attach($this->shared->id);
+    $this->registryB->packages()->attach($this->shared->id);
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $this->shared))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('assignments.0.can_edit', true)
+            ->where('assignments.1.can_edit', true)
+            ->etc());
+});
+
+it('marks an own packages row editable for its owning organizations admin', function () {
+    $this->registryA->packages()->attach($this->own->id);
+
+    $this->actingAs($this->customerAdminA)->get(route('admin.packages.show', $this->own))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('assignments.0.can_edit', true)->etc());
 });
 
 it('lists the major version lines that actually exist, for the bounds editor dropdown', function () {

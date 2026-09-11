@@ -202,7 +202,12 @@ function removeAssignment(row: AssignmentRow) {
                                 </span>
                             </td>
                             <td class="px-4 py-2">
-                                <div class="flex items-center gap-1">
+                                <!-- Hidden rather than disabled for a row outside the active console
+                                     scope: the writer would refuse both actions with a 403 (it asks
+                                     assertAdministersGroupInScope() per row), and an offered button
+                                     that only ever 403s is worse than none — the operator's fix is to
+                                     switch scope, not to retry. -->
+                                <div v-if="row.can_edit" class="flex items-center gap-1">
                                     <Button
                                         variant="ghost"
                                         size="icon"
@@ -220,6 +225,7 @@ function removeAssignment(row: AssignmentRow) {
                                         <Trash2 class="size-4 text-destructive" />
                                     </Button>
                                 </div>
+                                <span v-else class="text-xs text-muted-foreground">In anderem Bereich verwaltbar</span>
                             </td>
                         </tr>
                     </tbody>

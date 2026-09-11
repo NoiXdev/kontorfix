@@ -24,6 +24,18 @@ export interface AssignmentRow {
     available_until_iso: string | null;
     /** Decided by the server (`Group::assignedPackages()`'s predicate) — never re-derived here. */
     in_force: boolean;
+    /**
+     * Whether THIS row is editable by the current viewer — narrower than the tab's own
+     * `can_manage_assignments` master switch (a PACKAGE-level answer). AssignmentWriter's
+     * write()/assign()/revoke() each ask `assertAdministersGroupInScope()` per row, which
+     * reads the caller's ACTIVE console scope, not the full administered set
+     * `can_manage_assignments` is built from — a caller who administers a shared
+     * package's owner across every organization they hold any role in can still have the
+     * console scoped down to one customer, and the writer refuses every row outside it.
+     * The edit/remove actions are gated on this, not on `can_manage_assignments` alone, so
+     * the UI can never offer an action the writer goes on to refuse.
+     */
+    can_edit: boolean;
 }
 
 /** One registry the "Registry freigeben" picker may offer. */

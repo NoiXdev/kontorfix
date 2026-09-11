@@ -168,7 +168,13 @@ const isGitSourced = computed(() => props.package.is_git_sourced);
 // what the npm migration leaves behind. SyncPackage's failure message tells that operator
 // to remove the URL, so the tab holding the field has to open for them too; gating it on
 // is_git_sourced alone made the recommended remedy unreachable.
-const canEditSource = computed(() => isGitSourced.value || props.package.repository_url !== null);
+//
+// `can_manage_assignments`, first: since the Freigaben tab's viewing guard widened to admit
+// a customer who only RECEIVES a shared package, `repository_url` is null and
+// `is_git_sourced` alone can no longer decide this tab for that viewer — the server already
+// withholds every field this tab would render (PackageController::show()'s trim), and the
+// tab itself must not open on nothing to edit that belongs to another organization anyway.
+const canEditSource = computed(() => props.can_manage_assignments && (isGitSourced.value || props.package.repository_url !== null));
 
 // The README empty state points at the tab that actually replaces "Versionen" for this
 // package type — Python shows "Distributionen" there instead (see the TabsTrigger below).
@@ -468,8 +474,8 @@ useOperatorChannel({
                     <TabsTrigger v-if="canEditSource" value="quelle">Quelle</TabsTrigger>
                     <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
-                    <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
-                    <TabsTrigger value="verwaltung">Verwaltung</TabsTrigger>
+                    <TabsTrigger v-if="props.can_manage_assignments" value="aktivitaet">Aktivität</TabsTrigger>
+                    <TabsTrigger v-if="props.can_manage_assignments" value="verwaltung">Verwaltung</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="uebersicht">
@@ -720,13 +726,13 @@ useOperatorChannel({
                     </section>
                 </TabsContent>
 
-                <TabsContent value="aktivitaet">
+                <TabsContent v-if="props.can_manage_assignments" value="aktivitaet">
                     <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
                         <ActivityTimeline :activities="props.activities" compact />
                     </div>
                 </TabsContent>
 
-                <TabsContent value="verwaltung">
+                <TabsContent v-if="props.can_manage_assignments" value="verwaltung">
                     <form
                         class="flex max-w-xl flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
                         @submit.prevent="saveAbandonment"
