@@ -101,7 +101,7 @@ class Group extends Model
     {
         return $this->belongsToMany(Package::class)
             ->using(GroupPackage::class)
-            ->withPivot('version_constraint', 'available_until');
+            ->withPivot('version_constraint', 'available_until', 'version_min', 'version_max');
     }
 
     /**
