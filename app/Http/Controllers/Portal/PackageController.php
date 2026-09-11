@@ -63,15 +63,16 @@ class PackageController extends Controller
 
         $rows = $this->packages->for($organization);
 
-        // One query for every row's versions instead of one per row. The service answers with
-        // MODELS rather than a query — it composes its set from several registries — so the
-        // eager load belongs here, and an Eloquent collection is what carries it.
+        // PortalPackages::for() already loads every row's `versions` in bulk itself (Task 9
+        // needs that same relation to decide each assignment's licence note), so this is
+        // loadMissing() rather than a second load(): a no-op given that guarantee, and a
+        // fallback rather than a silent duplicate query if it ever stops holding.
         //
         // No ordering closure: Package::versions() is declared `->orderByDesc('released_at')`,
         // so first() is the newest release wherever the relation is loaded. Repeating the order
         // here (as RegistryController::show() does) would be a second statement of it, and the
         // one that silently stops matching when the relation's own order changes.
-        (new EloquentCollection($rows->pluck('package')->all()))->load('versions');
+        (new EloquentCollection($rows->pluck('package')->all()))->loadMissing('versions');
 
         // The registries the entry band picks from, with their addresses. `portal_enabled` is
         // the same per-registry predicate PortalPackages and Portal\RegistryController::index()
@@ -186,6 +187,14 @@ class PackageController extends Controller
                     'name' => $entry->group->name,
                     'in_force' => $entry->in_force,
                     'available_until' => $entry->available_until?->toDateString(),
+                    // Task 9: this registry's own upsell note, or null where there is nothing
+                    // to report (see PortalPackages::licenceNoteFor()). Read off THIS entry
+                    // only, never off the row or off any other entry — the same registry-local
+                    // scoping `available_until` above already keeps.
+                    'licence' => $entry->licence === null ? null : [
+                        'highest_permitted' => $entry->licence->highest_permitted,
+                        'withheld' => $entry->licence->withheld,
+                    ],
                     // ->all(), so the nested value is a plain list and not a Collection:
                     // Collection's TValue is INVARIANT, and a nullable inside a nested one
                     // makes this shape unprovable against a declaration identical to itself

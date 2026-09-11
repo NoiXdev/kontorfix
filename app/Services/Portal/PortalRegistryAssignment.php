@@ -27,6 +27,10 @@ use Illuminate\Support\Carbon;
  * `available_until` is a STORED VALUE CARRIED, not a rule. Nothing here or in PortalPackages
  * compares it to anything; whether an assignment is in force is decided one single way, by
  * RegistryAccessService, and arrives here already answered in `in_force`.
+ *
+ * `licence` (Task 9) is this assignment's own upsell note — see PortalLicenceNote — built by
+ * PortalPackages::licenceNoteFor() from this same pivot row's own bounds and never from any
+ * other assignment's, this organization's other registries included.
  */
 final class PortalRegistryAssignment
 {
@@ -34,5 +38,6 @@ final class PortalRegistryAssignment
         public readonly Group $group,
         public readonly bool $in_force,
         public readonly ?Carbon $available_until,
+        public readonly ?PortalLicenceNote $licence,
     ) {}
 }

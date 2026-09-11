@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     badgesFor,
     lapsedNote,
+    licenceNote,
     noteFor,
     partlyLapsedNote,
     registryLapsedNote,
@@ -231,6 +232,46 @@ describe('noteFor', () => {
         expect(noteFor({ shared: false, in_force: true, registries: [{ name: 'ci', in_force: true }] })).toBeNull();
     });
 
+});
+
+describe('licenceNote', () => {
+    // Task 9: display only, next to the highest version the customer's own licence admits.
+    it('says nothing for an unbounded assignment', () => {
+        expect(licenceNote({ in_force: true, available_until: null, licence: null })).toBeNull();
+    });
+
+    it('says nothing for a missing licence key, the same as an explicit null', () => {
+        // Several fixtures elsewhere in this file predate Task 9 and construct a
+        // PortalRegistryEntry with no `licence` property at all; the real payload always
+        // sends the key, but this function must not crash on the ones that don't.
+        expect(licenceNote({ in_force: true, available_until: null })).toBeNull();
+    });
+
+    it('says nothing when the bounds already admit the newest release', () => {
+        expect(licenceNote({ in_force: true, available_until: null, licence: { highest_permitted: 'v2.4.1', withheld: false } })).toBeNull();
+    });
+
+    it('names the highest permitted version beside the exact sentence the brief specifies', () => {
+        // toBe, not a pair of toContain assertions: the brief gives the sentence verbatim,
+        // and a misquoted upsell reads as an error message pointing at a bug that isn't
+        // there.
+        expect(licenceNote({ in_force: true, available_until: null, licence: { highest_permitted: 'v2.4.1', withheld: true } })).toBe(
+            'v2.4.1: Neuere Version verfügbar — nicht von Ihrer Lizenz abgedeckt.',
+        );
+    });
+
+    it('gives the bare sentence when the bounds admit none of the published releases', () => {
+        expect(licenceNote({ in_force: true, available_until: null, licence: { highest_permitted: null, withheld: true } })).toBe(
+            'Neuere Version verfügbar — nicht von Ihrer Lizenz abgedeckt.',
+        );
+    });
+
+    it('does not tell the customer to upgrade themselves', () => {
+        // Display only, no action: only the operator can widen a licence-bounded assignment.
+        expect(licenceNote({ in_force: true, available_until: null, licence: { highest_permitted: 'v2.4.1', withheld: true } })).not.toContain(
+            'Aktualisieren Sie',
+        );
+    });
 });
 
 describe('SHARED_BADGE_TITLE', () => {

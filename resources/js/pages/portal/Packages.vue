@@ -11,7 +11,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import { badgesFor, noteFor, registryMarker, SHARED_BADGE_TITLE, type PortalRegistryEntry } from './portalPackages';
+import { badgesFor, licenceNote, noteFor, registryMarker, SHARED_BADGE_TITLE, type PortalRegistryEntry } from './portalPackages';
 
 interface RegistryEntry extends PortalRegistryEntry {
     // The id, not the slug: every portal registry URL is built from the id
@@ -185,6 +185,11 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                             {{ reg.name }}
                                         </Link>
                                         <span v-if="registryMarker(reg)" class="text-xs text-destructive">({{ registryMarker(reg) }})</span>
+                                        <!-- Task 9: display only, next to the highest version this registry's own
+                                             licence admits — no action, no self-service upgrade. Independent of
+                                             `registryMarker` above: a lapsed registry and a licence-bounded one
+                                             are different facts and can both be true of the same entry. -->
+                                        <span v-if="licenceNote(reg)" class="text-xs text-copper-hi">({{ licenceNote(reg) }})</span>
                                     </span>
                                 </div>
                             </td>

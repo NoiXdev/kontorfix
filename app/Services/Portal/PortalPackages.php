@@ -2,17 +2,28 @@
 
 namespace App\Services\Portal;
 
+use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\GroupPackage;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PackageVersion;
+use App\Services\Licence\VersionEntitlement;
 use App\Services\RegistryAccessService;
+use App\Support\Licence\VersionBounds;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 class PortalPackages
 {
-    public function __construct(private readonly RegistryAccessService $access) {}
+    public function __construct(
+        private readonly RegistryAccessService $access,
+        // Task 9's licence note. Only permits() is ever called on this — see
+        // licenceNoteFor()'s docblock for why boundsFor() itself is not: this class already
+        // holds the one pivot row boundsFor() would otherwise re-query for.
+        private readonly VersionEntitlement $entitlement,
+    ) {}
 
     /**
      * Every package available to this organization, its own and those shared with it, with the
@@ -74,7 +85,12 @@ class PortalPackages
      */
     public function for(Organization $organization): Collection
     {
-        /** @var array<string, array{package: Package, groups: list<PortalRegistryAssignment>}> $rows */
+        /**
+         * @var array<string, array{
+         *     package: Package,
+         *     groups: list<array{group: Group, in_force: bool, available_until: ?Carbon, bounds: VersionBounds}>
+         * }> $rows
+         */
         $rows = [];
 
         $groups = $organization->groups()
@@ -101,6 +117,15 @@ class PortalPackages
                 /** @var Carbon|null $availableUntil */
                 $availableUntil = $assignment->available_until;
 
+                // Task 9's bounds, read the same way: straight off THIS pivot row, the one
+                // belonging to this registry's own assignment. VersionBounds::fromPivot() is
+                // the exact mapping VersionEntitlement::boundsFor() itself applies once it has
+                // fetched an assignment row — and this loop already holds that row, fetched
+                // once per registry by group->packages()->get() above, so asking boundsFor()
+                // again here would spend one extra query per package re-deriving an answer
+                // already in hand.
+                $bounds = VersionBounds::fromPivot($assignment->version_min, $assignment->version_max);
+
                 // The pivot is read and then DROPPED, because the model outlives this iteration:
                 // the row keeps the first registry's Package instance, so leaving the relation
                 // loaded would let a caller reach $row['package']->pivot->available_until and get
@@ -111,30 +136,49 @@ class PortalPackages
 
                 $rows[$package->id] ??= ['package' => $package, 'groups' => []];
 
-                // The per-registry answer, and the only place any `in_force` is decided.
-                // Appended into the stored row itself, so there is no write-back to forget and
-                // none to mistake for one (an earlier Collection here made the write-back a
-                // no-op, because push() mutates in place).
-                $rows[$package->id]['groups'][] = new PortalRegistryAssignment(
-                    group: $group,
-                    in_force: $served->has($package->id),
-                    available_until: $availableUntil,
-                );
+                // The per-registry answer, kept as plain data rather than a finished
+                // PortalRegistryAssignment: the licence note below needs each package's own
+                // version history loaded, and that happens once, in bulk, after this loop
+                // finishes gathering every package this organization can reach — never once
+                // per (group, package) pair here, which is what asking for it inside this loop
+                // would make of it.
+                $rows[$package->id]['groups'][] = [
+                    'group' => $group,
+                    'in_force' => $served->has($package->id),
+                    'available_until' => $availableUntil,
+                    'bounds' => $bounds,
+                ];
             }
         }
 
         $ordered = array_values($rows);
         usort($ordered, fn (array $a, array $b): int => strcmp($a['package']->name, $b['package']->name));
 
+        // ONE query for every row's own version history, exactly the shape
+        // Portal\PackageController::index() already applies to the same rows for
+        // `latest_version` — never one query per package, which is what asking
+        // licenceNoteFor() to fetch $package->versions lazily, package by package, would
+        // silently become.
+        (new EloquentCollection(array_map(fn (array $row): Package => $row['package'], $ordered)))
+            ->load('versions');
+
         $result = [];
 
         foreach ($ordered as $row) {
-            // Wrapped once, here: the entries are composed as a plain list above, where appending
-            // into the stored row needs no write-back, and the list is finished by now.
-            $groups = collect($row['groups']);
+            $package = $row['package'];
+
+            // Wrapped into PortalRegistryAssignment only now, once the licence note has
+            // everything it needs: each entry's own bounds, gathered above, and every
+            // row's package with its versions already loaded.
+            $groups = collect($row['groups'])->map(fn (array $entry): PortalRegistryAssignment => new PortalRegistryAssignment(
+                group: $entry['group'],
+                in_force: $entry['in_force'],
+                available_until: $entry['available_until'],
+                licence: $this->licenceNoteFor($package, $entry['bounds']),
+            ));
 
             $result[] = [
-                'package' => $row['package'],
+                'package' => $package,
                 'groups' => $groups,
                 // Derived from the entries, never accumulated alongside them: in force in at
                 // least one registry. The package is usable, and the registry column says
@@ -144,5 +188,58 @@ class PortalPackages
         }
 
         return collect($result);
+    }
+
+    /**
+     * Task 9: this ONE assignment's own upsell note — the highest version among the
+     * package's own releases that its OWN bounds admit, and whether a newer release exists
+     * that those bounds do not cover. Null wherever there is nothing to report: the bounds
+     * are unlimited, or the package has no releases at all yet, or (the ordinary bounded
+     * case) the bounds already admit the newest one.
+     *
+     * $bounds is THIS assignment's own window — VersionBounds::fromPivot() applied to the
+     * pivot row `for()` already holds, the identical mapping VersionEntitlement::boundsFor()
+     * itself would apply after a redundant query for the same row — never the union
+     * VersionEntitlement::windowsForOrganization() would build across every one of the
+     * organization's registries. A customer with two registries assigned to the same package
+     * under two different windows sees each registry's own ceiling here, not a wider one that
+     * would tell them nothing about the registry they are actually looking at — the same
+     * registry-local scoping PortalRegistryAssignment::$available_until already keeps.
+     *
+     * Docker is refused before ever reaching permits(), which throws LogicException for it —
+     * Docker carries no licence-bounded assignment concept at all (AssignmentWriter forces
+     * its bounds absent), so a bound on a Docker pivot row can only be a hand-run mistake,
+     * and this must not crash the portal's landing page over one.
+     *
+     * `Package::versions()` orders `released_at desc`, so `first()` is always the package's
+     * own newest release and iterating in that same order finds the newest ADMITTED one —
+     * matching the meaning `latest_version` already gives the same relation one level up, in
+     * Portal\PackageController::index().
+     */
+    private function licenceNoteFor(Package $package, VersionBounds $bounds): ?PortalLicenceNote
+    {
+        if ($package->type === PackageType::Docker || $bounds->isUnlimited()) {
+            return null;
+        }
+
+        $newest = $package->versions->first();
+
+        if ($newest === null) {
+            return null;
+        }
+
+        /** @var PackageVersion|null $highestPermitted */
+        $highestPermitted = $package->versions->first(
+            fn (PackageVersion $v): bool => $this->entitlement->permits($bounds, $package->type, $v->version)
+        );
+
+        if ($highestPermitted === null) {
+            return new PortalLicenceNote(highest_permitted: null, withheld: true);
+        }
+
+        return new PortalLicenceNote(
+            highest_permitted: $highestPermitted->version_pretty,
+            withheld: $highestPermitted->isNot($newest),
+        );
     }
 }

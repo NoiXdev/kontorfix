@@ -58,11 +58,29 @@ export interface PortalPackageRow {
     in_force: boolean;
 }
 
+/**
+ * Task 9's per-registry licence answer: the highest version among the package's own releases
+ * THIS assignment's own bounds admit, and whether that leaves a newer release withheld. Never
+ * a claim about any other registry, this organization's own others included — see
+ * `licenceNote()` and PortalPackages::licenceNoteFor() on the backend.
+ */
+export interface PortalLicenceEntry {
+    highest_permitted: string | null;
+    withheld: boolean;
+}
+
 /** One registry's answer for this package, as the payload's `registries` entries carry it. */
 export interface PortalRegistryEntry {
     in_force: boolean;
     /** `YYYY-MM-DD`, or null for an assignment with no end date. */
     available_until: string | null;
+    /**
+     * Optional rather than required: several existing fixtures in this module's own test
+     * file construct a `PortalRegistryEntry` literal without it, predating Task 9. The real
+     * payload always sends the key (null when there is nothing to report), and `licenceNote`
+     * below treats a missing key the same as an explicit null.
+     */
+    licence?: PortalLicenceEntry | null;
 }
 
 /** What the partial-lapse note needs of an entry: which registry, and whether it still serves. */
@@ -302,4 +320,31 @@ export function registryMarker(entry: PortalRegistryEntry): string | null {
     }
 
     return entry.available_until === null ? 'abgelaufen' : `abgelaufen am ${formatDay(entry.available_until)}`;
+}
+
+/**
+ * Task 9's upsell note for ONE registry entry — display only, no action, no self-service
+ * upgrade: only the operator can widen a licence-bounded assignment, the same reason
+ * `lapsedNote()` and `registryLapsedNote()` never tell the customer to do anything either.
+ *
+ * Null wherever `entry.licence` is null or absent (an unbounded assignment, or a bounded one
+ * whose newest release already survives — see PortalPackages::licenceNoteFor()) and wherever
+ * the server already decided nothing is withheld: this reads `withheld` rather than
+ * re-deriving it from `highest_permitted`, the same "trust the server's one answer" reasoning
+ * `in_force` is read by rather than recomputed in this module.
+ *
+ * The sentence is the exact wording the brief specifies, verbatim — an upsell that misquotes
+ * itself is worse than none, because a customer who reads it as an error message would go
+ * looking for a bug that isn't there. `highest_permitted` (when there is one to name) is
+ * given first, so the note reads as "here is what you have, and here is what you're missing"
+ * rather than the sentence alone with nothing to anchor it.
+ */
+export function licenceNote(entry: PortalRegistryEntry): string | null {
+    if (!entry.licence?.withheld) {
+        return null;
+    }
+
+    const sentence = 'Neuere Version verfügbar — nicht von Ihrer Lizenz abgedeckt.';
+
+    return entry.licence.highest_permitted === null ? sentence : `${entry.licence.highest_permitted}: ${sentence}`;
 }
