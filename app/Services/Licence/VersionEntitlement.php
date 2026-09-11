@@ -120,8 +120,10 @@ final class VersionEntitlement
      * placed against a bound honestly, so a bounded licence fails closed and refuses it;
      * the refusal is logged once per version so an upstream feed full of local versions does
      * not flood the log. The same fail-closed rule applies the other way round: if the bound
-     * itself (the pivot's own `version_min`/`version_max`) cannot be parsed — write-path
-     * validation only arrives in a later task, so a bad row can exist in the meantime — every
+     * itself (the pivot's own `version_min`/`version_max`) cannot be parsed — {@see
+     * \App\Services\Package\AssignmentWriter::assertValidBounds()} now refuses a
+     * syntactically invalid bound at write time, but that guard cannot reach a row written
+     * before it existed, or one written by anything other than AssignmentWriter — every
      * version is refused rather than the unparseable side being silently treated as open,
      * logged once per bound value so an operator can find the offending row.
      *

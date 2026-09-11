@@ -24,7 +24,8 @@ use UnexpectedValueException;
  * (Admin\PackageAssignmentController, the package page's "Freigaben" surface) appears.
  *
  * ROUTING A WRITE THROUGH THIS CLASS IS WHAT MAKES IT SAFE, not merely convenient — every
- * one of `write()`, `assign()` and `revoke()` asks, ITSELF, in this order:
+ * one of `write()`, `assign()` and `revoke()` asks, ITSELF, every one of the guards below
+ * that applies to it:
  *
  *   1. does the caller administer the TARGET GROUP's organization at all
  *      ({@see ScopesToAdministeredOrgs::assertAdministersGroupInScope()});
@@ -38,6 +39,15 @@ use UnexpectedValueException;
  *      post-merge pair, not merely what one caller happened to submit — syntactically
  *      valid for the package's type, ordered, and absent for a Docker package
  *      ({@see assertValidBounds()}).
+ *
+ * The RUNTIME ORDER is not the 1-2-3-4-5 order above, and differs between methods:
+ * `write()` runs 1 → 2 → 5 → 4; `assign()` runs 1 → 3 → 2 → 5 → 4; `revoke()` runs only
+ * 1 → 2, since detaching a row leaves nothing for 3, 4 or 5 to check. None of that ordering
+ * is load-bearing — every guard here either aborts/throws or does nothing, so the outcome
+ * of running all of them is the same regardless of sequence; the only observable effect of
+ * reordering is which single error a caller sees first when more than one guard would have
+ * failed on the same request. The list above is grouped by WHAT each guard asks, not by
+ * when it runs.
  *
  * A caller (a controller, a future job, a console command) that reaches these three
  * methods without separately re-deriving any of the above gets the full guarantee for

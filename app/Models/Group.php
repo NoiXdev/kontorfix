@@ -131,15 +131,18 @@ class Group extends Model
      * (`Admin\PackageAssignmentController`, the package page's "Freigaben" surface) must.
      *
      * AssignmentWriter itself, not whichever controller happens to call it, is what makes
-     * a write safe: `write()`, `assign()` and `revoke()` each ask, themselves — the caller
-     * administers the TARGET GROUP's organization; the caller administers the shared
-     * package's OWNING organization, or owns the package outright; a fresh row (`assign()`)
-     * is reachable into that group at all; the resulting assignment does not shadow, or
-     * get shadowed by, a same-named package of the other kind (SharedAssignment, see
-     * below); and the bounds actually being persisted — the merged, EFFECTIVE pair, not
-     * merely what one caller's request happened to submit — are syntactically valid,
-     * ordered, and absent for a Docker package. A caller that does nothing more than pass
-     * validated values to one of these three methods gets the full guarantee for free.
+     * a write safe. All three of `write()`, `assign()` and `revoke()` ask, themselves,
+     * whether the caller administers the TARGET GROUP's organization, and whether the
+     * caller administers the shared package's OWNING organization or owns the package
+     * outright. `assign()` alone additionally asks whether a fresh row is reachable into
+     * that group at all. `write()` and `assign()` — never `revoke()`, which only detaches a
+     * row and has nothing to validate — additionally ask whether the resulting assignment
+     * does not shadow, or get shadowed by, a same-named package of the other kind
+     * (SharedAssignment, see below), and whether the bounds actually being persisted — the
+     * merged, EFFECTIVE pair, not merely what one caller's request happened to submit — are
+     * syntactically valid, ordered, and absent for a Docker package. A caller that does
+     * nothing more than pass validated values to one of these three methods gets the full
+     * guarantee for free.
      *
      * The write path asks SharedAssignment before it touches `available_until`, and it has
      * to. SharedAssignment's tolerance of expired rows — it permits assigning or creating a

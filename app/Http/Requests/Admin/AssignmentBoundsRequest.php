@@ -8,9 +8,12 @@ use Illuminate\Foundation\Http\FormRequest;
 /**
  * The SHAPE rules only for the three columns {@see AssignmentWriter} writes:
  * `available_until` a plain `Y-m-d` day, `version_min`/`version_max` plain nullable
- * strings. Both admin surfaces that create or edit an assignment share this one class —
- * `Admin\GroupController::updateAssignment()` today, `Admin\PackageAssignmentController`'s
- * "Freigaben" surface once it lands.
+ * strings. Both admin surfaces that edit an EXISTING assignment share this one class —
+ * `Admin\GroupController::updateAssignment()` and
+ * `Admin\PackageAssignmentController::update()`'s "Freigaben" surface. That controller's
+ * own `store()` — a brand new assignment, with no stored row to merge against — validates
+ * inline instead; see its docblock for why reusing this class there would be wrong, not
+ * merely redundant.
  *
  * `version_min`/`version_max` are `sometimes`: the console dialog behind
  * `updateAssignment()` submits only `available_until` today and omitting the bounds
