@@ -170,26 +170,43 @@ it('answers a valid, empty metadata document when the bounds exclude every versi
     expect($res->json('packages'))->toBe(['acme/excluded' => []]);
 });
 
-// The load-bearing test: a licence narrowed to a version window must not turn the package
-// name into one the registry appears not to host — ResolvesRegistryPackage::findLocal() and
-// packageExistsLocally() are asked about ASSIGNMENT, never about which versions a bound
-// admits, so a name assigned here (at any window) keeps suppressing the upstream fallthrough
-// exactly as an unbounded assignment does. Filtering lives entirely inside
-// ComposerMetadataBuilder's document(), downstream of that guard, on purpose.
-it('never falls through to the upstream for a name assigned locally, even with a narrow licence window', function () {
-    Http::fake();
+// The load-bearing test: the dependency-confusion guard
+// (ResolvesRegistryPackage::packageExistsLocally()) must keep suppressing the upstream
+// fallthrough purely on ASSIGNMENT, never on whether a bound admits any particular version.
+//
+// A live assignment can't exercise this: since Task 4, every row the guard's clauses admit
+// with a live assignment is a row findLocal() already resolves and serves, so resolution
+// answers first and the guard is never reached (see SharedPackageUpstreamTest's closing
+// comment block, which measures the same thing for the pre-existing shared-package guard).
+// The one state that reaches the guard through HTTP is a LAPSED assignment: findLocal()
+// excludes it (RegistryAccessService::availablePackages() reads Group::assignedPackages(),
+// which filters out an expired row), but packageExistsLocally() reads the unfiltered
+// Group::packages() and still counts it — mirroring
+// SharedPackageUpstreamTest::'does not send a shared composer name whose assignment lapsed
+// upstream'. This fixture is that same shape, with a version_min/version_max recorded on the
+// very (lapsed) row the guard reads: a future regression that made the guard bounds-aware —
+// e.g. by requiring the pivot's bounds to admit some version before counting the name as
+// hosted — would sail straight through an assertion that never puts a bound in play. This one
+// does, and does go red under exactly that mutation (verified by hand while writing this
+// test, not merely asserted here).
+it('does not fall through to the upstream for a lapsed shared assignment that carried a narrow licence window', function () {
+    Http::fake(['*' => Http::response(['minified' => 'composer/2.0', 'packages' => []], 200)]);
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     Upstream::factory()->for($group)->create(['type' => PackageType::Composer, 'url' => 'https://repo.packagist.org', 'policy' => UpstreamPolicy::Proxy]);
-    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/narrow']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '2.4.1', 'version_pretty' => 'v2.4.1']);
-    PackageVersion::factory()->for($pkg)->create(['version' => '3.5.0', 'version_pretty' => 'v3.5.0']);
-    $group->packages()->attach($pkg, ['version_min' => '2.0.0', 'version_max' => '3.0.0']);
 
-    $res = $this->withHeaders(tokenHeaderFor($group))
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->create(['name' => 'acme/narrow', 'type' => PackageType::Composer, 'shared' => true]);
+    PackageVersion::factory()->for($shared)->create(['version' => '2.4.1', 'version_pretty' => 'v2.4.1']);
+    $group->packages()->attach($shared, [
+        'version_min' => '2.0.0', 'version_max' => '3.0.0',
+        'available_until' => now()->subDay(),
+    ]);
+
+    // 404 (name stays local, same shape as an unfiltered lapsed assignment) — not the 200 an
+    // upstream fallthrough would answer with.
+    $this->withHeaders(tokenHeaderFor($group))
         ->getJson(registryPath($group).'/p2/acme/narrow.json')
-        ->assertOk();
+        ->assertNotFound();
 
-    // Served locally (with the out-of-window 3.5.0 filtered out) — never proxied.
-    expect(composerServedVersions($res->json(), 'acme/narrow'))->toBe(['v2.4.1']);
     Http::assertNothingSent();
 });
