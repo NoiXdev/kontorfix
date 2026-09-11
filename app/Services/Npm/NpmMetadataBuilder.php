@@ -103,10 +103,18 @@ class NpmMetadataBuilder
             $versions[$v->version] = $manifest;
         }
 
+        $tags = $this->distTags($package, array_map('strval', array_keys($versions)));
+
+        // npm's packument shape has both `versions` and `dist-tags` as a JSON OBJECT, never
+        // an array — but PHP's json_encode() renders an empty associative array as `[]`. Every
+        // non-empty case above already produces a string-keyed array, which encodes as an
+        // object correctly; only the empty case (a bounded licence admitting none of the
+        // package's versions — a valid, 200-worthy state, not an error) needs the explicit
+        // cast, done here rather than relying on `versions`/`tags` never being empty.
         return [
             'name' => $package->name,
-            'dist-tags' => $this->distTags($package, array_map('strval', array_keys($versions))),
-            'versions' => $versions,
+            'dist-tags' => $tags === [] ? (object) [] : $tags,
+            'versions' => $versions === [] ? (object) [] : $versions,
         ];
     }
 

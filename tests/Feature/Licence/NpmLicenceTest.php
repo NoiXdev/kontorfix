@@ -102,6 +102,34 @@ it('404s the tarball for a version at/above the exclusive upper bound', function
         ->assertNotFound();
 });
 
+// Reachable in practice: an operator typo in version_min/version_max, or a customer licensed
+// for a range that has no published versions yet. The spec's error table calls this "empty
+// (valid) version list" — a 200 with an empty packument, not an error. npm's packument shape
+// for both `versions` and `dist-tags` is a JSON OBJECT ({}), never an array ([]); PHP's
+// json_encode() renders an empty associative array as `[]`, which is why this is asserted on
+// the raw response body rather than the decoded one — decoding `{}` and `[]` both back into an
+// empty PHP array would make the two indistinguishable and let exactly this regression through.
+it('answers a valid, empty packument (versions and dist-tags as objects, not arrays) when the bounds exclude every version', function () {
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create([
+        'name' => 'acme-excluded',
+        'type' => PackageType::Npm,
+        'dist_tags' => ['latest' => '1.5.0'],
+    ]);
+    PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => [], 'dist_tarball_name' => 'acme-excluded-1.0.0.tgz']);
+    PackageVersion::factory()->for($pkg)->create(['version' => '1.5.0', 'version_pretty' => '1.5.0', 'metadata' => [], 'dist_tarball_name' => 'acme-excluded-1.5.0.tgz']);
+    $group->packages()->attach($pkg, ['version_min' => '5.0.0', 'version_max' => '6.0.0']);
+
+    $res = $this->withHeaders(tokenHeaderFor($group))
+        ->getJson(registryPath($group).'/acme-excluded')
+        ->assertOk();
+
+    expect($res->json('versions'))->toBe([])
+        ->and($res->json('dist-tags'))->toBe([]);
+    expect($res->getContent())->toContain('"versions":{}')
+        ->and($res->getContent())->toContain('"dist-tags":{}');
+});
+
 // The "no behavior change" pin: an unbounded assignment (the shape every assignment made
 // before this task has) must keep serving exactly what it always did — the same equality
 // approach ComposerLicenceTest uses, adapted to compare two independent unbounded fixtures'
