@@ -15,7 +15,9 @@ import {
     boundsPreview,
     detectMajorLine,
     effectiveBounds,
+    excludesAllVersions,
     groupByOrganization,
+    revokeAssignmentConfirmation,
     statusLabel,
     type AssignableGroup,
     type AssignmentRow,
@@ -144,7 +146,16 @@ function saveEditor() {
 }
 
 function removeAssignment(row: AssignmentRow) {
-    router.delete(route('admin.packages.assignments.destroy', [props.packageId, row.group_id]), { preserveScroll: true });
+    router.delete(route('admin.packages.assignments.destroy', [props.packageId, row.group_id]), {
+        preserveScroll: true,
+        // Same pattern as the token revoke confirmations elsewhere in the console (e.g.
+        // groups/Show.vue's "Token wirklich widerrufen?"): a native confirm in `onBefore`,
+        // so a declined dialog cancels the request outright. Named explicitly here because
+        // — per spec §4 as amended — detaching, unlike letting an assignment lapse, is the
+        // one act that releases the package name back to the public index for this
+        // customer, and that consequence is not obvious from a bare trash icon.
+        onBefore: () => confirm(revokeAssignmentConfirmation(row.group_name)),
+    });
 }
 </script>
 
@@ -185,6 +196,16 @@ function removeAssignment(row: AssignmentRow) {
                             <td class="py-2 pr-4 pl-8">{{ row.group_name }}</td>
                             <td v-if="offersBounds" class="px-4 py-2 font-mono text-xs text-muted-foreground">
                                 {{ boundsLabel(row.version_min, row.version_max) }}
+                                <!-- The saved-typo case the spec's error table warns about: the live
+                                     preview in the editor only warns while the dialog is open, so a
+                                     bounds pair that admits nothing must stay visible here too, not
+                                     just at save time. -->
+                                <span
+                                    v-if="excludesAllVersions(props.versions, row.version_min, row.version_max)"
+                                    class="ml-1 inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
+                                >
+                                    schließt alle Versionen aus
+                                </span>
                             </td>
                             <td class="px-4 py-2 text-xs text-muted-foreground">{{ availableUntilLabel(row.available_until) }}</td>
                             <td class="px-4 py-2">

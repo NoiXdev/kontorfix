@@ -8,8 +8,10 @@ import {
     effectiveBounds,
     formatDay,
     groupByOrganization,
+    excludesAllVersions,
     highestAdmittedForPreview,
     majorLineBounds,
+    revokeAssignmentConfirmation,
     statusLabel,
     type AssignmentRow,
 } from './freigaben';
@@ -176,6 +178,33 @@ describe('highestAdmittedForPreview', () => {
 
     it('returns null when the bounds admit none of the versions', () => {
         expect(highestAdmittedForPreview(['1.0.0', '1.5.0'], '2.0.0', '3.0.0')).toBeNull();
+    });
+});
+
+describe('excludesAllVersions', () => {
+    it('is true when the saved bounds admit none of the packages versions — the row badge case', () => {
+        expect(excludesAllVersions(['1.0.0', '1.5.0'], '5.0.0', null)).toBe(true);
+    });
+
+    it('is false when at least one version is admitted', () => {
+        expect(excludesAllVersions(['1.0.0', '2.5.0', '3.0.0'], '2.0.0', '3.0.0')).toBe(false);
+    });
+
+    it('is false for unlimited bounds', () => {
+        expect(excludesAllVersions(['1.0.0'], null, null)).toBe(false);
+    });
+
+    it('is false when the package has no versions to judge the bounds against at all', () => {
+        expect(excludesAllVersions([], '5.0.0', null)).toBe(false);
+    });
+});
+
+describe('revokeAssignmentConfirmation', () => {
+    it('names the registry and states that detaching releases the name to the public index', () => {
+        const text = revokeAssignmentConfirmation('Registry A');
+
+        expect(text).toContain('Registry A');
+        expect(text).toContain('öffentlichen Index');
     });
 });
 

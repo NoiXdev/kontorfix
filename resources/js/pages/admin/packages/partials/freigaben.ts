@@ -68,6 +68,24 @@ export function statusLabel(inForce: boolean): 'aktiv' | 'abgelaufen' {
     return inForce ? 'aktiv' : 'abgelaufen';
 }
 
+/**
+ * The confirmation text for detaching an assignment (the trash icon) — spec §4 (amended):
+ * unlike letting an assignment lapse, detaching is the act that stops suppressing the
+ * upstream fallthrough for this customer, handing the package name back to the public
+ * index for their builds. A single unconfirmed click used to do that silently; this names
+ * the consequence so the operator sees it before it happens, the same pattern the token
+ * revoke confirmations elsewhere in the console follow.
+ */
+export function revokeAssignmentConfirmation(groupName: string): string {
+    return (
+        `Freigabe für „${groupName}" wirklich entfernen?\n\n` +
+        'Anders als ein Ablaufdatum beendet das Entfernen die Sperrung dieses Paketnamens ' +
+        'für diese Registry sofort: der Name wird wieder an den öffentlichen Index ' +
+        'freigegeben, und künftige Installationen dieser Registry können ihn von dort ' +
+        'beziehen.'
+    );
+}
+
 /** The bounds cell: "ab 2.0 < 3.0", "ab 2.0", "< 3.0", or "alle" for no bounds at all. */
 export function boundsLabel(min: string | null, max: string | null): string {
     if (min === null && max === null) {
@@ -216,6 +234,21 @@ export function highestAdmittedForPreview(versions: string[], min: string | null
     const admitted = versions.filter((v) => admitsForPreview(v, min, max));
 
     return admitted.length === 0 ? null : admitted.reduce((best, v) => (compareVersionsForPreview(v, best) > 0 ? v : best));
+}
+
+/**
+ * Whether SAVED bounds admit none of the package's versions — the row badge's condition.
+ *
+ * The editor's own live preview (`boundsPreview()` below) already warns about this while
+ * the dialog is open, but the spec's error table promises the warning stays visible
+ * afterwards too: a typo saved once (e.g. `min` and `max` transposed) must not go quiet
+ * the moment the dialog closes, or an operator has no way to notice a licence nobody can
+ * actually use. `versions.length === 0` reads as false, the same "nothing to judge against"
+ * case `boundsPreview()` handles separately — a package with no releases yet is not itself
+ * a misconfigured row.
+ */
+export function excludesAllVersions(versions: string[], min: string | null, max: string | null): boolean {
+    return versions.length > 0 && highestAdmittedForPreview(versions, min, max) === null;
 }
 
 /**
