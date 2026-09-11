@@ -32,7 +32,10 @@ interface VersionRow {
     released_at: string | null;
     reference: string | null;
     dependencies: Dependencies;
-    download_count: number;
+    // Null for a viewer who may not manage the package's assignments — see
+    // PackageController::show()'s trim: this is a cross-customer usage figure, the exact
+    // same aggregate `stats.downloads` is built from, just unsummed.
+    download_count: number | null;
     dist_size: number | null;
 }
 
@@ -48,6 +51,15 @@ function formatBytes(bytes: number | null | undefined): string {
         i++;
     }
     return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// `null` — this viewer may not manage the package's assignments, and the server withheld
+// the figure rather than send a real zero (see PackageController::show()'s trim) — reads as
+// "—", the same withheld-figure convention formatBytes() already uses. A GENUINE zero (a
+// version nobody has downloaded yet) is deliberately kept distinct from that and prints "0":
+// conflating the two would tell an operator "no downloads" when the true state is "hidden".
+function formatDownloadCount(count: number | null): string {
+    return count === null ? '—' : count.toLocaleString('de-DE');
 }
 
 interface GroupRow {
@@ -76,8 +88,10 @@ interface PythonDistRow {
     filename: string;
     version: string;
     filetype: string;
-    size: number;
-    download_count: number;
+    // Both null for a viewer who may not manage the package's assignments — see
+    // VersionRow's download_count/dist_size for why.
+    size: number | null;
+    download_count: number | null;
     uploaded_at: string | null;
 }
 
@@ -644,7 +658,7 @@ useOperatorChannel({
                                             </span>
                                         </td>
                                         <td class="px-4 py-3 text-muted-foreground">{{ formatBytes(dist.size) }}</td>
-                                        <td class="px-4 py-3 text-muted-foreground">{{ dist.download_count.toLocaleString('de-DE') }}</td>
+                                        <td class="px-4 py-3 text-muted-foreground">{{ formatDownloadCount(dist.download_count) }}</td>
                                     </tr>
                                     <tr v-if="props.pythonDists.length === 0">
                                         <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">
@@ -682,8 +696,12 @@ useOperatorChannel({
                                     <span v-if="currentVersion.reference" class="font-mono text-xs text-muted-foreground">
                                         {{ currentVersion.reference.slice(0, 12) }}
                                     </span>
-                                    <span class="ml-auto text-sm text-muted-foreground">
-                                        {{ currentVersion.download_count.toLocaleString('de-DE') }} Downloads ·
+                                    <!-- Omitted entirely, not shown as "0 Downloads", for a viewer who may not
+                                         manage the package's assignments: both fields null together (see
+                                         PackageController::show()'s trim), and a withheld cross-customer figure
+                                         is not the same fact as a version nobody has downloaded yet. -->
+                                    <span v-if="currentVersion.download_count !== null" class="ml-auto text-sm text-muted-foreground">
+                                        {{ formatDownloadCount(currentVersion.download_count) }} Downloads ·
                                         {{ formatBytes(currentVersion.dist_size) }}
                                     </span>
                                 </div>

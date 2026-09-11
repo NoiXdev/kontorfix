@@ -35,6 +35,7 @@ use App\Models\MirrorSource;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use App\Models\PythonDist;
 use App\Models\User;
 
 function assignmentRowOf(Group $group, Package $package): ?GroupPackage
@@ -133,6 +134,10 @@ it('withholds every operator-internal detail from a customer who only receives a
         'repository_url' => 'https://github.com/betrieb/geteilt-intern.git',
         'git_credential_id' => $credential->id,
     ]);
+    // A per-version usage figure — the same cross-customer number `stats.downloads` sums.
+    // Nulling only the sum while leaving this would let the customer reconstruct exactly
+    // what was withheld, and the Versionen tab renders it directly regardless.
+    PackageVersion::factory()->for($this->shared)->create(['download_count' => 4321, 'dist_size' => 555]);
 
     $this->registryA->packages()->attach($this->shared->id, ['version_min' => '2.0.0']);
     $this->registryB->packages()->attach($this->shared->id);
@@ -150,6 +155,8 @@ it('withholds every operator-internal detail from a customer who only receives a
             ->where('package.git_credential_id', null)
             ->where('package.has_repository_token', false)
             ->where('package.sync_error', null)
+            ->where('versions.0.download_count', null)
+            ->where('versions.0.dist_size', null)
             ->etc());
 
     $response
@@ -157,7 +164,60 @@ it('withholds every operator-internal detail from a customer who only receives a
         ->assertDontSee('Registry B')
         ->assertDontSee('Geheimes Operator-Credential')
         ->assertDontSee('Betrieb Mitarbeiterin')
-        ->assertDontSee('betrieb/geteilt-intern');
+        // Not `assertDontSee('betrieb/geteilt-intern')`: Inertia's JSON response escapes
+        // `/` as `\/`, so a leaked URL containing one would never match that string — a
+        // slash-free substring is what would actually catch it reappearing.
+        ->assertDontSee('geteilt-intern');
+    // download_count/dist_size are proven absent structurally above (`versions.0.…` is
+    // `null`, not merely equal to some OTHER value) — a raw-text assertDontSee() for a
+    // short generic number like `555` is not a stronger check and is prone to a false
+    // failure the moment that digit sequence appears anywhere else on the page by chance.
+});
+
+it('still shows real per-version download and storage figures to a caller who may manage the package', function () {
+    // The companion to the test above: proving the trim withholds these figures from a
+    // non-manager is only half the guarantee. This proves it does not ALSO withhold them
+    // from the operator who is supposed to see them — a fix that zeroed the field
+    // unconditionally would pass every "withholds…" test and still be wrong.
+    PackageVersion::factory()->for($this->shared)->create(['download_count' => 4321, 'dist_size' => 555]);
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $this->shared))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('can_manage_assignments', true)
+            ->where('versions.0.download_count', 4321)
+            ->where('versions.0.dist_size', 555)
+            ->etc());
+});
+
+it('withholds pythonDists download and size figures from a customer who only receives a shared python package', function () {
+    $pythonPackage = Package::factory()->for($this->operator)
+        ->create(['type' => 'python', 'name' => 'betrieb-geteilt-python', 'shared' => true]);
+    PythonDist::factory()->for($pythonPackage)->create(['download_count' => 999, 'size' => 12345]);
+    $this->registryA->packages()->attach($pythonPackage->id);
+
+    $this->actingAs($this->customerAdminA)->get(route('admin.packages.show', $pythonPackage))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('can_manage_assignments', false)
+            ->where('pythonDists.0.download_count', null)
+            ->where('pythonDists.0.size', null)
+            ->etc());
+});
+
+it('still shows real pythonDists download and size figures to a caller who may manage the package', function () {
+    $pythonPackage = Package::factory()->for($this->operator)
+        ->create(['type' => 'python', 'name' => 'betrieb-geteilt-python-2', 'shared' => true]);
+    PythonDist::factory()->for($pythonPackage)->create(['download_count' => 999, 'size' => 12345]);
+    $this->registryA->packages()->attach($pythonPackage->id);
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $pythonPackage))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('can_manage_assignments', true)
+            ->where('pythonDists.0.download_count', 999)
+            ->where('pythonDists.0.size', 12345)
+            ->etc());
 });
 
 it('withholds the mirror source from a customer who only receives a mirror-sourced shared package', function () {

@@ -371,21 +371,28 @@ class PackageController extends Controller
             // source mode — the form has nothing to retarget and nothing this caller may
             // point the package at anyway.
             'mirrorSources' => $canManageAssignments && $package->isMirrorSourced() ? $this->mirrorSourceOptionsFor($package) : null,
+            // `download_count`/`dist_size` are per-row cross-customer usage figures — the
+            // exact same aggregate `stats.downloads`/`storage_bytes` is built from, just
+            // unsummed. Nulling only the sum while leaving these would not withhold
+            // anything: a non-managing viewer could still reconstruct it by adding the
+            // column back up, and the Versionen tab would show it to them directly without
+            // even that step. Withheld the same way and for the same reason as `stats`.
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
                 'reference' => $v->source_reference,
                 'dependencies' => $deps->for($package->type, $v->metadata ?? []),
-                'download_count' => $v->download_count,
-                'dist_size' => $v->dist_size,
+                'download_count' => $canManageAssignments ? $v->download_count : null,
+                'dist_size' => $canManageAssignments ? $v->dist_size : null,
             ]),
-            // Python distribution files (empty for other types).
+            // Python distribution files (empty for other types). Same trim as `versions`
+            // above, on the two columns that carry the identical cross-customer figures.
             'pythonDists' => $dists->map(fn (PythonDist $d) => [
                 'filename' => $d->filename,
                 'version' => $d->version,
                 'filetype' => $d->filetype,
-                'size' => $d->size,
-                'download_count' => $d->download_count,
+                'size' => $canManageAssignments ? $d->size : null,
+                'download_count' => $canManageAssignments ? $d->download_count : null,
                 'uploaded_at' => $d->uploaded_at?->toDateString(),
             ]),
             'groups' => $visibleGroups->map(fn (Group $g) => ['id' => $g->id, 'name' => $g->name, 'slug' => $g->slug, 'url_path' => $registryUrl->path($g)])->values(),
@@ -520,6 +527,8 @@ class PackageController extends Controller
             ->with('organization:id,name')
             ->get(['groups.id', 'groups.name', 'groups.organization_id']);
 
+        $scope = app(OrgScope::class);
+
         // For a SHARED package this is deliberately unfiltered — every customer registry
         // it is assigned to, regardless of the caller's active scope selection, is exactly
         // what canManageAssignments() already established this caller may administer (see
@@ -530,13 +539,10 @@ class PackageController extends Controller
         // PackageGroupLeakTest), and that row is no more this caller's business inside the
         // Freigaben tab than it is in the Registries one.
         if (! $package->shared) {
-            $scope = app(OrgScope::class);
             $groups = $scope->spansAllOrganizations()
                 ? $groups
                 : $groups->whereIn('organization_id', $this->scopedOrgIds());
         }
-
-        $scope = app(OrgScope::class);
 
         return $groups
             ->map(function (Group $group) use ($inForceGroupIds, $scope): array {
