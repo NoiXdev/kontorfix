@@ -1,4 +1,32 @@
-## [0.10.0](https://github.com/NoiXdev/kontorfix/compare/v0.9.0...v) (2026-09-09)
+## [0.11.0](https://github.com/NoiXdev/kontorfix/compare/v0.10.0...v) (2026-09-11)
+
+
+### Features
+
+* **portal:** organization-wide setup tab with org-scoped tokens ([feabd4b](https://github.com/NoiXdev/kontorfix/commit/feabd4b58b23303e48667583cc68662e2deb3870))
+* **registry:** mount the read-only org-level endpoint prefix ([79bb006](https://github.com/NoiXdev/kontorfix/commit/79bb00666d449f5cdac74719bbb93baa2b6c8ecf))
+* **registry:** org-level access checks and the org-wide package union ([fc2383f](https://github.com/NoiXdev/kontorfix/commit/fc2383fe0f3adc64ab817dee793395598a7cbb80))
+* **registry:** organization-wide setup snippets ([7599db0](https://github.com/NoiXdev/kontorfix/commit/7599db01f664ba2e11e2db7fa7a515430dbe3939))
+* **registry:** serve composer metadata and dists organization-wide ([6a48c83](https://github.com/NoiXdev/kontorfix/commit/6a48c83ffb0c04d4b5798cdf58e0fabd58a874f5))
+* **registry:** serve npm packuments and tarballs organization-wide ([d8c5411](https://github.com/NoiXdev/kontorfix/commit/d8c5411678025d67793de6b04c103fa80eae14f8))
+* **registry:** serve the pypi simple index organization-wide ([5b2e4e0](https://github.com/NoiXdev/kontorfix/commit/5b2e4e0a655e9615ee2c74e7fe7416afd7ac7dd9))
+
+
+### Bug Fixes
+
+* **admin:** close the scope oracle in UpdateUpstreamRequest and remove dead helper ([f71abea](https://github.com/NoiXdev/kontorfix/commit/f71abeaa57b8788b8f23bd17414a0dbf814e790e))
+* **admin:** finish the scope sweep on domains, upstreams and tokens ([e80497a](https://github.com/NoiXdev/kontorfix/commit/e80497a85030eb59a5564be321aad9f4c396a6a4))
+* **admin:** make registry, mirror-source and git-credential guards respect the active scope ([d10a62d](https://github.com/NoiXdev/kontorfix/commit/d10a62d42733c266d4322bdfc141d9df6583b076))
+* **admin:** make webhooks, recipients, user/robot lists and the portal link honour org scope ([4258838](https://github.com/NoiXdev/kontorfix/commit/4258838037aadcec6c8a9a3a81fe1280bb27bd14))
+* **portal:** give the Einrichtung tab a revoke control for org-wide tokens ([33b8c81](https://github.com/NoiXdev/kontorfix/commit/33b8c8152e0f00223b74fd038a72f3aae2dcad8a))
+* **registry:** apply own-beats-shared ordering to the org package pool ([600f26f](https://github.com/NoiXdev/kontorfix/commit/600f26f51a58e1f9ed62dea898f8110c8a4f8de0))
+* **registry:** drop unenforced version-constraint filter, gate /o/ by registry type ([3d94b7b](https://github.com/NoiXdev/kontorfix/commit/3d94b7b6bcd1dbeae46f76a3d27addd1dc263767))
+* **registry:** exclude proxy-download routes from the /o/ org mount ([5d4acc2](https://github.com/NoiXdev/kontorfix/commit/5d4acc2dc7fbd4b2af83befb83e332a766991456))
+* **registry:** give each /o/ route its own name, close the write-route fail-open gap ([31a5835](https://github.com/NoiXdev/kontorfix/commit/31a5835f4efb87c2a7ac21261760fbed529f3cfb))
+* **registry:** per-registry docker host in the org snippet set, single-source the /o/ path ([89ebb8a](https://github.com/NoiXdev/kontorfix/commit/89ebb8afd0e0314ea6a85f25b8794c3745cc7668))
+* **registry:** use Sie-form in the org write-refusal message ([bc095c9](https://github.com/NoiXdev/kontorfix/commit/bc095c9831ae666b5c2e096071b6403b13127e91))
+
+## [0.10.0](https://github.com/NoiXdev/kontorfix/compare/v0.9.0...v0.10.0) (2026-09-09)
 
 
 ### Features
