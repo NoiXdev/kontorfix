@@ -4,6 +4,7 @@ use App\Enums\PackageType;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Services\Npm\NpmMetadataBuilder;
+use App\Support\Licence\VersionBounds;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -18,7 +19,7 @@ it('builds a packument with dist-tags and tarball urls scoped to the group', fun
         'dist_tarball_name' => 'ui-kit-1.2.0.tgz',
     ]);
 
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz', VersionBounds::unlimited());
 
     expect($doc['name'])->toBe('@noixdev/ui-kit')
         ->and($doc['dist-tags'])->toBe(['latest' => '1.2.0'])
@@ -34,7 +35,7 @@ it('derives latest from highest semver when dist_tags is empty', function () {
     foreach (['1.0.0', '2.1.0', '2.0.0'] as $v) {
         PackageVersion::factory()->for($pkg)->create(['version' => $v, 'version_pretty' => $v, 'metadata' => ['name' => 'thing', 'version' => $v], 'dist_tarball_name' => "thing-$v.tgz"]);
     }
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz', VersionBounds::unlimited());
     expect($doc['dist-tags']['latest'])->toBe('2.1.0');
 });
 
@@ -45,7 +46,7 @@ it('overrides malicious name/version/dist from stored metadata', function () {
         'metadata' => ['name' => 'evil', 'version' => '9.9.9', 'dist' => ['tarball' => 'https://evil.test/x.tgz']],
         'dist_tarball_name' => 'safe-1.0.0.tgz',
     ]);
-    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz/');
+    $doc = app(NpmMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz/', VersionBounds::unlimited());
     expect($doc['versions']['1.0.0']['name'])->toBe('safe')
         ->and($doc['versions']['1.0.0']['version'])->toBe('1.0.0')
         ->and($doc['versions']['1.0.0']['dist']['tarball'])->toBe('https://registry.test/r/kadenz/safe/-/safe-1.0.0.tgz');
@@ -55,7 +56,7 @@ it('omits deprecated entirely for a live package', function () {
     $package = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'thing']);
     PackageVersion::factory()->for($package)->create(['version' => '1.0.0']);
 
-    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     expect($doc['versions']['1.0.0'])->not->toHaveKey('deprecated');
 });
@@ -72,7 +73,7 @@ it('puts the composed sentence on every version', function () {
         PackageVersion::factory()->for($package)->create(['version' => $v]);
     }
 
-    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     foreach (['1.0.0', '1.1.0'] as $v) {
         expect($doc['versions'][$v]['deprecated'])
@@ -84,7 +85,7 @@ it('uses the default sentence when only the switch is set', function () {
     $package = Package::factory()->create(['type' => PackageType::Npm, 'name' => 'thing', 'abandoned_at' => now()]);
     PackageVersion::factory()->for($package)->create(['version' => '1.0.0']);
 
-    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     expect($doc['versions']['1.0.0']['deprecated'])->toBe('Dieses Paket wird nicht mehr gepflegt.');
 });
@@ -96,7 +97,7 @@ it('does not let a published manifest forge its own deprecation', function () {
         'metadata' => ['deprecated' => 'gefälschte Warnung'],
     ]);
 
-    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test');
+    $doc = app(NpmMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     // The registry decides this field, not the uploaded package.json.
     expect($doc['versions']['1.0.0'])->not->toHaveKey('deprecated');

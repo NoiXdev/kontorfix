@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
+use App\Services\Licence\VersionEntitlement;
 use App\Services\Npm\NpmMetadataBuilder;
 use App\Services\Npm\NpmPublishService;
 use App\Services\RegistryAccessService;
@@ -29,6 +30,7 @@ class NpmController extends Controller
         private readonly NpmMetadataBuilder $metadata,
         private readonly NpmPublishService $publisher,
         private readonly NpmProxyService $proxy,
+        private readonly VersionEntitlement $entitlement,
     ) {}
 
     protected function access(): RegistryAccessService
@@ -63,10 +65,9 @@ class NpmController extends Controller
                 abort(404);
             }
 
-            // NpmMetadataBuilder::build() takes no Group — unlike ComposerMetadataBuilder,
-            // there is no buildForOrganization() twin to introduce here; the same method
-            // already serves both branches once given a Package and a base URL.
-            return response()->json($this->metadata->build($pkg, $this->registryBaseUrlForOrganization($request, $organization)));
+            $windows = $this->entitlement->windowsForOrganization($organization, $pkg);
+
+            return response()->json($this->metadata->buildForOrganization($pkg, $this->registryBaseUrlForOrganization($request, $organization), $windows));
         }
 
         $group = $this->registryGroup($request);
@@ -75,7 +76,9 @@ class NpmController extends Controller
         $pkg = $this->findLocal($request, $group, PackageType::Npm, $name);
 
         if ($pkg !== null) {
-            return response()->json($this->metadata->build($pkg, $this->registryBaseUrl($request, $group)));
+            $bounds = $this->entitlement->boundsFor($group, $pkg);
+
+            return response()->json($this->metadata->build($pkg, $this->registryBaseUrl($request, $group), $bounds));
         }
 
         // If the name exists locally but isn't accessible to this group, we abort,
@@ -134,6 +137,28 @@ class NpmController extends Controller
         // NpmMetadataBuilder) — so there is nothing to additionally filter here either.
         // Unchanged group behavior; the org branch matches it.
         $version = $pkg->versions()->where('dist_tarball_name', $file)->firstOrFail();
+
+        // The licence bounds ARE enforced here (a distinct check from version_constraint
+        // above): a version outside the caller's window must 404 exactly like an unknown
+        // version — same shape, checked BEFORE any disk access below — never served-but-
+        // refused, mirroring ComposerController::dist(). findAccessible()/
+        // organizationPackage() above stay unfiltered by bounds on purpose: a name licensed
+        // at any window still resolves the package, only individual versions are hidden.
+        $permitted = $organization !== null
+            ? $this->entitlement->permitsAny(
+                $this->entitlement->windowsForOrganization($organization, $pkg),
+                PackageType::Npm,
+                $version->version,
+            )
+            : $this->entitlement->permits(
+                $this->entitlement->boundsFor($group, $pkg),
+                PackageType::Npm,
+                $version->version,
+            );
+
+        if (! $permitted) {
+            abort(404);
+        }
 
         $disk = Storage::disk('artifacts');
         abort_unless($version->dist_path !== null && $disk->exists($version->dist_path), 404);
