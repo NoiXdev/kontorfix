@@ -8,7 +8,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Models\PythonDist;
 use App\Models\RegistryToken;
+use App\Services\Licence\VersionEntitlement;
 use App\Services\Python\PythonName;
 use App\Services\Python\PythonPublishService;
 use App\Services\Python\PythonSimpleIndexBuilder;
@@ -49,6 +51,7 @@ class PypiController extends Controller
         private readonly RegistryAccessService $access,
         private readonly PythonPublishService $publisher,
         private readonly PythonSimpleIndexBuilder $builder,
+        private readonly VersionEntitlement $entitlement,
     ) {}
 
     protected function access(): RegistryAccessService
@@ -190,7 +193,15 @@ class PypiController extends Controller
                 abort(404);
             }
 
-            $dists = $pkg->pythonDists()->orderBy('filename')->get();
+            // Out-of-licence rows are HIDDEN — absent from both representations entirely,
+            // never listed-but-refused — mirroring ComposerController::metadata()'s and
+            // NpmController's org branches. Filtered per-row on that row's own stored
+            // `version`, since a single PythonDist is filename-keyed (several files can
+            // share one version), unlike Composer/npm which filter a version list directly.
+            $windows = $this->entitlement->windowsForOrganization($organization, $pkg);
+            $dists = $pkg->pythonDists()->orderBy('filename')->get()
+                ->filter(fn (PythonDist $d): bool => $this->entitlement->permitsAny($windows, PackageType::Python, $d->version))
+                ->values();
             $base = $this->registryBaseUrlForOrganization($request, $organization);
 
             if (str_contains((string) $request->header('Accept'), self::JSON_ACCEPT)) {
@@ -221,7 +232,15 @@ class PypiController extends Controller
                 && $this->access->canAccessPackage($token, $group, $p));
 
         if ($pkg !== null) {
-            $dists = $pkg->pythonDists()->orderBy('filename')->get();
+            // Same hiding rule as the org branch above, through the group's own bounds
+            // rather than a windowed union. findLocal()/pythonExistsLocally() below stay
+            // unfiltered on purpose: a name assigned at any window must still suppress the
+            // dependency-confusion guard's upstream fallthrough — only individual dists are
+            // hidden here, never the project's existence.
+            $bounds = $this->entitlement->boundsFor($group, $pkg);
+            $dists = $pkg->pythonDists()->orderBy('filename')->get()
+                ->filter(fn (PythonDist $d): bool => $this->entitlement->permits($bounds, PackageType::Python, $d->version))
+                ->values();
             $base = $this->registryBaseUrl($request, $group);
 
             if (str_contains((string) $request->header('Accept'), self::JSON_ACCEPT)) {
@@ -335,6 +354,26 @@ class PypiController extends Controller
         }
 
         $dist = $pkg->pythonDists()->where('filename', $filename)->firstOrFail();
+
+        // The licence bounds ARE enforced here: a version outside the caller's window must
+        // 404 exactly like an unknown file (same shape, checked BEFORE any disk access
+        // below) — refused, not merely hidden from the index while still downloadable.
+        // Mirrors ComposerController::dist()/NpmController's tarball endpoint.
+        $permitted = $organization !== null
+            ? $this->entitlement->permitsAny(
+                $this->entitlement->windowsForOrganization($organization, $pkg),
+                PackageType::Python,
+                $dist->version,
+            )
+            : $this->entitlement->permits(
+                $this->entitlement->boundsFor($group, $pkg),
+                PackageType::Python,
+                $dist->version,
+            );
+
+        if (! $permitted) {
+            abort(404);
+        }
 
         $disk = Storage::disk('artifacts');
         abort_unless($disk->exists($dist->path), 404);
