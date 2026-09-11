@@ -6,6 +6,7 @@ use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\RetentionRuleType;
 use App\Http\Controllers\Concerns\GuardsMirrorSourceAssignment;
+use App\Http\Controllers\Concerns\GuardsPackageAttachment;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StorePackageRequest;
@@ -14,6 +15,7 @@ use App\Jobs\SyncMirrorPackage;
 use App\Jobs\SyncPackage;
 use App\Models\GitCredential;
 use App\Models\Group;
+use App\Models\GroupPackage;
 use App\Models\MirrorSource;
 use App\Models\OciManifest;
 use App\Models\OciTag;
@@ -41,9 +43,12 @@ use App\Support\Retention\RetentionDecision;
 use App\Support\Retention\RetentionRule;
 use App\Support\Retention\RetentionRuleSetValidator;
 use App\Support\VersionOrder;
+use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -180,8 +185,6 @@ class PackageController extends Controller
 
     public function show(Request $request, Package $package, PackageDependencies $deps, RegistryUrl $registryUrl, SetupSnippetBuilder $snippets): Response
     {
-        $this->assertCanTouchPackage($package);
-
         // A Docker repository has nothing in common with the other three types' detail
         // page: no versions, no git source, no sync job (isPublishBased() covers it, but
         // there is no PackageVersion row to point "Versionen" at either) — and it needs a
@@ -189,10 +192,16 @@ class PackageController extends Controller
         // occupied/shared size composition. Branching here, before any of the generic
         // payload below is assembled, keeps that composition logic (and the size rule
         // that goes with it) out of a method that would otherwise carry every type's
-        // concerns at once.
+        // concerns at once. Docker keeps the strict, ownership-only guard: it has no
+        // Freigaben tab (see assertCanViewPackage()'s docblock), so nothing on its page
+        // needs the wider one.
         if ($package->type === PackageType::Docker) {
+            $this->assertCanTouchPackage($package);
+
             return $this->showDocker($request, $package, $registryUrl);
         }
+
+        $this->assertCanViewPackage($package);
 
         // `groups.organization:id,slug` on top of the group's own columns: the registry list
         // below prints each registry's URL, and RegistryUrl reads the organization's slug for
@@ -245,6 +254,8 @@ class PackageController extends Controller
         $isPython = $package->type === PackageType::Python;
         $dists = $isPython ? $package->pythonDists()->orderByDesc('uploaded_at')->get() : collect();
 
+        $canManageAssignments = $this->canManageAssignments($package);
+
         return Inertia::render('admin/packages/Show', [
             'package' => [
                 'id' => $package->id,
@@ -293,6 +304,30 @@ class PackageController extends Controller
             // than re-derived in Vue so the front end never restates the gate's rule (the
             // instance setting it reads is not itself exposed to the client).
             'canSharePackages' => (bool) $request->user()?->can('share-packages'),
+            // The "Freigaben" tab: whether THIS viewer may create, edit or end one of this
+            // package's assignments at all — the same disjunction AssignmentWriter's own
+            // assertMayTouchAssignment() asks (administering the owning organization for a
+            // shared package, ownership within the active scope for anything else) — see
+            // canManageAssignments()'s docblock for why this is the one place on the page
+            // that question can actually come back false.
+            'can_manage_assignments' => $canManageAssignments,
+            // Every registry this package is currently assigned to, across every
+            // organization — grouped by customer in the UI, not a flat table. Deliberately
+            // EMPTY rather than filtered for a viewer who may not manage assignments: this
+            // is the one payload key on this page that would otherwise hand a customer's
+            // registry name and id to another customer, and the feature this tab exists
+            // for is the operator deciding who receives what, not a directory of it. See
+            // assignmentPayload()'s docblock for the row shape.
+            'assignments' => $canManageAssignments ? $this->assignmentPayload($package) : [],
+            // The distinct major version lines this package actually has releases under,
+            // for the editor's "Nur eine Hauptversion" dropdown — see majorLines().
+            'major_lines' => $this->majorLines($package, $isPython, $dists),
+            // The "Registry freigeben" picker's own options: registries this package could
+            // newly be assigned to that it is not already carried by. Gated behind the same
+            // flag as `assignments`, for the same reason — it is a list of registry names,
+            // and a viewer who may not manage assignments has no business browsing it even
+            // to pick a target that would only be refused on submit.
+            'assignable_groups' => $canManageAssignments ? $this->assignableGroups($package) : [],
             // Managed credentials assignable to this package: own, global, or explicitly
             // shared to the package's owning organization (never exposes the token).
             'gitCredentials' => GitCredential::usableBy($package->organization)
@@ -342,6 +377,213 @@ class PackageController extends Controller
             ],
             'activities' => ActivityPresenter::recentFor($package),
         ]);
+    }
+
+    /**
+     * Whether the current viewer may reach this page at all — broader than
+     * {@see ScopesToAdministeredOrgs::assertCanTouchPackage()}, which stays the
+     * MANAGEMENT question everywhere else in this controller (update, resync, delete, …)
+     * and is asked unchanged for a Docker package above, since Docker has no Freigaben tab.
+     *
+     * The extra way in this method adds: a customer whose registry currently carries this
+     * package as a SHARED assignment may read the page too — its versions, its install
+     * snippet, the Freigaben tab telling them what they have and until when — even though
+     * only the owning organization may decide who ELSE receives it. Before this the page
+     * was reachable only by the package's own organization, so `can_manage_assignments`
+     * (computed separately below) had no caller it could ever say `false` to; this is what
+     * makes that boolean answer something.
+     *
+     * `$package->groups()`, not `assignedPackages()`: reachability tracks the assignment
+     * ROW existing, the same choice `GuardsPackageAttachment::currentAssignmentIds()`
+     * makes and for the same reason — a lapsed shared assignment still means something to
+     * the customer who has it (the name stays blocked, the Freigaben tab still has a row
+     * worth reading), so it must not make the page itself 404.
+     *
+     * A non-shared package this caller does not own is refused exactly as before: this
+     * method only adds one more way IN for a shared package, never a way past ownership
+     * for anything else.
+     */
+    private function assertCanViewPackage(Package $package): void
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            return;
+        }
+
+        if (in_array($package->organization_id, $this->scopedOrgIds(), true)) {
+            return;
+        }
+
+        abort_unless(
+            $package->shared
+                && $package->groups()->whereIn('groups.organization_id', $this->scopedOrgIds())->exists(),
+            403,
+        );
+    }
+
+    /**
+     * Whether this viewer may create, edit or end one of THIS package's assignments — the
+     * Freigaben tab's master switch, mirroring {@see AssignmentWriter}'s own
+     * `assertMayTouchAssignment()` disjunction exactly (administering the owning
+     * organization for a shared package, ownership within the active scope otherwise) so
+     * the button this flag shows can never be a promise the writer goes on to refuse.
+     *
+     * For a NON-shared package this is unconditionally true: {@see assertCanViewPackage()}
+     * already required ownership within the active scope to reach this point for one, and
+     * that is exactly `assertMayTouchAssignment()`'s non-shared branch. The only caller who
+     * can see this answer `false` is the one {@see assertCanViewPackage()} newly admits — a
+     * customer who merely RECEIVES a shared package.
+     */
+    private function canManageAssignments(Package $package): bool
+    {
+        if (! $package->shared) {
+            return true;
+        }
+
+        return in_array($package->organization_id, $this->administeredOrganizationIds(), true);
+    }
+
+    /**
+     * Every registry this package is assigned to, across every organization — the row
+     * shape the "Freigaben" tab groups by customer and renders indented beneath it.
+     *
+     * `in_force` is decided by the identical predicate {@see Group::assignedPackages()}
+     * applies from the other side of the same pivot table
+     * ({@see Group::notExpiredAssignmentPredicate()}), reached here from the PACKAGE side
+     * the same way `App\Services\Licence\VersionEntitlement::windowsForOrganization()`
+     * already does — so this tab and the registry's own serving decision can never
+     * disagree about whether a given row counts.
+     *
+     * `available_until` carries the day (`Y-m-d`, what the editor's date field reads back)
+     * and `available_until_iso` the full instant the column actually stores (the END of
+     * that day — see `Admin\GroupController::updateAssignment()`'s docblock) for the parts
+     * of the UI that want it exactly, e.g. a precise tooltip.
+     *
+     * Only ever called for a caller {@see canManageAssignments()} already said yes to —
+     * show() gates it behind that flag rather than filtering rows here, because this is
+     * the one payload key on the page that would otherwise name another customer's
+     * registry to a viewer with no business reading it.
+     *
+     * @return list<array{organization_id: string, organization_name: string, group_id: string, group_name: string, version_min: ?string, version_max: ?string, available_until: ?string, available_until_iso: ?string, in_force: bool}>
+     */
+    private function assignmentPayload(Package $package): array
+    {
+        /** @var Closure(Builder<Group>): Builder<Group> $predicate */
+        $predicate = Group::notExpiredAssignmentPredicate();
+        $inForceGroupIds = $package->groups()->where($predicate)->pluck('groups.id')->all();
+
+        $groups = $package->groups()
+            ->with('organization:id,name')
+            ->get(['groups.id', 'groups.name', 'groups.organization_id']);
+
+        // For a SHARED package this is deliberately unfiltered — every customer registry
+        // it is assigned to, regardless of the caller's active scope selection, is exactly
+        // what canManageAssignments() already established this caller may administer (see
+        // its own docblock: the full administered set, not the narrower active scope). For
+        // anything else the same visibility rule show() already applies to the `groups` key
+        // applies here too: a non-shared package should only ever carry own-organization
+        // rows, but pre-invariant data can still hold a stray cross-organization one (see
+        // PackageGroupLeakTest), and that row is no more this caller's business inside the
+        // Freigaben tab than it is in the Registries one.
+        if (! $package->shared) {
+            $scope = app(OrgScope::class);
+            $groups = $scope->spansAllOrganizations()
+                ? $groups
+                : $groups->whereIn('organization_id', $this->scopedOrgIds());
+        }
+
+        return $groups
+            ->map(function (Group $group) use ($inForceGroupIds): array {
+                $pivot = $group->getRelation('pivot');
+
+                return [
+                    'organization_id' => $group->organization_id,
+                    'organization_name' => $group->organization->name,
+                    'group_id' => $group->id,
+                    'group_name' => $group->name,
+                    'version_min' => $pivot instanceof GroupPackage ? $pivot->version_min : null,
+                    'version_max' => $pivot instanceof GroupPackage ? $pivot->version_max : null,
+                    'available_until' => $pivot instanceof GroupPackage ? $pivot->available_until?->toDateString() : null,
+                    'available_until_iso' => $pivot instanceof GroupPackage ? $pivot->available_until?->toIso8601String() : null,
+                    'in_force' => in_array($group->id, $inForceGroupIds, true),
+                ];
+            })
+            ->sortBy(fn (array $row): string => $row['organization_name'].'|'.$row['group_name'])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The distinct major version lines this package actually has releases under, for the
+     * editor's "Nur eine Hauptversion" dropdown — writing `min = X.0`, `max = (X+1).0` for
+     * whichever line the operator picks (see the Freigaben editor). Never computed for
+     * Docker, which has no version bounds concept at all and never reaches this method:
+     * show() redirects a Docker package to showDocker() before major_lines is built.
+     *
+     * The leading run of digits before the first non-digit character, taken off whichever
+     * population this package's type actually lists versions from — `package_versions`
+     * for Composer/npm, `python_dists` for Python (mirroring $isPython/$dists just above
+     * in show()). A version this cannot parse a leading number from (empty, or starting
+     * with a letter) contributes no line rather than aborting the whole dropdown.
+     *
+     * @param  Collection<int, PythonDist>  $dists
+     * @return list<string>
+     */
+    private function majorLines(Package $package, bool $isPython, Collection $dists): array
+    {
+        $versions = $isPython
+            ? $dists->pluck('version')
+            : $package->versions->pluck('version');
+
+        return $versions
+            ->map(fn (?string $v): ?string => $this->majorLineOf((string) $v))
+            ->filter(fn (?string $major): bool => $major !== null)
+            ->unique()
+            ->sortBy(fn (string $major): int => (int) $major)
+            ->values()
+            ->all();
+    }
+
+    /** `'2.5.0'` → `'2'`; `'v3.1'` → `'3'`; anything with no leading digit → null. */
+    private function majorLineOf(string $version): ?string
+    {
+        $normalised = ltrim($version, 'vV');
+
+        return preg_match('/^(\d+)/', $normalised, $matches) === 1 ? $matches[1] : null;
+    }
+
+    /**
+     * The registries the "Registry freigeben" picker may offer: ones this caller
+     * administers ({@see ScopesToAdministeredOrgs::scopeGroupQuery()}, the exact query
+     * {@see AssignmentWriter::assign()}'s own `assertAdministersGroupInScope()` guard
+     * would accept) that do not already carry this package.
+     *
+     * A non-shared package narrows further to its OWN organization's registries —
+     * {@see GuardsPackageAttachment::assertPackagesReachableIn()}
+     * refuses attaching a non-shared package anywhere else, so offering a foreign
+     * registry here would only earn a 403 on submit. A shared package has no such
+     * narrowing: {@see AssignmentWriter::assign()}'s reachability guard admits a shared
+     * package into any organization, so every administered registry not already carrying
+     * it is a legitimate target.
+     *
+     * @return list<array{id: string, name: string, organization_name: string}>
+     */
+    private function assignableGroups(Package $package): array
+    {
+        $alreadyAssignedIds = $package->groups()->pluck('groups.id')->all();
+
+        return $this->scopeGroupQuery(Group::query())
+            ->when(! $package->shared, fn (Builder $query) => $query->where('organization_id', $package->organization_id))
+            ->whereNotIn('id', $alreadyAssignedIds)
+            ->with('organization:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'organization_id'])
+            ->map(fn (Group $group): array => [
+                'id' => $group->id,
+                'name' => $group->name,
+                'organization_name' => $group->organization->name,
+            ])
+            ->values()
+            ->all();
     }
 
     /**

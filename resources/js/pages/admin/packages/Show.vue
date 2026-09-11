@@ -19,6 +19,8 @@ import { type BreadcrumbItem } from '@/types';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
+import Freigaben from './partials/Freigaben.vue';
+import type { AssignableGroup, AssignmentRow } from './partials/freigaben';
 
 interface Dependencies {
     runtime: Record<string, string>;
@@ -135,6 +137,12 @@ const props = defineProps<{
     // than re-derived here, since the rule behind it (super-admin, or an operator-org
     // maintainer once the instance setting allows it) is not something the client knows.
     canSharePackages: boolean;
+    // The "Freigaben" tab — see Admin\PackageController::show() and ./partials/freigaben.ts
+    // for the shapes and the reasoning behind each of them.
+    can_manage_assignments: boolean;
+    assignments: AssignmentRow[];
+    major_lines: string[];
+    assignable_groups: AssignableGroup[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -165,6 +173,13 @@ const canEditSource = computed(() => isGitSourced.value || props.package.reposit
 // The README empty state points at the tab that actually replaces "Versionen" for this
 // package type — Python shows "Distributionen" there instead (see the TabsTrigger below).
 const secondaryTabLabel = computed(() => (props.package.type === 'python' ? 'Distributionen' : 'Versionen'));
+
+// The Freigaben editor's preview line only — see freigaben.ts's highestAdmittedForPreview()
+// for why the order this arrives in does not matter. Python is file-centric, so its
+// versions come from the dist list rather than package_versions, same as `stats` above.
+const freigabenVersions = computed(() =>
+    props.package.type === 'python' ? props.pythonDists.map((d) => d.version) : props.versions.map((v) => v.version),
+);
 
 const credentialOptions = computed(() => [
     { value: '', label: 'Kein Token / öffentlich' },
@@ -373,7 +388,12 @@ useOperatorChannel({
                     >
                         <div class="grid gap-1">
                             <Label for="mirror_source_id" class="text-xs">Mirror-Quelle</Label>
-                            <SearchableSelect id="mirror_source_id" v-model="mirrorForm.mirror_source_id" :options="mirrorSourceOptions" class="w-56" />
+                            <SearchableSelect
+                                id="mirror_source_id"
+                                v-model="mirrorForm.mirror_source_id"
+                                :options="mirrorSourceOptions"
+                                class="w-56"
+                            />
                             <p v-if="mirrorForm.errors.mirror_source_id" class="text-xs text-destructive">{{ mirrorForm.errors.mirror_source_id }}</p>
                         </div>
                         <div class="grid gap-1">
@@ -444,6 +464,7 @@ useOperatorChannel({
                     <TabsTrigger value="uebersicht">Übersicht</TabsTrigger>
                     <TabsTrigger value="installation">Installation</TabsTrigger>
                     <TabsTrigger value="registries">Registries</TabsTrigger>
+                    <TabsTrigger value="freigaben">Freigaben</TabsTrigger>
                     <TabsTrigger v-if="canEditSource" value="quelle">Quelle</TabsTrigger>
                     <TabsTrigger v-if="props.package.type === 'python'" value="dists">Distributionen ({{ props.pythonDists.length }})</TabsTrigger>
                     <TabsTrigger v-else value="versionen">Versionen ({{ props.versions.length }})</TabsTrigger>
@@ -516,6 +537,18 @@ useOperatorChannel({
                             </table>
                         </div>
                     </section>
+                </TabsContent>
+
+                <TabsContent value="freigaben">
+                    <Freigaben
+                        :package-id="props.package.id"
+                        :package-type="props.package.type"
+                        :can-manage="props.can_manage_assignments"
+                        :assignments="props.assignments"
+                        :versions="freigabenVersions"
+                        :major-lines="props.major_lines"
+                        :assignable-groups="props.assignable_groups"
+                    />
                 </TabsContent>
 
                 <TabsContent v-if="canEditSource" value="quelle">

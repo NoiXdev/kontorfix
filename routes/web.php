@@ -81,6 +81,18 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::put('packages/{package}/shared', [Admin\PackageController::class, 'shared'])->name('packages.shared');
     // Re-queue a sync for a git-sourced package; refused (409) for a publish-based one.
     Route::post('packages/{package}/resync', [Admin\PackageController::class, 'resync'])->name('packages.resync');
+    // The package page's own "Freigaben" tab: the same three assignment writes
+    // GroupController offers from the registry side, reached here from the package's own
+    // detail page instead. `group_id` travels in store()'s body (the row does not exist
+    // yet); update()/destroy() name the registry in the URL (it already does). Every
+    // guard — target-group scope, shared-package ownership, the same-name shadow check,
+    // bounds validation — lives in AssignmentWriter itself; see PackageAssignmentController.
+    Route::post('packages/{package}/assignments', [Admin\PackageAssignmentController::class, 'store'])
+        ->name('packages.assignments.store');
+    Route::put('packages/{package}/assignments/{group}', [Admin\PackageAssignmentController::class, 'update'])
+        ->name('packages.assignments.update');
+    Route::delete('packages/{package}/assignments/{group}', [Admin\PackageAssignmentController::class, 'destroy'])
+        ->name('packages.assignments.destroy');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');
