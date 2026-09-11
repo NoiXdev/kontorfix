@@ -1,9 +1,9 @@
 <?php
 
-use App\Models\Group;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Services\Composer\ComposerMetadataBuilder;
+use App\Support\Licence\VersionBounds;
 use Composer\MetadataMinifier\MetadataMinifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
@@ -16,9 +16,7 @@ it('builds minified composer v2 metadata with dist urls scoped to the group', fu
         'version_pretty' => 'v1.0.0',
         'metadata' => ['name' => 'acme/demo', 'require' => ['php' => '>=8.2']],
     ]);
-    $group = Group::factory()->create(['slug' => 'kadenz']);
-
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz', VersionBounds::unlimited());
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions[0]['version'])->toBe('v1.0.0')
@@ -37,9 +35,7 @@ it('includes multiple versions ordered newest first and merges source reference'
         'version' => '1.1.0.0', 'version_pretty' => 'v1.1.0', 'source_reference' => str_repeat('b', 40),
         'metadata' => ['name' => 'acme/demo'], 'released_at' => now(),
     ]);
-    $group = Group::factory()->create(['slug' => 'kadenz']);
-
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz', VersionBounds::unlimited());
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions)->toHaveCount(2)
@@ -52,9 +48,7 @@ it('includes multiple versions ordered newest first and merges source reference'
 it('omits the source block when the package has no repository url', function () {
     $pkg = Package::factory()->create(['name' => 'acme/demo', 'repository_url' => null]);
     PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0', 'metadata' => ['name' => 'acme/demo']]);
-    $group = Group::factory()->create(['slug' => 'kadenz']);
-
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz', VersionBounds::unlimited());
     $versions = MetadataMinifier::expand($doc['packages']['acme/demo']);
 
     expect($versions[0])->not->toHaveKey('source');
@@ -74,9 +68,7 @@ it('overrides malicious dist, source and version keys from the stored composer.j
             'source' => ['type' => 'git', 'url' => 'https://evil.test/x.git', 'reference' => 'x'],
         ],
     ]);
-    $group = Group::factory()->create(['slug' => 'kadenz']);
-
-    $doc = app(ComposerMetadataBuilder::class)->build($pkg, $group, 'https://registry.test/r/kadenz/');
+    $doc = app(ComposerMetadataBuilder::class)->build($pkg, 'https://registry.test/r/kadenz/', VersionBounds::unlimited());
     $v = MetadataMinifier::expand($doc['packages']['acme/demo'])[0];
 
     expect($v['version'])->toBe('v1.0.0')
@@ -89,7 +81,7 @@ it('omits abandoned entirely for a live package whose manifest never declared it
     $package = Package::factory()->create(['name' => 'acme/demo']);
     PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     $entries = $doc['packages'][$package->name];
 
@@ -111,7 +103,7 @@ it('strips an abandoned key forged by the tag composer.json for a live package',
         'metadata' => ['abandoned' => 'evil/pkg'],
     ]);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     $entries = $doc['packages'][$package->name];
 
@@ -130,7 +122,7 @@ it('carries the replacement onto every version after the deltas are expanded', f
         PackageVersion::factory()->for($package)->create(['version' => $norm, 'version_pretty' => $pretty]);
     }
 
-    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
 
     // Expand exactly the way Composer's MetadataMinifier does, so this asserts what a
     // client sees rather than what we happened to build before minification.
@@ -146,7 +138,7 @@ it('emits a bare true when no replacement is named', function () {
     $package = Package::factory()->create(['name' => 'acme/demo', 'abandoned_at' => now()]);
     PackageVersion::factory()->for($package)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
 
-    $doc = app(ComposerMetadataBuilder::class)->build($package, Group::factory()->create(['slug' => 'kadenz']), 'https://reg.test');
+    $doc = app(ComposerMetadataBuilder::class)->build($package, 'https://reg.test', VersionBounds::unlimited());
     $expanded = MetadataMinifier::expand($doc['packages'][$package->name]);
 
     expect($expanded[0]['abandoned'])->toBe(true);

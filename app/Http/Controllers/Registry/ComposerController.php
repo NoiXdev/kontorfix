@@ -9,6 +9,7 @@ use App\Models\Organization;
 use App\Models\PackageVersion;
 use App\Models\Upstream;
 use App\Services\Composer\ComposerMetadataBuilder;
+use App\Services\Licence\VersionEntitlement;
 use App\Services\RegistryAccessService;
 use App\Services\Upstream\ComposerProxyService;
 use App\Services\Vcs\GitRepository;
@@ -31,6 +32,7 @@ class ComposerController extends Controller
         private readonly RegistryAccessService $access,
         private readonly ComposerMetadataBuilder $metadata,
         private readonly ComposerProxyService $proxy,
+        private readonly VersionEntitlement $entitlement,
     ) {}
 
     protected function access(): RegistryAccessService
@@ -96,7 +98,9 @@ class ComposerController extends Controller
                 abort(404);
             }
 
-            return response()->json($this->metadata->buildForOrganization($package, $this->registryBaseUrlForOrganization($request, $organization)));
+            $windows = $this->entitlement->windowsForOrganization($organization, $package);
+
+            return response()->json($this->metadata->buildForOrganization($package, $this->registryBaseUrlForOrganization($request, $organization), $windows));
         }
 
         $group = $this->registryGroup($request);
@@ -106,7 +110,9 @@ class ComposerController extends Controller
         $package = $this->findLocal($request, $group, PackageType::Composer, $fullName);
 
         if ($package !== null) {
-            return response()->json($this->metadata->build($package, $group, $this->registryBaseUrl($request, $group)));
+            $bounds = $this->entitlement->boundsFor($group, $package);
+
+            return response()->json($this->metadata->build($package, $this->registryBaseUrl($request, $group), $bounds));
         }
 
         // If the name exists locally but isn't accessible to this group, we abort,
@@ -163,12 +169,31 @@ class ComposerController extends Controller
             $package = $this->findAccessible($request, $group, PackageType::Composer, "{$vendor}/{$name}");
         }
 
-        // version_constraint is not enforced at serve time on any path today, metadata
-        // included (see ComposerMetadataBuilder) — so there is nothing to additionally
-        // filter here either. Unchanged group behavior; the org branch matches it.
+        // group_package.version_constraint (a distinct column from the version_min/
+        // version_max licence bounds checked below) is still not enforced at serve time on
+        // any path today — see ComposerMetadataBuilder. The licence bounds ARE enforced here:
+        // a version outside the caller's window must 404 exactly like an unknown version
+        // (same shape, checked BEFORE any disk access below), never served-but-refused —
+        // out-of-licence versions are hidden, not merely blocked on download.
         $pkgVersion = $package->versions()->where('version', $version)->first();
 
         if ($pkgVersion === null) {
+            abort(404);
+        }
+
+        $permitted = $organization !== null
+            ? $this->entitlement->permitsAny(
+                $this->entitlement->windowsForOrganization($organization, $package),
+                PackageType::Composer,
+                $pkgVersion->version,
+            )
+            : $this->entitlement->permits(
+                $this->entitlement->boundsFor($group, $package),
+                PackageType::Composer,
+                $pkgVersion->version,
+            );
+
+        if (! $permitted) {
             abort(404);
         }
 

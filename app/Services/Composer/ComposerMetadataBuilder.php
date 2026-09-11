@@ -2,56 +2,79 @@
 
 namespace App\Services\Composer;
 
-use App\Models\Group;
+use App\Enums\PackageType;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use App\Services\Licence\VersionEntitlement;
 use App\Support\CredentialUrl;
+use App\Support\Licence\VersionBounds;
+use App\Support\Licence\VersionWindows;
+use Closure;
 use Composer\MetadataMinifier\MetadataMinifier;
 
 class ComposerMetadataBuilder
 {
+    public function __construct(private readonly VersionEntitlement $entitlement) {}
+
     /**
+     * $bounds is the already-resolved licence window for this group's assignment (see
+     * VersionEntitlement::boundsFor()) — this class stays free of access/licence lookups and
+     * only asks permits() whether a given served version falls inside it.
+     *
      * @return array<string, mixed>
      */
-    public function build(Package $package, Group $group, string $registryBaseUrl): array
+    public function build(Package $package, string $registryBaseUrl, VersionBounds $bounds): array
     {
-        return $this->document($package, $registryBaseUrl);
+        return $this->document(
+            $package,
+            $registryBaseUrl,
+            fn (string $version): bool => $this->entitlement->permits($bounds, PackageType::Composer, $version),
+        );
     }
 
     /**
      * The org endpoint's counterpart of build() — same document, no Group parameter (the org
-     * aggregate has none).
+     * aggregate has none). $windows is the union of every unexpired assignment's window
+     * across the organization's groups (VersionEntitlement::windowsForOrganization()), asked
+     * via permitsAny() rather than permits() so a version admitted by ANY one group's window
+     * is served, never a hull of the windows.
      *
-     * Unfiltered, exactly like build() above: `group_package.version_constraint` is not
-     * enforced at serve time on ANY path today — it is written nowhere and read nowhere else
-     * in the app (see App\Http\Controllers\Concerns\GuardsPackageAttachment's docblock, "the
-     * fuse is in the schema and only the endpoints are missing"). The org spec's version-
-     * constraint union ("serve what the union of the org's groups would serve") therefore
-     * reduces to "serve everything", because that is what each individual group already
-     * does. If per-group constraint enforcement is ever added, it has to land in build() and
-     * this method together, so a package assigned with different constraints in different
-     * groups keeps resolving identically wherever its name is reachable.
+     * `group_package.version_constraint` (a distinct column from the `version_min`/
+     * `version_max` bounds `$windows` carries) is still not enforced at serve time on ANY
+     * path today — it is written nowhere and read nowhere else in the app (see
+     * App\Http\Controllers\Concerns\GuardsPackageAttachment's docblock, "the fuse is in the
+     * schema and only the endpoints are missing"). That is unrelated to the licence-bounds
+     * filtering below, which both build() and this method now apply identically.
      *
      * @return array<string, mixed>
      */
-    public function buildForOrganization(Package $package, string $registryBaseUrl): array
+    public function buildForOrganization(Package $package, string $registryBaseUrl, VersionWindows $windows): array
     {
-        return $this->document($package, $registryBaseUrl);
+        return $this->document(
+            $package,
+            $registryBaseUrl,
+            fn (string $version): bool => $this->entitlement->permitsAny($windows, PackageType::Composer, $version),
+        );
     }
 
     /**
      * The document both build() and buildForOrganization() produce — identical in every
-     * respect once a Package and a base URL are fixed.
+     * respect once a Package, a base URL and a permits predicate are fixed. $permits decides,
+     * per version, whether the caller's licence admits it; an out-of-licence version is
+     * dropped from $versions entirely (HIDDEN, not merely refused on download) so it never
+     * appears in the metadata a package manager resolves against.
      *
+     * @param  Closure(string): bool  $permits
      * @return array<string, mixed>
      */
-    private function document(Package $package, string $registryBaseUrl): array
+    private function document(Package $package, string $registryBaseUrl, Closure $permits): array
     {
         $registryBaseUrl = rtrim($registryBaseUrl, '/');
 
         $notice = $package->abandonmentNotice();
 
         $versions = $package->versions()->get()
+            ->filter(fn (PackageVersion $v): bool => $permits($v->version))
             ->map(function (PackageVersion $v) use ($package, $registryBaseUrl, $notice): array {
                 // The tag's complete composer.json is passed through (like Packagist);
                 // name/version/dist/source are authoritatively overwritten by us, so
