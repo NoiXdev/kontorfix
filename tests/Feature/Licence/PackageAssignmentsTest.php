@@ -157,6 +157,7 @@ it('withholds every operator-internal detail from a customer who only receives a
             ->where('package.sync_error', null)
             ->where('versions.0.download_count', null)
             ->where('versions.0.dist_size', null)
+            ->where('versions.0.reference', null)
             ->etc());
 
     $response
@@ -179,7 +180,7 @@ it('still shows real per-version download and storage figures to a caller who ma
     // non-manager is only half the guarantee. This proves it does not ALSO withhold them
     // from the operator who is supposed to see them — a fix that zeroed the field
     // unconditionally would pass every "withholds…" test and still be wrong.
-    PackageVersion::factory()->for($this->shared)->create(['download_count' => 4321, 'dist_size' => 555]);
+    PackageVersion::factory()->for($this->shared)->create(['download_count' => 4321, 'dist_size' => 555, 'source_reference' => 'abc123def']);
 
     $this->actingAs(superAdmin())->get(route('admin.packages.show', $this->shared))
         ->assertOk()
@@ -187,6 +188,7 @@ it('still shows real per-version download and storage figures to a caller who ma
             ->where('can_manage_assignments', true)
             ->where('versions.0.download_count', 4321)
             ->where('versions.0.dist_size', 555)
+            ->where('versions.0.reference', 'abc123def')
             ->etc());
 });
 

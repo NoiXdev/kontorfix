@@ -377,10 +377,15 @@ class PackageController extends Controller
             // anything: a non-managing viewer could still reconstruct it by adding the
             // column back up, and the Versionen tab would show it to them directly without
             // even that step. Withheld the same way and for the same reason as `stats`.
+            //
+            // `reference` (the git commit SHA/tag this version was built from) is withheld
+            // the same way and for the same reason as `repository_url` above: it names a
+            // location in the OWNING organization's source repository, operator-internal
+            // detail a receiving customer has no business reading.
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
                 'released_at' => $v->released_at?->toDateString(),
-                'reference' => $v->source_reference,
+                'reference' => $canManageAssignments ? $v->source_reference : null,
                 'dependencies' => $deps->for($package->type, $v->metadata ?? []),
                 'download_count' => $canManageAssignments ? $v->download_count : null,
                 'dist_size' => $canManageAssignments ? $v->dist_size : null,
@@ -438,12 +443,17 @@ class PackageController extends Controller
      * and is asked unchanged for a Docker package above, since Docker has no Freigaben tab.
      *
      * The extra way in this method adds: a customer whose registry currently carries this
-     * package as a SHARED assignment may read the page too — its versions, its install
-     * snippet, the Freigaben tab telling them what they have and until when — even though
-     * only the owning organization may decide who ELSE receives it. Before this the page
-     * was reachable only by the package's own organization, so `can_manage_assignments`
-     * (computed separately below) had no caller it could ever say `false` to; this is what
-     * makes that boolean answer something.
+     * package as a SHARED assignment may read the page too — its versions and its install
+     * snippet — even though only the owning organization may decide who ELSE receives it.
+     * The Freigaben tab itself tells this caller nothing about their OWN row: for a
+     * non-managing viewer `can_manage_assignments` is false, and `PackageController::show()`
+     * sends an EMPTY `assignments` array regardless of viewer — including this caller's own
+     * assignment — so the tab renders only the generic notice that the package is shared
+     * and that the providing organization decides who else receives it and under which
+     * version bound (see `Freigaben.vue`'s `v-if="!props.canManage"` branch). Before this
+     * method's widening the page was reachable only by the package's own organization, so
+     * `can_manage_assignments` (computed separately below) had no caller it could ever say
+     * `false` to; this is what makes that boolean answer something.
      *
      * `$package->groups()`, not `assignedPackages()`: reachability tracks the assignment
      * ROW existing, the same choice `GuardsPackageAttachment::currentAssignmentIds()`
