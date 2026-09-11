@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\Package\AssignmentWriter;
 use Closure;
 use Database\Factories\GroupFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -123,19 +124,24 @@ class Group extends Model
      * assignments of a package across an organization contribute a licence window —
      * questions that must never be able to disagree about whether a given row counts.
      *
-     * `available_until` HAS EXACTLY ONE WRITER: Admin\GroupController::updateAssignment(),
-     * the assignment dialog's date field (spec §6). Everything else only reads the column.
+     * `available_until`, `version_min` AND `version_max` HAVE EXACTLY ONE WRITER:
+     * {@see AssignmentWriter}. `Admin\GroupController::updateAssignment()`
+     * — the assignment dialog's date field (spec §6) — used to write `available_until`
+     * directly and now delegates to it instead, the same way any further caller
+     * (`Admin\PackageAssignmentController`, the package page's "Freigaben" surface) must.
      *
-     * That writer asks SharedAssignment before it writes, and it has to. SharedAssignment's
-     * tolerance of expired rows — it permits assigning or creating a customer's own package
-     * under a name only a lapsed shared assignment used to serve — is safe only while an
-     * expired assignment stays expired. Pushing one back into the future reverses that
-     * decision retroactively and reaches the collision the attach guard refuses, through a
-     * request that changes no pivot membership at all and so passes none of the six
-     * membership writers' guards. Extending an assignment is an assignment.
+     * The write path asks SharedAssignment before it touches `available_until`, and it has
+     * to. SharedAssignment's tolerance of expired rows — it permits assigning or creating a
+     * customer's own package under a name only a lapsed shared assignment used to serve —
+     * is safe only while an expired assignment stays expired. Pushing one back into the
+     * future reverses that decision retroactively and reaches the collision the attach
+     * guard refuses, through a request that changes no pivot membership at all and so
+     * passes none of the six membership writers' guards. Extending an assignment is an
+     * assignment.
      *
-     * ANY FURTHER WRITER OF THIS COLUMN MUST DO THE SAME. The reasoning above is a property
-     * of the column, not of the controller that happens to hold the form today.
+     * ANY FURTHER WRITER OF THESE COLUMNS MUST GO THROUGH AssignmentWriter. The reasoning
+     * above is a property of the columns, not of whichever controller happens to hold the
+     * form today.
      *
      * Separately, and NOT an entry point of that guard — the counts above are about
      * SharedAssignment's three, and these add none — this relation has *dependents* that a

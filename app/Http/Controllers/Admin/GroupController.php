@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Enums\SyncStatus;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\AssignmentBoundsRequest;
 use App\Http\Requests\Admin\StoreGroupRequest;
 use App\Http\Requests\Admin\UpdateGroupRequest;
 use App\Models\Domain;
@@ -16,6 +17,8 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
+use App\Services\Licence\VersionEntitlement;
+use App\Services\Package\AssignmentWriter;
 use App\Services\Package\PackageNameKey;
 use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
@@ -25,6 +28,7 @@ use App\Services\Scope\OrgScope;
 use App\Services\Slugs\SlugClaimGuard;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
+use App\Support\Licence\VersionBounds;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -496,47 +500,67 @@ class GroupController extends Controller
      * cross-organization assignment survives — so a foreign row still implies a shared
      * package. Adding the check back would also mask the guard below in tests: a refusal
      * would land on the org scope before ever reaching it, the lesson Task 2 recorded.
+     *
+     * The actual column write, and the "may this caller touch a SHARED assignment at all"
+     * question this method used to ask directly via assertMayEditSharedAssignment(), now
+     * live in {@see AssignmentWriter::write()} — see its docblock and
+     * Group::assignedPackages()'s, which names it the single writer. AssignmentBoundsRequest
+     * validates `available_until`'s syntax exactly as the inline `$request->validate()`
+     * used to, plus the bounds' syntax and ordering; the console dialog behind this route
+     * does not submit bounds yet, so `$request->has()` distinguishes "omitted, preserve
+     * whatever is stored" from "submitted null, clear it".
      */
-    public function updateAssignment(Request $request, Group $group, Package $package, SharedAssignment $sharedAssignment): RedirectResponse
-    {
+    public function updateAssignment(
+        AssignmentBoundsRequest $request,
+        Group $group,
+        Package $package,
+        SharedAssignment $sharedAssignment,
+        AssignmentWriter $writer,
+        VersionEntitlement $entitlement,
+    ): RedirectResponse {
         $this->assertAdministersGroupInScope($group);
 
         // Without this the request would silently succeed against no row at all —
-        // updateExistingPivot() reports zero affected rows and returns.
+        // AssignmentWriter::write()'s updateExistingPivot() reports zero affected rows and
+        // returns.
         abort_unless($group->packages()->whereKey($package->id)->exists(), 404);
-
-        // Re-dating a SHARED assignment is a change to how long this customer receives the
-        // operator's package, which spec §4 reserves to whoever administers the owning
-        // organization.
-        //
-        // Asked HERE rather than left to assertSharedAssignmentsUnchanged(), which cannot see
-        // this write at all: `available_until` is a column on the pivot row, so the set of
-        // assigned package ids is identical before and after and that comparison correctly
-        // finds nothing to refuse. The two halves of spec §4's sentence need two predicates.
-        //
-        // After the 404, so a request naming a package this registry does not carry still
-        // answers "no such assignment" rather than leaking, by the choice of status code,
-        // whether the package is shared.
-        $this->assertMayEditSharedAssignment($package);
-
-        $data = $request->validate([
-            // A day, not an instant: the operator picks a date and the label says
-            // "verfügbar bis" it. `present` so clearing the date is an explicit act rather
-            // than an omitted field. No lower bound — see the note above on why a past date
-            // is a legitimate, and the safest, way to withdraw a share.
-            'available_until' => ['present', 'nullable', 'date_format:Y-m-d'],
-        ]);
 
         $sharedAssignment->assertAssignable($group, [$package->id]);
 
-        $group->packages()->updateExistingPivot($package->id, [
+        $data = $request->validated();
+
+        // Whatever is already stored, unless this request explicitly names a side of it —
+        // see the FormRequest's docblock for why `has()`, not `filled()` or `??`, is the
+        // right presence check here.
+        $current = $entitlement->boundsFor($group, $package);
+
+        // Re-dating or re-bounding a SHARED assignment is a change to how long, and to
+        // what extent, this customer receives the operator's package, which spec §4
+        // reserves to whoever administers the owning organization — asked by write()
+        // itself (assertMayTouchAssignment()), not here.
+        //
+        // Asked THERE rather than left to assertSharedAssignmentsUnchanged(), which cannot
+        // see this write at all: these three columns live on the pivot row, so the set of
+        // assigned package ids is identical before and after and that comparison correctly
+        // finds nothing to refuse. The two halves of spec §4's sentence need two predicates.
+        //
+        // After the 404 above and assertAssignable() just above, so a request naming a
+        // package this registry does not carry still answers "no such assignment" rather
+        // than leaking, by the choice of status code, whether the package is shared.
+        $writer->write(
+            $group,
+            $package,
             // Through the END of the named day. "Verfügbar bis 31.12." reads as inclusive,
             // and Group::assignedPackages() compares `available_until > now()`, so the first
             // moment of the day would stop serving it a day before the label promises.
-            'available_until' => $data['available_until'] === null
+            $data['available_until'] === null
                 ? null
                 : CarbonImmutable::parse($data['available_until'])->endOfDay(),
-        ]);
+            new VersionBounds(
+                $request->has('version_min') ? $data['version_min'] : $current->min,
+                $request->has('version_max') ? $data['version_max'] : $current->max,
+            ),
+        );
 
         return back()->with('success', 'Verfügbarkeit der Zuweisung aktualisiert.');
     }
