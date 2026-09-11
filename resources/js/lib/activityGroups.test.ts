@@ -7,6 +7,10 @@ const at = (id: number, exact: string): ActivityEntry => ({
     event: 'updated',
     description: 'updated',
     subject_type: 'Package',
+    // Null by default rather than a shared id: most fixtures here are not about per-subject
+    // collapsing, and a null subject_id never merges with anything (see collapseBySubject),
+    // so these entries behave exactly as they did before subject_id existed on the type.
+    subject_id: null,
     subject_label: 'acme/demo',
     causer: 'Tim',
     changes: {},
@@ -99,6 +103,9 @@ describe('groupBursts', () => {
         expect(rows).toHaveLength(1);
         expect(rows[0].type).toBe('burst');
         expect(rows[0].type === 'burst' && rows[0].entries.map((e) => e.id)).toEqual([1, 2, 3]);
+        // None of these entries carry a subject_id, so per-subject collapsing must not
+        // change anything: the count is still the raw number of entries.
+        expect(rows[0].type === 'burst' && rows[0].count).toBe(3);
     });
 
     it('leaves two matching entries flat rather than folding them', () => {
@@ -176,15 +183,35 @@ describe('groupBursts', () => {
         // synced" one row instead of twelve, each about a different package.
         const rows = groupBursts(
             [
-                { ...at(1, '2026-08-19 09:00:10'), subject_label: 'acme/one' },
-                { ...at(2, '2026-08-19 09:00:20'), subject_label: 'acme/two' },
-                { ...at(3, '2026-08-19 09:00:30'), subject_label: 'acme/three' },
+                { ...at(1, '2026-08-19 09:00:10'), subject_id: 'pkg-1', subject_label: 'acme/one' },
+                { ...at(2, '2026-08-19 09:00:20'), subject_id: 'pkg-2', subject_label: 'acme/two' },
+                { ...at(3, '2026-08-19 09:00:30'), subject_id: 'pkg-3', subject_label: 'acme/three' },
             ],
             true,
         );
 
         expect(rows).toHaveLength(1);
         expect(rows[0].type).toBe('burst');
+        expect(rows[0].type === 'burst' && rows[0].count).toBe(3);
+    });
+
+    it('does not fold matching entries that are not contiguous', () => {
+        // Entries 1, 2 and 3 share every field the key is built from, but an unrelated entry
+        // (a different causer) sits between 1 and 2. Pulling 1 forward to join 2 and 3 would
+        // reorder the timeline out from under a reader following it top to bottom, so the run
+        // 2,3 is the only candidate — and at length 2 it is one short of a burst.
+        const rows = groupBursts(
+            [
+                at(1, '2026-08-19 09:00:10'),
+                { ...at(9, '2026-08-19 09:00:15'), causer: 'Alex' },
+                at(2, '2026-08-19 09:00:20'),
+                at(3, '2026-08-19 09:00:30'),
+            ],
+            true,
+        );
+
+        expect(rows).toHaveLength(4);
+        expect(rows.every((r) => r.type === 'single')).toBe(true);
     });
 
     it('preserves the given order rather than sorting the burst', () => {
@@ -205,6 +232,74 @@ describe('groupBursts', () => {
 
         expect(rows).toHaveLength(3);
         expect(rows.every((r) => r.type === 'single')).toBe(true);
+    });
+});
+
+/**
+ * `SyncPackage::handle()` writes two `updated` rows per package a resync touches: `syncing`
+ * at the start, then `synced`/`failed` at the end — both landing in the same minute with the
+ * same log_name/event/subject_type/causer. Builds that pair for one subject, one second
+ * apart, so several subjects' pairs can share a minute and stay contiguous.
+ */
+function syncPhasePair(startId: number, second: number, subjectId: string, outcome: 'synced' | 'failed'): ActivityEntry[] {
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    return [
+        {
+            ...at(startId, `2026-08-19 09:00:${pad(second)}`),
+            subject_id: subjectId,
+            changes: { attributes: { sync_status: 'syncing' }, old: { sync_status: 'pending' } },
+        },
+        {
+            ...at(startId + 1, `2026-08-19 09:00:${pad(second + 1)}`),
+            subject_id: subjectId,
+            changes: { attributes: { sync_status: outcome }, old: { sync_status: 'syncing' } },
+        },
+    ];
+}
+
+describe('groupBursts — per-subject collapsing of sync write-phase pairs', () => {
+    it('counts distinct subjects, not rows, when every subject wrote a syncing row and a synced row', () => {
+        const entries = Array.from({ length: 12 }, (_, i) => syncPhasePair(100 + i * 2, i * 2, `pkg-${i + 1}`, 'synced')).flat();
+
+        const rows = groupBursts(entries, true);
+
+        expect(rows).toHaveLength(1);
+        expect(rows[0].type).toBe('burst');
+        // The expanded view still shows every row — all 24 of them.
+        expect(rows[0].type === 'burst' && rows[0].entries).toHaveLength(24);
+        // But the headline count and the outcome describe the 12 packages, not the 24 rows.
+        expect(rows[0].type === 'burst' && rows[0].count).toBe(12);
+        expect(rows[0].type === 'burst' && rows[0].outcome).toBe('12 erfolgreich');
+    });
+
+    it('tallies success/failure per subject rather than per row', () => {
+        const entries = [
+            ...Array.from({ length: 11 }, (_, i) => syncPhasePair(200 + i * 2, i * 2, `pkg-${i + 1}`, 'synced')).flat(),
+            ...syncPhasePair(300, 22, 'pkg-12', 'failed'),
+        ];
+
+        const rows = groupBursts(entries, true);
+
+        expect(rows[0].type === 'burst' && rows[0].count).toBe(12);
+        expect(rows[0].type === 'burst' && rows[0].outcome).toBe('11 erfolgreich, 1 fehlgeschlagen');
+    });
+
+    it('reports no outcome while one subject is still mid-flight, but still counts it as one subject', () => {
+        const entries: ActivityEntry[] = [
+            ...Array.from({ length: 11 }, (_, i) => syncPhasePair(400 + i * 2, i * 2, `pkg-${i + 1}`, 'synced')).flat(),
+            // pkg-12 has only fired its first write phase so far — no terminal row exists yet.
+            {
+                ...at(500, '2026-08-19 09:00:22'),
+                subject_id: 'pkg-12',
+                changes: { attributes: { sync_status: 'syncing' }, old: { sync_status: 'pending' } },
+            },
+        ];
+
+        const rows = groupBursts(entries, true);
+
+        expect(rows[0].type === 'burst' && rows[0].count).toBe(12);
+        expect(rows[0].type === 'burst' && rows[0].outcome).toBeNull();
     });
 });
 

@@ -101,7 +101,7 @@ const EVENT_NOUNS: Record<string, string> = {
  */
 function burstHeadline(burst: ActivityBurst): string {
     const sample = burst.entries[0];
-    const count = burst.entries.length;
+    const count = burst.count;
 
     if (props.compact) {
         const noun = (sample.event && EVENT_NOUNS[sample.event]) ?? 'Ereignisse';

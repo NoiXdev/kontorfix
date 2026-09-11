@@ -97,6 +97,7 @@ interface ActivityRow {
     event: string | null;
     description: string;
     subject_type: string | null;
+    subject_id: string | null;
     subject_label: string | null;
     causer: string | null;
     changes: Record<string, unknown>;
