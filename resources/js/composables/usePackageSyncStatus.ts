@@ -31,7 +31,21 @@ export function createPackageSyncStatus(options: {
     seed: () => SyncStatusSnapshot;
     read: () => Promise<SyncStatusSnapshot>;
     delays?: readonly number[];
+    /**
+     * Whether this viewer's browser may poll the server at all. Defaults to `true`.
+     *
+     * A receiving customer on a shared package's page has `can_manage_assignments: false`,
+     * and `admin.packages.syncStatus` keeps `assertCanTouchPackage()` regardless — it was
+     * never widened alongside the page's own viewing guard. Polling anyway means every
+     * scheduled `read()` 403s, which `syncStatusPoll`'s reconciler treats as "unknown, try
+     * again", burning the whole attempt budget and ending in a false "veraltet" give-up
+     * notice for a viewer who could never have fixed it by reloading. The badge still shows
+     * the server-rendered snapshot — it simply never tries to freshen it — since only a
+     * managing viewer can trigger "Erneut synchronisieren" in the first place.
+     */
+    poll?: boolean;
 }): PackageSyncStatus {
+    const pollEnabled = options.poll ?? true;
     const initial = options.seed();
     const status = ref<SyncStatus>(initial.status);
     const error = ref<string | null>(initial.error);
@@ -70,7 +84,10 @@ export function createPackageSyncStatus(options: {
         () => [options.seed().status, options.seed().error] as const,
         ([nextStatus, nextError]) => {
             apply({ status: nextStatus, error: nextError });
-            reconciler.restart();
+
+            if (pollEnabled) {
+                reconciler.restart();
+            }
         },
     );
 
@@ -79,7 +96,11 @@ export function createPackageSyncStatus(options: {
         error,
         stale,
         apply,
-        start: () => reconciler.start(),
+        start: () => {
+            if (pollEnabled) {
+                reconciler.start();
+            }
+        },
         stop: () => {
             reconciler.stop();
             stopWatching();
@@ -118,9 +139,11 @@ export async function fetchSyncStatus(packageId: string): Promise<SyncStatusSnap
  *
  * @param seed reads the server-rendered prop; it is watched, so pass a getter over props
  *             rather than a snapshot taken at setup time.
+ * @param poll whether to poll the server at all — see `createPackageSyncStatus()`'s own
+ *             `poll` option. Defaults to `true` for every existing caller.
  */
-export function usePackageSyncStatus(packageId: string, seed: () => SyncStatusSnapshot): PackageSyncStatus {
-    const core = createPackageSyncStatus({ seed, read: () => fetchSyncStatus(packageId) });
+export function usePackageSyncStatus(packageId: string, seed: () => SyncStatusSnapshot, poll: boolean = true): PackageSyncStatus {
+    const core = createPackageSyncStatus({ seed, read: () => fetchSyncStatus(packageId), poll });
 
     onMounted(core.start);
     onBeforeUnmount(core.stop);

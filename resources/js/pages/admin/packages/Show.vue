@@ -334,10 +334,19 @@ const {
     error: syncError,
     stale: syncStatusStale,
     apply: applySyncStatus,
-} = usePackageSyncStatus(props.package.id, () => ({
-    status: props.package.sync_status,
-    error: props.package.sync_error,
-}));
+} = usePackageSyncStatus(
+    props.package.id,
+    () => ({
+        status: props.package.sync_status,
+        error: props.package.sync_error,
+    }),
+    // `admin.packages.syncStatus` keeps `assertCanTouchPackage()` — it was never widened
+    // alongside this page's own viewing guard — so a receiving customer on a shared
+    // package polling it would just 403 in a loop and end in a false "veraltet" notice.
+    // Only a managing viewer can trigger a resync in the first place, so there is nothing
+    // for a non-managing one to poll for.
+    props.can_manage_assignments,
+);
 
 function applyStatus(p: PackagePayload) {
     if (p.id !== props.package.id) {

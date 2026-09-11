@@ -13,7 +13,12 @@ afterEach(() => vi.useRealTimers());
  * Mirrors how Show.vue wires this up: a reactive stand-in for the server-rendered prop,
  * passed as a getter rather than a snapshot.
  */
-function harness(initial: SyncStatusSnapshot, answers: SyncStatusSnapshot[], delays: readonly number[] = [1_000, 2_000, 3_000]) {
+function harness(
+    initial: SyncStatusSnapshot,
+    answers: SyncStatusSnapshot[],
+    delays: readonly number[] = [1_000, 2_000, 3_000],
+    poll: boolean = true,
+) {
     const prop = ref<SyncStatusSnapshot>(initial);
     const read = vi.fn(async (): Promise<SyncStatusSnapshot> => {
         const next = answers.shift();
@@ -24,7 +29,7 @@ function harness(initial: SyncStatusSnapshot, answers: SyncStatusSnapshot[], del
         return next;
     });
 
-    const core = createPackageSyncStatus({ seed: () => prop.value, read, delays });
+    const core = createPackageSyncStatus({ seed: () => prop.value, read, delays, poll });
 
     return {
         core,
@@ -140,6 +145,48 @@ describe('the give-up notice', () => {
         expect(h.core.stale.value).toBe(true);
 
         await h.rerenderWith('pending');
+
+        expect(h.core.stale.value).toBe(false);
+    });
+});
+
+// A read-only viewer of a shared package (can_manage_assignments: false) still sees the
+// badge — seeded from the server-rendered prop — but must never poll for it: the
+// `admin.packages.syncStatus` route keeps `assertCanTouchPackage()`, so that request would
+// 403 in a loop and the badge would flip to a false "veraltet" the moment the reconciler
+// gave up.
+describe('the polling gate (can_manage_assignments: false)', () => {
+    it('never reads the server, even though the seeded status is non-terminal', async () => {
+        const h = harness({ status: 'pending', error: null }, [], undefined, false);
+        h.core.start();
+
+        await vi.advanceTimersByTimeAsync(600_000);
+
+        expect(h.read).not.toHaveBeenCalled();
+    });
+
+    it('still shows the seeded status, it just does not chase a fresher one', () => {
+        const h = harness({ status: 'failed', error: 'kaputt' }, [], undefined, false);
+
+        expect(h.core.status.value).toBe('failed');
+        expect(h.core.error.value).toBe('kaputt');
+    });
+
+    it('does not poll on a re-render either', async () => {
+        const h = harness({ status: 'pending', error: null }, [], undefined, false);
+        h.core.start();
+
+        await h.rerenderWith('pending');
+        await vi.advanceTimersByTimeAsync(600_000);
+
+        expect(h.read).not.toHaveBeenCalled();
+    });
+
+    it('never marks the display stale, since it never gives up on a poll it never started', async () => {
+        const h = harness({ status: 'pending', error: null }, [], undefined, false);
+        h.core.start();
+
+        await vi.advanceTimersByTimeAsync(600_000);
 
         expect(h.core.stale.value).toBe(false);
     });
