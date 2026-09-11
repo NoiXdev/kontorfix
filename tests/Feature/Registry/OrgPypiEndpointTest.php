@@ -58,6 +58,34 @@ it('normalises project names per PEP 503 in the simple index, same as the group 
         ->assertSee('my-package');
 });
 
+// Spec §5: a customer's own project always wins over a shared one of the same normalised
+// name — the same rule SharedPackageResolutionTest.php pins for the group endpoint, and
+// OrgComposerEndpointTest.php pins for the org Composer endpoint. The organization's own
+// `shared-lib` (assigned to groupA) and an operator's SHARED `shared-lib` (assigned to
+// groupB of the SAME organization) are both visible through organizationPackagesQuery() at
+// once. The shared package is created and attached FIRST, so an unordered query would tend
+// to return it instead.
+it('serves the organization\'s own python project over a shared one of the same name, through the org endpoint', function () {
+    $org = Organization::factory()->create();
+    $groupA = Group::factory()->for($org)->create();
+    $groupB = Group::factory()->for($org)->create();
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->create(['type' => PackageType::Python, 'name' => 'shared-lib', 'shared' => true, 'repository_url' => null]);
+    $groupB->packages()->attach($shared);
+    PythonDist::factory()->for($shared)->create(['version' => '1.0.0', 'filename' => 'shared_lib-1.0.0.tar.gz']);
+
+    $own = Package::factory()->inOrgOf($groupA)->create(['type' => PackageType::Python, 'name' => 'shared-lib', 'repository_url' => null]);
+    $groupA->packages()->attach($own);
+    PythonDist::factory()->for($own)->create(['version' => '9.9.9', 'filename' => 'shared_lib-9.9.9.tar.gz']);
+
+    $this->withHeaders(orgTokenHeaderFor($org))
+        ->get(orgRegistryPath($org).'/simple/shared-lib/')
+        ->assertOk()
+        ->assertSee('shared_lib-9.9.9.tar.gz')
+        ->assertDontSee('shared_lib-1.0.0.tar.gz');
+});
+
 it('answers a valid, empty simple index for an organization with zero visible projects', function () {
     $org = Organization::factory()->create();
     Group::factory()->for($org)->create(); // a group exists, but nothing is assigned to it
@@ -256,6 +284,53 @@ it('returns a plain 404 for an unknown project in org mode, WITHOUT redirecting 
 
 it('unknown org slug still 404s under the pypi simple-project path', function () {
     $this->get('/o/no-such-org/simple/does-not-exist/')->assertNotFound();
+});
+
+// download()'s org branch now resolves through a keyed SQL query (organizationPackagesQuery()
+// narrowed by type and whereKey()) instead of loading every visible package as full models
+// and filtering in PHP by `$p->id === $package`. That PHP comparison was case-sensitive,
+// while Postgres' `uuid` column comparison (what whereKey() now runs) is not — and the route
+// pattern for {package} admits uppercase hex (`[0-9a-fA-F]`). This pins that an uppercase-hex
+// id resolves identically on /o/ and /r/, rather than 404ing on one and not the other.
+it('resolves an uppercase-hex UUID download identically on the org and the group endpoint', function () {
+    Storage::fake('artifacts');
+    $org = Organization::factory()->create();
+    $group = Group::factory()->for($org)->create();
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Python, 'name' => 'acme-demo', 'repository_url' => null]);
+    $group->packages()->attach($pkg);
+    $dist = PythonDist::factory()->for($pkg)->create(['version' => '1.0.0', 'filename' => 'acme_demo-1.0.0.tar.gz']);
+    Storage::disk('artifacts')->put($dist->path, 'sdist-bytes');
+
+    $uppercaseId = strtoupper($pkg->id);
+    expect($uppercaseId)->not->toBe($pkg->id); // the case flip must actually change something
+
+    $orgRes = $this->withHeaders(orgTokenHeaderFor($org))
+        ->get(orgRegistryPath($org)."/pypi/files/{$uppercaseId}/acme_demo-1.0.0.tar.gz");
+    $groupRes = $this->withHeaders(tokenHeaderFor($group))
+        ->get(registryPath($group)."/pypi/files/{$uppercaseId}/acme_demo-1.0.0.tar.gz");
+
+    $orgRes->assertOk();
+    $groupRes->assertOk();
+});
+
+// The keyed query still has to carry the same "own organization, or shared" scope
+// organizationPackagesQuery() states — narrowing to type/id must not accidentally widen
+// past it. A package assigned only to a foreign organization's group must still 404 on the
+// org download path.
+it('404s a python download for a package outside the organization, through the org endpoint', function () {
+    Storage::fake('artifacts');
+    $org = Organization::factory()->create();
+    Group::factory()->for($org)->create();
+
+    $foreignGroup = Group::factory()->create();
+    $foreign = Package::factory()->inOrgOf($foreignGroup)->create(['type' => PackageType::Python, 'name' => 'internal-lib', 'repository_url' => null]);
+    $foreignGroup->packages()->attach($foreign);
+    $dist = PythonDist::factory()->for($foreign)->create(['version' => '1.0.0', 'filename' => 'internal_lib-1.0.0.tar.gz']);
+    Storage::disk('artifacts')->put($dist->path, 'sdist-bytes');
+
+    $this->withHeaders(orgTokenHeaderFor($org))
+        ->get(orgRegistryPath($org)."/pypi/files/{$foreign->id}/internal_lib-1.0.0.tar.gz")
+        ->assertNotFound();
 });
 
 it('denies a file download for a project not visible to the organization', function () {

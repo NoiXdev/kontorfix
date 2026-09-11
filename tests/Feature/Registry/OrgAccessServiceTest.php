@@ -159,4 +159,30 @@ describe('organizationPackage', function () {
 
         expect($found)->toBeNull();
     });
+
+    /**
+     * The tie-break this method's docblock used to deny was even possible: a package is
+     * unique per (organization, type, name) only among an organization's OWN rows — a
+     * shared package carries no such constraint against another organization's namespace,
+     * and SharedAssignment only refuses a collision WITHIN one registry (see findLocal()'s
+     * docblock). So the organization's own `acme/widget`, assigned to groupA1, and an
+     * operator's SHARED `acme/widget`, assigned to groupA2 of the SAME organization, are
+     * both visible through packagesForOrganization($orgA) at once — two rows for one
+     * (type, name). Without organizationPackagesQuery()'s ordering, `first()` returns
+     * whichever row Postgres hands back, which could serve the operator's package to a
+     * customer asking for their own. Attached in the order that would expose an unordered
+     * query: the shared row first, the own row second.
+     */
+    it('prefers the organization\'s own package over a shared one of the same (type, name)', function () {
+        $operator = Organization::factory()->create(['is_operator' => true]);
+        $shared = Package::factory()->for($operator)->create(['type' => PackageType::Npm, 'name' => 'acme/widget', 'shared' => true]);
+        $this->groupA2->packages()->attach($shared);
+
+        $own = Package::factory()->inOrgOf($this->groupA1)->create(['type' => PackageType::Npm, 'name' => 'acme/widget']);
+        $this->groupA1->packages()->attach($own);
+
+        $found = $this->svc->organizationPackage($this->orgA, PackageType::Npm, 'acme/widget');
+
+        expect($found?->id)->toBe($own->id);
+    });
 });

@@ -40,6 +40,32 @@ it('lists the union of packages assigned across every group of the organization,
     expect($res->json('available-packages'))->toBe(['acme/a', 'acme/b', 'acme/shared']);
 });
 
+// Spec §5: a customer's own package always wins over a shared one of the same name — the
+// same rule SharedPackageResolutionTest.php pins for the group endpoint. Reachable here too:
+// packagesForOrganization()/organizationPackage() span the organization's own packages AND
+// the operator's shared ones, so the organization's own `acme/shared` (assigned to groupA)
+// and an operator's SHARED `acme/shared` (assigned to groupB of the SAME organization) are
+// both visible at once. The shared package is created and attached FIRST, so an unordered
+// query would tend to return it instead.
+it('serves the organization\'s own composer package over a shared one of the same name, through the org endpoint', function () {
+    $org = Organization::factory()->create();
+    $groupA = Group::factory()->for($org)->create();
+    $groupB = Group::factory()->for($org)->create();
+
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->create(['name' => 'acme/shared', 'shared' => true]);
+    $groupB->packages()->attach($shared);
+    PackageVersion::factory()->for($shared)->create(['version' => '1.0.0.0', 'version_pretty' => 'v1.0.0']);
+
+    $own = Package::factory()->inOrgOf($groupA)->create(['name' => 'acme/shared']);
+    $groupA->packages()->attach($own);
+    PackageVersion::factory()->for($own)->create(['version' => '9.9.9.0', 'version_pretty' => 'v9.9.9']);
+
+    $res = $this->withHeaders(orgTokenHeaderFor($org))->getJson(orgRegistryPath($org).'/p2/acme/shared.json');
+
+    $res->assertOk()->assertJsonPath('packages.acme/shared.0.version', 'v9.9.9');
+});
+
 it('answers a valid, empty response for an organization with zero visible packages', function () {
     $org = Organization::factory()->create();
     Group::factory()->for($org)->create(); // a group exists, but nothing is assigned to it

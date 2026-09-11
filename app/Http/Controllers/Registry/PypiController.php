@@ -161,15 +161,22 @@ class PypiController extends Controller
 
             $normalized = PythonName::normalize($project);
 
-            // packagesForOrganization(), not organizationPackage(): the latter matches
+            // organizationPackagesQuery(), not organizationPackage(): the latter matches
             // `packages.name` exactly, but a stored Python project name is not guaranteed
             // to already be in PEP 503 canonical form (twine uploads "My.Package" as-is —
             // see PypiController::upload()/PythonName::normalize()) — exactly the reason
-            // pythonPackagesOfGroup() below filters in PHP rather than in SQL. Filtered to
-            // Python because the org pool spans every PackageType.
-            $pkg = $this->access->packagesForOrganization($organization)
-                ->first(fn (Package $p): bool => $p->type === PackageType::Python
-                    && PythonName::normalize($p->name) === $normalized);
+            // pythonPackagesOfGroup() below filters in PHP rather than in SQL. The `type`
+            // filter itself narrows in SQL rather than in PHP (unlike simpleRoot() above,
+            // which needs every PackageType and so cannot) — this runs once per project
+            // page, but there is no reason to load every Composer/npm row of the
+            // organization just to discard them here. The query's own ordering (own
+            // organization before shared, see organizationPackagesQuery()) makes this
+            // `first()` prefer the organization's own project over a shared one of the
+            // same normalised name, mirroring findLocal()'s tie-break.
+            $pkg = $this->access->organizationPackagesQuery($organization)
+                ->where('packages.type', PackageType::Python)
+                ->get()
+                ->first(fn (Package $p): bool => PythonName::normalize($p->name) === $normalized);
 
             // No upstream fallthrough here, unlike the group branch below: a Python upstream
             // is a row on ONE group's Upstream table, and the org aggregate spans every group
@@ -285,13 +292,19 @@ class PypiController extends Controller
         if ($organization !== null) {
             $this->authorizeOrganization($request, $organization);
 
-            // packagesForOrganization() rather than a raw Package lookup: it already states
-            // "own-organization, or shared, assigned (unexpired) to any group of the
-            // organization" — the same predicate the group branch below spells out by hand
-            // against one group's pivot. Filtered to Python and to this id in PHP, matching
-            // the shape of the group branch's own filter (id lookup, then type).
-            $pkg = $this->access->packagesForOrganization($organization)
-                ->first(fn (Package $p): bool => $p->type === PackageType::Python && $p->id === $package);
+            // organizationPackagesQuery() rather than packagesForOrganization(): the latter
+            // loads every visible package of the organization as full models and would be
+            // filtered down to one row in PHP — `pip install` calls this once per
+            // distribution file, so a full-type scan here is a hot-path cost with no
+            // purpose once the id is known. whereKey() also keeps the comparison a SQL
+            // `uuid` comparison, matching the group branch below: `$p->id === $package`
+            // would compare case-sensitively in PHP, while Postgres' `uuid` type compares
+            // case-insensitively, so an uppercase-hex id (the route pattern allows
+            // `[0-9a-fA-F]`) resolved here but not there.
+            $pkg = $this->access->organizationPackagesQuery($organization)
+                ->where('packages.type', PackageType::Python)
+                ->whereKey($package)
+                ->first();
             abort_if($pkg === null, 404);
         } else {
             $group = $this->registryGroup($request);

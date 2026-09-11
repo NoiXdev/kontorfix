@@ -150,10 +150,18 @@ class RegistryAccessService
     }
 
     /**
-     * A single visible package by (type, name) — packages are unique per (organization,
-     * type, name), so at most one row can ever match. Returns null both when no such
-     * package exists at all and when it exists but is not assigned (unexpired) to any
-     * group of the organization: this method answers visibility, not existence.
+     * A single visible package by (type, name). Packages are unique per (organization,
+     * type, name) among an organization's OWN packages, but this query is not scoped to
+     * ownership — it also spans the operator's `shared` packages, and a share carries no
+     * such uniqueness constraint (SharedAssignment only refuses a collision WITHIN one
+     * registry, per findLocal()'s docblock). So two rows can legitimately match: the
+     * organization's own package of this (type, name), and a shared package of the same
+     * (type, name) assigned to a different group of the same organization. The ordering
+     * on organizationPackagesQuery() is what makes `first()` here reproducible and correct
+     * rather than whichever row Postgres happens to hand back — see that method. Returns
+     * null both when no such package exists at all and when it exists but is not assigned
+     * (unexpired) to any group of the organization: this method answers visibility, not
+     * existence.
      */
     public function organizationPackage(Organization $organization, PackageType $type, string $name): ?Package
     {
@@ -164,10 +172,12 @@ class RegistryAccessService
     }
 
     /**
-     * The query shared by packagesForOrganization() and organizationPackage(): every
-     * package assigned (unexpired) to any group of the organization, owned by that
-     * organization or shared — the same predicate availablePackages() states for a single
-     * group, generalized across all of the organization's groups at once.
+     * The query shared by packagesForOrganization(), organizationPackage(), and the PyPI
+     * read paths that need a type-scoped slice of the same pool (PypiController's org
+     * branches of simpleProject()/download()): every package assigned (unexpired) to any
+     * group of the organization, owned by that organization or shared — the same predicate
+     * availablePackages() states for a single group, generalized across all of the
+     * organization's groups at once.
      *
      * ONE query, not one per group: the EXISTS produced by whereHas() correlates against
      * `groups`/`group_package` per package row rather than joining and multiplying rows,
@@ -176,9 +186,26 @@ class RegistryAccessService
      * `whereHas` subquery could otherwise ambiguously resolve against `groups`/
      * `group_package`.
      *
+     * Ordered own-organization-first, then by id, for the same reason as
+     * ResolvesRegistryPackage::findLocal() and PypiController::pythonPackagesOfGroup(): the
+     * union spans the organization's own packages AND the operator's shared packages, so
+     * two rows can match one (type, name) — the org's own `acme/tools` assigned to one
+     * group, and a SHARED `acme/tools` assigned to another group of the same organization.
+     * Without this order, `organizationPackage()`'s and the PyPI read paths' `first()` would
+     * pick whichever row Postgres happens to return, which could serve the operator's
+     * artifact instead of the customer's own. Spec §5 settles which wins — the
+     * organization's own package, never shadowed by a shared one of that name — mirroring
+     * the tie-break the group path already applies.
+     *
+     * Public (not the private helper it once was): PypiController's org branches for
+     * simpleProject()/download() narrow this query further by `type` and, for download,
+     * by key, rather than loading the whole union via packagesForOrganization() and
+     * filtering in PHP — that would mean loading every package type on every file
+     * download, a hot path for `pip install`.
+     *
      * @return Builder<Package>
      */
-    private function organizationPackagesQuery(Organization $organization): Builder
+    public function organizationPackagesQuery(Organization $organization): Builder
     {
         return Package::query()
             ->whereHas('groups', fn ($q) => $q
@@ -188,7 +215,8 @@ class RegistryAccessService
                     ->orWhere('group_package.available_until', '>', now())))
             ->where(fn ($q) => $q
                 ->where('packages.organization_id', $organization->id)
-                ->orWhere('packages.shared', true));
+                ->orWhere('packages.shared', true))
+            ->orderByRaw('(packages.organization_id = ?) desc, packages.id', [$organization->id]);
     }
 
     /**
