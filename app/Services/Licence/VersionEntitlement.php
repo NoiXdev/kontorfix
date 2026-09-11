@@ -11,9 +11,11 @@ use App\Support\Licence\VersionBounds;
 use App\Support\Licence\VersionWindows;
 use Closure;
 use Composer\Semver\Comparator;
+use Composer\Semver\VersionParser;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 use LogicException;
+use UnexpectedValueException;
 
 /**
  * The single rule that decides which versions a licence admits — every serve-time site
@@ -47,6 +49,25 @@ final class VersionEntitlement
      * @var array<string, true>
      */
     private static array $loggedUnparseableBounds = [];
+
+    /**
+     * Same "once per process" dedupe as {@see $loggedUnparseableVersions}, for a Composer
+     * or npm version `VersionParser::normalize()` cannot parse — kept separate from that
+     * array (rather than shared with Python) because the two ecosystems log different
+     * text for the same fact, and a Composer and a Python version that happened to share
+     * one raw string must not silently dedupe against each other's log line.
+     *
+     * @var array<string, true>
+     */
+    private static array $loggedUnparseableSemverVersions = [];
+
+    /**
+     * Same reasoning as {@see $loggedUnparseableSemverVersions}, for a Composer/npm
+     * `version_min`/`version_max` bound that cannot be normalized.
+     *
+     * @var array<string, true>
+     */
+    private static array $loggedUnparseableSemverBounds = [];
 
     /**
      * The bounds a single assignment grants, read straight off its pivot row.
@@ -174,17 +195,72 @@ final class VersionEntitlement
         return false;
     }
 
+    /**
+     * `Comparator::*` is a thin wrapper over raw `version_compare()` — it does NOT
+     * normalize either operand. Comparing an un-normalized pre-release against a short
+     * bound compares them as plain strings rather than composer-semantically: a customer
+     * licenced `min=2.0` would be served `2.0.0-beta1` (`version_compare('2.0.0-beta1',
+     * '2.0', '>=')` is true, even though `2.0.0-beta1 < 2.0.0` composer-semantically), and
+     * `3.0.0-beta1` would be wrongly withheld under `max=3.0` despite sitting inside the
+     * window. Normalizing BOTH the served version and the bound with the same
+     * `VersionParser::normalize()` composer itself uses (the one `AssignmentWriter`
+     * already validates bound syntax with) fixes both directions at once, and handles a
+     * `v`-prefixed bound (`v2.0`) identically to its bare form.
+     *
+     * A side that cannot be normalized — a malformed served version, or a bound written
+     * before write-time validation existed — fails closed exactly as `permitsPython()`
+     * does for its own unparseable version/bound: refused, logged once per value so a
+     * feed full of one bad string does not flood the log.
+     */
     private function permitsSemver(VersionBounds $bounds, string $version): bool
     {
-        if ($bounds->min !== null && ! Comparator::greaterThanOrEqualTo($version, $bounds->min)) {
+        $normalizedVersion = $this->normalizeSemver($version);
+
+        if ($normalizedVersion === null) {
+            $this->logUnparseableSemverVersionOnce($version);
+
             return false;
         }
 
-        if ($bounds->max !== null && ! Comparator::lessThan($version, $bounds->max)) {
-            return false;
+        if ($bounds->min !== null) {
+            $normalizedMin = $this->normalizeSemver($bounds->min);
+
+            if ($normalizedMin === null) {
+                $this->logUnparseableSemverBoundOnce($bounds->min);
+
+                return false;
+            }
+
+            if (! Comparator::greaterThanOrEqualTo($normalizedVersion, $normalizedMin)) {
+                return false;
+            }
+        }
+
+        if ($bounds->max !== null) {
+            $normalizedMax = $this->normalizeSemver($bounds->max);
+
+            if ($normalizedMax === null) {
+                $this->logUnparseableSemverBoundOnce($bounds->max);
+
+                return false;
+            }
+
+            if (! Comparator::lessThan($normalizedVersion, $normalizedMax)) {
+                return false;
+            }
         }
 
         return true;
+    }
+
+    /** `VersionParser::normalize()` throws on anything it cannot parse rather than returning a sentinel. */
+    private function normalizeSemver(string $version): ?string
+    {
+        try {
+            return (new VersionParser)->normalize($version);
+        } catch (UnexpectedValueException) {
+            return null;
+        }
     }
 
     private function permitsPython(VersionBounds $bounds, string $version): bool
@@ -256,6 +332,34 @@ final class VersionEntitlement
         self::$loggedUnparseableBounds[$bound] = true;
 
         Log::warning('PyPI licence bound could not be parsed as PEP 440; refusing every version under it.', [
+            'bound' => $bound,
+        ]);
+    }
+
+    /** Composer/npm counterpart of {@see logUnparseableVersionOnce()} — see permitsSemver(). */
+    private function logUnparseableSemverVersionOnce(string $version): void
+    {
+        if (isset(self::$loggedUnparseableSemverVersions[$version])) {
+            return;
+        }
+
+        self::$loggedUnparseableSemverVersions[$version] = true;
+
+        Log::warning('Composer/npm version could not be normalized; refusing it under a bounded licence.', [
+            'version' => $version,
+        ]);
+    }
+
+    /** Composer/npm counterpart of {@see logUnparseableBoundOnce()} — see permitsSemver(). */
+    private function logUnparseableSemverBoundOnce(string $bound): void
+    {
+        if (isset(self::$loggedUnparseableSemverBounds[$bound])) {
+            return;
+        }
+
+        self::$loggedUnparseableSemverBounds[$bound] = true;
+
+        Log::warning('Composer/npm licence bound could not be normalized; refusing every version under it.', [
             'bound' => $bound,
         ]);
     }

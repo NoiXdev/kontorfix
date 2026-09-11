@@ -65,6 +65,42 @@ describe('permits', function () {
         it('permits everything when unlimited', function () {
             expect($this->svc->permits(VersionBounds::unlimited(), PackageType::Composer, '999.999.999'))->toBeTrue();
         });
+
+        // Comparator::* does not normalize either side — it is raw version_compare(). A
+        // pre-release compared against a short bound sorts on string length instead of on
+        // composer-semantic precedence, which either lets a pre-release through below the
+        // floor or withholds one that is genuinely inside the window. Normalizing both
+        // sides first (VersionParser::normalize()) is what the spec's "on the normalized
+        // version" phrase requires.
+        it('refuses a pre-release that composer-semantically sorts below an unnormalized min', function () {
+            $bounds = VersionBounds::fromPivot('2.0', '3.0');
+
+            expect($this->svc->permits($bounds, PackageType::Composer, '2.0.0-beta1'))->toBeFalse();
+        });
+
+        it('permits a pre-release that composer-semantically sorts inside the window, below an unnormalized max', function () {
+            $bounds = VersionBounds::fromPivot('2.0', '3.0');
+
+            expect($this->svc->permits($bounds, PackageType::Composer, '3.0.0-beta1'))->toBeTrue();
+        });
+
+        it('normalizes a v-prefixed bound the same as its bare equivalent', function () {
+            $prefixed = VersionBounds::fromPivot('v2.0', '3.0');
+            $bare = VersionBounds::fromPivot('2.0', '3.0');
+
+            expect($this->svc->permits($prefixed, PackageType::Composer, '2.0.0-beta1'))
+                ->toBe($this->svc->permits($bare, PackageType::Composer, '2.0.0-beta1'))
+                ->and($this->svc->permits($prefixed, PackageType::Composer, '2.5.0'))
+                ->toBe($this->svc->permits($bare, PackageType::Composer, '2.5.0'));
+        });
+
+        it('fails closed and logs once when a bound cannot be normalized', function () {
+            Log::shouldReceive('warning')->once();
+
+            $bounds = VersionBounds::fromPivot('not-a-version', '3.0');
+
+            expect($this->svc->permits($bounds, PackageType::Composer, '2.5.0'))->toBeFalse();
+        });
     });
 
     describe('Npm', function () {
@@ -262,8 +298,12 @@ describe('permitsAny', function () {
         expect($this->svc->permitsAny(VersionWindows::unlimited(), PackageType::Composer, '999.0.0'))->toBeTrue();
     });
 
-    it('permits everything when there are no windows at all', function () {
-        expect($this->svc->permitsAny(new VersionWindows([]), PackageType::Composer, '999.0.0'))->toBeTrue();
+    // An empty window list is not "unlimited" — see VersionWindows::isUnlimited()'s
+    // docblock. It means no unexpired assignment was found (e.g. one lapsed or was
+    // revoked between two separate `now()` reads on the serving path), which must refuse
+    // every version rather than fail open.
+    it('refuses everything when there are no windows at all', function () {
+        expect($this->svc->permitsAny(new VersionWindows([]), PackageType::Composer, '999.0.0'))->toBeFalse();
     });
 });
 
@@ -331,7 +371,11 @@ describe('windowsForOrganization', function () {
         expect($windows->isUnlimited())->toBeTrue();
     });
 
-    it('contributes no window for an expired assignment', function () {
+    // The race this closes: organizationPackage() found the package visible at its own
+    // now(), but the one assignment that made it visible has since lapsed (or been
+    // revoked) by the time this method runs its own now(). Zero unexpired assignments must
+    // refuse every version, not fall back to "no assignment found, so admit everything".
+    it('refuses everything for an expired assignment, contributing no window', function () {
         $org = Organization::factory()->create();
         $package = Package::factory()->create(['organization_id' => $org->id]);
         $group = Group::factory()->for($org)->create();
@@ -344,17 +388,19 @@ describe('windowsForOrganization', function () {
 
         $windows = $this->svc->windowsForOrganization($org, $package);
 
-        expect($windows->isUnlimited())->toBeTrue()
-            ->and($windows->windows)->toBe([]);
+        expect($windows->isUnlimited())->toBeFalse()
+            ->and($windows->windows)->toBe([])
+            ->and($this->svc->permitsAny($windows, PackageType::Composer, '2.5'))->toBeFalse();
     });
 
-    it('is unlimited when the package has no assignment in the organization at all', function () {
+    it('refuses everything when the package has no assignment in the organization at all', function () {
         $org = Organization::factory()->create();
         $package = Package::factory()->create(['organization_id' => $org->id]);
 
         $windows = $this->svc->windowsForOrganization($org, $package);
 
-        expect($windows->isUnlimited())->toBeTrue();
+        expect($windows->isUnlimited())->toBeFalse()
+            ->and($this->svc->permitsAny($windows, PackageType::Composer, '999.0.0'))->toBeFalse();
     });
 
     it('runs as a single query, not one per group of the organization', function () {

@@ -58,8 +58,13 @@ it('exposes VersionBounds::unlimited() as unlimited with both null', function ()
         ->and($unlimited->max)->toBeNull();
 });
 
-it('treats an empty VersionWindows as unlimited', function () {
-    expect((new VersionWindows([]))->isUnlimited())->toBeTrue();
+// An empty window list means no unexpired assignment was found to build a window from —
+// e.g. an assignment that lapsed or was revoked between two separate `now()` reads on the
+// serving path. That must refuse every version, never admit everything: "unlimited" is
+// represented only by an explicit VersionBounds::unlimited() MEMBER of the list (see the
+// two tests below), never by the list being empty.
+it('treats an empty VersionWindows as refusing every version, not as unlimited', function () {
+    expect((new VersionWindows([]))->isUnlimited())->toBeFalse();
 });
 
 it('treats a VersionWindows with an unlimited member as unlimited', function () {
