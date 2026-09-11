@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Closure;
 use Database\Factories\GroupFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -13,6 +14,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 
+/**
+ * @property-read GroupPackage $pivot The pivot row when loaded through Group::packages() /
+ *                                     Package::groups() — the only belongsToMany this model
+ *                                     participates in.
+ */
 class Group extends Model
 {
     /** @use HasFactory<GroupFactory> */
@@ -108,11 +114,14 @@ class Group extends Model
      * The assignments that are actually in force: `available_until` makes an assignment
      * time-limited, and an expired row serves nothing.
      *
-     * The one statement of that predicate. RegistryAccessService decides what a registry
-     * serves with it, App\Services\Package\SharedAssignment decides whether a name is
-     * already taken with it, and App\Http\Controllers\Registry\PypiController decides
-     * through it which project a twine upload may target — questions that must never be able
-     * to disagree about whether a given row counts.
+     * The one statement of that predicate — factored into notExpiredAssignmentPredicate()
+     * below so a query reached from the other side of the pivot can apply the identical rule
+     * rather than restate it. RegistryAccessService decides what a registry serves with it,
+     * App\Services\Package\SharedAssignment decides whether a name is already taken with it,
+     * App\Http\Controllers\Registry\PypiController decides through it which project a twine
+     * upload may target, and App\Services\Licence\VersionEntitlement decides through it which
+     * assignments of a package across an organization contribute a licence window —
+     * questions that must never be able to disagree about whether a given row counts.
      *
      * `available_until` HAS EXACTLY ONE WRITER: Admin\GroupController::updateAssignment(),
      * the assignment dialog's date field (spec §6). Everything else only reads the column.
@@ -145,9 +154,38 @@ class Group extends Model
      */
     public function assignedPackages(): BelongsToMany
     {
-        return $this->packages()->where(fn (Builder $q) => $q
+        // The predicate's own signature is deliberately generic over Model (see
+        // notExpiredAssignmentPredicate()'s docblock — it touches only the pivot table's own
+        // columns, nothing Package- or Group-specific), so each caller asserts the concrete
+        // instantiation it knows applies here rather than PHPStan trying to unify a single
+        // invariant generic across two different relations reached from opposite ends of the
+        // same pivot.
+        /** @var Closure(Builder<Package>): Builder<Package> $predicate */
+        $predicate = self::notExpiredAssignmentPredicate();
+
+        return $this->packages()->where($predicate);
+    }
+
+    /**
+     * The predicate itself, factored out of assignedPackages() so a second query needing the
+     * exact same rule can apply it without restating it — and so the two can never quietly
+     * drift apart about which row counts.
+     *
+     * `App\Services\Licence\VersionEntitlement::windowsForOrganization()` is that second
+     * caller: it walks the pivot from the Package side (`$package->groups()`) rather than the
+     * Group side this relation reads from, to gather every unexpired assignment of one
+     * package across an organization's groups in a single query. Both call sites resolve to
+     * an Eloquent query over the same `group_package` pivot table, just reached from opposite
+     * ends of the relationship, which is why one closure, taking a plain `Builder`, serves
+     * both without needing to know which model it was built against.
+     *
+     * @return Closure(Builder<Model>): Builder<Model>
+     */
+    public static function notExpiredAssignmentPredicate(): Closure
+    {
+        return fn (Builder $q) => $q
             ->whereNull('group_package.available_until')
-            ->orWhere('group_package.available_until', '>', now()));
+            ->orWhere('group_package.available_until', '>', now());
     }
 
     /**

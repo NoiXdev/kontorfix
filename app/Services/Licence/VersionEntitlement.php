@@ -9,8 +9,11 @@ use App\Models\Package;
 use App\Support\Licence\Pep440Version;
 use App\Support\Licence\VersionBounds;
 use App\Support\Licence\VersionWindows;
+use Closure;
 use Composer\Semver\Comparator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
+use LogicException;
 
 /**
  * The single rule that decides which versions a licence admits — every serve-time site
@@ -23,6 +26,9 @@ use Illuminate\Support\Facades\Log;
  */
 final class VersionEntitlement
 {
+    /** Docker has no notion of a licence-bounded version at all — see permits()'s guard. */
+    private const DOCKER_BOUNDS_UNSUPPORTED = 'Version bounds are not supported for Docker packages.';
+
     /**
      * Versions already logged as unparseable, so a package with many unparseable releases
      * does not flood the log once per request. Keyed by the raw version string; process-
@@ -31,6 +37,16 @@ final class VersionEntitlement
      * @var array<string, true>
      */
     private static array $loggedUnparseableVersions = [];
+
+    /**
+     * Bound strings (the pivot's own `version_min`/`version_max`) already logged as
+     * unparseable — same "once per process" reasoning as $loggedUnparseableVersions, keyed
+     * separately because a bad bound and a bad served version are different operator
+     * problems: one is a row to fix, the other is upstream data to tolerate.
+     *
+     * @var array<string, true>
+     */
+    private static array $loggedUnparseableBounds = [];
 
     /**
      * The bounds a single assignment grants, read straight off its pivot row.
@@ -59,23 +75,32 @@ final class VersionEntitlement
      * permits 2.x and 4.x but must still refuse 3.x, which a merged `[2.0,5.0)` range would
      * wrongly admit.
      *
-     * Goes through `Group::assignedPackages()` for the expiry check rather than restating
-     * it: that relation is the one statement of "is this assignment still in force" shared
-     * with the registry's own serving decision, so an expired row here is exactly an
-     * expired row there.
+     * ONE query: walks the pivot from the Package side (`Package::groups()`, which already
+     * carries the version_min/version_max `withPivot`), scoped to this organization's groups
+     * and filtered by `Group::notExpiredAssignmentPredicate()` — the exact closure
+     * `Group::assignedPackages()` applies from the other side of the same pivot table, so
+     * this method and the registry's own serving decision can never disagree about which
+     * assignment row counts. This sits on the `/o/{orgSlug}` metadata path, the same hot
+     * path `RegistryAccessService::organizationPackagesQuery()` is pinned to one query for —
+     * a query per group here would reintroduce exactly the N+1 that method was built to
+     * avoid.
      */
     public function windowsForOrganization(Organization $org, Package $package): VersionWindows
     {
-        $windows = $org->groups()
+        // Same generic-over-Model predicate assignedPackages() applies from the Group side;
+        // this call reaches it from the Package side, so it asserts the other of the two
+        // concrete instantiations — see that method's comment for why.
+        /** @var Closure(Builder<Group>): Builder<Group> $predicate */
+        $predicate = Group::notExpiredAssignmentPredicate();
+
+        $windows = $package->groups()
+            ->where('groups.organization_id', $org->id)
+            ->where($predicate)
             ->get()
-            ->flatMap(fn (Group $group) => $group->assignedPackages()
-                ->where('packages.id', $package->getKey())
-                ->get())
-            ->map(fn (Package $assigned): VersionBounds => VersionBounds::fromPivot(
-                $assigned->pivot->version_min,
-                $assigned->pivot->version_max,
+            ->map(fn (Group $group): VersionBounds => VersionBounds::fromPivot(
+                $group->pivot->version_min,
+                $group->pivot->version_max,
             ))
-            ->values()
             ->all();
 
         return new VersionWindows($windows);
@@ -94,10 +119,23 @@ final class VersionEntitlement
      * local version (`1.0+cu118`) or the implicit post shorthand (`1.0-1`) — cannot be
      * placed against a bound honestly, so a bounded licence fails closed and refuses it;
      * the refusal is logged once per version so an upstream feed full of local versions does
-     * not flood the log.
+     * not flood the log. The same fail-closed rule applies the other way round: if the bound
+     * itself (the pivot's own `version_min`/`version_max`) cannot be parsed — write-path
+     * validation only arrives in a later task, so a bad row can exist in the meantime — every
+     * version is refused rather than the unparseable side being silently treated as open,
+     * logged once per bound value so an operator can find the offending row.
+     *
+     * Docker packages carry no version bounds concept at all (there is no licence-scoped
+     * assignment UI for them and none is planned), so a Docker type is refused outright
+     * rather than being run through the semver comparator, which would compare image tags
+     * as if they were semver and could silently produce a meaningless answer.
      */
     public function permits(VersionBounds $bounds, PackageType $type, string $version): bool
     {
+        if ($type === PackageType::Docker) {
+            throw new LogicException(self::DOCKER_BOUNDS_UNSUPPORTED);
+        }
+
         if ($bounds->isUnlimited()) {
             return true;
         }
@@ -107,9 +145,20 @@ final class VersionEntitlement
             : $this->permitsSemver($bounds, $version);
     }
 
-    /** Whether a version is admitted by ANY window — never a hull of them. */
+    /**
+     * Whether a version is admitted by ANY window — never a hull of them.
+     *
+     * Rejects `PackageType::Docker` up front, the same as permits(): checked here too,
+     * rather than left to be reached only through the per-window call to permits(), because
+     * an all-unlimited VersionWindows short-circuits below without ever calling permits() at
+     * all, which would let a Docker call through silently.
+     */
     public function permitsAny(VersionWindows $windows, PackageType $type, string $version): bool
     {
+        if ($type === PackageType::Docker) {
+            throw new LogicException(self::DOCKER_BOUNDS_UNSUPPORTED);
+        }
+
         if ($windows->isUnlimited()) {
             return true;
         }
@@ -148,14 +197,28 @@ final class VersionEntitlement
 
         if ($bounds->min !== null) {
             $min = Pep440Version::parse($bounds->min);
-            if ($min !== null && $parsed->compareTo($min) < 0) {
+
+            if ($min === null) {
+                $this->logUnparseableBoundOnce($bounds->min);
+
+                return false;
+            }
+
+            if ($parsed->compareTo($min) < 0) {
                 return false;
             }
         }
 
         if ($bounds->max !== null) {
             $max = Pep440Version::parse($bounds->max);
-            if ($max !== null && $parsed->compareTo($max) >= 0) {
+
+            if ($max === null) {
+                $this->logUnparseableBoundOnce($bounds->max);
+
+                return false;
+            }
+
+            if ($parsed->compareTo($max) >= 0) {
                 return false;
             }
         }
@@ -173,6 +236,25 @@ final class VersionEntitlement
 
         Log::warning('PyPI version could not be parsed as PEP 440; refusing it under a bounded licence.', [
             'version' => $version,
+        ]);
+    }
+
+    /**
+     * Logs a licence bound (`version_min` or `version_max`) that PEP 440 cannot parse —
+     * distinct from logUnparseableVersionOnce() because this names a bad row in
+     * `group_package` rather than a version served from a package's own release history, and
+     * an operator needs the bound's value, not a served version, to go find and fix it.
+     */
+    private function logUnparseableBoundOnce(string $bound): void
+    {
+        if (isset(self::$loggedUnparseableBounds[$bound])) {
+            return;
+        }
+
+        self::$loggedUnparseableBounds[$bound] = true;
+
+        Log::warning('PyPI licence bound could not be parsed as PEP 440; refusing every version under it.', [
+            'bound' => $bound,
         ]);
     }
 }

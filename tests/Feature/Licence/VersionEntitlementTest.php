@@ -7,6 +7,7 @@ use App\Models\Package;
 use App\Services\Licence\VersionEntitlement;
 use App\Support\Licence\VersionBounds;
 use App\Support\Licence\VersionWindows;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 beforeEach(function () {
@@ -197,6 +198,51 @@ describe('permits', function () {
 
             expect($this->svc->permits(VersionBounds::unlimited(), PackageType::Python, '1.0+cu118'))->toBeTrue();
         });
+
+        it('fails closed when the stored min bound itself cannot be parsed as PEP 440', function () {
+            Log::shouldReceive('warning')->once();
+
+            // An invalid row that write-path validation (a later task) will eventually
+            // refuse to create — but nothing here should ever guess it means "no lower
+            // bound" just because it could not be read.
+            $bounds = VersionBounds::fromPivot('1.0+cu118', '2.0');
+
+            expect($this->svc->permits($bounds, PackageType::Python, '1.5'))->toBeFalse();
+        });
+
+        it('fails closed when the stored max bound itself cannot be parsed as PEP 440', function () {
+            Log::shouldReceive('warning')->once();
+
+            $bounds = VersionBounds::fromPivot('1.0', '2.0+cu118');
+
+            expect($this->svc->permits($bounds, PackageType::Python, '1.5'))->toBeFalse();
+        });
+    });
+});
+
+describe('permits Docker guard', function () {
+    it('throws for permits() rather than silently comparing image tags as semver', function () {
+        $bounds = VersionBounds::fromPivot('1.0.0', '2.0.0');
+
+        expect(fn () => $this->svc->permits($bounds, PackageType::Docker, '1.5.0'))
+            ->toThrow(LogicException::class, 'Version bounds are not supported for Docker packages.');
+    });
+
+    it('throws for permits() even when the bounds are unlimited', function () {
+        expect(fn () => $this->svc->permits(VersionBounds::unlimited(), PackageType::Docker, 'latest'))
+            ->toThrow(LogicException::class);
+    });
+
+    it('throws for permitsAny() rather than silently comparing image tags as semver', function () {
+        $windows = new VersionWindows([VersionBounds::fromPivot('1.0.0', '2.0.0')]);
+
+        expect(fn () => $this->svc->permitsAny($windows, PackageType::Docker, '1.5.0'))
+            ->toThrow(LogicException::class, 'Version bounds are not supported for Docker packages.');
+    });
+
+    it('throws for permitsAny() even when the windows are unlimited', function () {
+        expect(fn () => $this->svc->permitsAny(VersionWindows::unlimited(), PackageType::Docker, 'latest'))
+            ->toThrow(LogicException::class);
     });
 });
 
@@ -309,5 +355,31 @@ describe('windowsForOrganization', function () {
         $windows = $this->svc->windowsForOrganization($org, $package);
 
         expect($windows->isUnlimited())->toBeTrue();
+    });
+
+    it('runs as a single query, not one per group of the organization', function () {
+        // Three groups, so a naive one-query-per-group implementation would show up here as
+        // 3 (or more) queries rather than 1 — the same shape OrgAccessServiceTest pins
+        // packagesForOrganization() to, for the same reason: this sits on the /o/{orgSlug}
+        // metadata path.
+        $org = Organization::factory()->create();
+        $package = Package::factory()->create(['organization_id' => $org->id]);
+        $groupA = Group::factory()->for($org)->create();
+        $groupB = Group::factory()->for($org)->create();
+        $groupC = Group::factory()->for($org)->create();
+
+        $groupA->packages()->attach($package, ['version_min' => '2.0', 'version_max' => '3.0']);
+        $groupB->packages()->attach($package, ['version_min' => '4.0', 'version_max' => '5.0']);
+        $groupC->packages()->attach($package);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->svc->windowsForOrganization($org, $package);
+
+        $queryCount = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        expect($queryCount)->toBe(1);
     });
 });
