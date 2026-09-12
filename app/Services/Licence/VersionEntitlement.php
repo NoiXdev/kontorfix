@@ -13,6 +13,7 @@ use Closure;
 use Composer\Semver\Comparator;
 use Composer\Semver\VersionParser;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use LogicException;
 use UnexpectedValueException;
@@ -32,42 +33,39 @@ final class VersionEntitlement
     private const DOCKER_BOUNDS_UNSUPPORTED = 'Version bounds are not supported for Docker packages.';
 
     /**
-     * Versions already logged as unparseable, so a package with many unparseable releases
-     * does not flood the log once per request. Keyed by the raw version string; process-
-     * lifetime only, which is what "once" can mean without a place to persist the fact.
+     * How long an offending value's "already logged" fact is remembered before the same
+     * value is allowed to log again.
      *
-     * @var array<string, true>
+     * Not process-lifetime: a PHP-FPM worker survives many requests, so a plain in-memory
+     * "logged once" flag really means "logged once per worker, for however long that
+     * worker happens to live" — an operator fixes the underlying row, the problem recurs
+     * later (feed regression, retry, a different package reusing the same string), and no
+     * second warning appears until the worker recycles. Cache::add() below makes the
+     * dedupe both time-boxed AND shared across workers, which is what "logged once" is
+     * actually meant to mean.
      */
-    private static array $loggedUnparseableVersions = [];
+    private const DEDUPE_WINDOW_SECONDS = 3600;
 
     /**
-     * Bound strings (the pivot's own `version_min`/`version_max`) already logged as
-     * unparseable — same "once per process" reasoning as $loggedUnparseableVersions, keyed
-     * separately because a bad bound and a bad served version are different operator
-     * problems: one is a row to fix, the other is upstream data to tolerate.
+     * Records that `$value` has just been logged for `$namespace`, returning whether this
+     * call is the one that should actually emit the log line.
      *
-     * @var array<string, true>
+     * `Cache::add()` is the whole dedupe in one atomic call: it writes the key and returns
+     * true only if the key did not already exist, so two concurrent callers (or two calls
+     * within the same request) can never both be told "you're first". The raw value is
+     * hashed rather than interpolated into the key because a version or bound string can
+     * contain characters (whitespace, `:`, control bytes from a malformed feed) a cache key
+     * should not carry, and `$namespace` keeps a version-string dedupe and a bound-string
+     * dedupe — and the PyPI and Composer/npm variants of each — from colliding with each
+     * other, or with anything else in the shared cache, even when the raw value is
+     * identical across them.
      */
-    private static array $loggedUnparseableBounds = [];
+    private function shouldLogOnce(string $namespace, string $value): bool
+    {
+        $key = sprintf('licence-entitlement:unparseable:%s:%s', $namespace, hash('sha256', $value));
 
-    /**
-     * Same "once per process" dedupe as {@see $loggedUnparseableVersions}, for a Composer
-     * or npm version `VersionParser::normalize()` cannot parse — kept separate from that
-     * array (rather than shared with Python) because the two ecosystems log different
-     * text for the same fact, and a Composer and a Python version that happened to share
-     * one raw string must not silently dedupe against each other's log line.
-     *
-     * @var array<string, true>
-     */
-    private static array $loggedUnparseableSemverVersions = [];
-
-    /**
-     * Same reasoning as {@see $loggedUnparseableSemverVersions}, for a Composer/npm
-     * `version_min`/`version_max` bound that cannot be normalized.
-     *
-     * @var array<string, true>
-     */
-    private static array $loggedUnparseableSemverBounds = [];
+        return Cache::add($key, true, self::DEDUPE_WINDOW_SECONDS);
+    }
 
     /**
      * The bounds a single assignment grants, read straight off its pivot row — or `null` if
@@ -321,11 +319,9 @@ final class VersionEntitlement
 
     private function logUnparseableVersionOnce(string $version): void
     {
-        if (isset(self::$loggedUnparseableVersions[$version])) {
+        if (! $this->shouldLogOnce('pep440-version', $version)) {
             return;
         }
-
-        self::$loggedUnparseableVersions[$version] = true;
 
         Log::warning('PyPI version could not be parsed as PEP 440; refusing it under a bounded licence.', [
             'version' => $version,
@@ -340,11 +336,9 @@ final class VersionEntitlement
      */
     private function logUnparseableBoundOnce(string $bound): void
     {
-        if (isset(self::$loggedUnparseableBounds[$bound])) {
+        if (! $this->shouldLogOnce('pep440-bound', $bound)) {
             return;
         }
-
-        self::$loggedUnparseableBounds[$bound] = true;
 
         Log::warning('PyPI licence bound could not be parsed as PEP 440; refusing every version under it.', [
             'bound' => $bound,
@@ -354,11 +348,9 @@ final class VersionEntitlement
     /** Composer/npm counterpart of {@see logUnparseableVersionOnce()} — see permitsSemver(). */
     private function logUnparseableSemverVersionOnce(string $version): void
     {
-        if (isset(self::$loggedUnparseableSemverVersions[$version])) {
+        if (! $this->shouldLogOnce('semver-version', $version)) {
             return;
         }
-
-        self::$loggedUnparseableSemverVersions[$version] = true;
 
         Log::warning('Composer/npm version could not be normalized; refusing it under a bounded licence.', [
             'version' => $version,
@@ -368,11 +360,9 @@ final class VersionEntitlement
     /** Composer/npm counterpart of {@see logUnparseableBoundOnce()} — see permitsSemver(). */
     private function logUnparseableSemverBoundOnce(string $bound): void
     {
-        if (isset(self::$loggedUnparseableSemverBounds[$bound])) {
+        if (! $this->shouldLogOnce('semver-bound', $bound)) {
             return;
         }
-
-        self::$loggedUnparseableSemverBounds[$bound] = true;
 
         Log::warning('Composer/npm licence bound could not be normalized; refusing every version under it.', [
             'bound' => $bound,

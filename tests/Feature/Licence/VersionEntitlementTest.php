@@ -216,17 +216,56 @@ describe('permits', function () {
             expect($this->svc->permits($bounds, PackageType::Python, 'nicht-eine-version'))->toBeFalse();
         });
 
-        it('logs an unparseable version only once', function () {
+        it('logs an unparseable version only once within the dedupe window', function () {
             Log::shouldReceive('warning')->once();
 
             $bounds = VersionBounds::fromPivot('1.0', '2.0');
 
-            // A distinct version string from the other unparseable-version cases in this
-            // file: the dedupe is keyed by version string and process-lifetime, so reusing
-            // one already logged by a sibling test would make this assertion depend on
-            // test order rather than on the behaviour under test.
-            $this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version');
-            $this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version');
+            // Cache::add() dedupes on a per-key basis, and the test cache store is fresh
+            // per test (the whole application container is rebuilt in setUp()), so there
+            // is no longer a cross-test leakage concern here — this string need not be
+            // unique across the file, only within this test.
+            //
+            // Both calls must still refuse the version: whether the log fires is purely
+            // an observability concern, never a factor in the fail-closed decision itself.
+            expect($this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version'))->toBeFalse()
+                ->and($this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version'))->toBeFalse();
+        });
+
+        it('logs an unparseable version again once the dedupe window has elapsed', function () {
+            Log::shouldReceive('warning')->twice();
+
+            $bounds = VersionBounds::fromPivot('1.0', '2.0');
+
+            $this->svc->permits($bounds, PackageType::Python, 'window-elapsed-not-a-version');
+
+            $this->travel(61)->minutes();
+
+            $this->svc->permits($bounds, PackageType::Python, 'window-elapsed-not-a-version');
+        });
+
+        it('logs two different unparseable versions separately, with no collision between them', function () {
+            Log::shouldReceive('warning')->twice();
+
+            $bounds = VersionBounds::fromPivot('1.0', '2.0');
+
+            $this->svc->permits($bounds, PackageType::Python, 'first-distinct-not-a-version');
+            $this->svc->permits($bounds, PackageType::Python, 'second-distinct-not-a-version');
+        });
+
+        it('does not let an unparseable version and an unparseable bound sharing the same string suppress each other', function () {
+            Log::shouldReceive('warning')->twice();
+
+            $sharedString = 'shared-unparseable-string';
+
+            // First call: the bad value is the served version.
+            $this->svc->permits(VersionBounds::fromPivot('1.0', '2.0'), PackageType::Python, $sharedString);
+
+            // Second call: the very same string is now the bad value on the OTHER side —
+            // the min bound — of a version that itself parses fine. If the version-dedupe
+            // and bound-dedupe keys were not namespaced separately, this would be wrongly
+            // suppressed as "already logged".
+            $this->svc->permits(VersionBounds::fromPivot($sharedString, '2.0'), PackageType::Python, '1.5');
         });
 
         it('serves an unparseable version normally when bounds are unlimited, doing no filtering and no logging', function () {

@@ -79,11 +79,11 @@ it('404s the download for a version at/above the exclusive upper bound', functio
 // The PyPI-specific fail-closed pin: with bounds SET, a version PEP 440 cannot read is not
 // permitted. Pep440Version now reads a local version segment (`+cu118` et al.) and the
 // implicit post shorthand, so this fixture uses a version that is genuinely, not just
-// syntactically-locally, unparseable — see Pep440Version's own docblock. A version string
-// distinct from VersionEntitlementTest's own unparseable-version fixtures — the dedupe that
-// logs a warning only once per version string is process-lifetime (static), so reusing one
-// already logged by a sibling test file would make that file's "logs ... exactly once"
-// assertions depend on suite run order.
+// syntactically-locally, unparseable — see Pep440Version's own docblock. The unparseable-
+// version dedupe in VersionEntitlement is now a time-boxed Cache::add() rather than a
+// process-lifetime static, and the test cache store is rebuilt fresh per test, so this
+// fixture no longer needs a name distinct from VersionEntitlementTest's own — it is kept
+// descriptive of this file rather than renamed back to something generic.
 it('hides a dist whose version pep440 cannot parse when bounds are set, and 404s its download', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
