@@ -82,3 +82,22 @@ it('returns null, not a guess, for a string that is not a PEP 440 version', func
 it('returns null for an empty string', function () {
     expect(Pep440Version::parse(''))->toBeNull();
 });
+
+it('parses a local version segment and compares it equal to the same public version', function () {
+    expectEqual('2.1.0+cu118', '2.1.0');
+});
+
+it('parses the implicit post-release shorthand and orders it after the base release', function () {
+    expectOrdered('1.0', '1.0-1');
+    expectOrdered('1.0-1', '1.0.post2');
+});
+
+it('normalizes a local segment so -/_ and case differences parse to the same local segment', function () {
+    $a = Pep440Version::parse('1.0+Foo_Bar');
+    $b = Pep440Version::parse('1.0+foo.bar');
+
+    expect($a)->not->toBeNull()
+        ->and($b)->not->toBeNull()
+        ->and($a->localSegment())->toBe($b->localSegment())
+        ->and($a->localSegment())->toBe('foo.bar');
+});

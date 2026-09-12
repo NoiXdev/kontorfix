@@ -16,6 +16,18 @@ namespace App\Support\Licence;
  * to the caller, not a shortcoming to work around: a bound comparison against an unparseable
  * version cannot be answered honestly, and the safe default is to treat it as outside every
  * bounded window (fail closed) rather than guess an ordering.
+ *
+ * Two forms this class DOES read, per PEP 440's own normalization rules:
+ *  - A local version segment (`1.0+cu118`, `2.3.1+local.7`) — extremely common for ML
+ *    wheels (PyTorch and friends publish `2.1.0+cu118`, `+cpu`, `+rocm5.6`). It is parsed
+ *    into its own component ({@see localSegment()}) but deliberately IGNORED by
+ *    {@see compareTo()}: the reference `packaging` library ranks a local version ABOVE the
+ *    same public version when comparing two full versions, but a licence bound comparison
+ *    is a public-version comparison, so `2.1.0+cu118` must compare EQUAL to `2.1.0` for
+ *    ordering purposes — keeping the bound check simple and matching what a customer
+ *    licensed for `[2.0, 3.0)` actually expects to receive.
+ *  - The implicit post-release shorthand (`1.0-1`, meaning `1.0.post1`) — PEP 440's
+ *    "implicit post release" form, with no `post`/`rev`/`r` marker at all.
  */
 final class Pep440Version
 {
@@ -25,16 +37,29 @@ final class Pep440Version
      * modifiers (pre/post/dev) in one pass. Each modifier's own marker (`pre_l`/`post_l`/
      * `dev_l`) is captured separately from its optional digits (`pre_n`/`post_n`/`dev_n`) so
      * a marker with no digits — e.g. `1.0.dev` — is still detected as present, defaulting to
-     * `0`, rather than being indistinguishable from the marker being absent entirely. A local
-     * version segment (`+...`) is deliberately not matched, so any version carrying one fails
-     * to parse rather than being guessed at.
+     * `0`, rather than being indistinguishable from the marker being absent entirely.
+     *
+     * The post-release segment is an alternation of two forms, mirroring the reference
+     * `packaging` library's own grammar: the implicit shorthand `-N` (`post_implicit`,
+     * digits mandatory — that is the whole point of the shorthand), or the explicit
+     * `post`/`rev`/`r` marker (`post_l`/`post_n`, digits optional as above). Only one of the
+     * two can ever match for a given version.
+     *
+     * A trailing local version segment (`+...`) is captured into `local` — dot-separated
+     * alphanumeric/`-`/`_` parts — but is parsed as an opaque string, not decomposed further,
+     * since {@see compareTo()} never inspects it.
      */
     private const PATTERN = '/^
         (?:(?<epoch>[0-9]+)!)?
         (?<release>[0-9]+(?:\.[0-9]+)*)
         (?:[-_.]?(?<pre_l>a|b|c|rc|alpha|beta|pre|preview)[-_.]?(?<pre_n>[0-9]+)?)?
-        (?:[-_.]?(?<post_l>post|rev|r)[-_.]?(?<post_n>[0-9]+)?)?
+        (?:
+            -(?<post_implicit>[0-9]+)
+            |
+            (?:[-_.]?(?<post_l>post|rev|r)[-_.]?(?<post_n>[0-9]+)?)
+        )?
         (?:[-_.]?(?<dev_l>dev)[-_.]?(?<dev_n>[0-9]+)?)?
+        (?:\+(?<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
     $/x';
 
     /** Pre-release letter, normalised to its rank: alpha/a=0, beta/b=1, everything else (c, rc, pre, preview)=2. */
@@ -52,6 +77,7 @@ final class Pep440Version
         private readonly ?int $preNum,
         private readonly ?int $postNum,
         private readonly ?int $devNum,
+        private readonly ?string $local,
     ) {}
 
     public static function parse(string $version): ?self
@@ -81,7 +107,9 @@ final class Pep440Version
         }
 
         $postNum = null;
-        if (isset($m['post_l']) && $m['post_l'] !== '') {
+        if (isset($m['post_implicit']) && $m['post_implicit'] !== '') {
+            $postNum = (int) $m['post_implicit'];
+        } elseif (isset($m['post_l']) && $m['post_l'] !== '') {
             $postNum = isset($m['post_n']) && $m['post_n'] !== '' ? (int) $m['post_n'] : 0;
         }
 
@@ -90,7 +118,28 @@ final class Pep440Version
             $devNum = isset($m['dev_n']) ? (int) $m['dev_n'] : 0;
         }
 
-        return new self($epoch, $release, $preRank, $preNum, $postNum, $devNum);
+        // Unlike the other optional groups above, `local` is the pattern's last capturing
+        // group: PCRE only back-fills an unmatched optional group with '' when a later group
+        // in the same match went on to match something, so an absent local segment simply
+        // never appears in $m at all — isset() alone distinguishes "absent" from "present",
+        // with no possible empty-string case to also guard against.
+        $local = null;
+        if (isset($m['local'])) {
+            $local = str_replace(['-', '_'], '.', $m['local']);
+        }
+
+        return new self($epoch, $release, $preRank, $preNum, $postNum, $devNum, $local);
+    }
+
+    /**
+     * The normalized local version segment (`+cu118` → `cu118`, `+Foo_Bar` → `foo.bar`), or
+     * `null` when the version carried none. Exposed for callers that want to display or log
+     * it, but deliberately never consulted by {@see compareTo()} — see the class docblock for
+     * why a licence bound comparison must ignore it.
+     */
+    public function localSegment(): ?string
+    {
+        return $this->local;
     }
 
     /**

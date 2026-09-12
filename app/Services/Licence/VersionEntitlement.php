@@ -150,11 +150,12 @@ final class VersionEntitlement
      *
      * Composer and npm share one semver comparator; PyPI's PEP 440 ordering (epochs,
      * pre/post/dev segments) has no equivalent in `composer/semver`, so it goes through
-     * `Pep440Version` instead. A version PEP 440 cannot parse with confidence — including a
-     * local version (`1.0+cu118`) or the implicit post shorthand (`1.0-1`) — cannot be
-     * placed against a bound honestly, so a bounded licence fails closed and refuses it;
-     * the refusal is logged once per version so an upstream feed full of local versions does
-     * not flood the log. The same fail-closed rule applies the other way round: if the bound
+     * `Pep440Version` instead, which also reads a local version segment (`1.0+cu118`) and
+     * the implicit post shorthand (`1.0-1`) — see that class's docblock. A version PEP 440
+     * still cannot parse with confidence cannot be placed against a bound honestly, so a
+     * bounded licence fails closed and refuses it; the refusal is logged once per version so
+     * an upstream feed full of unparseable versions does not flood the log. The same
+     * fail-closed rule applies the other way round: if the bound
      * itself (the pivot's own `version_min`/`version_max`) cannot be parsed — {@see
      * \App\Services\Package\AssignmentWriter::assertValidBounds()} now refuses a
      * syntactically invalid bound at write time, but that guard cannot reach a row written

@@ -213,7 +213,7 @@ describe('permits', function () {
 
             $bounds = VersionBounds::fromPivot('1.0', '2.0');
 
-            expect($this->svc->permits($bounds, PackageType::Python, '1.0+cu118'))->toBeFalse();
+            expect($this->svc->permits($bounds, PackageType::Python, 'nicht-eine-version'))->toBeFalse();
         });
 
         it('logs an unparseable version only once', function () {
@@ -225,14 +225,14 @@ describe('permits', function () {
             // file: the dedupe is keyed by version string and process-lifetime, so reusing
             // one already logged by a sibling test would make this assertion depend on
             // test order rather than on the behaviour under test.
-            $this->svc->permits($bounds, PackageType::Python, '1.0+onlyonce');
-            $this->svc->permits($bounds, PackageType::Python, '1.0+onlyonce');
+            $this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version');
+            $this->svc->permits($bounds, PackageType::Python, 'onlyonce-not-a-version');
         });
 
         it('serves an unparseable version normally when bounds are unlimited, doing no filtering and no logging', function () {
             Log::shouldReceive('warning')->never();
 
-            expect($this->svc->permits(VersionBounds::unlimited(), PackageType::Python, '1.0+cu118'))->toBeTrue();
+            expect($this->svc->permits(VersionBounds::unlimited(), PackageType::Python, 'nicht-eine-version'))->toBeTrue();
         });
 
         it('fails closed when the stored min bound itself cannot be parsed as PEP 440', function () {
@@ -241,7 +241,7 @@ describe('permits', function () {
             // An invalid row that write-path validation (a later task) will eventually
             // refuse to create — but nothing here should ever guess it means "no lower
             // bound" just because it could not be read.
-            $bounds = VersionBounds::fromPivot('1.0+cu118', '2.0');
+            $bounds = VersionBounds::fromPivot('nicht-eine-min-version', '2.0');
 
             expect($this->svc->permits($bounds, PackageType::Python, '1.5'))->toBeFalse();
         });
@@ -249,9 +249,30 @@ describe('permits', function () {
         it('fails closed when the stored max bound itself cannot be parsed as PEP 440', function () {
             Log::shouldReceive('warning')->once();
 
-            $bounds = VersionBounds::fromPivot('1.0', '2.0+cu118');
+            $bounds = VersionBounds::fromPivot('1.0', 'nicht-eine-max-version');
 
             expect($this->svc->permits($bounds, PackageType::Python, '1.5'))->toBeFalse();
+        });
+
+        // The customer-facing bug this branch fixes: a licence bounded to [2.0, 3.0) must
+        // still serve a local-version wheel build. PEP 440 orders a local version equal to
+        // its public version for bound purposes (packaging ranks it strictly above when
+        // comparing two full versions, but a licence bound is a public-version comparison —
+        // see Pep440Version::parse()'s docblock), so 2.1.0+cu118 sits inside [2.0, 3.0).
+        it('permits a local version whose public version sits inside the bounds', function () {
+            $bounds = VersionBounds::fromPivot('2.0', '3.0');
+
+            expect($this->svc->permits($bounds, PackageType::Python, '2.1.0+cu118'))->toBeTrue();
+        });
+
+        // The fail-closed rule this branch must NOT weaken: a version PEP 440 genuinely
+        // cannot read is still refused under a bounded licence, local-segment support or not.
+        it('still fails closed on a genuinely unparseable version under bounds, even after local-version support', function () {
+            Log::shouldReceive('warning')->once();
+
+            $bounds = VersionBounds::fromPivot('2.0', '3.0');
+
+            expect($this->svc->permits($bounds, PackageType::Python, 'not-a-real-version-at-all'))->toBeFalse();
         });
     });
 });

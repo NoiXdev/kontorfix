@@ -77,17 +77,18 @@ it('404s the download for a version at/above the exclusive upper bound', functio
 });
 
 // The PyPI-specific fail-closed pin: with bounds SET, a version PEP 440 cannot read is not
-// permitted — the `+` local-version segment is deliberately unmatched by Pep440Version's
-// pattern (see its docblock), so this version is unparseable by construction, not by
-// accident. A version string distinct from VersionEntitlementTest's own unparseable-version
-// fixtures ('1.0+cu118' et al.) — the dedupe that logs a warning only once per version
-// string is process-lifetime (static), so reusing one already logged by a sibling test file
-// would make that file's "logs ... exactly once" assertions depend on suite run order.
+// permitted. Pep440Version now reads a local version segment (`+cu118` et al.) and the
+// implicit post shorthand, so this fixture uses a version that is genuinely, not just
+// syntactically-locally, unparseable — see Pep440Version's own docblock. A version string
+// distinct from VersionEntitlementTest's own unparseable-version fixtures — the dedupe that
+// logs a warning only once per version string is process-lifetime (static), so reusing one
+// already logged by a sibling test file would make that file's "logs ... exactly once"
+// assertions depend on suite run order.
 it('hides a dist whose version pep440 cannot parse when bounds are set, and 404s its download', function () {
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Python, 'name' => 'acme-oddball', 'repository_url' => null]);
-    $dist = PythonDist::factory()->for($pkg)->create(['version' => '1.0+pypilicencetest', 'filename' => 'acme_oddball-1.0+pypilicencetest.tar.gz']);
+    $dist = PythonDist::factory()->for($pkg)->create(['version' => 'pypilicencetest-not-a-version', 'filename' => 'acme_oddball-pypilicencetest-not-a-version.tar.gz']);
     Storage::disk('artifacts')->put($dist->path, 'bytes');
     $group->packages()->attach($pkg, ['version_min' => '1.0', 'version_max' => '2.0']);
 
@@ -97,7 +98,7 @@ it('hides a dist whose version pep440 cannot parse when bounds are set, and 404s
     expect($jsonRes->json('files'))->toBe([]);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get(registryPath($group)."/pypi/files/{$pkg->id}/acme_oddball-1.0+pypilicencetest.tar.gz")
+        ->get(registryPath($group)."/pypi/files/{$pkg->id}/acme_oddball-pypilicencetest-not-a-version.tar.gz")
         ->assertNotFound();
 });
 
@@ -107,17 +108,17 @@ it('serves a dist whose version pep440 cannot parse normally when the assignment
     Storage::fake('artifacts');
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
     $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Python, 'name' => 'acme-oddball', 'repository_url' => null]);
-    $dist = PythonDist::factory()->for($pkg)->create(['version' => '1.0+pypilicencetest', 'filename' => 'acme_oddball-1.0+pypilicencetest.tar.gz']);
+    $dist = PythonDist::factory()->for($pkg)->create(['version' => 'pypilicencetest-not-a-version', 'filename' => 'acme_oddball-pypilicencetest-not-a-version.tar.gz']);
     Storage::disk('artifacts')->put($dist->path, 'bytes');
     $group->packages()->attach($pkg);
 
     $jsonRes = $this->withHeaders(tokenHeaderFor($group) + ['Accept' => PYPI_JSON_ACCEPT])
         ->get(registryPath($group).'/simple/acme-oddball/')
         ->assertOk();
-    expect($jsonRes->json('versions'))->toBe(['1.0+pypilicencetest']);
+    expect($jsonRes->json('versions'))->toBe(['pypilicencetest-not-a-version']);
 
     $this->withHeaders(tokenHeaderFor($group))
-        ->get(registryPath($group)."/pypi/files/{$pkg->id}/acme_oddball-1.0+pypilicencetest.tar.gz")
+        ->get(registryPath($group)."/pypi/files/{$pkg->id}/acme_oddball-pypilicencetest-not-a-version.tar.gz")
         ->assertOk();
 });
 
