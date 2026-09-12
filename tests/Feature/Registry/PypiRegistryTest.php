@@ -11,6 +11,7 @@ use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\Upstream;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 /** @return array{0: Group, 1: Package} */
@@ -102,6 +103,38 @@ it('serves the PEP 503 simple index resolving the normalised name', function () 
     $res->assertSee('my_package-1.0.0.tar.gz', false);
     $res->assertSee('#sha256='.str_repeat('a', 64), false);
     $res->assertSee('data-requires-python="&gt;=3.9"', false);
+});
+
+it('answers 404, not the project page, when the assignment is revoked between resolve and bounds check', function () {
+    // PyPI's simpleProject()-side instance of the race pinned end-to-end in ComposerFlowTest
+    // for ComposerController::metadata(): VersionEntitlement::boundsFor() must fail closed
+    // when AssignmentWriter::revoke() (no transaction) detaches the pivot row in the window
+    // between pythonPackagesOfGroup()/canAccessPackage() resolving the project and
+    // simpleProject()'s own separate boundsFor() call. Same DB::beforeExecuting() hook, same
+    // predicate-shape match — see that test's docblock for the drift scenario that would
+    // break the match.
+    [$group, $pkg] = pythonRegistry();
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('a', 64), 'size' => 10, 'uploaded_at' => now(),
+    ]);
+    $headers = tokenHeaderFor($group);
+
+    $detached = false;
+    DB::beforeExecuting(function (string $query) use (&$detached, $group, $pkg) {
+        if (! $detached
+            && str_contains($query, 'group_package')
+            && ! str_contains($query, 'available_until" is null or')
+        ) {
+            $detached = true;
+            $group->packages()->detach($pkg->getKey());
+        }
+    });
+
+    $this->withHeaders($headers)->get(registryPath($group).'/simple/my-package/')->assertNotFound();
+
+    expect($detached)->toBeTrue()
+        ->and($group->packages()->whereKey($pkg->id)->exists())->toBeFalse();
 });
 
 it('serves PEP 691 JSON when the client asks for it', function () {
@@ -384,6 +417,41 @@ it('downloads a stored distribution and counts the download', function () {
         ->assertOk();
 
     expect($dist->fresh()->download_count)->toBe(1);
+});
+
+it('answers 404, not the file, when the assignment is revoked between resolve and bounds check', function () {
+    // PyPI's download()-side instance of the race pinned end-to-end in ComposerFlowTest for
+    // ComposerController::dist(): VersionEntitlement::boundsFor() must fail closed when
+    // AssignmentWriter::revoke() (no transaction) detaches the pivot row in the window
+    // between canAccessPackage() resolving the project and download()'s own separate
+    // boundsFor() call. Same DB::beforeExecuting() hook, same predicate-shape match — see
+    // that test's docblock for the drift scenario that would break the match.
+    Storage::fake('artifacts');
+    [$group, $pkg] = pythonRegistry();
+    Storage::disk('artifacts')->put("pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'data');
+    $pkg->pythonDists()->create([
+        'version' => '1.0.0', 'filename' => 'my_package-1.0.0.tar.gz', 'filetype' => 'sdist',
+        'path' => "pypi/{$pkg->id}/my_package-1.0.0.tar.gz", 'sha256' => str_repeat('c', 64), 'size' => 4, 'uploaded_at' => now(),
+    ]);
+    $headers = tokenHeaderFor($group);
+
+    $detached = false;
+    DB::beforeExecuting(function (string $query) use (&$detached, $group, $pkg) {
+        if (! $detached
+            && str_contains($query, 'group_package')
+            && ! str_contains($query, 'available_until" is null or')
+        ) {
+            $detached = true;
+            $group->packages()->detach($pkg->getKey());
+        }
+    });
+
+    $this->withHeaders($headers)
+        ->get(registryPath($group)."/pypi/files/{$pkg->id}/my_package-1.0.0.tar.gz")
+        ->assertNotFound();
+
+    expect($detached)->toBeTrue()
+        ->and($group->packages()->whereKey($pkg->id)->exists())->toBeFalse();
 });
 
 it('never forwards a locally-known project to an upstream (dependency confusion)', function () {

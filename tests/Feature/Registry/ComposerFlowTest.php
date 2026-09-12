@@ -70,6 +70,11 @@ it('answers 404, not every version, when the assignment is revoked between resol
     $group->packages()->attach($pkg);
     $headers = tokenHeaderFor($group);
 
+    // Drift to watch for: this match identifies boundsFor()'s query only as long as it is
+    // the sole `group_package` read on this path without the `available_until` predicate —
+    // if the RESOLUTION query (findLocal()'s, above) ever lost that predicate, this hook
+    // would fire on that query instead, and the test would still pass (a resolution-time
+    // detach 404s too) while no longer exercising boundsFor()'s own null branch at all.
     $detached = false;
     DB::beforeExecuting(function (string $query, array $bindings) use (&$detached, $group, $pkg) {
         if (! $detached

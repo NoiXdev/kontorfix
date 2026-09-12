@@ -6,6 +6,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use App\Models\PackageVersion;
+use Illuminate\Support\Facades\DB;
 
 it('serves an npm packument for an assigned scoped package', function () {
     $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
@@ -41,6 +42,38 @@ it('401 without token, 404 for unassigned npm package', function () {
 
     $this->getJson(registryPath($group).'/leftpad')->assertUnauthorized();
     $this->withHeaders(tokenHeaderFor($group))->getJson(registryPath($group).'/secret')->assertNotFound();
+});
+
+it('answers 404, not the packument, when the assignment is revoked between resolve and bounds check', function () {
+    // npm's own instance of the race ComposerFlowTest's version of this test pins for
+    // ComposerController::metadata(): VersionEntitlement::boundsFor() must fail closed when
+    // AssignmentWriter::revoke() (no transaction) detaches the pivot row in the window
+    // between findLocal() resolving the package and NpmController::respondPackument()'s own
+    // separate boundsFor() call. Same DB::beforeExecuting() hook, same predicate-shape match
+    // — see that test's docblock for why matching the literal "available_until" column name
+    // is not enough, and for what would have to change for this match to stop identifying
+    // the right query.
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['type' => PackageType::Npm, 'name' => 'leftpad']);
+    PackageVersion::factory()->for($pkg)->create(['version' => '1.0.0', 'version_pretty' => '1.0.0', 'metadata' => [], 'dist_tarball_name' => 'leftpad-1.0.0.tgz']);
+    $group->packages()->attach($pkg);
+    $headers = tokenHeaderFor($group);
+
+    $detached = false;
+    DB::beforeExecuting(function (string $query) use (&$detached, $group, $pkg) {
+        if (! $detached
+            && str_contains($query, 'group_package')
+            && ! str_contains($query, 'available_until" is null or')
+        ) {
+            $detached = true;
+            $group->packages()->detach($pkg->getKey());
+        }
+    });
+
+    $this->withHeaders($headers)->getJson(registryPath($group).'/leftpad')->assertNotFound();
+
+    expect($detached)->toBeTrue()
+        ->and($group->packages()->whereKey($pkg->id)->exists())->toBeFalse();
 });
 
 it('does not shadow the composer root or p2 routes', function () {
