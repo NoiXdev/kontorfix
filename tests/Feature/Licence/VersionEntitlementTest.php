@@ -7,6 +7,7 @@ use App\Models\Package;
 use App\Services\Licence\VersionEntitlement;
 use App\Support\Licence\VersionBounds;
 use App\Support\Licence\VersionWindows;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -100,6 +101,24 @@ describe('permits', function () {
             $bounds = VersionBounds::fromPivot('not-a-version', '3.0');
 
             expect($this->svc->permits($bounds, PackageType::Composer, '2.5.0'))->toBeFalse();
+        });
+
+        // The semver-namespace counterpart of the PEP 440 namespacing pin below: an
+        // unnormalizable Composer version and an unnormalizable Composer bound that happen
+        // to share one raw string must log separately rather than dedupe against each
+        // other — proving logUnparseableSemverVersionOnce() and
+        // logUnparseableSemverBoundOnce() are namespaced apart, not just inspected as such.
+        it('does not let an unnormalizable composer version and an unnormalizable composer bound sharing the same string suppress each other', function () {
+            Log::shouldReceive('warning')->twice();
+
+            $sharedString = 'shared-unnormalizable-string';
+
+            // First call: the bad value is the served version.
+            $this->svc->permits(VersionBounds::fromPivot('2.0.0', '3.0.0'), PackageType::Composer, $sharedString);
+
+            // Second call: the same string is now the bad value on the bound side, of a
+            // version that itself normalizes fine.
+            $this->svc->permits(VersionBounds::fromPivot($sharedString, '3.0.0'), PackageType::Composer, '2.5.0');
         });
     });
 
@@ -313,6 +332,23 @@ describe('permits', function () {
 
             expect($this->svc->permits($bounds, PackageType::Python, 'not-a-real-version-at-all'))->toBeFalse();
         });
+    });
+});
+
+describe('unparseable-value dedupe resilience', function () {
+    // The dedupe is best-effort observability bolted onto a decision permits() has
+    // already made — it must never be able to turn a cache-store outage into a broken
+    // response. Forcing Cache::add() to throw proves shouldLogOnce() swallows the
+    // exception, still emits the warning (losing only the dedupe for this one call), and
+    // — most importantly — permits() still returns its normal fail-closed answer instead
+    // of letting the exception escape as an uncaught 500.
+    it('still refuses and still logs when the cache store throws, without the exception escaping permits()', function () {
+        Cache::shouldReceive('add')->once()->andThrow(new RuntimeException('cache store unavailable'));
+        Log::shouldReceive('warning')->once();
+
+        $bounds = VersionBounds::fromPivot('1.0', '2.0');
+
+        expect($this->svc->permits($bounds, PackageType::Python, 'cache-outage-not-a-version'))->toBeFalse();
     });
 });
 

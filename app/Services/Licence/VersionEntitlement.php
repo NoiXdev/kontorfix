@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use LogicException;
+use Throwable;
 use UnexpectedValueException;
 
 /**
@@ -59,12 +60,25 @@ final class VersionEntitlement
      * dedupe — and the PyPI and Composer/npm variants of each — from colliding with each
      * other, or with anything else in the shared cache, even when the raw value is
      * identical across them.
+     *
+     * Deliberately fails OPEN on a cache-store exception (Redis refused, DB connection
+     * lost, …) — the opposite of every other fail-closed rule in this class, and
+     * intentionally so: this mechanism is best-effort observability bolted onto a decision
+     * that has already been made (permits() has already computed its refusal by the time
+     * either caller reaches this method), never a gate on it. Letting the exception escape
+     * would turn a cache outage into an uncaught 500 on every request for an already-known-
+     * bad version, where the caller previously refused cleanly — the dedupe is worth losing
+     * for that one call, the clean refusal is not.
      */
     private function shouldLogOnce(string $namespace, string $value): bool
     {
         $key = sprintf('licence-entitlement:unparseable:%s:%s', $namespace, hash('sha256', $value));
 
-        return Cache::add($key, true, self::DEDUPE_WINDOW_SECONDS);
+        try {
+            return Cache::add($key, true, self::DEDUPE_WINDOW_SECONDS);
+        } catch (Throwable) {
+            return true;
+        }
     }
 
     /**
