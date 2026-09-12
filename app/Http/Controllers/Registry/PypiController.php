@@ -238,6 +238,15 @@ class PypiController extends Controller
             // dependency-confusion guard's upstream fallthrough — only individual dists are
             // hidden here, never the project's existence.
             $bounds = $this->entitlement->boundsFor($group, $pkg);
+
+            // null means the assignment vanished between resolving $pkg above and this
+            // query — e.g. a revoke landing mid-request (AssignmentWriter::revoke() detaches
+            // with no transaction) — and must be refused exactly like any other "not
+            // accessible to this registry" case, never served as if unbounded.
+            if ($bounds === null) {
+                abort(404);
+            }
+
             $dists = $pkg->pythonDists()->orderBy('filename')->get()
                 ->filter(fn (PythonDist $d): bool => $this->entitlement->permits($bounds, PackageType::Python, $d->version))
                 ->values();
@@ -359,17 +368,24 @@ class PypiController extends Controller
         // 404 exactly like an unknown file (same shape, checked BEFORE any disk access
         // below) — refused, not merely hidden from the index while still downloadable.
         // Mirrors ComposerController::dist()/NpmController's tarball endpoint.
-        $permitted = $organization !== null
-            ? $this->entitlement->permitsAny(
+        if ($organization !== null) {
+            $permitted = $this->entitlement->permitsAny(
                 $this->entitlement->windowsForOrganization($organization, $pkg),
                 PackageType::Python,
                 $dist->version,
-            )
-            : $this->entitlement->permits(
-                $this->entitlement->boundsFor($group, $pkg),
-                PackageType::Python,
-                $dist->version,
             );
+        } else {
+            $bounds = $this->entitlement->boundsFor($group, $pkg);
+
+            // null means the assignment vanished between resolving $pkg above and this
+            // query — the same in-flight-revoke race simpleProject() guards against — and
+            // must be refused rather than treated as an unbounded licence.
+            if ($bounds === null) {
+                abort(404);
+            }
+
+            $permitted = $this->entitlement->permits($bounds, PackageType::Python, $dist->version);
+        }
 
         if (! $permitted) {
             abort(404);

@@ -5,6 +5,7 @@ use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
 use Composer\MetadataMinifier\MetadataMinifier;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\Support\FixtureRepo;
 
@@ -42,6 +43,53 @@ it('serves a client that lacks a token nothing but a 401 challenge across the fl
     $this->getJson(registryPath($group).'/packages.json')->assertUnauthorized();
     $this->getJson(registryPath($group).'/p2/acme/demo.json')->assertUnauthorized();
     $this->get(registryPath($group).'/dists/acme/demo/1.0.0.0.zip')->assertUnauthorized();
+});
+
+it('answers 404, not every version, when the assignment is revoked between resolve and bounds check', function () {
+    // The race VersionEntitlement::boundsFor()'s docblock names: AssignmentWriter::revoke()
+    // detaches with no transaction, so a revoke landing between ComposerController::metadata()
+    // resolving the package (findLocal(), through Group::assignedPackages(), which DOES
+    // filter on `available_until` being null/in the future) and its own separate boundsFor()
+    // query (Group::packages(), which deliberately does NOT restate that predicate — see
+    // boundsFor()'s own docblock) can make that second, later query find no pivot row at
+    // all.
+    //
+    // Reproduced with a real, unmocked request-response cycle by hooking
+    // Connection::beforeExecuting(): the ONLY `group_package` query on this path with no
+    // `available_until IS NULL OR ... >` predicate is boundsFor()'s own — every resolution
+    // query upstream of it carries that predicate (boundsFor()'s query still SELECTs the
+    // `available_until` pivot column, just never filters on it, so matching has to look for
+    // the predicate shape, not just the column name). Detaching right there, immediately
+    // before that exact query runs, plants the revoke in the precise window between the two
+    // reads, deterministically, instead of relying on genuine thread interleaving — and
+    // still runs the real production boundsFor() implementation, not a stubbed answer.
+    Storage::fake('artifacts');
+    $group = Group::factory()->for(Organization::factory())->create(['slug' => 'kadenz']);
+    $pkg = Package::factory()->inOrgOf($group)->create(['name' => 'acme/demo', 'repository_url' => 'file://'.FixtureRepo::make()]);
+    (new SyncPackage($pkg))->handle();
+    $group->packages()->attach($pkg);
+    $headers = tokenHeaderFor($group);
+
+    $detached = false;
+    DB::beforeExecuting(function (string $query, array $bindings) use (&$detached, $group, $pkg) {
+        if (! $detached
+            && str_contains($query, 'group_package')
+            && ! str_contains($query, 'available_until" is null or')
+        ) {
+            $detached = true;
+            $group->packages()->detach($pkg->getKey());
+        }
+    });
+
+    // A fail-open bounds answer would serve the metadata document (and every version in
+    // it); the fix must answer the same 404 the endpoint already gives for "not accessible
+    // to this registry".
+    $this->withHeaders($headers)
+        ->getJson(registryPath($group).'/p2/acme/demo.json')
+        ->assertNotFound();
+
+    expect($detached)->toBeTrue()
+        ->and($group->packages()->whereKey($pkg->id)->exists())->toBeFalse();
 });
 
 /*

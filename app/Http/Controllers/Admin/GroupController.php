@@ -537,6 +537,15 @@ class GroupController extends Controller
         // write() validates and persists.
         $current = $entitlement->boundsFor($group, $package);
 
+        // Cannot happen in practice: the abort_unless() just above already proved the pivot
+        // row exists, and nothing in this request detaches it before this call. Handled
+        // anyway, defensively, now that boundsFor() can answer null at all — the same 404
+        // the existence check above would have given, not a null-pointer error reading
+        // $current->min/$current->max below.
+        if ($current === null) {
+            abort(404);
+        }
+
         $writer->write(
             $group,
             $package,

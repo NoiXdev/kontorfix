@@ -315,7 +315,8 @@ describe('boundsFor', function () {
 
         $bounds = $this->svc->boundsFor($group->fresh(), $package);
 
-        expect($bounds->min)->toBe('1.0')
+        expect($bounds)->not->toBeNull()
+            ->and($bounds->min)->toBe('1.0')
             ->and($bounds->max)->toBe('2.0');
     });
 
@@ -326,16 +327,21 @@ describe('boundsFor', function () {
 
         $bounds = $this->svc->boundsFor($group->fresh(), $package);
 
-        expect($bounds->isUnlimited())->toBeTrue();
+        expect($bounds)->not->toBeNull()
+            ->and($bounds->isUnlimited())->toBeTrue();
     });
 
-    it('is unlimited when there is no assignment row at all', function () {
+    // Fail CLOSED, not open: no pivot row means no assignment was found for this group,
+    // which must be indistinguishable from "not available" to every caller — never treated
+    // as an unbounded licence. See VersionEntitlement::boundsFor()'s own docblock and its
+    // twin, VersionWindows::isUnlimited(), which states the identical rule for the org path.
+    it('returns null when there is no assignment row at all', function () {
         $group = Group::factory()->create();
         $package = Package::factory()->inOrgOf($group)->create();
 
         $bounds = $this->svc->boundsFor($group, $package);
 
-        expect($bounds->isUnlimited())->toBeTrue();
+        expect($bounds)->toBeNull();
     });
 });
 

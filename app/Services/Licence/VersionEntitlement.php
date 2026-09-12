@@ -70,21 +70,35 @@ final class VersionEntitlement
     private static array $loggedUnparseableSemverBounds = [];
 
     /**
-     * The bounds a single assignment grants, read straight off its pivot row.
+     * The bounds a single assignment grants, read straight off its pivot row — or `null` if
+     * no such row exists for this (group, package) pair.
      *
      * Deliberately reads `Group::packages()`, not `assignedPackages()`: whether the
      * assignment is still in force is a separate question the caller has already answered
      * (or is answering via `windowsForOrganization()`), and restating the expiry predicate
      * here would risk the two disagreeing about which row counts.
+     *
+     * `null` on a missing row, rather than `VersionBounds::unlimited()`, is what makes this
+     * method fail CLOSED: nothing holds a transaction across a caller's own "resolve" read
+     * and this one, so `AssignmentWriter::revoke()` (which detaches with no transaction) can
+     * land in between and leave this query with no row to find, for a request that had
+     * every reason to believe an assignment existed a moment earlier. Every caller must
+     * treat `null` as "not available to this registry" — the same answer it already gives
+     * when resolution itself fails — never as license to serve anything. This is
+     * `windowsForOrganization()`'s twin for the single-group path: that method states the
+     * identical rule for the org-wide union through `VersionWindows::isUnlimited()`'s
+     * docblock (an empty window list is not unlimited, for the same race, stated there
+     * first) — the two must keep agreeing on which shape of "nothing found" is refused
+     * versus which shape of "found, no bounds" is unlimited.
      */
-    public function boundsFor(Group $group, Package $package): VersionBounds
+    public function boundsFor(Group $group, Package $package): ?VersionBounds
     {
         $assignment = $group->packages()
             ->where('packages.id', $package->getKey())
             ->first();
 
         if ($assignment === null) {
-            return VersionBounds::unlimited();
+            return null;
         }
 
         return VersionBounds::fromPivot($assignment->pivot->version_min, $assignment->pivot->version_max);

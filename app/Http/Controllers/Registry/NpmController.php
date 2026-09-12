@@ -78,6 +78,14 @@ class NpmController extends Controller
         if ($pkg !== null) {
             $bounds = $this->entitlement->boundsFor($group, $pkg);
 
+            // null means the assignment vanished between findLocal() resolving the package
+            // and this query — e.g. a revoke landing mid-request (AssignmentWriter::revoke()
+            // detaches with no transaction) — and must be refused exactly like any other
+            // "not accessible to this registry" case, never served as if unbounded.
+            if ($bounds === null) {
+                abort(404);
+            }
+
             return response()->json($this->metadata->build($pkg, $this->registryBaseUrl($request, $group), $bounds));
         }
 
@@ -144,17 +152,24 @@ class NpmController extends Controller
         // refused, mirroring ComposerController::dist(). findAccessible()/
         // organizationPackage() above stay unfiltered by bounds on purpose: a name licensed
         // at any window still resolves the package, only individual versions are hidden.
-        $permitted = $organization !== null
-            ? $this->entitlement->permitsAny(
+        if ($organization !== null) {
+            $permitted = $this->entitlement->permitsAny(
                 $this->entitlement->windowsForOrganization($organization, $pkg),
                 PackageType::Npm,
                 $version->version,
-            )
-            : $this->entitlement->permits(
-                $this->entitlement->boundsFor($group, $pkg),
-                PackageType::Npm,
-                $version->version,
             );
+        } else {
+            $bounds = $this->entitlement->boundsFor($group, $pkg);
+
+            // null means the assignment vanished between resolving the package above and
+            // this query — the same in-flight-revoke race respondPackument() guards against
+            // — and must be refused rather than treated as an unbounded licence.
+            if ($bounds === null) {
+                abort(404);
+            }
+
+            $permitted = $this->entitlement->permits($bounds, PackageType::Npm, $version->version);
+        }
 
         if (! $permitted) {
             abort(404);

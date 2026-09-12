@@ -112,6 +112,14 @@ class ComposerController extends Controller
         if ($package !== null) {
             $bounds = $this->entitlement->boundsFor($group, $package);
 
+            // null means the assignment vanished between findLocal() resolving the package
+            // and this query — e.g. a revoke landing mid-request (AssignmentWriter::revoke()
+            // detaches with no transaction) — and must be refused exactly like any other
+            // "not accessible to this registry" case, never served as if unbounded.
+            if ($bounds === null) {
+                abort(404);
+            }
+
             return response()->json($this->metadata->build($package, $this->registryBaseUrl($request, $group), $bounds));
         }
 
@@ -181,17 +189,24 @@ class ComposerController extends Controller
             abort(404);
         }
 
-        $permitted = $organization !== null
-            ? $this->entitlement->permitsAny(
+        if ($organization !== null) {
+            $permitted = $this->entitlement->permitsAny(
                 $this->entitlement->windowsForOrganization($organization, $package),
                 PackageType::Composer,
                 $pkgVersion->version,
-            )
-            : $this->entitlement->permits(
-                $this->entitlement->boundsFor($group, $package),
-                PackageType::Composer,
-                $pkgVersion->version,
             );
+        } else {
+            $bounds = $this->entitlement->boundsFor($group, $package);
+
+            // null means the assignment vanished between resolving the package above and
+            // this query — the same in-flight-revoke race metadata() guards against — and
+            // must be refused rather than treated as an unbounded licence.
+            if ($bounds === null) {
+                abort(404);
+            }
+
+            $permitted = $this->entitlement->permits($bounds, PackageType::Composer, $pkgVersion->version);
+        }
 
         if (! $permitted) {
             abort(404);
