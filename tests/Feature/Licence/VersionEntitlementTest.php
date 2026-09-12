@@ -339,12 +339,24 @@ describe('unparseable-value dedupe resilience', function () {
     // The dedupe is best-effort observability bolted onto a decision permits() has
     // already made — it must never be able to turn a cache-store outage into a broken
     // response. Forcing Cache::add() to throw proves shouldLogOnce() swallows the
-    // exception, still emits the warning (losing only the dedupe for this one call), and
-    // — most importantly — permits() still returns its normal fail-closed answer instead
-    // of letting the exception escape as an uncaught 500.
-    it('still refuses and still logs when the cache store throws, without the exception escaping permits()', function () {
+    // exception rather than letting it escape permits() as an uncaught 500, but does NOT
+    // discard it: the throwable gets its own warning line (naming the exception class and
+    // message, so a genuine cache-layer bug stays visible instead of vanishing into an
+    // ordinary "unparseable version" line), and the licence warning still fires as normal
+    // — both lines, not one swallowed for the other.
+    it('logs the cache failure AND the licence warning, and still refuses, when the cache store throws', function () {
         Cache::shouldReceive('add')->once()->andThrow(new RuntimeException('cache store unavailable'));
-        Log::shouldReceive('warning')->once();
+
+        Log::shouldReceive('warning')->once()->with(
+            'Licence entitlement dedupe cache is unavailable; logging without deduplication.',
+            Mockery::on(fn (array $context): bool => $context['exception'] === RuntimeException::class
+                && $context['message'] === 'cache store unavailable'),
+        );
+
+        Log::shouldReceive('warning')->once()->with(
+            'PyPI version could not be parsed as PEP 440; refusing it under a bounded licence.',
+            ['version' => 'cache-outage-not-a-version'],
+        );
 
         $bounds = VersionBounds::fromPivot('1.0', '2.0');
 

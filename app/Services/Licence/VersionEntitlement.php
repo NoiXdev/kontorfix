@@ -69,6 +69,15 @@ final class VersionEntitlement
      * would turn a cache outage into an uncaught 500 on every request for an already-known-
      * bad version, where the caller previously refused cleanly — the dedupe is worth losing
      * for that one call, the clean refusal is not.
+     *
+     * Deliberately catches `Throwable`, not `Exception`: narrowing this would let the
+     * `Error` family (e.g. a `TypeError` from a misconfigured cache store) escape and
+     * reopen exactly the serve-path 500 this guard exists to prevent — "observability must
+     * never break serving" has to hold for every failure kind, not just the ones that
+     * happen to extend `Exception`. The throwable is not silently discarded either: it is
+     * logged in its own right (distinct from the licence warning that follows) so a
+     * genuine cache-layer bug remains visible instead of vanishing into an ordinary
+     * "unparseable version" line.
      */
     private function shouldLogOnce(string $namespace, string $value): bool
     {
@@ -76,7 +85,12 @@ final class VersionEntitlement
 
         try {
             return Cache::add($key, true, self::DEDUPE_WINDOW_SECONDS);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            Log::warning('Licence entitlement dedupe cache is unavailable; logging without deduplication.', [
+                'exception' => $e::class,
+                'message' => $e->getMessage(),
+            ]);
+
             return true;
         }
     }
