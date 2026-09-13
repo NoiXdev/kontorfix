@@ -251,8 +251,12 @@ it('returns 404 for a package name not visible to the organization, unknown-name
     expect($res->json('message'))->toBe($groupRes->json('message'));
 });
 
-it('unknown org slug still 404s under the npm packument path', function () {
-    $this->getJson('/o/no-such-org/acme-demo')->assertNotFound();
+// Anonymously indistinguishable from an organization the caller may not read: the unknown
+// slug used to 404 while a real one answered 401, which made the first URL segment — the
+// CUSTOMER's name — a wordlist-checkable oracle. See OrgSlugEnumerationTest, which pins the
+// refusals being byte-identical rather than merely both non-200.
+it('unknown org slug is refused, not distinguished, under the npm packument path', function () {
+    $this->getJson('/o/no-such-org/acme-demo')->assertUnauthorized();
 });
 
 it('denies a tarball download for a package not visible to the organization', function () {

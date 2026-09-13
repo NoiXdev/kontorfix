@@ -82,8 +82,26 @@ class ResolveRegistryContext
             // "no group -> pass through" branch behaving the same way it already documents
             // for the OCI handshake case. Task 3+ wires the org-level controllers to read
             // `registryOrganization` directly instead.
-            $organization = Organization::where('slug', $orgSlug)->first();
-            abort_if($organization === null, 404);
+            // An unknown slug does NOT 404 here. A 404 for an unknown organization beside
+            // the 401 a real one answers with made this single path segment an oracle for
+            // the first thing in the URL — which, since organizations got their own slug,
+            // is the CUSTOMER's name. Anonymous, un-throttled, one segment, wordlist-sized:
+            // "is this company a customer of this instance". ResolvePortalContext's own
+            // docblock names precisely that as something the portal is careful not to
+            // answer, so this was an internal contradiction rather than a protocol
+            // necessity. The 401 for a real organization is not the bug and stays — a
+            // reactive client (Composer's prompt, pip's keyring lookup, twine) needs it.
+            //
+            // Instead the unknown slug resolves to an organization that exists only for
+            // this request and that nothing can hold a token for: it has no id, so
+            // canAccessOrganization()'s `token->organization_id === org->id` is false for
+            // every token, and the ordinary refusal in authorizeOrganization() runs — 401
+            // without credentials, 403 with a token that does not grant access. Both are
+            // byte-identical to what a real organization the caller may not read answers,
+            // which is the property, rather than a second hand-written refusal that could
+            // drift away from the first.
+            $organization = Organization::where('slug', $orgSlug)->first()
+                ?? tap(new Organization, fn (Organization $o) => $o->slug = $orgSlug);
 
             $request->attributes->set('registryOrganization', $organization);
             $request->attributes->set('registryGroup', null);

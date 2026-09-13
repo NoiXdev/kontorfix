@@ -19,7 +19,7 @@ function releaseWorkflow(): string
     return (string) file_get_contents(base_path('.github/workflows/release.yml'));
 }
 
-function composeFile(): string
+function releaseComposeSource(): string
 {
     return (string) file_get_contents(base_path('docker/compose.yaml'));
 }
@@ -28,12 +28,12 @@ it('lets the deployment name the same image the release publishes and signs', fu
     // The chain can only hold if both ends can be pointed at one reference. The workflow
     // side is HARBOR_IMAGE; the deployment side has to be a variable too, or the two are
     // wired together by nothing but an operator's memory.
-    expect(composeFile())->toContain('${KONTORFIX_IMAGE:-')
+    expect(releaseComposeSource())->toContain('${KONTORFIX_IMAGE:-')
         ->and(releaseWorkflow())->toContain('vars.HARBOR_IMAGE');
 
     // And every application service has to follow it — a single forgotten literal would
     // run one container from an unsigned image while the rest are verified.
-    preg_match_all('/^\s*image:\s*([^\s#]+)/m', composeFile(), $matches);
+    preg_match_all('/^\s*image:\s*([^\s#]+)/m', releaseComposeSource(), $matches);
     $appImages = array_values(array_filter(
         $matches[1],
         fn (string $ref): bool => str_contains($ref, 'kontorfix'),

@@ -36,8 +36,12 @@ it('resolves an organization by slug and sets registryOrganization, leaving regi
         ->assertJsonPath('group', null);
 });
 
-it('404s an unknown organization slug under /o/', function () {
-    $this->getJson('/o/does-not-exist/packages.json')->assertNotFound();
+// Anonymously indistinguishable from an organization the caller may not read: the unknown
+// slug used to 404 while a real one answered 401, which made the first URL segment — the
+// CUSTOMER's name — a wordlist-checkable oracle. See OrgSlugEnumerationTest, which pins the
+// refusals being byte-identical rather than merely both non-200.
+it('refuses an unknown organization slug under /o/ the same way it refuses a real one', function () {
+    $this->getJson('/o/does-not-exist/packages.json')->assertUnauthorized();
 });
 
 it('keeps /o/ working when organizations.portal_enabled is false — this is the registry API, not the portal', function () {

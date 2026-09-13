@@ -269,6 +269,10 @@ it('returns 404 for a package name not visible to the organization, unknown-name
         ->assertNotFound();
 });
 
-it('unknown org slug still 404s under the composer p2 path', function () {
-    $this->getJson('/o/no-such-org/p2/acme/demo.json')->assertNotFound();
+// Anonymously indistinguishable from an organization the caller may not read: the unknown
+// slug used to 404 while a real one answered 401, which made the first URL segment — the
+// CUSTOMER's name — a wordlist-checkable oracle. See OrgSlugEnumerationTest, which pins the
+// refusals being byte-identical rather than merely both non-200.
+it('unknown org slug is refused, not distinguished, under the composer p2 path', function () {
+    $this->getJson('/o/no-such-org/p2/acme/demo.json')->assertUnauthorized();
 });

@@ -282,8 +282,12 @@ it('returns a plain 404 for an unknown project in org mode, WITHOUT redirecting 
         ->assertNotFound();
 });
 
-it('unknown org slug still 404s under the pypi simple-project path', function () {
-    $this->get('/o/no-such-org/simple/does-not-exist/')->assertNotFound();
+// Anonymously indistinguishable from an organization the caller may not read: the unknown
+// slug used to 404 while a real one answered 401, which made the first URL segment — the
+// CUSTOMER's name — a wordlist-checkable oracle. See OrgSlugEnumerationTest, which pins the
+// refusals being byte-identical rather than merely both non-200.
+it('unknown org slug is refused, not distinguished, under the pypi simple-project path', function () {
+    $this->get('/o/no-such-org/simple/does-not-exist/')->assertUnauthorized();
 });
 
 // download()'s org branch now resolves through a keyed SQL query (organizationPackagesQuery()
