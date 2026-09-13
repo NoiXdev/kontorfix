@@ -79,6 +79,9 @@ it('refuses to auto-link a federated identity to an account privileged only in a
 
 it('still auto-links a regular member account by verified email', function () {
     $member = User::factory()->create(['email' => 'member@firma.de', 'role' => UserRole::Member]);
+    // Linking by email is scoped to the provider's own organization, so the provider has
+    // to be the one this member belongs to — see OidcTenantScopedLinkingTest.
+    $this->provider->update(['default_organization_id' => $member->organization_id]);
     fakeIdpForRole($this->provider, 'member@firma.de');
     $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
 
@@ -89,6 +92,7 @@ it('still auto-links a regular member account by verified email', function () {
 it('still auto-links a member who holds a non-privileged membership in another organization', function () {
     $member = User::factory()->create(['email' => 'guest@firma.de', 'role' => UserRole::Member]);
     $member->organizations()->attach(Organization::factory()->create()->id, ['role' => UserRole::Member->value]);
+    $this->provider->update(['default_organization_id' => $member->organization_id]);
     fakeIdpForRole($this->provider, 'guest@firma.de');
     $this->withSession(['oidc' => ['state' => 's', 'nonce' => 'nonce-1', 'verifier' => 'v', 'provider' => 'authentik']]);
 

@@ -52,6 +52,9 @@ it('redirects to the identity provider with a stored state', function () {
 
 it('logs in an existing user matched by verified email and links the identity', function () {
     $user = User::factory()->create(['email' => 'sso@idp.test']);
+    // Linking by email only reaches accounts of the provider's own organization — see
+    // OidcTenantScopedLinkingTest for why matching instance-wide was a takeover primitive.
+    $this->provider->update(['default_organization_id' => $user->organization_id]);
     fakeIdp($this->provider);
     primeSession($this, $this->provider);
 
@@ -102,6 +105,7 @@ it('rejects a callback whose state does not match the session', function () {
 it('does not require the totp step even if the user has 2fa', function () {
     $user = User::factory()->create(['email' => 'sso@idp.test']);
     $user->forceFill(['two_factor_secret' => app(TwoFactorAuthenticator::class)->generateSecret(), 'two_factor_confirmed_at' => now()])->save();
+    $this->provider->update(['default_organization_id' => $user->organization_id]);
     fakeIdp($this->provider);
     primeSession($this, $this->provider);
 

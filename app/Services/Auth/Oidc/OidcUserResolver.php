@@ -66,6 +66,28 @@ class OidcUserResolver
                     throw new RuntimeException('Automatische SSO-Verknüpfung für privilegierte Konten ist nicht erlaubt.');
                 }
 
+                // ...and it only gets to claim accounts that are ITS OWN tenant's. The lookup
+                // above spans the whole instance, because an address is unique instance-wide;
+                // trusting a provider's email claim therefore used to mean trusting it about
+                // every account on the box. A tenant's IdP asserting a colleague's address at
+                // another tenant was linked to that stranger's account and logged in as them —
+                // no password, and no 2FA either, since this path never reaches the two-factor
+                // challenge. `trusts_email_claim` cannot catch that: it answers "may this
+                // provider claim by email", never "whose".
+                //
+                // Checked after the privilege guard so the most specific reason is the one the
+                // operator is told, and scoped through accessibleOrganizationIds() so an
+                // external collaborator who is genuinely a member here still logs in.
+                //
+                // A provider without a default organization has no boundary to check against
+                // and may not link by email at all — no scope means refuse, not match anyone.
+                // The same column is already mandatory for allow_registration, so this asks
+                // nothing new of an operator who wants the provider to reach accounts.
+                if ($provider->default_organization_id === null
+                    || ! $user->belongsToOrganization((string) $provider->default_organization_id)) {
+                    throw new RuntimeException('Für diese E-Mail-Adresse existiert bereits ein Konto außerhalb der Organisation dieses Providers. Eine automatische Verknüpfung über Organisationsgrenzen hinweg ist nicht erlaubt. Hinterlegen Sie die passende Default-Organisation am Provider, oder verknüpfen Sie das Konto gezielt im angemeldeten Zustand.');
+                }
+
                 $this->link($provider, $user, $subject);
 
                 return $user;

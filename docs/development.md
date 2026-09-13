@@ -1638,7 +1638,9 @@ Deliberately classified as low and documented in the security audit (non-blockin
   gated or disabled — it is disabled by default. The endpoint carries `throttle:5,1` per
   source address: it performs a bcrypt-12 hash, inserts a row and sends mail per request.
 - **OIDC email linking:** auto-linking across multiple enabled identity providers for member
-  accounts — relevant only with multiple, partly untrusted IdPs. The address is now one
+  accounts — relevant only with multiple, partly untrusted IdPs, and now confined to the
+  provider's own organization (a provider with no `default_organization_id` may not link by
+  email at all). The address is now one
   identity whatever its case: a unique partial index on `lower(users.email)`, a
   case-insensitive uniqueness check on every write path, and an oldest-first order in the
   resolver. An instance that already held two case-variant addresses gets a *non-unique*

@@ -48,7 +48,11 @@ it('still links the existing member account when the provider is trusted', funct
         'email' => 'anna@firma.de',
         'role' => UserRole::Member,
     ]);
-    $provider = OidcProvider::factory()->create(['trusts_email_claim' => true]);
+    $provider = OidcProvider::factory()->create([
+        'trusts_email_claim' => true,
+        // Email linking is additionally scoped to the provider's organization.
+        'default_organization_id' => $this->org->id,
+    ]);
 
     $resolved = app(OidcUserResolver::class)->resolve($provider, [
         'sub' => 'trusted-subject-1',

@@ -156,7 +156,13 @@ it('links the account that held the address first when a pair survives', functio
     $older = caseVariantRow('root@firma.de', now()->subYear()->toDateTimeString());
     $newer = caseVariantRow('Root@firma.de', now()->toDateTimeString());
 
-    $provider = OidcProvider::factory()->create(['allow_registration' => false]);
+    $provider = OidcProvider::factory()->create([
+        'allow_registration' => false,
+        // Both case variants belong to the same organization (caseVariantRow builds them
+        // from the same factory), so scoping the provider there keeps this test about
+        // WHICH of the two rows wins, not about tenancy.
+        'default_organization_id' => $older->organization_id,
+    ]);
 
     $resolved = (new OidcUserResolver)->resolve($provider, [
         'sub' => 'idp-subject-1',

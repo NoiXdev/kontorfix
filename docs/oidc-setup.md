@@ -86,6 +86,16 @@ Die Route ist `oidc.callback` (`GET /auth/oidc/{slug}/callback`).
   Zusicherung abnimmt. Ist der Provider nicht als vertrauenswürdig markiert und existiert
   bereits ein Konto zu der Adresse, wird der Login mit einem Hinweis abgewiesen — das Konto
   lässt sich stattdessen gezielt im angemeldeten Zustand verknüpfen.
+- **Verknüpfung endet an der Organisationsgrenze:** Ein Provider darf per E-Mail nur Konten
+  beanspruchen, die zu **seiner eigenen** Organisation gehören (`default_organization_id`,
+  geprüft über Heimat-Organisation *und* zusätzliche Mitgliedschaften). Die Adresssuche läuft
+  technisch instanzweit, weil E-Mail-Adressen instanzweit eindeutig sind — ohne diese Schranke
+  hieße „diesem IdP die E-Mail-Zusicherung abnehmen" deshalb: ihm über *jedes* Konto der
+  Instanz Auskunft geben, auch über die anderer Mandanten. `trusts_email_claim` allein deckt
+  das nicht ab; es beantwortet, **ob** ein Provider per E-Mail verknüpfen darf, nie **wessen**
+  Konten. Ein Provider **ohne** `default_organization_id` hat keine Grenze, gegen die geprüft
+  werden könnte, und darf deshalb gar nicht per E-Mail verknüpfen — hinterlegen Sie die
+  passende Organisation, wenn der Provider bestehende Konten erreichen soll.
 - **Privilegierte Konten werden nie automatisch verknüpft:** Unabhängig von
   `trusts_email_claim` lehnt der Resolver die automatische Verknüpfung ab, sobald das
   Zielkonto privilegiert ist (Super-Admin-Flag, Rolle in der Heimat-Organisation o. Ä.).
@@ -93,7 +103,8 @@ Die Route ist `oidc.callback` (`GET /auth/oidc/{slug}/callback`).
   hätte die Migration auf reinen SSO-Instanzen alle Anmeldungen blockiert. Die Migration
   protokolliert die betroffenen Provider als Warnung. Prüfen Sie nach dem Upgrade, welche
   davon die Zusicherung wirklich verdienen, und schalten Sie den Rest in der Provider-Liste
-  über die Schaltfläche neben dem Badge ab.
+  über die Schaltfläche neben dem Badge ab. Die Organisationsgrenze oben gilt für diese
+  nachträglich als vertrauenswürdig markierten Provider genauso wie für neue.
 - **Auto-Provisioning ist opt-in pro Provider:** Nur wenn `allow_registration = true`, legt
   ein erfolgreicher Login ohne bestehendes Konto automatisch einen neuen Nutzer an — in der
   konfigurierten `default_organization_id` mit `default_role`. Ist das Flag `false`, wird

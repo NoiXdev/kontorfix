@@ -43,6 +43,7 @@ beforeEach(function () {
 
 it('runs the full redirect -> callback chain against the live session state', function () {
     $user = User::factory()->create(['email' => 'e2e@idp.test']);
+    $this->provider->update(['default_organization_id' => $user->organization_id]);
 
     // 1) Redirect generates state/nonce/verifier in the session.
     $redirect = $this->get('/auth/oidc/authentik/redirect');
