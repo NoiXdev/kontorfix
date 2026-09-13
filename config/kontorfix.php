@@ -267,6 +267,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Upstream metadata cap
+    |--------------------------------------------------------------------------
+    |
+    | The largest metadata document an upstream may answer with. Artifacts have had a byte
+    | cap since they were moved onto a streaming read; metadata had none, so a malicious
+    | upstream could answer a single /p2/{vendor}/{name}.json with as much JSON as it liked
+    | — synchronously, inside the web request, on every cache miss, on routes that carry no
+    | request budget by design.
+    |
+    | 16 MiB is far above anything real: a Composer p2 document for one package and an npm
+    | packument are kilobytes to a few megabytes even for the largest published packages.
+    | The number is deliberately not larger, because the bytes are decoded into PHP arrays
+    | afterwards and that representation is several times the size of the JSON.
+    |
+    */
+
+    'upstream_max_metadata_bytes' => (int) env('KONTORFIX_UPSTREAM_MAX_METADATA_BYTES', 16 * 1024 * 1024),
+
+    /*
+    |--------------------------------------------------------------------------
     | OCI sweep blob budget
     |--------------------------------------------------------------------------
     |

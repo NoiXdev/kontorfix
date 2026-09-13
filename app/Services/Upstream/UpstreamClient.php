@@ -31,9 +31,24 @@ class UpstreamClient
         // Like getBytes: follow redirects manually and re-check each hop against the
         // SSRF rules — a malicious upstream must not be able to redirect a metadata
         // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
-        [$response] = $this->follow($endpoint, $url, fn (PendingRequest $req) => $headers === []
-            ? $req->acceptJson()
-            : $req->acceptJson()->replaceHeaders($headers));
+        $cap = self::metadataCap();
+
+        [$response] = $this->follow($endpoint, $url, function (PendingRequest $req) use ($headers, $cap): PendingRequest {
+            $req = $headers === [] ? $req->acceptJson() : $req->acceptJson()->replaceHeaders($headers);
+
+            return $req->withOptions([
+                // The body lands in a temp stream instead of a PHP string. Without this,
+                // $response->json() was the first thing that saw the response, and by then
+                // the whole document was already resident — a decode spike an upstream
+                // chooses the size of. php://temp spills to disk past its threshold, so
+                // memory stays bounded whatever arrives.
+                'sink' => self::metadataSink(),
+                // …and a declared oversize body is refused before it is sent at all.
+                // Only advisory: it acts on Content-Length, which a chunked response
+                // simply omits, which is why the read below caps as well.
+                'curl' => [CURLOPT_MAXFILESIZE => $cap],
+            ]);
+        });
 
         if ($response->status() === 404) {
             return null;
@@ -42,9 +57,31 @@ class UpstreamClient
             throw new UpstreamException('Upstream '.CredentialUrl::redact($endpoint->endpointUrl())." returned {$response->status()} for {$path}.", $response->status());
         }
 
-        return $response->json();
+        $body = $response->toPsrResponse()->getBody();
+        $body->rewind();
+        $json = $body->read($cap + 1);
+
+        if (strlen($json) > $cap) {
+            throw new UpstreamException('Upstream '.CredentialUrl::redact($endpoint->endpointUrl())." answered with more than {$cap} bytes of metadata for {$path}.");
+        }
+
+        $decoded = json_decode($json, true);
+
+        // Matches what Response::json() did before: a body that is not a JSON object is
+        // indistinguishable from an absent one to every caller here.
+        return is_array($decoded) ? $decoded : null;
     }
 
+    /**
+     * No production caller: every serving path goes through getStream(), which caps and
+     * hashes while the bytes arrive. It is kept because the SSRF suite drives it as the
+     * plainest probe of follow()'s redirect and bearer-scoping rules, and rewriting those
+     * regression tests around a streaming return would obscure what they pin.
+     *
+     * It buffers the whole body in a PHP string and has no cap. That is tolerable only
+     * while nothing in production calls it: a serving path that needs artifact bytes takes
+     * getStream() and its byte cap, and this must not become the shortcut that skips them.
+     */
     public function getBytes(UpstreamEndpoint $endpoint, string $absoluteUrl): ?string
     {
         [$response] = $this->follow($endpoint, $absoluteUrl, fn (PendingRequest $req) => $req);
@@ -199,6 +236,31 @@ class UpstreamClient
         $peer = @stream_socket_get_name($stream, true);
 
         return is_string($peer) ? $peer : '';
+    }
+
+    private static function metadataCap(): int
+    {
+        return max(1, (int) config('kontorfix.upstream_max_metadata_bytes'));
+    }
+
+    /**
+     * Where a metadata response is buffered.
+     *
+     * php://temp keeps the first 2 MiB in memory and spills the rest to a temp file that
+     * is released with the stream, so the size of the response is the upstream's choice
+     * but the memory cost is not.
+     *
+     * @return resource
+     */
+    private static function metadataSink()
+    {
+        $sink = fopen('php://temp', 'w+b');
+
+        if (! is_resource($sink)) {
+            throw new UpstreamException('Could not allocate a buffer for the upstream response.');
+        }
+
+        return $sink;
     }
 
     private function request(UpstreamEndpoint $endpoint, bool $withAuth = true): PendingRequest

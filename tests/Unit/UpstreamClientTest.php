@@ -122,3 +122,46 @@ it('re-pins on a redirect hop instead of carrying the first hop\'s address', fun
         ['cdn.example:443:198.51.100.7'],
     ]);
 });
+
+it('refuses upstream metadata past the cap instead of decoding it', function () {
+    // getJson() handed the whole response to $response->json(), with nothing between the
+    // wire and PHP memory. Artifact fetches have had a byte cap since the streaming
+    // rewrite; metadata never did, so a malicious upstream could answer a single
+    // /p2/{vendor}/{name}.json — un-throttled, and reached synchronously in the web
+    // request on every cache miss — with as much JSON as it liked.
+    config()->set('kontorfix.upstream_max_metadata_bytes', 1024);
+    Http::fake(['repo.test/*' => Http::response(str_repeat('x', 4096), 200)]);
+    $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => null]);
+
+    expect(fn () => app(UpstreamClient::class)->getJson($up, '/p2/x/y.json'))
+        ->toThrow(UpstreamException::class);
+});
+
+it('still returns metadata that fits inside the cap', function () {
+    config()->set('kontorfix.upstream_max_metadata_bytes', 1024);
+    Http::fake(['repo.test/*' => Http::response(['packages' => ['a/b' => []]], 200)]);
+    $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => null]);
+
+    expect(app(UpstreamClient::class)->getJson($up, '/p2/x/y.json'))
+        ->toBe(['packages' => ['a/b' => []]]);
+});
+
+it('tells the upstream the cap up front, so an oversize body is refused before it is sent', function () {
+    config()->set('kontorfix.upstream_max_metadata_bytes', 4096);
+    $this->resolveHostTo('repo.test', ['203.0.113.10']);
+
+    $captured = null;
+    Http::fake(function ($request, $options) use (&$captured) {
+        $captured = $options;
+
+        return Http::response(['ok' => true], 200);
+    });
+
+    $up = Upstream::factory()->create(['url' => 'https://repo.test', 'auth_token' => null]);
+    app(UpstreamClient::class)->getJson($up, '/p2/x/y.json');
+
+    expect($captured['curl'][CURLOPT_MAXFILESIZE] ?? null)->toBe(4096)
+        // …and the address pin from the SSRF fix survives alongside it, rather than one
+        // withOptions() call replacing the other's curl array.
+        ->and($captured['curl'][CURLOPT_RESOLVE] ?? null)->toBe(['repo.test:443:203.0.113.10']);
+});
