@@ -7,6 +7,7 @@ use App\Rules\AddressableSlug;
 use App\Rules\UnclaimedSlug;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateGroupRequest extends FormRequest
 {
@@ -62,6 +63,50 @@ class UpdateGroupRequest extends FormRequest
             'public' => ['boolean'],
             'portal_enabled' => ['boolean'],
         ];
+    }
+
+    /**
+     * Publishing a registry that serves the operator's shared packages is the operator's
+     * call, not its customer's.
+     *
+     * `public` short-circuits RegistryAccessService::canAccessGroup() for anonymous
+     * callers, and the read paths hand out artifact BYTES on that same unauthenticated
+     * route — so this one boolean is the difference between a licensed package sitting in
+     * a customer's private registry and the same package being downloadable worldwide.
+     * docs/development.md already states the distribution decision belongs to the
+     * operator; this is the seam where a customer admin could make it for them.
+     *
+     * Three deliberate narrowings:
+     *
+     *  - Only the false → true TRANSITION is judged. A registry the operator made public
+     *    on purpose stays fully editable for everything else, instead of the customer
+     *    hitting this error on every unrelated rename.
+     *  - A super-admin is exempt. They own the shared packages, so publishing them is
+     *    precisely the decision the rule is protecting — refusing it would remove a
+     *    legitimate capability and buy nothing.
+     *  - The question is asked of `assignedPackages()`, the expiry-filtered relation the
+     *    read path itself uses. A lapsed assignment is not served, so it is not published
+     *    either, and the guard must not be broader than the exposure it prevents.
+     */
+    protected function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $group = $this->group();
+
+            if ($group === null || $group->public || ! $this->boolean('public')) {
+                return;
+            }
+
+            if ($this->user()?->isSuperAdmin() === true) {
+                return;
+            }
+
+            if (! $group->assignedPackages()->where('packages.shared', true)->exists()) {
+                return;
+            }
+
+            $validator->errors()->add('public', 'Diese Registry führt vom Betreiber bereitgestellte Pakete. Sie öffentlich zu schalten würde diese Pakete anonym verfügbar machen — darüber entscheidet der Betreiber. Entfernen Sie die geteilten Pakete aus dieser Registry, oder wenden Sie sich an den Betreiber.');
+        });
     }
 
     /** The registry being updated — route-model-bound on both the console and the API route. */

@@ -483,10 +483,13 @@ async function copyToken() {
                                 <p v-if="form.errors.name" class="text-sm text-destructive">{{ form.errors.name }}</p>
                             </div>
 
-                            <label class="flex items-center gap-2 text-sm">
-                                <Switch v-model="form.public" />
-                                Öffentlich (ohne Token lesbar)
-                            </label>
+                            <div class="space-y-1">
+                                <label class="flex items-center gap-2 text-sm">
+                                    <Switch v-model="form.public" />
+                                    Öffentlich (ohne Token lesbar)
+                                </label>
+                                <InputError :message="form.errors.public" />
+                            </div>
 
                             <label class="flex items-start gap-2 text-sm">
                                 <Switch v-model="form.portal_enabled" class="mt-1" />

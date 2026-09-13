@@ -809,6 +809,11 @@ Who may do what is deliberately split:
   the operator organization, since only its packages can be shared. A customer's own admin may do
   none of the three, on their own registry included: how long a customer keeps the operator's
   package is the operator's decision, not theirs.
+- **Publishing a registry that carries shared packages is likewise the operator's call.** Turning
+  a registry `public` makes it readable — including artifact bytes — without any token, so the
+  false → true transition is refused for a customer admin while the registry still serves an
+  unexpired shared package. A super-admin may do it: those packages are theirs to distribute. An
+  already-public registry stays fully editable; only the transition is judged.
 - **A customer keeps full control of their own packages.** They assign, detach and re-date those as
   before. What is refused is a write that would *change* which shared packages their registry
   carries, so re-submitting the registry's whole package list with a shared package sitting in it

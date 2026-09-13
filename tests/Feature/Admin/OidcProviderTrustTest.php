@@ -43,7 +43,13 @@ it('changes real resolver behaviour end-to-end: a provider that linked by email 
         'email' => 'anna@firma.de',
         'role' => UserRole::Member,
     ]);
-    $provider = OidcProvider::factory()->create(['trusts_email_claim' => true]);
+    $provider = OidcProvider::factory()->create([
+        'trusts_email_claim' => true,
+        // Email linking is scoped to the provider's organization — see
+        // OidcTenantScopedLinkingTest. This test is about the trust toggle, so the
+        // provider belongs to the org its users are in.
+        'default_organization_id' => $this->org->id,
+    ]);
 
     $claims = [
         'sub' => 'toggle-subject-1',
