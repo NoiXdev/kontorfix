@@ -557,7 +557,8 @@ production deployment:
   from `TRUSTED_PROXIES`: the host allowlist bites even when no forwarded header is present
   at all, so pinning the proxy IPs does not substitute for it and vice versa.
 - **`TRUSTED_PROXIES`** — pin to the **concrete proxy IP(s)**, not the broad default private
-  ranges. The `X-Forwarded-*` headers are only accepted from these addresses; with too broad
+  ranges. The operator health page carries a `TRUSTED_PROXIES` check that stays red until
+  this is narrowed, so the instruction is visible rather than only written down here. The `X-Forwarded-*` headers are only accepted from these addresses; with too broad
   a configuration the client IP (and thus IP-based rate limits) could be spoofed. Also make
   sure the app port is reachable **only** through the proxy (network segmentation) — the
   shipped `docker/compose.yaml` publishes no port on the host for exactly that reason; attach

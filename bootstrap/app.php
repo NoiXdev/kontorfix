@@ -16,6 +16,7 @@ use App\Http\Middleware\ResolveRegistryContext;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\ValidatePostSize;
 use App\Services\Http\TrustedHosts;
+use App\Support\TrustedProxies;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -90,9 +91,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // dist URLs in the Composer metadata would be wrong. The trusted
         // proxy IPs/networks are configurable via TRUSTED_PROXIES (default: private
         // network ranges + localhost), '*' remains available as an explicit opt-out.
-        $proxies = (string) env('TRUSTED_PROXIES', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.1');
+        // Read through App\Support\TrustedProxies so HealthService's visibility check and
+        // this configuration cannot drift apart. env() rather than config() because this
+        // runs before the config repository exists.
+        $proxies = (string) env('TRUSTED_PROXIES', TrustedProxies::DEFAULT);
         $middleware->trustProxies(
-            at: $proxies === '*' ? '*' : array_map('trim', explode(',', $proxies)),
+            at: $proxies === '*' ? '*' : TrustedProxies::parse($proxies),
             headers: Request::HEADER_X_FORWARDED_FOR |
                 Request::HEADER_X_FORWARDED_HOST |
                 Request::HEADER_X_FORWARDED_PORT |

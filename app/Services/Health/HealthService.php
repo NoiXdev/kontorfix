@@ -10,6 +10,7 @@ use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
 use App\Services\Users\EmailUniquenessIndex;
 use App\Support\CredentialUrl;
+use App\Support\TrustedProxies;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -26,6 +27,7 @@ class HealthService
     {
         return [
             $this->appUrl(),
+            $this->trustedProxies(),
             $this->database(),
             $this->cache(),
             $this->queue(),
@@ -151,6 +153,44 @@ class HealthService
                 ?? 'APP_URL nennt keinen Host. Die Host-Allowlist und die Verankerung erzeugter '
                     .'Links sind dadurch beide abgeschaltet — ein vorgelagerter Proxy kann den '
                     .'Host in Passwort-Reset-Links frei wählen.',
+        ];
+    }
+
+    /**
+     * Whether the forwarded-header trust is pinned to the proxy or left wide open.
+     *
+     * TRUSTED_PROXIES decides who may set `X-Forwarded-For`, and with it what every
+     * IP-keyed limiter counts and what the audit log records as the origin of an action.
+     * It ships covering every private range, because the application cannot know an
+     * operator's proxy address. docs/development.md has always said to pin it — but an
+     * instruction nothing checks is advice, not a control, so the state belongs on screen.
+     *
+     * Not a failure: the shipped breadth is harmless against an internet attacker, since
+     * the trusted-proxy walk stops at the first untrusted address, which behind Traefik is
+     * the real client. It matters for something already inside the private network.
+     *
+     * @return array{key:string,label:string,ok:bool,detail:string}
+     */
+    private function trustedProxies(): array
+    {
+        $value = trim((string) config('kontorfix.trusted_proxies'));
+        $broad = TrustedProxies::isBroad($value);
+
+        return [
+            'key' => 'trusted-proxies',
+            'label' => 'TRUSTED_PROXIES',
+            'ok' => ! $broad,
+            'detail' => match (true) {
+                $value === '' => 'Nicht gesetzt — es wird keinem Proxy vertraut, weitergereichtes '
+                    .'Schema und Host werden ignoriert und erzeugte Links zeigen auf den internen Host.',
+                $value === '*' => 'Auf "*" gesetzt: jede Gegenstelle darf X-Forwarded-For bestimmen. '
+                    .'Damit sind IP-basierte Limits umgehbar und die im Audit-Log vermerkte Adresse frei wählbar.',
+                $broad => "Umfasst mehr als die konkreten Proxy-Adressen ({$value}). Alles, was die "
+                    .'Anwendung aus diesem Netz erreicht, darf damit X-Forwarded-For setzen — IP-basierte '
+                    .'Limits sind umgehbar und die Adresse im Audit-Log ist fälschbar. Auf die IP(s) des '
+                    .'vorgelagerten Proxys eingrenzen.',
+                default => $value,
+            },
         ];
     }
 

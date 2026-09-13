@@ -1,6 +1,18 @@
 <?php
 
+use App\Support\TrustedProxies;
+
 return [
+
+    /**
+     * Which upstream addresses may speak for the client (see App\Support\TrustedProxies).
+     *
+     * The middleware itself is configured in bootstrap/app.php from the same environment
+     * variable — it runs before this repository exists — so this entry is what everything
+     * else in the application reads, and the shared default constant is what keeps the two
+     * from drifting.
+     */
+    'trusted_proxies' => env('TRUSTED_PROXIES', TrustedProxies::DEFAULT),
 
     /*
     |--------------------------------------------------------------------------
