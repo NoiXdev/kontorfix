@@ -47,6 +47,56 @@ final class CredentialUrl
     }
 
     /**
+     * Separates an http(s) URL's userinfo from the URL itself.
+     *
+     * redact() withholds a credential from a READER. This removes it from the value that
+     * gets handed to a subprocess, which is a different exposure: `git clone` with the
+     * credential still in the URL puts it on argv — readable in `ps` for the life of the
+     * call — and git then writes the whole URL into the mirror's `remote.origin.url`,
+     * where it stays at rest in plaintext. Splitting lets the caller pass the credential
+     * the way GitAuth already carries the dedicated `repository_token`: as an
+     * origin-scoped `http.<origin>.extraHeader`, which reaches neither.
+     *
+     * Only http and https are split. `git@github.com:acme/x.git` and
+     * `ssh://git@host/x.git` put a transport username in the same position, and it is not
+     * a secret — removing it would just break the remote.
+     *
+     * The password is percent-decoded, because a PAT containing reserved characters is
+     * encoded in the URL and has to be decoded to be usable as a Basic-auth password.
+     *
+     * @return array{0: string, 1: string|null, 2: string|null} [url without userinfo, username, password]
+     */
+    public static function split(string $url): array
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return [$url, null, null];
+        }
+
+        $parts = parse_url($url);
+        if (! is_array($parts) || ! isset($parts['user'])) {
+            return [$url, null, null];
+        }
+
+        $user = rawurldecode((string) $parts['user']);
+        $pass = isset($parts['pass']) ? rawurldecode((string) $parts['pass']) : null;
+
+        $rebuilt = $scheme.'://'.strtolower((string) ($parts['host'] ?? ''));
+        if (isset($parts['port'])) {
+            $rebuilt .= ':'.$parts['port'];
+        }
+        $rebuilt .= (string) ($parts['path'] ?? '');
+        if (isset($parts['query'])) {
+            $rebuilt .= '?'.$parts['query'];
+        }
+        if (isset($parts['fragment'])) {
+            $rebuilt .= '#'.$parts['fragment'];
+        }
+
+        return [$rebuilt, $user === '' ? null : $user, $pass === '' ? null : $pass];
+    }
+
+    /**
      * Whether the value carries a userinfo component at all — redacted or not.
      */
     public static function carries(?string $url): bool

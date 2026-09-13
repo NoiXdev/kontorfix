@@ -3,6 +3,7 @@
 namespace App\Services\Vcs;
 
 use App\Enums\GitProvider;
+use App\Support\CredentialUrl;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Process\ProcessResult;
 use Illuminate\Support\Facades\Cache;
@@ -107,11 +108,28 @@ class GitRepository
 
     private string $mirrorPath;
 
+    /**
+     * The URL git is actually given: whatever was passed in, minus any userinfo.
+     *
+     * `repository_url` legitimately carries `https://x-access-token:<PAT>@github.com/…` —
+     * that column is the only way to authenticate a remote when the dedicated
+     * `repository_token` was skipped. Handing that value to git verbatim published the PAT
+     * twice over: on argv, readable in `ps` for the life of the call, and then at rest in
+     * the mirror's `remote.origin.url`, which git writes out of the clone URL. The comment
+     * on the fetch below already claimed the stored URL was token-free; for this shape it
+     * was not.
+     *
+     * Splitting it here means the credential travels the way GitAuth has always carried
+     * the dedicated column — as an origin-scoped `http.<origin>.extraHeader` passed
+     * through the environment — and reaches neither place.
+     */
+    private readonly string $url;
+
     /** @var array<string, string> */
     private array $authEnv;
 
     public function __construct(
-        private readonly string $url,
+        string $url,
         private readonly string $storageKey,
         ?string $token = null,
         ?GitProvider $provider = null,
@@ -121,8 +139,15 @@ class GitRepository
             throw new InvalidArgumentException('Invalid storage key.');
         }
 
+        [$this->url, $embeddedUsername, $embeddedToken] = CredentialUrl::split($url);
+
+        // An explicitly stored credential wins: it is the one an operator manages, rotates
+        // and scopes, and the URL copy may well be the stale leftover of a rotation.
+        $token ??= $embeddedToken;
+        $username ??= $embeddedUsername;
+
         $this->mirrorPath = storage_path('app/vcs/'.$storageKey.'.git');
-        $this->authEnv = GitAuth::env($url, $token, $provider, $username);
+        $this->authEnv = GitAuth::env($this->url, $token, $provider, $username);
     }
 
     /**
@@ -259,7 +284,8 @@ class GitRepository
         }
 
         if ($state === MirrorState::Usable) {
-            // fetch needs the auth header too (the mirror's stored URL is token-free).
+            // fetch needs the auth header too — the mirror's stored URL is token-free,
+            // because $this->url is split before git ever sees it (see the property).
             $result = Process::path($this->mirrorPath)->env($this->authEnv)->timeout(self::FETCH_TIMEOUT)
                 ->run(['git', 'fetch', '--prune', '--tags', 'origin']);
 

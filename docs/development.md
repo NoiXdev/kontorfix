@@ -1638,6 +1638,16 @@ assert.
 
 Deliberately classified as low and documented in the security audit (non-blocking):
 
+- **Git credentials embedded in `repository_url` are stored in plaintext.** The column is a
+  supported credential carrier (see `App\Support\CredentialUrl`), and unlike the dedicated
+  `repository_token` it is not an encrypted cast. The two places that used to publish the
+  credential further — `git`'s argv, and the mirror's `remote.origin.url` — are closed:
+  `GitRepository` and `RepositoryProbe` split the userinfo off before git sees the URL and
+  pass it as an origin-scoped header instead. What remains is the value at rest in the
+  database, which needs a dump or volume access to read. Moving it into the encrypted
+  column would additionally have to unpick the console's redact-and-resubmit round-trip,
+  and is deliberately left as its own change.
+
 - **Open self-registration:** `/register` allows creating a `member` account without an
   organization (which sees nothing in the portal). For a closed instance, `/register` can be
   gated or disabled — it is disabled by default. The endpoint carries `throttle:5,1` per

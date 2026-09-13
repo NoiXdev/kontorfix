@@ -5,6 +5,7 @@ namespace App\Services\Vcs;
 use App\Enums\GitProvider;
 use App\Enums\ManifestReadStatus;
 use App\Enums\PackageType;
+use App\Support\CredentialUrl;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
@@ -32,6 +33,13 @@ class RepositoryProbe
         if ($rejection !== null) {
             return ['ok' => false, 'error' => $rejection, 'versions' => []];
         }
+
+        // Same reason as GitRepository: a credential left in the URL would go onto
+        // `git ls-remote`'s argv, readable in `ps`. GitAuth carries it in the environment
+        // instead. An explicitly stored credential wins over the URL's copy.
+        [$url, $embeddedUsername, $embeddedToken] = CredentialUrl::split($url);
+        $token ??= $embeddedToken;
+        $username ??= $embeddedUsername;
 
         $env = GitAuth::env($url, $token, $provider, $username);
 
