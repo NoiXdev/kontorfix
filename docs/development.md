@@ -1633,9 +1633,6 @@ assert.
 
 Deliberately classified as low and documented in the security audit (non-blocking):
 
-- **DNS rebinding (TOCTOU):** the SSRF check (`UrlSafety::isSafeResolving`) and the actual
-  later connection resolve the hostname separately. Fully closed only with a resolver pinned
-  to cURL (`CURLOPT_RESOLVE`).
 - **Open self-registration:** `/register` allows creating a `member` account without an
   organization (which sees nothing in the portal). For a closed instance, `/register` can be
   gated or disabled — it is disabled by default. The endpoint carries `throttle:5,1` per

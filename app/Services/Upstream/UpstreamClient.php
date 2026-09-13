@@ -31,7 +31,7 @@ class UpstreamClient
         // Like getBytes: follow redirects manually and re-check each hop against the
         // SSRF rules — a malicious upstream must not be able to redirect a metadata
         // fetch via 302 to an internal address (http://[::1]/, 169.254.169.254).
-        $response = $this->follow($endpoint, $url, fn (PendingRequest $req) => $headers === []
+        [$response] = $this->follow($endpoint, $url, fn (PendingRequest $req) => $headers === []
             ? $req->acceptJson()
             : $req->acceptJson()->replaceHeaders($headers));
 
@@ -47,7 +47,7 @@ class UpstreamClient
 
     public function getBytes(UpstreamEndpoint $endpoint, string $absoluteUrl): ?string
     {
-        $response = $this->follow($endpoint, $absoluteUrl, fn (PendingRequest $req) => $req);
+        [$response] = $this->follow($endpoint, $absoluteUrl, fn (PendingRequest $req) => $req);
 
         if ($response->status() === 404) {
             return null;
@@ -77,10 +77,11 @@ class UpstreamClient
      */
     public function getStream(UpstreamEndpoint $endpoint, string $absoluteUrl): ?array
     {
-        $response = $this->follow(
+        [$response, $pin] = $this->follow(
             $endpoint,
             $absoluteUrl,
             fn (PendingRequest $req) => $req->withOptions(['stream' => true]),
+            streaming: true,
         );
 
         if ($response->status() === 404) {
@@ -95,6 +96,23 @@ class UpstreamClient
 
         if (! is_resource($stream)) {
             return null;
+        }
+
+        // The one place the artifact path can still be rebound. CURLOPT_RESOLVE does not
+        // reach here: `stream => true` routes this request to PHP's stream wrapper, which
+        // takes its connect address from the URL and offers no override. So the peer is
+        // checked against the pin instead — after the socket is open, but before a single
+        // body byte is read, which is the point that matters: these bytes get persisted
+        // as an artifact and streamed back to a tenant.
+        //
+        // A non-socket resource means libcurl handled the request after all (a deployment
+        // with allow_url_fopen off), where follow() has already pinned the connection and
+        // there is no peer to read. Only a socket is checked, and only a socket can lie.
+        $peer = self::peerOf($stream);
+        if ($peer !== null && ! $pin->permits($peer)) {
+            fclose($stream);
+
+            throw new UpstreamException('Upstream '.CredentialUrl::redact($absoluteUrl).' connected to an address that did not pass the outbound address policy.');
         }
 
         return [
@@ -113,18 +131,35 @@ class UpstreamClient
      * redirect to a different host, the private token must not travel along with it
      * (otherwise a malicious upstream could harvest it via 302 to its own collector).
      *
+     * Each hop is pinned to the addresses its own safety check was reached on, so the
+     * transport never re-resolves a name we already judged (see AddressPin). The pin of
+     * the FINAL hop travels back to the caller, because that is the connection whose peer
+     * the streaming path still has to verify for itself.
+     *
      * @param  callable(PendingRequest): PendingRequest  $configure
+     * @return array{0: Response, 1: AddressPin}
      */
-    private function follow(UpstreamEndpoint $endpoint, string $url, callable $configure): Response
+    private function follow(UpstreamEndpoint $endpoint, string $url, callable $configure, bool $streaming = false): array
     {
         for ($hop = 0; $hop < 5; $hop++) {
-            if (! UrlSafety::isSafeResolving($url)) {
+            $pin = AddressPin::for($url);
+            if ($pin === null) {
                 throw new UpstreamException('Refusing unsafe upstream URL: '.CredentialUrl::redact($url).'.');
             }
 
             // Same host AND an encrypted hop — see request().
             $withAuth = $this->sameHost($url, $endpoint->endpointUrl()) && self::isEncrypted($url);
-            $response = $configure($this->request($endpoint, $withAuth))->withoutRedirecting()->get($url);
+            $req = $configure($this->request($endpoint, $withAuth));
+
+            // Guzzle chooses the handler by request option: `stream => true` goes to the
+            // stream wrapper whenever allow_url_fopen is on, and handing curl options to
+            // that handler is both useless and deprecated. Everything else is curl's.
+            $curlOptions = $pin->curlOptions();
+            if ($curlOptions !== [] && ! ($streaming && filter_var(ini_get('allow_url_fopen'), FILTER_VALIDATE_BOOL))) {
+                $req = $req->withOptions(['curl' => $curlOptions]);
+            }
+
+            $response = $req->withoutRedirecting()->get($url);
 
             if ($response->redirect()) {
                 $location = (string) $response->header('Location');
@@ -136,10 +171,34 @@ class UpstreamClient
                 continue;
             }
 
-            return $response;
+            return [$response, $pin];
         }
 
         throw new UpstreamException('Too many redirects fetching upstream URL '.CredentialUrl::redact($url).'.');
+    }
+
+    /**
+     * The peer address of an open socket, or null when the resource is not a socket.
+     *
+     * Null means "not applicable", not "allowed": it is returned only for a resource that
+     * has no remote end to report — a curl sink, a memory stream — and the caller treats
+     * that case as already pinned by CURLOPT_RESOLVE. A socket whose peer cannot be read
+     * reports the empty string rather than null, which permits() then refuses.
+     *
+     * @param  resource  $stream
+     */
+    private static function peerOf($stream): ?string
+    {
+        $meta = stream_get_meta_data($stream);
+        $type = $meta['stream_type'];
+
+        if (! str_starts_with($type, 'tcp_socket')) {
+            return null;
+        }
+
+        $peer = @stream_socket_get_name($stream, true);
+
+        return is_string($peer) ? $peer : '';
     }
 
     private function request(UpstreamEndpoint $endpoint, bool $withAuth = true): PendingRequest

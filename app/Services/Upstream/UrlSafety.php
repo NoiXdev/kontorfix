@@ -45,17 +45,60 @@ class UrlSafety
      * to http://vault.internal) as well as octal/decimal IP encodings that filter_var
      * treats as hostnames. Hosts that don't resolve are rejected too: see hostIsPublic().
      *
-     * Note: does not protect against DNS rebinding (TOCTOU) — that would require a
-     * resolver pinned to cURL; this is noted as a follow-up.
+     * A bare verdict is not enough to connect safely — see safeAddressesFor(), which
+     * returns the addresses this verdict was reached on so the caller can dial THOSE
+     * rather than let the transport resolve the name a second time.
      */
     public static function isSafeResolving(?string $url): bool
     {
+        return self::safeAddressesFor($url) !== null;
+    }
+
+    /**
+     * Every address the URL's host is allowed to be dialled at, or null when the URL
+     * fails the address policy.
+     *
+     * This exists because a boolean verdict cannot be acted on safely. isSafeResolving()
+     * resolves the host, judges the answer and throws it away; the transport then
+     * resolves the SAME name a second time to decide where to connect. Those are two
+     * different questions to DNS, and an authoritative zone under an attacker's control
+     * is free to answer them differently — the public address is judged, the private one
+     * is dialled (DNS rebinding, a TOCTOU on the name). Returning the judged addresses
+     * lets the caller pin the connection to them, so the address that passed is the
+     * address that is used.
+     *
+     * For an IP literal the list is the literal itself: there is no name, so there is
+     * nothing to re-resolve and nothing to rebind.
+     *
+     * @return list<string>|null
+     */
+    public static function safeAddressesFor(?string $url): ?array
+    {
         if (! self::isSafe($url)) {
-            return false;
+            return null;
         }
 
-        // isSafe() has already checked IP literals (including bracketed IPv6).
-        return self::hostIsPublic((string) parse_url((string) $url, PHP_URL_HOST));
+        $host = self::normalizeHost((string) parse_url((string) $url, PHP_URL_HOST));
+
+        // isSafe() has already judged IP literals (including bracketed IPv6).
+        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+            return [$host];
+        }
+
+        $ips = self::resolveIps($host);
+
+        // No address to judge — refuse rather than guess. Mirrors hostIsPublic().
+        if ($ips === []) {
+            return null;
+        }
+
+        foreach ($ips as $ip) {
+            if (! self::ipIsPublic($ip)) {
+                return null;
+            }
+        }
+
+        return $ips;
     }
 
     /**
