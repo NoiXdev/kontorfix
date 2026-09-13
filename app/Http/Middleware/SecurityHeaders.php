@@ -176,13 +176,15 @@ class SecurityHeaders
             return ['script-src' => "script-src 'self' 'unsafe-inline'"];
         }
 
-        if ($name === 'scramble.docs.ui') {
-            return [
-                'script-src' => "script-src 'self' 'unsafe-inline' https://unpkg.com",
-                'style-src' => "style-src 'self' 'unsafe-inline' https://fonts.bunny.net https://unpkg.com",
-            ];
-        }
-
+        // The API reference used to need an exception of its own: Scramble's shipped view
+        // pulls Stoplight Elements from unpkg.com and carries un-nonced inline blocks, so
+        // the page only rendered with the CDN allowed and 'unsafe-inline' on both
+        // directives — script execution on this origin delegated to a third party, in the
+        // session of the only role permitted to open the page. The view is published under
+        // resources/views/vendor/scramble now: the renderer is a Vite bundle served from
+        // 'self', and every inline block carries the nonce. It therefore needs no
+        // exception at all, and must not silently regain one — SecurityHeadersVendorPages
+        // asserts that.
         return [];
     }
 

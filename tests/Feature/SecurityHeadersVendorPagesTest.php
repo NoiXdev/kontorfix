@@ -49,17 +49,27 @@ it('serves horizon a policy its un-nonced module script survives', function () {
         ->and($csp)->toContain("base-uri 'self'");
 });
 
-it('serves the api browser a policy that covers its third-party bundle', function () {
+it('serves the api browser the ordinary policy, with no third-party allowance left', function () {
+    // This page used to need the widest exception in the application: Scramble's shipped
+    // view pulls Stoplight Elements from unpkg.com with no subresource integrity, so the
+    // policy had to allow that origin AND 'unsafe-inline' on both directives — delegating
+    // script execution on this origin to a CDN, in the session of an operator admin, the
+    // only role allowed to open the page. The view is published now and the renderer is a
+    // Vite bundle, so the exception is gone and must not come back unnoticed.
     config(['security.csp' => 'enforce']);
 
     $res = $this->actingAs(cspOperator())->get('/docs/api');
     $csp = (string) $res->headers->get('Content-Security-Policy');
 
-    expect($res->getContent())->toContain('https://unpkg.com/@stoplight/elements');
+    expect($res->getContent())->not->toContain('unpkg.com')
+        // The premise: every inline block on the page carries the nonce, which is what
+        // makes a nonce-only policy survivable here.
+        ->and($res->getContent())->not->toMatch('/<script(?![^>]*\bnonce=)[^>]*>/')
+        ->and($res->getContent())->not->toMatch('/<style(?![^>]*\bnonce=)[^>]*>/');
 
-    expect($csp)->toContain("script-src 'self' 'unsafe-inline' https://unpkg.com")
-        ->and($csp)->toContain('style-src')
-        ->and($csp)->toContain('https://unpkg.com;')
+    expect($csp)->toContain("script-src 'self' 'nonce-")
+        ->and($csp)->not->toContain('unpkg.com')
+        ->and($csp)->not->toContain("script-src 'self' 'unsafe-inline'")
         ->and($csp)->toContain("frame-ancestors 'none'");
 });
 

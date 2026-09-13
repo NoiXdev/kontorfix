@@ -7,7 +7,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
     plugins: [
         laravel({
-            input: ['resources/js/app.ts'],
+            input: ['resources/js/app.ts', 'resources/js/api-docs.ts'],
             refresh: true,
         }),
         vue({

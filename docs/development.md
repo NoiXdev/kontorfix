@@ -589,10 +589,11 @@ production deployment:
   - Surfaces checked under `enforce`: the SPA (`@routes`, the one inline script in the
     layout, is nonced; `fonts.bunny.net` is allowed for the webfont stylesheet and
     `ws:`/`wss:` for Reverb), the PEP 503 index and Laravel's error pages — none of them
-    break. `/horizon` and `/docs/api` are rendered from vendor views whose inline scripts
-    cannot be nonced, so they are served a `script-src` of their own (`'unsafe-inline'`,
-    plus `unpkg.com` for the API browser's bundle) while keeping `frame-ancestors`,
-    `object-src`, `base-uri` and `form-action`. `npm run dev` HMR does not work under
+    break. `/horizon` is rendered from a vendor view whose inline script cannot be
+    nonced, so it is served a `script-src` of its own (`'unsafe-inline'`) while keeping
+    `frame-ancestors`, `object-src`, `base-uri` and `form-action`. `/docs/api` needs no
+    exception: its view is published under `resources/views/vendor/scramble`, its inline
+    blocks carry the nonce and its renderer is a Vite bundle served from `self`. `npm run dev` HMR does not work under
     `enforce`; leave the local default at `off`.
 - **`APP_DEBUG=false`** in production.
 
@@ -1666,9 +1667,11 @@ Deliberately classified as low and documented in the security audit (non-blockin
 - **API existence oracle:** route model binding runs before the key auth; non-existent
   `{id}` routes return 404 instead of 401. Low value due to non-enumerable UUIDs.
 - **API docs in `local`:** `/docs/api` is ungated in the `local` environment (development).
-  The page also loads Stoplight Elements from unpkg.com and runs it on this origin without
-  subresource integrity, in a session that is by definition an operator admin's. Set
-  `KONTORFIX_API_DOCS_ENABLED=false` on an instance that does not need the browser.
+  Set `KONTORFIX_API_DOCS_ENABLED=false` on an instance that does not need the browser. The
+  renderer itself is no longer third-party at runtime: Scramble's view is published under
+  `resources/views/vendor/scramble` and Stoplight Elements is bundled by Vite, so nothing on
+  the page is fetched from a CDN. When Scramble is upgraded, diff its `docs.blade.php`
+  against the published copy.
 - **API keys minted from an API key:** `POST /api/v1/me/api-keys` cannot carry
   `password.confirm` (the gate reads a session key; `/api/v1` is stateless). A successor may
   be neither wider nor longer-lived than its parent, and a parent with no expiry falls back
