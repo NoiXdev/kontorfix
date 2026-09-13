@@ -10,6 +10,7 @@ use App\Models\PackageVersion;
 use App\Services\Npm\NpmPublishService;
 use App\Services\Upstream\UpstreamClient;
 use App\Services\Vcs\ReadmeRenderer;
+use App\Support\CredentialUrl;
 use Composer\Semver\VersionParser;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Log;
@@ -223,9 +224,13 @@ class NpmMirrorImport
      */
     private function verifyIntegrity(Filesystem $disk, string $path, string $integrity, string $url): void
     {
+        // Redacted for the same reason MirrorImporter::fetchArtifact() redacts: these
+        // messages become Package::sync_error, which the member-tier API hands out.
+        $shown = CredentialUrl::redact($url);
+
         if (! str_starts_with($integrity, 'sha512-')) {
             $disk->delete($path);
-            throw MirrorSyncFailed::because("Nicht unterstütztes Integritätsformat des Artefakts: {$url}");
+            throw MirrorSyncFailed::because("Nicht unterstütztes Integritätsformat des Artefakts: {$shown}");
         }
 
         $expected = base64_decode(substr($integrity, strlen('sha512-')), true);
@@ -246,7 +251,7 @@ class NpmMirrorImport
 
         if ($expected === false || ! hash_equals($expected, $actual)) {
             $disk->delete($path);
-            throw MirrorSyncFailed::because("Prüfsumme (integrity) des Artefakts stimmt nicht überein: {$url}");
+            throw MirrorSyncFailed::because("Prüfsumme (integrity) des Artefakts stimmt nicht überein: {$shown}");
         }
     }
 

@@ -53,7 +53,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.", $response->status());
+            throw new UpstreamException('Upstream artifact '.CredentialUrl::redact($absoluteUrl)." returned {$response->status()}.", $response->status());
         }
 
         return $response->body();
@@ -88,7 +88,7 @@ class UpstreamClient
             return null;
         }
         if (! $response->successful()) {
-            throw new UpstreamException("Upstream artifact {$absoluteUrl} returned {$response->status()}.", $response->status());
+            throw new UpstreamException('Upstream artifact '.CredentialUrl::redact($absoluteUrl)." returned {$response->status()}.", $response->status());
         }
 
         $declared = $response->header('Content-Length');
