@@ -568,7 +568,13 @@ production deployment:
   `Host` never reaches the container in the first place.
 - **Verify and pin the image.** The release workflow signs every published image by digest
   with keyless cosign, bound to this repository's `release.yml` workflow identity, alongside
-  the provenance attestation and SBOM it already produced. Provenance says how an image was
+  the provenance attestation and SBOM it already produced. "Every published image" now
+  includes the one you deploy: set the repository variable `HARBOR_IMAGE` (plus
+  `HARBOR_REGISTRY` and the `HARBOR_USERNAME`/`HARBOR_TOKEN` secrets) and the release pushes
+  the *same build* to both registries, so one digest — and one signature — covers both. Point
+  `KONTORFIX_IMAGE` in the deployment at that same reference. While `HARBOR_IMAGE` is unset
+  the workflow annotates the run with a warning, because a release that signs only an image
+  nobody deploys is worse than none: it reads as covered when it is not. Provenance says how an image was
   built; the signature says that *this* image is the one this repository published, which is
   the part a `docker compose pull` of a mutable `:latest` cannot establish. Verify the version
   tag, read its digest, and pin `docker/compose.yaml` to `@sha256:<digest>` — the exact

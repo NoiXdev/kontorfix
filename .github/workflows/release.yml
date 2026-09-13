@@ -137,11 +137,34 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # docker/compose.yaml deploys from Harbor, not from Docker Hub. Pushing both
+      # references from the SAME build is what makes the signature below cover the bytes
+      # the deployment actually pulls: one build produces one digest, and both registries
+      # receive it.
+      - name: Log in to Harbor
+        if: ${{ inputs.dry_run == false && vars.HARBOR_IMAGE != '' }}
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
+        with:
+          registry: ${{ vars.HARBOR_REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_TOKEN }}
+
+      # A conditional push that silently does nothing would recreate the gap it exists to
+      # close: a release that looks signed while the deployed registry is served by
+      # something outside this repository entirely.
+      - name: Warn when the deployment registry is not part of this release
+        if: ${{ vars.HARBOR_IMAGE == '' }}
+        run: |
+          echo "::warning::HARBOR_IMAGE is not configured, so this release publishes and signs only the Docker Hub image. docker/compose.yaml deploys from Harbor — that image is then built outside this workflow and is covered by no attestation."
+
       - name: Compute image tags
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
-          images: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
+          # Both references get the same tag set, so one build push covers both.
+          images: |
+            docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
+            ${{ vars.HARBOR_IMAGE }}
           tags: |
             type=raw,value=latest,enable=${{ inputs.prerelease == false }}
             type=semver,pattern={{version}},value=${{ steps.bump.outputs.tag }}
@@ -186,12 +209,22 @@ jobs:
         if: ${{ inputs.dry_run == false }}
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
-      - name: Sign the published image
+      - name: Sign every published image
         if: ${{ inputs.dry_run == false }}
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-          IMAGE: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+          IMAGES: |
+            docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.DOCKERHUB_IMAGE }}
+            ${{ vars.HARBOR_IMAGE }}
+        run: |
+          # One digest, every registry it was pushed to. Signing by digest rather than by
+          # tag is the point: a tag is a mutable pointer, so a signature over it says
+          # nothing about the bytes a consumer receives.
+          echo "$IMAGES" | while read -r image; do
+            [ -n "$image" ] || continue
+            echo "Signing ${image}@${DIGEST}"
+            cosign sign --yes "${image}@${DIGEST}"
+          done
 
       - name: Commit version bump + CHANGELOG to main
         if: ${{ inputs.dry_run == false }}

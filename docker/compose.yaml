@@ -50,7 +50,14 @@ x-logging: &logging
 
 services:
   app:
-    image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    # The image every service runs. Set KONTORFIX_IMAGE to the SAME value as the release
+    # workflow's HARBOR_IMAGE variable: that is what makes the cosign signature cover the
+    # bytes this deployment pulls rather than a Docker Hub copy nobody deploys. Pin a
+    # digest (…@sha256:…) rather than a tag for a deployment that should not move on its
+    # own, and verify it before rolling out:
+    #   cosign verify --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/' \
+    #     --certificate-oidc-issuer https://token.actions.githubusercontent.com "$KONTORFIX_IMAGE"
+    image: ${KONTORFIX_IMAGE:-harbor.cloud.noidee.dev/noixdev/kontorfix:latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -128,7 +135,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    image: ${KONTORFIX_IMAGE:-harbor.cloud.noidee.dev/noixdev/kontorfix:latest}
     environment:
       CONTAINER_ROLE: worker
       LOG_CHANNEL: stderr
@@ -160,7 +167,7 @@ services:
     restart: unless-stopped
 
   scheduler:
-    image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    image: ${KONTORFIX_IMAGE:-harbor.cloud.noidee.dev/noixdev/kontorfix:latest}
     environment:
       CONTAINER_ROLE: scheduler
       LOG_CHANNEL: stderr
@@ -180,7 +187,7 @@ services:
     restart: unless-stopped
 
   reverb:
-    image: harbor.cloud.noidee.dev/noixdev/kontorfix:latest
+    image: ${KONTORFIX_IMAGE:-harbor.cloud.noidee.dev/noixdev/kontorfix:latest}
     # Opt-in, exactly like the broadcasting block in .env.example that it needs:
     #   docker compose --profile reverb up -d
     # Without the profile this service is not created at all. `docker/.env.example` ships
