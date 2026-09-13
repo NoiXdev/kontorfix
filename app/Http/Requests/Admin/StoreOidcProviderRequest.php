@@ -23,11 +23,18 @@ class StoreOidcProviderRequest extends FormRequest
             'slug' => ['required', 'string', 'regex:/^[a-z0-9-]+$/', 'unique:oidc_providers,slug'],
             'client_id' => ['required', 'string', 'max:190'],
             'client_secret' => ['required', 'string', 'max:500'],
-            'issuer' => ['required', 'url'],
-            'authorization_endpoint' => ['required', 'url'],
-            'token_endpoint' => ['required', 'url'],
-            'jwks_uri' => ['required', 'url'],
-            'userinfo_endpoint' => ['nullable', 'url'],
+            // https, not just `url`. UrlSafety's scheme allowlist permits http on purpose —
+            // it is built for artifact URLs, where an internal mirror without TLS is a real
+            // deployment — but an identity provider is different: OidcService POSTs the
+            // client_secret to the token endpoint and fetches the JWKS that every id_token
+            // signature is checked against. Over http that hands an on-path attacker the
+            // secret in cleartext and lets them serve a forged key set. OIDC Core requires
+            // https of the issuer anyway, so this refuses nothing the spec allows.
+            'issuer' => ['required', 'url:https'],
+            'authorization_endpoint' => ['required', 'url:https'],
+            'token_endpoint' => ['required', 'url:https'],
+            'jwks_uri' => ['required', 'url:https'],
+            'userinfo_endpoint' => ['nullable', 'url:https'],
             'scopes' => ['nullable', 'string', 'max:500'],
             'enabled' => ['boolean'],
             'allow_registration' => ['boolean'],

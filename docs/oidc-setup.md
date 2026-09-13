@@ -77,6 +77,10 @@ Die Route ist `oidc.callback` (`GET /auth/oidc/{slug}/callback`).
   (Ablauf) und `nonce` geprüft.
 - **SSRF-Schutz:** Ausgehende Requests auf Discovery-, Token- und JWKS-Endpunkte sind gegen
   SSRF abgesichert (keine internen/privaten Ziele).
+- **TLS ist Pflicht:** Alle Provider-Endpunkte müssen `https` sein — im Formular und noch
+  einmal beim Discovery, auch für die Endpunkte, die das Discovery-Dokument selbst nennt.
+  Über `http` würde das `client_secret` im Klartext zum Token-Endpunkt gehen und die JWKS
+  ließe sich unterwegs austauschen; OIDC Core verlangt `https` ohnehin.
 - **Verknüpfung mit bestehenden Konten ist doppelt abgesichert:** Eine OIDC-Identität wird
   nur dann automatisch mit einem bestehenden Konto verknüpft, wenn (1) der IdP die E-Mail
   als verifiziert liefert **und** (2) der Provider `trusts_email_claim = true` gesetzt hat.
