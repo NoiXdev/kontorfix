@@ -5,7 +5,10 @@ namespace App\Services\Package;
 use App\Enums\PackageType;
 use App\Http\Controllers\Concerns\ScopesToAdministeredOrgs;
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
+use App\Services\Licence\VersionEntitlement;
+use App\Support\Licence\OrganizationLicence;
 use App\Support\Licence\Pep440Version;
 use App\Support\Licence\VersionBounds;
 use Carbon\CarbonInterface;
@@ -22,6 +25,13 @@ use UnexpectedValueException;
  * `available_until` alone and now delegates to this instead, so the invariant stays
  * literally true with two call sites rather than becoming false the moment a second one
  * (Admin\PackageAssignmentController, the package page's "Freigaben" surface) appears.
+ *
+ * `assignToOrganization()`, `writeOrganization()` and `revokeOrganization()` extend that
+ * same invariant to `organization_package`'s identically-named three columns — see
+ * {@see Organization::licensedPackages()}'s docblock — rather than a second class taking
+ * up that role for the new table. Splitting the org methods out into their own class would
+ * let "the one place these three columns get written" quietly become two answers, one per
+ * table, the moment anybody forgot the other existed.
  *
  * ROUTING A WRITE THROUGH THIS CLASS IS WHAT MAKES IT SAFE, not merely convenient — every
  * one of `write()`, `assign()` and `revoke()` asks, ITSELF, every one of the guards below
@@ -133,6 +143,106 @@ final class AssignmentWriter
         $this->assertMayTouchAssignment($package);
 
         $group->packages()->detach($package->getKey());
+    }
+
+    /**
+     * Creates or replaces an organization's licence for a package — the ceiling every
+     * `group_package` row of that organization is then read through
+     * ({@see VersionEntitlement::boundsFor()}).
+     *
+     * Same guards as assign(), read against an organization instead of a registry, plus one
+     * of its own: only a `shared` package may be licensed. A licence over a package the
+     * customer already owns is meaningless, and requiring the flag makes the "Für andere
+     * Organisationen freigeben" switch the visible prerequisite of this feature rather than
+     * an unrelated control beside it. See {@see assertLicensable()} for the Docker half of
+     * that same guard.
+     *
+     * Deliberately NOT guarded: whether this licence leaves existing registry rows empty.
+     * See assertWithinOrganizationLicence() for why that direction stays open.
+     */
+    public function assignToOrganization(Organization $organization, Package $package, ?CarbonInterface $availableUntil, VersionBounds $bounds): void
+    {
+        $this->assertAdministersOrgInScope($organization->getKey());
+        $this->assertMayTouchAssignment($package);
+        $this->assertLicensable($package);
+        $this->assertValidBounds($package->type, $bounds);
+
+        $organization->licensedPackages()->syncWithoutDetaching([
+            $package->getKey() => [
+                'available_until' => $availableUntil,
+                'version_min' => $bounds->min,
+                'version_max' => $bounds->max,
+            ],
+        ]);
+    }
+
+    /**
+     * Period and bounds on a licence that already exists. Assumes the row is there — a
+     * caller writing against one that is not gets a silent no-op from updateExistingPivot(),
+     * exactly as write() does for registry rows; the 404 distinction is the controller's.
+     */
+    public function writeOrganization(Organization $organization, Package $package, ?CarbonInterface $availableUntil, VersionBounds $bounds): void
+    {
+        $this->assertAdministersOrgInScope($organization->getKey());
+        $this->assertMayTouchAssignment($package);
+        $this->assertLicensable($package);
+        $this->assertValidBounds($package->type, $bounds);
+
+        $organization->licensedPackages()->updateExistingPivot($package->getKey(), [
+            'available_until' => $availableUntil,
+            'version_min' => $bounds->min,
+            'version_max' => $bounds->max,
+        ]);
+    }
+
+    /**
+     * Ends a licence outright.
+     *
+     * NOT the same as letting it expire: removing the row means "this customer holds no org
+     * licence, and their registry assignments stand on their own again", while an expired
+     * row withdraws the package everywhere. Both are deliberate; see
+     * {@see OrganizationLicence}.
+     *
+     * Runs only the permission guards (1 → 2 in the class docblock's numbering): detaching a
+     * row leaves nothing for assertLicensable() or assertValidBounds() to check — a licence
+     * that should never have been shared, or whose bounds have since gone stale, is exactly
+     * as revocable as a perfectly ordinary one.
+     */
+    public function revokeOrganization(Organization $organization, Package $package): void
+    {
+        $this->assertAdministersOrgInScope($organization->getKey());
+        $this->assertMayTouchAssignment($package);
+
+        $organization->licensedPackages()->detach($package->getKey());
+    }
+
+    /**
+     * Only a shared package can be licensed to an organization that does not own it, and
+     * Docker is refused outright regardless of bounds.
+     *
+     * The Docker refusal cannot be left to {@see assertValidBounds()} alone: that guard only
+     * rejects a Docker package for a non-unlimited pair, so `VersionBounds::unlimited()`
+     * would otherwise sail an `organization_package` row through for a package type that
+     * has, by design, no notion of a licence-bounded version at all
+     * ({@see VersionEntitlement}'s `DOCKER_BOUNDS_UNSUPPORTED` guard) —
+     * a row nothing would ever read (Docker is served through the OCI distribution
+     * endpoints, which never consult `VersionEntitlement`), but one that would misleadingly
+     * suggest a licence exists. Checked ahead of assertValidBounds() in both call sites so a
+     * Docker package is refused on type alone, before its bounds are inspected at all.
+     */
+    private function assertLicensable(Package $package): void
+    {
+        if (! $package->shared) {
+            throw ValidationException::withMessages([
+                'package_id' => 'Nur freigegebene Pakete können einer Organisation lizenziert werden. Aktivieren Sie zuerst „Für andere Organisationen freigeben".',
+            ]);
+        }
+
+        if ($package->type === PackageType::Docker) {
+            throw ValidationException::withMessages([
+                'package_id' => 'Docker-Pakete können nicht organisationsweit lizenziert werden.',
+            ]);
+        }
     }
 
     /**
