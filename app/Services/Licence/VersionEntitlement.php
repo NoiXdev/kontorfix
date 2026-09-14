@@ -5,10 +5,13 @@ namespace App\Services\Licence;
 use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\OrganizationPackage;
 use App\Models\Package;
+use App\Support\Licence\OrganizationLicence;
 use App\Support\Licence\Pep440Version;
 use App\Support\Licence\VersionBounds;
 use App\Support\Licence\VersionWindows;
+use Carbon\CarbonImmutable;
 use Closure;
 use Composer\Semver\Comparator;
 use Composer\Semver\VersionParser;
@@ -165,6 +168,133 @@ final class VersionEntitlement
             ->all();
 
         return new VersionWindows($windows);
+    }
+
+    /**
+     * This organization's licence for this package, or null when it holds none.
+     *
+     * Null and expired are DIFFERENT answers and every caller must treat them so — see
+     * OrganizationLicence's docblock. Returning the row rather than a bare verdict is what
+     * lets the callers tell them apart.
+     *
+     * Reads the pivot via `getRelation('pivot')` rather than the usual `$model->pivot`
+     * property: `Organization` has never been the far side of a `belongsToMany` before this
+     * feature, so Larastan has no generic to type that property from and reports it as
+     * undefined. `getRelation()` is the same runtime data through the untyped, always-legal
+     * Eloquent accessor, cast once via the closure's declared return type instead of a bare
+     * property fetch.
+     */
+    public function organizationLicence(string $organizationId, Package $package): ?OrganizationLicence
+    {
+        $pivot = $package->licensedOrganizations()
+            ->where('organizations.id', $organizationId)
+            ->get()
+            ->map(static fn (Organization $organization): OrganizationPackage => $organization->getRelation('pivot'))
+            ->first();
+
+        if ($pivot === null) {
+            return null;
+        }
+
+        $until = $pivot->available_until;
+
+        return new OrganizationLicence(
+            VersionBounds::fromPivot($pivot->version_min, $pivot->version_max),
+            $until === null ? null : CarbonImmutable::parse($until),
+        );
+    }
+
+    /**
+     * The window both sides admit, or null when they admit nothing together.
+     *
+     * Lives here rather than on VersionBounds because deciding which of two versions is
+     * larger is TYPE-AWARE: Composer and npm share composer/semver, PyPI needs Pep440Version
+     * (see permits()). Those comparators are already here, and a value object reaching for
+     * them would split the one place that knows the rule.
+     *
+     * Fails closed on anything it cannot parse: an unplaceable bound cannot be intersected
+     * honestly, so it denies rather than guessing which side is open — the same direction
+     * permits() takes, and logged through the same time-boxed dedupe so a bad stored row is
+     * findable without flooding the log.
+     */
+    public function intersect(VersionBounds $licence, VersionBounds $row, PackageType $type): ?VersionBounds
+    {
+        $min = $this->higherBound($licence->min, $row->min, $type);
+        $max = $this->lowerBound($licence->max, $row->max, $type);
+
+        if ($min === false || $max === false) {
+            return null;
+        }
+
+        if ($min !== null && $max !== null && ! $this->boundsAreOrdered($type, $min, $max)) {
+            return null;
+        }
+
+        return new VersionBounds($min, $max);
+    }
+
+    /**
+     * The larger of two lower bounds; null when neither narrows. `false` signals an
+     * unparseable value, which the caller turns into a refusal.
+     */
+    private function higherBound(?string $a, ?string $b, PackageType $type): string|false|null
+    {
+        if ($a === null || $b === null) {
+            return $a ?? $b;
+        }
+
+        $ordered = $this->compareBounds($type, $a, $b);
+
+        return $ordered === null ? false : ($ordered >= 0 ? $a : $b);
+    }
+
+    /** The smaller of two upper bounds; see higherBound() for the `false` case. */
+    private function lowerBound(?string $a, ?string $b, PackageType $type): string|false|null
+    {
+        if ($a === null || $b === null) {
+            return $a ?? $b;
+        }
+
+        $ordered = $this->compareBounds($type, $a, $b);
+
+        return $ordered === null ? false : ($ordered <= 0 ? $a : $b);
+    }
+
+    /** -1/0/1, or null when either side cannot be parsed for this ecosystem. */
+    private function compareBounds(PackageType $type, string $a, string $b): ?int
+    {
+        if ($type === PackageType::Python) {
+            $parsedA = Pep440Version::parse($a);
+            $parsedB = Pep440Version::parse($b);
+
+            if ($parsedA === null || $parsedB === null) {
+                $this->logUnparseableBoundOnce($parsedA === null ? $a : $b);
+
+                return null;
+            }
+
+            return $parsedA->compareTo($parsedB);
+        }
+
+        $normalisedA = $this->normalizeSemver($a);
+        $normalisedB = $this->normalizeSemver($b);
+
+        if ($normalisedA === null || $normalisedB === null) {
+            $this->logUnparseableSemverBoundOnce($normalisedA === null ? $a : $b);
+
+            return null;
+        }
+
+        return Comparator::equalTo($normalisedA, $normalisedB)
+            ? 0
+            : (Comparator::lessThan($normalisedA, $normalisedB) ? -1 : 1);
+    }
+
+    private function boundsAreOrdered(PackageType $type, string $min, string $max): bool
+    {
+        $ordered = $this->compareBounds($type, $min, $max);
+
+        return $ordered !== null && $ordered <= 0;
     }
 
     /**
