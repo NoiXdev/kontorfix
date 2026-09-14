@@ -12,6 +12,7 @@ use App\Models\RegistryToken;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\DB;
 
 class RegistryAccessService
 {
@@ -208,11 +209,28 @@ class RegistryAccessService
     public function organizationPackagesQuery(Organization $organization): Builder
     {
         return Package::query()
-            ->whereHas('groups', fn ($q) => $q
-                ->where('groups.organization_id', $organization->id)
-                ->where(fn ($q2) => $q2
-                    ->whereNull('group_package.available_until')
-                    ->orWhere('group_package.available_until', '>', now())))
+            // Reachable either through an unexpired registry assignment in this organization
+            // or through an unexpired org licence — the second disjunct is what lets a
+            // package with no registry assignment at all reach `/o/`.
+            ->where(fn ($q) => $q
+                ->whereHas('groups', fn ($g) => $g
+                    ->where('groups.organization_id', $organization->id)
+                    ->where(fn ($e) => $e
+                        ->whereNull('group_package.available_until')
+                        ->orWhere('group_package.available_until', '>', now())))
+                ->orWhereHas('licensedOrganizations', fn ($l) => $l
+                    ->where('organizations.id', $organization->id)
+                    ->where(fn ($e) => $e
+                        ->whereNull('organization_package.available_until')
+                        ->orWhere('organization_package.available_until', '>', now()))))
+            // …and withdrawn outright once a licence LAPSES, which is not the same as never
+            // having had one: falling back to the registry assignments here would make the
+            // end of a licence term widen access. The primary key admits one row per
+            // (organization, package), so this can never contradict the disjunct above.
+            ->whereDoesntHave('licensedOrganizations', fn ($l) => $l
+                ->where('organizations.id', $organization->id)
+                ->whereNotNull('organization_package.available_until')
+                ->where('organization_package.available_until', '<=', now()))
             ->where(fn ($q) => $q
                 ->where('packages.organization_id', $organization->id)
                 ->orWhere('packages.shared', true))
@@ -261,6 +279,28 @@ class RegistryAccessService
         return $group->assignedPackages()
             ->where(fn ($q) => $q
                 ->where('packages.organization_id', $group->organization_id)
-                ->orWhere('packages.shared', true));
+                ->orWhere('packages.shared', true))
+            // A lapsed org licence withdraws the package from this registry's index as well
+            // as from its downloads; boundsFor() already refuses the download. Without this
+            // the registry would keep advertising a package it no longer serves.
+            //
+            // A raw `organization_package` correlated subquery rather than
+            // `whereDoesntHave('licensedOrganizations', ...)`: that relation is a
+            // BelongsToMany to `organizations`, and its EXISTS subquery starts from and
+            // JOINs `organizations` purely to satisfy Eloquent's relation machinery — a join
+            // with nothing in it this predicate reads (verified: `whereDoesntHave` here
+            // produces `exists (select * from "organizations" inner join
+            // "organization_package" ...)`). This method feeds packagesFor() and
+            // packageBelongsToGroup() on the registry serve path, which
+            // RegistryResolutionQueriesTest pins to exactly one `organizations` query per
+            // request — the join was showing up there as a second one. Same fix, same
+            // reason, as VersionEntitlement::organizationLicence()'s docblock.
+            ->whereNotExists(fn ($q) => $q
+                ->select(DB::raw(1))
+                ->from('organization_package')
+                ->whereColumn('organization_package.package_id', 'packages.id')
+                ->where('organization_package.organization_id', $group->organization_id)
+                ->whereNotNull('organization_package.available_until')
+                ->where('organization_package.available_until', '<=', now()));
     }
 }
