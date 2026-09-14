@@ -88,3 +88,45 @@ it('withholds every licence field from a customer who only receives a shared pac
             ->where('organization_licences', [])
             ->where('licensable_organizations', []));
 });
+
+it('reports a pre-release bound as narrowed, which a naive string comparison would call equal', function () {
+    // A numeric-segment comparator (split on '.', '-', '+', parse each run as an int) reads
+    // '2.0.0-beta1' as {2,0,0} — the '-beta1' suffix parses to nothing and is dropped — so it
+    // rates '2.0.0-beta1' and '2.0.0' EQUAL instead of ranking the pre-release lower. That
+    // was `lizenz.ts`'s original defect: a licence floor of 2.0.0 would not have narrowed a
+    // row starting at 2.0.0-beta1 at all. Asserted here, at the payload layer, rather than
+    // only in VersionEntitlementTest, because a future refactor that reintroduces a
+    // client-side comparator would not trip a guard living one layer away from the payload.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $customer = Organization::factory()->create();
+    $package = Package::factory()->for($operator)->create(['shared' => true, 'type' => PackageType::Composer]);
+    $customer->licensedPackages()->attach($package->id, ['version_min' => '2.0.0']);
+
+    $registry = Group::factory()->for($customer)->create();
+    $registry->packages()->attach($package->id, ['version_min' => '2.0.0-beta1']);
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $package))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('assignments.0.version_min', '2.0.0-beta1')
+            ->where('assignments.0.narrowed_by_licence', true)
+            ->where('assignments.0.effective_version_min', '2.0.0'));
+});
+
+it('reports a PEP 440 post-release bound as narrowed too, the other form a naive comparator mangles', function () {
+    // The same numeric-segment comparator maps '1.0.post1' to {1,0,0} — the same shape as
+    // plain '1.0' — rating them EQUAL instead of ranking the post-release higher, which is
+    // the other version form `lizenz.ts`'s original comparator got wrong.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $customer = Organization::factory()->create();
+    $package = Package::factory()->for($operator)->create(['shared' => true, 'type' => PackageType::Python]);
+    $customer->licensedPackages()->attach($package->id, ['version_min' => '1.0.post1']);
+
+    $registry = Group::factory()->for($customer)->create();
+    $registry->packages()->attach($package->id, ['version_min' => '1.0']);
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $package))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('assignments.0.version_min', '1.0')
+            ->where('assignments.0.narrowed_by_licence', true)
+            ->where('assignments.0.effective_version_min', '1.0.post1'));
+});
