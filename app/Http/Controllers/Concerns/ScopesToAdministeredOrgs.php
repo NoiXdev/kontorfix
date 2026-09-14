@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Concerns;
 
 use App\Models\Group;
+use App\Models\Organization;
 use App\Models\Package;
+use App\Services\Package\AssignmentWriter;
 use App\Services\Scope\OrgScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
@@ -74,6 +76,26 @@ trait ScopesToAdministeredOrgs
         }
 
         return $query->whereIn('organization_id', $this->scopedOrgIds());
+    }
+
+    /**
+     * Constrains an Organization query to the active scope, the same shape
+     * {@see scopeGroupQuery()} applies to a registry query. A super-admin viewing "all
+     * orgs" gets no filter; everyone else is clamped to their administered organizations —
+     * the picker on the package page's "Organisation freigeben" dialog offers exactly the
+     * organizations a licence write against them ({@see AssignmentWriter::assignToOrganization()},
+     * which asks {@see assertAdministersOrgInScope()}) would actually accept.
+     *
+     * @param  Builder<Organization>  $query
+     * @return Builder<Organization>
+     */
+    protected function scopeOrganizationQuery(Builder $query): Builder
+    {
+        if (app(OrgScope::class)->spansAllOrganizations()) {
+            return $query;
+        }
+
+        return $query->whereIn('id', $this->scopedOrgIds());
     }
 
     /**

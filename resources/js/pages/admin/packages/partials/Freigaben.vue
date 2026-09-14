@@ -22,7 +22,11 @@ import {
     type AssignableGroup,
     type AssignmentRow,
     type BoundsMode,
+    type LicensableOrganization,
+    type OrganizationLicenceRow,
 } from './freigaben';
+import { effectiveWindow, type Licence } from './lizenz';
+import LizenzEditor from './LizenzEditor.vue';
 
 const props = defineProps<{
     packageId: string;
@@ -39,11 +43,125 @@ const props = defineProps<{
     versions: string[];
     majorLines: string[];
     assignableGroups: AssignableGroup[];
+    organizationLicences: OrganizationLicenceRow[];
+    licensableOrganizations: LicensableOrganization[];
 }>();
 
 const grouped = computed(() => groupByOrganization(props.assignments));
 
 const offersBounds = computed(() => props.packageType !== 'docker');
+
+// --- The effective-window rule: a registry row is shown THROUGH its organization's
+// licence, not by its own raw bounds alone — see `lizenz.ts`'s `effectiveWindow()`. ---
+
+// Maps the payload's `version_min`/`version_max`/`expired` onto `effectiveWindow`'s
+// `min`/`max`/`expired` shape — deliberately not the same field names: the helper is
+// ecosystem-agnostic (it knows nothing about "licences"), the payload is not, and renaming
+// either side to make them match would blur that boundary rather than clarify it.
+const licenceByOrg = computed<Record<string, Licence>>(() =>
+    Object.fromEntries(
+        props.organizationLicences.map((l) => [
+            l.organization_id,
+            { min: l.version_min, max: l.version_max, expired: l.expired },
+        ]),
+    ),
+);
+
+function effectiveFor(row: { organization_id: string; version_min: string | null; version_max: string | null }) {
+    return effectiveWindow({ min: row.version_min, max: row.version_max }, licenceByOrg.value[row.organization_id] ?? null);
+}
+
+// --- The licence editor dialog: shared between "Organisation freigeben" (create) and
+// editing/removing an existing organization licence. Embeds LizenzEditor.vue, the same
+// component the customer-page entry point will use. ---
+
+type LicenceEditorMode = 'create' | 'edit';
+
+const licenceEditorOpen = ref(false);
+const licenceEditorMode = ref<LicenceEditorMode>('create');
+const licenceEditorTarget = ref<OrganizationLicenceRow | null>(null);
+const licenceEditorErrors = ref<Record<string, string>>({});
+const licenceEditorSaving = ref(false);
+
+const licenceEditorOptions = computed(() => props.licensableOrganizations.map((o) => ({ value: o.id, label: o.name })));
+
+const licenceEditorInitial = computed(() => {
+    const target = licenceEditorTarget.value;
+
+    return target === null
+        ? { id: null, availableUntil: '', versionMin: '', versionMax: '' }
+        : {
+              id: target.organization_id,
+              availableUntil: target.available_until ?? '',
+              versionMin: target.version_min ?? '',
+              versionMax: target.version_max ?? '',
+          };
+});
+
+function openLicenceEditor(row?: OrganizationLicenceRow) {
+    licenceEditorMode.value = row ? 'edit' : 'create';
+    licenceEditorTarget.value = row ?? null;
+    licenceEditorErrors.value = {};
+    licenceEditorOpen.value = true;
+}
+
+function closeLicenceEditor() {
+    licenceEditorOpen.value = false;
+}
+
+function saveLicenceEditor(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
+    licenceEditorSaving.value = true;
+    licenceEditorErrors.value = {};
+
+    const options = {
+        preserveScroll: true,
+        onSuccess: () => closeLicenceEditor(),
+        onError: (errors: Record<string, string>) => {
+            licenceEditorErrors.value = errors;
+        },
+        onFinish: () => {
+            licenceEditorSaving.value = false;
+        },
+    };
+
+    if (licenceEditorMode.value === 'create') {
+        router.post(
+            route('admin.organizations.licences.store', payload.id ?? ''),
+            {
+                package_id: props.packageId,
+                available_until: payload.available_until,
+                version_min: payload.version_min,
+                version_max: payload.version_max,
+            },
+            options,
+        );
+    } else {
+        const organizationId = licenceEditorTarget.value?.organization_id ?? '';
+        router.put(
+            route('admin.organizations.licences.update', [organizationId, props.packageId]),
+            {
+                available_until: payload.available_until,
+                version_min: payload.version_min,
+                version_max: payload.version_max,
+            },
+            options,
+        );
+    }
+}
+
+function removeLicence(row: OrganizationLicenceRow) {
+    router.delete(route('admin.organizations.licences.destroy', [row.organization_id, props.packageId]), {
+        preserveScroll: true,
+        // Same confirm-then-cancel pattern removeAssignment() below already uses: a
+        // declined dialog cancels the request outright, via onBefore.
+        onBefore: () =>
+            confirm(
+                `Lizenz für „${row.organization_name}" wirklich entfernen?\n\n` +
+                    'Anders als ein Ablaufdatum entfernt dies nur die organisationsweite Obergrenze: bestehende ' +
+                    'Registry-Freigaben dieser Organisation bleiben unverändert bestehen.',
+            ),
+    });
+}
 
 // --- The editor dialog: shared between "Registry freigeben" (create) and editing a row. ---
 
@@ -175,6 +293,37 @@ function removeAssignment(row: AssignmentRow) {
                 Keine weiteren Registries verfügbar — dieses Paket ist bereits überall zugewiesen, wo Sie es zuweisen dürfen.
             </p>
 
+            <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-medium">Organisationen</h3>
+                    <Button size="sm" :disabled="props.licensableOrganizations.length === 0" @click="openLicenceEditor()">
+                        Organisation freigeben
+                    </Button>
+                </div>
+                <p
+                    v-if="props.licensableOrganizations.length === 0 && props.organizationLicences.length === 0"
+                    class="text-xs text-muted-foreground"
+                >
+                    Dieses Paket ist nicht freigegeben. Aktivieren Sie zuerst „Für andere Organisationen freigeben".
+                </p>
+                <table v-else class="w-full text-sm">
+                    <tbody>
+                        <tr v-for="l in props.organizationLicences" :key="l.organization_id">
+                            <td class="py-2">{{ l.organization_name }}</td>
+                            <td class="font-mono text-xs text-muted-foreground">{{ l.version_min ?? '–' }} bis {{ l.version_max ?? '–' }}</td>
+                            <td class="px-4 py-2 text-xs text-muted-foreground">
+                                <span v-if="l.expired" class="text-destructive">abgelaufen</span>
+                                <span v-else>{{ availableUntilLabel(l.available_until) }}</span>
+                            </td>
+                            <td class="text-right">
+                                <Button size="sm" variant="ghost" @click="openLicenceEditor(l)">Bearbeiten</Button>
+                                <Button size="sm" variant="ghost" @click="removeLicence(l)">Entfernen</Button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
             <div
                 v-if="grouped.length === 0"
                 class="rounded-xl border border-sidebar-border/70 px-4 py-8 text-center text-sm text-muted-foreground dark:border-sidebar-border"
@@ -195,6 +344,9 @@ function removeAssignment(row: AssignmentRow) {
                         >
                             <td class="py-2 pr-4 pl-8">{{ row.group_name }}</td>
                             <td v-if="offersBounds" class="px-4 py-2 font-mono text-xs text-muted-foreground">
+                                <!-- The row's OWN bounds, always visible — the licence effect is
+                                     stated separately below so a "narrows nothing" row still shows
+                                     what it was actually configured to. -->
                                 {{ boundsLabel(row.version_min, row.version_max) }}
                                 <!-- The saved-typo case the spec's error table warns about: the live
                                      preview in the editor only warns while the dialog is open, so a
@@ -205,6 +357,20 @@ function removeAssignment(row: AssignmentRow) {
                                     class="ml-1 inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
                                 >
                                     schließt alle Versionen aus
+                                </span>
+                                <!-- What this row actually SERVES once its organization's licence is
+                                     applied — see lizenz.ts's effectiveWindow(). Distinct from the raw
+                                     bounds line above: a row can be syntactically fine and still be
+                                     narrowed, or emptied outright, by a licence the operator set
+                                     separately in the "Organisationen" block above. -->
+                                <span class="mt-0.5 block font-sans">
+                                    <span>{{ effectiveFor(row).min ?? '–' }} bis {{ effectiveFor(row).max ?? '–' }}</span>
+                                    <span v-if="effectiveFor(row).empty" class="block text-destructive">
+                                        Durch die Lizenz dieser Organisation liefert diese Registry aktuell nichts.
+                                    </span>
+                                    <span v-else-if="effectiveFor(row).narrowedByLicence" class="block text-muted-foreground">
+                                        Durch die Lizenz dieser Organisation eingegrenzt.
+                                    </span>
                                 </span>
                             </td>
                             <td class="px-4 py-2 text-xs text-muted-foreground">{{ availableUntilLabel(row.available_until) }}</td>
@@ -337,5 +503,18 @@ function removeAssignment(row: AssignmentRow) {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+
+        <LizenzEditor
+            :open="licenceEditorOpen"
+            :mode="licenceEditorMode"
+            :title="licenceEditorMode === 'create' ? 'Organisation freigeben' : `Lizenz bearbeiten: ${licenceEditorTarget?.organization_name}`"
+            picker-label="Organisation"
+            :options="licenceEditorOptions"
+            :initial="licenceEditorInitial"
+            :errors="licenceEditorErrors"
+            :saving="licenceEditorSaving"
+            @update:open="licenceEditorOpen = $event"
+            @submit="saveLicenceEditor"
+        />
     </section>
 </template>

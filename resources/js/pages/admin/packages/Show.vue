@@ -20,7 +20,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import { ExternalLink } from 'lucide-vue-next';
 import { computed, ref, watch } from 'vue';
 import Freigaben from './partials/Freigaben.vue';
-import type { AssignableGroup, AssignmentRow } from './partials/freigaben';
+import type { AssignableGroup, AssignmentRow, LicensableOrganization, OrganizationLicenceRow } from './partials/freigaben';
 
 interface Dependencies {
     runtime: Record<string, string>;
@@ -158,6 +158,8 @@ const props = defineProps<{
     assignments: AssignmentRow[];
     major_lines: string[];
     assignable_groups: AssignableGroup[];
+    organization_licences: OrganizationLicenceRow[];
+    licensable_organizations: LicensableOrganization[];
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -578,6 +580,8 @@ useOperatorChannel({
                         :versions="freigabenVersions"
                         :major-lines="props.major_lines"
                         :assignable-groups="props.assignable_groups"
+                        :organization-licences="props.organization_licences"
+                        :licensable-organizations="props.licensable_organizations"
                     />
                 </TabsContent>
 

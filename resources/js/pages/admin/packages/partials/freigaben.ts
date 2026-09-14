@@ -45,6 +45,27 @@ export interface AssignableGroup {
     organization_name: string;
 }
 
+/**
+ * One organization's org-wide licence for this package, as `PackageController::show()`
+ * sends it — the "Organisationen" block above the registry list, and the source
+ * `Freigaben.vue`'s `licenceByOrg` reads to compute each registry row's effective window
+ * (see `lizenz.ts`'s `effectiveWindow()`).
+ */
+export interface OrganizationLicenceRow {
+    organization_id: string;
+    organization_name: string;
+    version_min: string | null;
+    version_max: string | null;
+    available_until: string | null;
+    expired: boolean;
+}
+
+/** One organization the "Organisation freigeben" picker may offer. */
+export interface LicensableOrganization {
+    id: string;
+    name: string;
+}
+
 /** `2026-12-31` → `31.12.2026`. String surgery, so no timezone can shift the day. */
 export function formatDay(day: string): string {
     const parts = day.slice(0, 10).split('-');

@@ -20,6 +20,7 @@ use App\Models\MirrorSource;
 use App\Models\OciManifest;
 use App\Models\OciTag;
 use App\Models\Organization;
+use App\Models\OrganizationPackage;
 use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Models\PythonDist;
@@ -349,6 +350,18 @@ class PackageController extends Controller
             // and a viewer who may not manage assignments has no business browsing it even
             // to pick a target that would only be refused on submit.
             'assignable_groups' => $canManageAssignments ? $this->assignableGroups($package) : [],
+            // Every organization holding an org-wide licence for this package — the
+            // "Organisationen" block above the registry list — and, alongside it, the
+            // registries below are shown THROUGH that licence (see the effective-window
+            // rule in `lizenz.ts`). Gated behind the same flag as `assignments`, for the
+            // same reason: this names other customers' licence terms, not this viewer's
+            // business to read merely because they receive the package.
+            'organization_licences' => $canManageAssignments ? $this->organizationLicences($package) : [],
+            // The "Organisation freigeben" picker's own options: administered organizations
+            // that do not already hold a licence for this package. Empty for a package that
+            // is not shared — AssignmentWriter::assertLicensable() refuses a licence on one
+            // regardless, and a picker that can only be refused is worse than none.
+            'licensable_organizations' => $canManageAssignments ? $this->licensableOrganizations($package) : [],
             // Managed credentials assignable to this package: own, global, or explicitly
             // shared to the package's owning organization (never exposes the token). Empty
             // for a non-managing viewer — this is the owning organization's credential
@@ -660,6 +673,69 @@ class PackageController extends Controller
                 'name' => $group->name,
                 'organization_name' => $group->organization->name,
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Every organization holding a licence for this package, with the window and whether
+     * the term has lapsed — the "Organisationen" block on the Freigaben tab, and the source
+     * the registry rows below it are shown THROUGH (see the effective-window rule).
+     *
+     * `$org->getRelation('pivot')`, not `$org->pivot`: `Organization` has never been the
+     * far side of a `belongsToMany` before this feature, so static analysis carries no
+     * knowledge that it has a `$pivot` property at all — the same reason
+     * `assignmentPayload()` above reads `$group->getRelation('pivot')` rather than
+     * `$group->pivot`. `available_until` comes back already cast to Carbon by the pivot's
+     * own `datetime` cast (see `OrganizationPackage`), unlike
+     * `VersionEntitlement::organizationLicence()`'s raw `DB::table()` read of the same
+     * column — no second `parse()` is needed or correct here.
+     *
+     * @return list<array{organization_id: string, organization_name: string, version_min: ?string, version_max: ?string, available_until: ?string, expired: bool}>
+     */
+    private function organizationLicences(Package $package): array
+    {
+        return $package->licensedOrganizations()
+            ->orderBy('organizations.name')
+            ->get(['organizations.id', 'organizations.name'])
+            ->map(function (Organization $org): array {
+                $pivot = $org->getRelation('pivot');
+                $availableUntil = $pivot instanceof OrganizationPackage ? $pivot->available_until : null;
+
+                return [
+                    'organization_id' => $org->id,
+                    'organization_name' => $org->name,
+                    'version_min' => $pivot instanceof OrganizationPackage ? $pivot->version_min : null,
+                    'version_max' => $pivot instanceof OrganizationPackage ? $pivot->version_max : null,
+                    'available_until' => $availableUntil?->toDateString(),
+                    'expired' => $availableUntil !== null && $availableUntil->isPast(),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Organizations this package could still be licensed to: every administered one that
+     * does not already hold a licence. Empty for a package that is not shared — the switch
+     * is the prerequisite, and offering a picker that can only be refused is worse than no
+     * picker.
+     *
+     * @return list<array{id: string, name: string}>
+     */
+    private function licensableOrganizations(Package $package): array
+    {
+        if (! $package->shared) {
+            return [];
+        }
+
+        $licensed = $package->licensedOrganizations()->pluck('organizations.id')->all();
+
+        return $this->scopeOrganizationQuery(Organization::query())
+            ->whereNotIn('id', $licensed)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (Organization $org): array => ['id' => $org->id, 'name' => $org->name])
             ->values()
             ->all();
     }
