@@ -145,6 +145,57 @@ it('reports withheld with no version to name when the bounds admit none of the p
         ->and($licence->withheld)->toBeTrue();
 });
 
+it('narrows the note to the organizations org-wide licence ceiling, not the raw registry row', function () {
+    // Org-level package licences: the org-wide licence is the CEILING on every registry
+    // assignment (see App\Services\Licence\VersionEntitlement::applyLicence()). Before this
+    // fix, licenceNoteFor() read the raw per-registry bound only — a customer whose org-wide
+    // licence was narrower than the registry's own configured window was told a version was
+    // reachable that the registry would actually refuse to serve.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->create(['name' => 'acme/ceilinged', 'shared' => true]);
+    foreach (['1.0.0' => 3, '2.0.0' => 2, '2.4.1' => 1, '4.0.0' => 0] as $v => $daysAgo) {
+        PackageVersion::factory()->for($shared)->create([
+            'version' => $v, 'version_pretty' => "v{$v}", 'released_at' => now()->subDays($daysAgo),
+        ]);
+    }
+
+    $customer = Organization::factory()->create();
+    $group = Group::factory()->for($customer)->create();
+    // The registry's own row admits everything up to (not including) 4.0.0 — v4.0.0 would
+    // be the newest ADMITTED version if the row's own bounds were all that mattered.
+    $group->packages()->attach($shared->id, ['version_min' => '1.0.0', 'version_max' => '4.0.0']);
+    // The organization's licence is narrower: up to (not including) 3.0.0.
+    $customer->licensedPackages()->attach($shared->id, ['version_min' => '1.0.0', 'version_max' => '3.0.0']);
+
+    $row = app(PortalPackages::class)->for($customer)->first();
+    $licence = $row['groups']->first()->licence;
+
+    expect($licence)->not->toBeNull()
+        ->and($licence->highest_permitted)->toBe('v2.4.1')
+        ->and($licence->withheld)->toBeTrue();
+});
+
+it('reports withheld with no version to name when the org-wide licence has expired', function () {
+    // An expired licence denies the package OUTRIGHT, regardless of what the registry row
+    // itself allows — see VersionEntitlement::applyLicence()'s docblock for why expiry must
+    // deny rather than fall back to "no licence".
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $shared = Package::factory()->for($operator)->create(['name' => 'acme/lapsed-licence', 'shared' => true]);
+    PackageVersion::factory()->for($shared)->create(['version' => '1.0.0', 'version_pretty' => 'v1.0.0']);
+
+    $customer = Organization::factory()->create();
+    $group = Group::factory()->for($customer)->create();
+    $group->packages()->attach($shared->id);
+    $customer->licensedPackages()->attach($shared->id, ['available_until' => now()->subDay()]);
+
+    $row = app(PortalPackages::class)->for($customer)->first();
+    $licence = $row['groups']->first()->licence;
+
+    expect($licence)->not->toBeNull()
+        ->and($licence->highest_permitted)->toBeNull()
+        ->and($licence->withheld)->toBeTrue();
+});
+
 it('sends the licence note through to the page the customer sees', function () {
     // End-to-end, through Portal\PackageController::index() and into the Inertia payload —
     // the level PortalPackages' own unit-shaped cases above cannot reach, and the level

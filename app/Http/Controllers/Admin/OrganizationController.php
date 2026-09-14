@@ -10,6 +10,7 @@ use App\Http\Requests\Admin\UpdateOrganizationRequest;
 use App\Models\Domain;
 use App\Models\Group;
 use App\Models\Organization;
+use App\Models\Package;
 use App\Models\RegistryToken;
 use App\Models\User;
 use App\Services\Portal\PortalUrl;
@@ -18,6 +19,7 @@ use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
 use App\Services\Slugs\SlugClaimGuard;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -141,6 +143,38 @@ class OrganizationController extends Controller
                     'ability' => $token->ability->value,
                     'group' => $token->group?->name,
                 ]),
+            // The "Lizenzierte Pakete" section: every org-wide licence this organization
+            // holds — the second of the two entry points OrganizationPackageController's own
+            // docblock names, writing through the identical route the package page's
+            // "Organisationen" block already uses. `expired` is computed here, the same way
+            // PackageController::organizationLicences() computes it for the package-page
+            // entry point, rather than left to the client to compare against "now" a second
+            // time.
+            'licences' => $organization->licensedPackages()
+                ->orderBy('packages.name')
+                ->get(['packages.id', 'packages.name', 'packages.type'])
+                ->map(fn (Package $p): array => [
+                    'package_id' => $p->id,
+                    'package_name' => $p->name,
+                    'package_type' => $p->type->value,
+                    'version_min' => $p->pivot->version_min,
+                    'version_max' => $p->pivot->version_max,
+                    'available_until' => $p->pivot->available_until,
+                    'expired' => $p->pivot->available_until !== null
+                        && CarbonImmutable::parse($p->pivot->available_until)->isPast(),
+                ])->values()->all(),
+            // The "Paket lizenzieren" picker's own options: shared, non-Docker packages this
+            // organization does not already hold a licence for — shared and not Docker are
+            // the two things AssignmentWriter::assertLicensable() refuses outright, kept out
+            // of the picker rather than offered and then rejected.
+            'licensable_packages' => Package::query()
+                ->where('shared', true)
+                ->where('type', '!=', PackageType::Docker)
+                ->whereNotIn('id', $organization->licensedPackages()->pluck('packages.id'))
+                ->orderBy('name')
+                ->get(['id', 'name', 'type'])
+                ->map(fn (Package $p): array => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type->value])
+                ->values()->all(),
         ]);
     }
 

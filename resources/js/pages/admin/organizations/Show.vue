@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { OCI_AUTO_CREATE_LABEL } from '@/pages/admin/ociAutoCreate';
+import LizenzEditor from '@/pages/admin/packages/partials/LizenzEditor.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Trash2 } from 'lucide-vue-next';
@@ -43,6 +44,30 @@ interface TokenRow {
     name: string;
     ability: string;
     group: string | null;
+}
+
+/**
+ * One org-wide licence this organization holds, as `OrganizationController::show()` sends
+ * it — the "Lizenzierte Pakete" section, the customer-page twin of the package page's
+ * "Organisationen" block (`freigaben.ts`'s `OrganizationLicenceRow`). `expired` is computed
+ * server-side, the same way `PackageController::organizationLicences()` computes it for the
+ * other entry point, so the two never compare `available_until` against "now" differently.
+ */
+interface LicenceRow {
+    package_id: string;
+    package_name: string;
+    package_type: string;
+    version_min: string | null;
+    version_max: string | null;
+    available_until: string | null;
+    expired: boolean;
+}
+
+/** One package the "Paket lizenzieren" picker may offer: shared, non-Docker, not yet licensed. */
+interface LicensablePackage {
+    id: string;
+    name: string;
+    type: string;
 }
 
 const props = defineProps<{
@@ -87,6 +112,8 @@ const props = defineProps<{
     members: MemberRow[];
     assignableUsers: MemberRow[];
     tokens: TokenRow[];
+    licences: LicenceRow[];
+    licensablePackages: LicensablePackage[];
 }>();
 
 // Per-org registry types: start from the effective set, choose within the instance ceiling.
@@ -252,6 +279,98 @@ function attachMember() {
 function detachMember(userId: string) {
     router.delete(route('admin.organizations.members.destroy', [props.organization.id, userId]), { preserveScroll: true });
 }
+
+// --- The licence editor dialog: the customer-page entry point over the same write surface
+// the package page's "Organisationen" block uses (`Admin\OrganizationPackageController`).
+// Embeds LizenzEditor.vue — the one editor both hosts share — with packages as the picker's
+// options rather than organizations, and posts through the organization-first routes
+// instead of the package-first ones. ---
+
+type LicenceEditorMode = 'create' | 'edit';
+
+const licenceEditorOpen = ref(false);
+const licenceEditorMode = ref<LicenceEditorMode>('create');
+const licenceEditorTarget = ref<LicenceRow | null>(null);
+const licenceEditorErrors = ref<Record<string, string>>({});
+const licenceEditorSaving = ref(false);
+
+const licenceEditorInitial = computed(() => {
+    const target = licenceEditorTarget.value;
+
+    return target === null
+        ? { id: null, availableUntil: '', versionMin: '', versionMax: '' }
+        : {
+              id: target.package_id,
+              availableUntil: target.available_until ?? '',
+              versionMin: target.version_min ?? '',
+              versionMax: target.version_max ?? '',
+          };
+});
+
+function openLicenceEditor(row?: LicenceRow) {
+    licenceEditorMode.value = row ? 'edit' : 'create';
+    licenceEditorTarget.value = row ?? null;
+    licenceEditorErrors.value = {};
+    licenceEditorOpen.value = true;
+}
+
+function closeLicenceEditor() {
+    licenceEditorOpen.value = false;
+}
+
+function saveLicence(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
+    licenceEditorSaving.value = true;
+    licenceEditorErrors.value = {};
+
+    const options = {
+        preserveScroll: true,
+        onSuccess: () => closeLicenceEditor(),
+        onError: (errors: Record<string, string>) => {
+            licenceEditorErrors.value = errors;
+        },
+        onFinish: () => {
+            licenceEditorSaving.value = false;
+        },
+    };
+
+    if (licenceEditorMode.value === 'create') {
+        router.post(
+            route('admin.organizations.licences.store', props.organization.id),
+            {
+                package_id: payload.id,
+                available_until: payload.available_until,
+                version_min: payload.version_min,
+                version_max: payload.version_max,
+            },
+            options,
+        );
+    } else {
+        const packageId = licenceEditorTarget.value?.package_id ?? '';
+        router.put(
+            route('admin.organizations.licences.update', [props.organization.id, packageId]),
+            {
+                available_until: payload.available_until,
+                version_min: payload.version_min,
+                version_max: payload.version_max,
+            },
+            options,
+        );
+    }
+}
+
+function removeLicence(row: LicenceRow) {
+    router.delete(route('admin.organizations.licences.destroy', [props.organization.id, row.package_id]), {
+        preserveScroll: true,
+        // Same confirm-then-cancel shape Freigaben.vue's removeLicence() uses: a declined
+        // dialog cancels the request outright, via onBefore.
+        onBefore: () =>
+            confirm(
+                `Lizenz für „${row.package_name}" wirklich entfernen?\n\n` +
+                    'Anders als ein Ablaufdatum entfernt dies nur die organisationsweite Obergrenze: bestehende ' +
+                    'Registry-Freigaben dieser Organisation bleiben unverändert bestehen.',
+            ),
+    });
+}
 </script>
 
 <template>
@@ -411,6 +530,61 @@ function detachMember(userId: string) {
                     </div>
                 </form>
             </section>
+
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-medium">Lizenzierte Pakete</h2>
+                    <Button size="sm" :disabled="props.licensablePackages.length === 0" @click="openLicenceEditor()">
+                        Paket lizenzieren
+                    </Button>
+                </div>
+
+                <p class="text-sm text-muted-foreground">
+                    Eine Lizenz wird über die organisationsweite Quelle ausgeliefert und ist zugleich die Obergrenze für jede
+                    Registry dieser Organisation. Läuft sie ab, liefert auch keine Registry dieses Paket mehr — eine Lizenz zu
+                    entfernen hebt dagegen nur die Obergrenze auf.
+                </p>
+
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-muted-foreground">
+                            <th class="py-2 font-medium">Paket</th>
+                            <th class="font-medium">Versionsfenster</th>
+                            <th class="font-medium">Verfügbar bis</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="licence in props.licences" :key="licence.package_id">
+                            <td class="py-2">{{ licence.package_name }}</td>
+                            <td>{{ licence.version_min ?? '–' }} bis {{ licence.version_max ?? '–' }}</td>
+                            <td>
+                                <span v-if="licence.expired" class="text-destructive">abgelaufen</span>
+                                <span v-else>{{ licence.available_until ?? 'unbegrenzt' }}</span>
+                            </td>
+                            <td class="text-right">
+                                <Button size="sm" variant="ghost" @click="openLicenceEditor(licence)">Bearbeiten</Button>
+                                <Button size="sm" variant="ghost" @click="removeLicence(licence)">Entfernen</Button>
+                            </td>
+                        </tr>
+                        <tr v-if="props.licences.length === 0">
+                            <td colspan="4" class="py-8 text-center text-muted-foreground">Keine lizenzierten Pakete.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <LizenzEditor
+                    v-model:open="licenceEditorOpen"
+                    :mode="licenceEditorMode"
+                    :title="licenceEditorMode === 'create' ? 'Paket lizenzieren' : 'Lizenz bearbeiten'"
+                    picker-label="Paket"
+                    :options="props.licensablePackages.map((p) => ({ value: p.id, label: p.name }))"
+                    :initial="licenceEditorInitial"
+                    :errors="licenceEditorErrors"
+                    :saving="licenceEditorSaving"
+                    @submit="saveLicence"
+                />
+            </div>
 
             <section class="flex flex-col gap-3">
                 <h2 class="text-lg font-medium">Registries</h2>

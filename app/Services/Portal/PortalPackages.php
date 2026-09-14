@@ -10,6 +10,7 @@ use App\Models\Package;
 use App\Models\PackageVersion;
 use App\Services\Licence\VersionEntitlement;
 use App\Services\RegistryAccessService;
+use App\Support\Licence\OrganizationLicence;
 use App\Support\Licence\VersionBounds;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
@@ -167,6 +168,16 @@ class PortalPackages
         foreach ($ordered as $row) {
             $package = $row['package'];
 
+            // The organization's org-wide licence for THIS package, if any — read once per
+            // package, not once per registry entry, since the licence is org-wide and
+            // therefore identical for every one of this organization's registries that
+            // carry the package. `applyLicence()` below is the exact rule the registry
+            // serve path itself applies (VersionEntitlement::boundsFor() calls it too) —
+            // this is that same rule, wired here so the note this organization reads
+            // matches what its registries actually serve, never a wider, stale reading of
+            // the raw per-registry row alone. See applyLicenceCeiling()'s own docblock.
+            $licence = $this->entitlement->organizationLicence((string) $organization->id, $package);
+
             // Wrapped into PortalRegistryAssignment only now, once the licence note has
             // everything it needs: each entry's own bounds, gathered above, and every
             // row's package with its versions already loaded.
@@ -174,7 +185,7 @@ class PortalPackages
                 group: $entry['group'],
                 in_force: $entry['in_force'],
                 available_until: $entry['available_until'],
-                licence: $this->licenceNoteFor($package, $entry['bounds']),
+                licence: $this->licenceNoteFor($package, $this->applyLicenceCeiling($licence, $entry['bounds'], $package)),
             ));
 
             $result[] = [
@@ -191,20 +202,58 @@ class PortalPackages
     }
 
     /**
-     * Task 9: this ONE assignment's own upsell note — the highest version among the
-     * package's own releases that its OWN bounds admit, and whether a newer release exists
-     * that those bounds do not cover. Null wherever there is nothing to report: the bounds
-     * are unlimited, or the package has no releases at all yet, or (the ordinary bounded
-     * case) the bounds already admit the newest one.
+     * The EFFECTIVE window this one registry's assignment serves, once its organization's
+     * org-wide licence (if any) is applied — the exact rule
+     * `Admin\PackageController::assignmentPayload()` already applies for the operator-facing
+     * "Freigaben" tab (`VersionEntitlement::applyLicence()`, the same method
+     * `VersionEntitlement::boundsFor()` calls on the registry serve path itself), reused here
+     * rather than restated, so this note and what the registry actually serves can never
+     * quietly disagree.
      *
-     * $bounds is THIS assignment's own window — VersionBounds::fromPivot() applied to the
-     * pivot row `for()` already holds, the identical mapping VersionEntitlement::boundsFor()
-     * itself would apply after a redundant query for the same row — never the union
-     * VersionEntitlement::windowsForOrganization() would build across every one of the
-     * organization's registries. A customer with two registries assigned to the same package
-     * under two different windows sees each registry's own ceiling here, not a wider one that
-     * would tell them nothing about the registry they are actually looking at — the same
-     * registry-local scoping PortalRegistryAssignment::$available_until already keeps.
+     * Without this, `licenceNoteFor()` used to read the RAW per-registry bound only: a
+     * customer whose org-wide licence for the package was narrower than (or had expired
+     * relative to) the registry's own configured window would be told they could reach a
+     * version their build could not actually install — the exact "customer reading their own
+     * page must see what they are licensed for, not the raw registry row" defect this method
+     * exists to close.
+     *
+     * Returns `null` — distinct from `VersionBounds::unlimited()` — when a live licence
+     * narrows the row to nothing, or has expired: `licenceNoteFor()` treats that the same
+     * way it already treats "the bounds admit none of the package's releases", since from
+     * this customer's perspective the effect is identical (nothing is currently withheld
+     * FOR THEM by a bound with a version to name — the licence denies the package outright).
+     */
+    private function applyLicenceCeiling(?OrganizationLicence $licence, VersionBounds $bounds, Package $package): ?VersionBounds
+    {
+        if ($package->type === PackageType::Docker) {
+            return $bounds;
+        }
+
+        return $this->entitlement->applyLicence($licence, $bounds, $package->type);
+    }
+
+    /**
+     * Task 9: this ONE assignment's own upsell note — the highest version among the
+     * package's own releases that its EFFECTIVE bounds (its own configured window, narrowed
+     * by any org-wide licence — see {@see applyLicenceCeiling()}) admit, and whether a newer
+     * release exists that those bounds do not cover. Null wherever there is nothing to
+     * report: the bounds are unlimited, or the package has no releases at all yet, or (the
+     * ordinary bounded case) the bounds already admit the newest one.
+     *
+     * `$bounds` is `null` exactly when a licence narrows this assignment to nothing or has
+     * expired — see applyLicenceCeiling()'s docblock — and is treated identically to the
+     * "bounds admit none of the package's releases" case just below: withheld, with no
+     * version to name.
+     *
+     * `$bounds` otherwise carries THIS assignment's own window — VersionBounds::fromPivot()
+     * applied to the pivot row `for()` already holds, the identical mapping
+     * VersionEntitlement::boundsFor() itself would apply after a redundant query for the same
+     * row — never the union VersionEntitlement::windowsForOrganization() would build across
+     * every one of the organization's registries. A customer with two registries assigned to
+     * the same package under two different windows sees each registry's own ceiling here, not
+     * a wider one that would tell them nothing about the registry they are actually looking
+     * at — the same registry-local scoping PortalRegistryAssignment::$available_until already
+     * keeps.
      *
      * Docker is refused before ever reaching permits(), which throws LogicException for it —
      * Docker carries no licence-bounded assignment concept at all (AssignmentWriter forces
@@ -216,9 +265,9 @@ class PortalPackages
      * matching the meaning `latest_version` already gives the same relation one level up, in
      * Portal\PackageController::index().
      */
-    private function licenceNoteFor(Package $package, VersionBounds $bounds): ?PortalLicenceNote
+    private function licenceNoteFor(Package $package, ?VersionBounds $bounds): ?PortalLicenceNote
     {
-        if ($package->type === PackageType::Docker || $bounds->isUnlimited()) {
+        if ($package->type === PackageType::Docker || $bounds?->isUnlimited()) {
             return null;
         }
 
@@ -226,6 +275,10 @@ class PortalPackages
 
         if ($newest === null) {
             return null;
+        }
+
+        if ($bounds === null) {
+            return new PortalLicenceNote(highest_permitted: null, withheld: true);
         }
 
         /** @var PackageVersion|null $highestPermitted */

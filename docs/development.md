@@ -947,6 +947,58 @@ cross-organization rows it legitimises stay behind, so running the enforcement m
 there aborts and names every shared assignment as a violation. Detach the shared assignments before
 rolling back that far, or roll forward again.
 
+#### Org-wide package licences
+
+A shared package can be assigned to any number of a customer's registries, each with its own
+version window and expiry — but nothing so far has capped what the *organization as a whole* may
+receive. An **org-wide licence** does exactly that: it is the commercial ceiling above every one of
+that organization's per-registry assignments of the package, kept in its own table,
+`organization_package` (`organization_id`, `package_id`, `version_min`, `version_max`,
+`available_until`), the exact three-column shape `group_package` already carries for a single
+registry. It is managed from two equivalent entry points — the package page's "Organisationen"
+block and the customer page's "Lizenzierte Pakete" section — both writing through the same
+`Admin\OrganizationPackageController`, so a licence created from one is the identical row read back
+from the other.
+
+**Three states, and only three.** A `(organization, package)` pair is either:
+
+- **No row at all** — no licence exists, and every registry assignment serves exactly what it is
+  configured to serve, unbounded by anything org-wide. This is the pre-existing behaviour, and
+  every package that predates this feature stays in it.
+- **A live licence** — `available_until` is empty or still in the future. The licence's own
+  `[version_min, version_max)` window is intersected with each registry assignment's own window
+  (`App\Services\Licence\VersionEntitlement::applyLicence()`), never unioned, so the *narrower* of
+  the two always wins on a per-registry basis.
+- **An expired licence** — `available_until` has passed. This is **not** the same as no licence at
+  all: an expired licence withdraws the package from **every** registry of that organization
+  outright, regardless of what any individual registry assignment itself still allows. Falling back
+  to "no licence" once the term ends would make a licence *expiring* widen access, which is the
+  opposite of what a licence is for.
+
+**Expiring and deleting are different acts with different effects**, the same distinction
+`group_package.available_until` already draws for a single registry: letting a licence lapse
+(setting or waiting out `available_until`) denies the package everywhere, loudly, while **deleting**
+the licence row only removes the ceiling — every registry assignment that organization already holds
+keeps serving exactly what it was configured to serve, unbounded again. Removing a licence is
+therefore the "this is no longer a commercial limit" action, not a revocation; revoking access is
+what letting the licence expire (or detaching the registry assignments themselves) is for.
+
+**The guard between the two is one-directional.** Creating or widening a registry assignment beyond
+what the organization's current licence admits is refused outright — `AssignmentWriter` intersects
+the proposed bounds against the licence before writing and rejects a window the licence does not
+cover, the same way it rejects an impossible bounds pair. *Narrowing* the licence afterwards is a
+different question and is always allowed: a licence may be tightened even while wider registry
+assignments already exist under it, and the effect is retroactive and immediate — every
+registry keeps its own stored bounds unchanged, but what it actually *serves* is filtered live
+through the licence's new, narrower window from that point on. Nothing needs to touch the registry
+rows themselves for a licence edit to take effect.
+
+**Docker and non-shared packages cannot be licensed.** A licence is a ceiling on a *shared*
+package's distribution — Docker carries no version-bounds concept at all (the same reason it has no
+per-registry bounds editor either), and a non-shared package has only one owning organization to
+begin with, so a licence on either is refused at the same write surface that refuses a Docker or
+non-shared package's registry bounds.
+
 ### The customer portal
 
 A customer's portal is at **`/c/{orgSlug}`**. The organization is part of the address, so the URL
