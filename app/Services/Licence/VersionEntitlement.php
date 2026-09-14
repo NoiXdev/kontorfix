@@ -236,11 +236,20 @@ final class VersionEntitlement
     /**
      * The larger of two lower bounds; null when neither narrows. `false` signals an
      * unparseable value, which the caller turns into a refusal.
+     *
+     * When only one side is present there is nothing to compare it against, but the lone
+     * value must still be parse-checked before being handed back — otherwise a
+     * present-but-unparseable bound paired with a null counterpart would sail through
+     * untouched, and intersect() would silently return an unparseable bound instead of
+     * failing closed on it. Comparing the value against itself through compareBounds() gets
+     * that check — and its Docker guard — for free, rather than duplicating either.
      */
     private function higherBound(?string $a, ?string $b, PackageType $type): string|false|null
     {
         if ($a === null || $b === null) {
-            return $a ?? $b;
+            $value = $a ?? $b;
+
+            return $value === null || $this->compareBounds($type, $value, $value) !== null ? $value : false;
         }
 
         $ordered = $this->compareBounds($type, $a, $b);
@@ -248,11 +257,13 @@ final class VersionEntitlement
         return $ordered === null ? false : ($ordered >= 0 ? $a : $b);
     }
 
-    /** The smaller of two upper bounds; see higherBound() for the `false` case. */
+    /** The smaller of two upper bounds; see higherBound() for the single-sided and `false` cases. */
     private function lowerBound(?string $a, ?string $b, PackageType $type): string|false|null
     {
         if ($a === null || $b === null) {
-            return $a ?? $b;
+            $value = $a ?? $b;
+
+            return $value === null || $this->compareBounds($type, $value, $value) !== null ? $value : false;
         }
 
         $ordered = $this->compareBounds($type, $a, $b);
@@ -260,9 +271,21 @@ final class VersionEntitlement
         return $ordered === null ? false : ($ordered <= 0 ? $a : $b);
     }
 
-    /** -1/0/1, or null when either side cannot be parsed for this ecosystem. */
+    /**
+     * -1/0/1, or null when either side cannot be parsed for this ecosystem.
+     *
+     * Docker packages carry no version bounds concept at all — see permits()'s docblock —
+     * so a Docker call is refused outright here too, the same as its two public siblings,
+     * rather than falling into the semver branch and comparing image tags as if they were
+     * versions: some tags parse "successfully" and would yield a meaningless ordering
+     * instead of failing loudly.
+     */
     private function compareBounds(PackageType $type, string $a, string $b): ?int
     {
+        if ($type === PackageType::Docker) {
+            throw new LogicException(self::DOCKER_BOUNDS_UNSUPPORTED);
+        }
+
         if ($type === PackageType::Python) {
             $parsedA = Pep440Version::parse($a);
             $parsedB = Pep440Version::parse($b);

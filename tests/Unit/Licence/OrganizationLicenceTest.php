@@ -106,3 +106,43 @@ it('fails closed on an unparseable bound', function () {
         PackageType::Composer,
     ))->toBeNull();
 });
+
+it('fails closed on a single-sided unparseable min bound (composer)', function () {
+    expect(licenceEntitlement()->intersect(
+        VersionBounds::unlimited(),
+        new VersionBounds('not-a-version', null),
+        PackageType::Composer,
+    ))->toBeNull();
+});
+
+it('fails closed on a single-sided unparseable max bound (composer)', function () {
+    expect(licenceEntitlement()->intersect(
+        VersionBounds::unlimited(),
+        new VersionBounds(null, 'not-a-version'),
+        PackageType::Composer,
+    ))->toBeNull();
+});
+
+it('fails closed on a single-sided unparseable min bound (python)', function () {
+    expect(licenceEntitlement()->intersect(
+        VersionBounds::unlimited(),
+        new VersionBounds('not-a-version', null),
+        PackageType::Python,
+    ))->toBeNull();
+});
+
+it('fails closed on a single-sided unparseable max bound (python)', function () {
+    expect(licenceEntitlement()->intersect(
+        VersionBounds::unlimited(),
+        new VersionBounds(null, 'not-a-version'),
+        PackageType::Python,
+    ))->toBeNull();
+});
+
+it('refuses to intersect bounds for a Docker package rather than comparing image tags as versions', function () {
+    licenceEntitlement()->intersect(
+        new VersionBounds('1.2.3', null),
+        new VersionBounds('4.5.6', null),
+        PackageType::Docker,
+    );
+})->throws(LogicException::class);
