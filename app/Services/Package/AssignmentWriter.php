@@ -71,7 +71,10 @@ final class AssignmentWriter
 {
     use ScopesToAdministeredOrgs;
 
-    public function __construct(private readonly SharedAssignment $sharedAssignment) {}
+    public function __construct(
+        private readonly SharedAssignment $sharedAssignment,
+        private readonly VersionEntitlement $entitlement,
+    ) {}
 
     /**
      * Writes available_until + bounds for ONE assignment. Assumes the pivot row already
@@ -93,6 +96,7 @@ final class AssignmentWriter
         $this->assertAdministersGroupInScope($group);
         $this->assertMayTouchAssignment($package);
         $this->assertValidBounds($package->type, $bounds);
+        $this->assertWithinOrganizationLicence($group, $package, $bounds);
         $this->sharedAssignment->assertAssignable($group, [(string) $package->getKey()]);
 
         $group->packages()->updateExistingPivot($package->getKey(), [
@@ -120,6 +124,7 @@ final class AssignmentWriter
         $this->assertCanAttachPackages([(string) $package->getKey()], $group->organization_id);
         $this->assertMayTouchAssignment($package);
         $this->assertValidBounds($package->type, $bounds);
+        $this->assertWithinOrganizationLicence($group, $package, $bounds);
         $this->sharedAssignment->assertAssignable($group, [(string) $package->getKey()]);
 
         $group->packages()->syncWithoutDetaching([
@@ -214,6 +219,49 @@ final class AssignmentWriter
         $this->assertMayTouchAssignment($package);
 
         $organization->licensedPackages()->detach($package->getKey());
+    }
+
+    /**
+     * A registry assignment may narrow the organization's licence, never escape it.
+     *
+     * ONE-DIRECTIONAL, deliberately, and this is where it differs from
+     * {@see SharedAssignment}: that guard argues over the post-state precisely so neither
+     * direction can slip past, because there both directions are the same mistake (one
+     * package shadowing another). Here they are different acts. A registry row outside the
+     * licence is an error — nothing would ever be served through it. A licence narrowed
+     * under an existing row is a business decision whose entire point IS the retroactive
+     * effect: a customer downgrading, a term ending. Guarding that direction would turn
+     * every downgrade into a multi-step operation for no safety gained.
+     *
+     * The consequence is made visible instead of forbidden: the console marks registry rows
+     * the current licence reduces to nothing.
+     *
+     * An EXPIRED licence refuses everything — consistent with it withdrawing the package
+     * from the registry entirely, rather than quietly accepting a row that can never serve.
+     */
+    private function assertWithinOrganizationLicence(Group $group, Package $package, VersionBounds $bounds): void
+    {
+        $licence = $this->entitlement->organizationLicence($group->organization_id, $package);
+
+        if ($licence === null) {
+            return;
+        }
+
+        if ($licence->isExpired()) {
+            throw ValidationException::withMessages([
+                'version_min' => 'Die Lizenz dieser Organisation für dieses Paket ist abgelaufen. Verlängern Sie zuerst die Lizenz.',
+            ]);
+        }
+
+        if ($this->entitlement->intersect($licence->bounds, $bounds, $package->type) !== null) {
+            return;
+        }
+
+        $window = ($licence->bounds->min ?? '–').' bis '.($licence->bounds->max ?? '–');
+
+        throw ValidationException::withMessages([
+            'version_min' => "Dieser Versionsbereich liegt außerhalb der Lizenz dieser Organisation ({$window}).",
+        ]);
     }
 
     /**
