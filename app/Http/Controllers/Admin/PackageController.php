@@ -26,6 +26,7 @@ use App\Models\PackageVersion;
 use App\Models\PythonDist;
 use App\Models\RetentionPolicy;
 use App\Rules\NotRedactedCredentialUrl;
+use App\Services\Licence\VersionEntitlement;
 use App\Services\Mirror\MirrorProbe;
 use App\Services\Oci\BlobStore;
 use App\Services\Oci\Retention\RetentionRunner;
@@ -38,6 +39,8 @@ use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
 use App\Support\CredentialUrl;
+use App\Support\Licence\OrganizationLicence;
+use App\Support\Licence\VersionBounds;
 use App\Support\RepositoryAuthority;
 use App\Support\RepositoryUrlRules;
 use App\Support\Retention\RetentionDecision;
@@ -538,7 +541,17 @@ class PackageController extends Controller
      * the one payload key on the page that would otherwise name another customer's
      * registry to a viewer with no business reading it.
      *
-     * @return list<array{organization_id: string, organization_name: string, group_id: string, group_name: string, version_min: ?string, version_max: ?string, available_until: ?string, available_until_iso: ?string, in_force: bool, can_edit: bool}>
+     * `effective_version_min`/`effective_version_max`/`narrowed_by_licence`/
+     * `emptied_by_licence` are what a row actually SERVES once its organization's licence
+     * (if any) is applied — computed here, server-side, via
+     * {@see VersionEntitlement::applyLicence()}, the exact rule the registry serve path
+     * itself uses ({@see VersionEntitlement::boundsFor()} calls the identical method). This
+     * used to be restated in the client as a second, string-splitting version comparator
+     * (`lizenz.ts`'s original `compare()`) that disagreed with the server's type-aware
+     * semver/PEP 440 ordering on its first real case (a `-beta1` suffix). The client now
+     * renders exactly what this method computes and compares nothing itself.
+     *
+     * @return list<array{organization_id: string, organization_name: string, group_id: string, group_name: string, version_min: ?string, version_max: ?string, effective_version_min: ?string, effective_version_max: ?string, narrowed_by_licence: bool, emptied_by_licence: bool, available_until: ?string, available_until_iso: ?string, in_force: bool, can_edit: bool}>
      */
     private function assignmentPayload(Package $package): array
     {
@@ -567,17 +580,42 @@ class PackageController extends Controller
                 : $groups->whereIn('organization_id', $this->scopedOrgIds());
         }
 
+        // One query for every organization licence this package carries (see
+        // licencesByOrganization()'s own docblock) — not one per row below, which
+        // VersionEntitlement::boundsFor() would incur if called per group instead of
+        // applyLicence() against bounds already in hand.
+        $licences = $this->licencesByOrganization($package);
+        $entitlement = app(VersionEntitlement::class);
+
         return $groups
-            ->map(function (Group $group) use ($inForceGroupIds, $scope): array {
+            ->map(function (Group $group) use ($inForceGroupIds, $scope, $licences, $entitlement, $package): array {
                 $pivot = $group->getRelation('pivot');
+                $versionMin = $pivot instanceof GroupPackage ? $pivot->version_min : null;
+                $versionMax = $pivot instanceof GroupPackage ? $pivot->version_max : null;
+
+                /** @var array{name: string, licence: OrganizationLicence}|null $entry */
+                $entry = $licences->get((string) $group->organization_id);
+                $licence = $entry['licence'] ?? null;
+                $effective = $entitlement->applyLicence($licence, VersionBounds::fromPivot($versionMin, $versionMax), $package->type);
 
                 return [
                     'organization_id' => $group->organization_id,
                     'organization_name' => $group->organization->name,
                     'group_id' => $group->id,
                     'group_name' => $group->name,
-                    'version_min' => $pivot instanceof GroupPackage ? $pivot->version_min : null,
-                    'version_max' => $pivot instanceof GroupPackage ? $pivot->version_max : null,
+                    'version_min' => $versionMin,
+                    'version_max' => $versionMax,
+                    'effective_version_min' => $effective?->min,
+                    'effective_version_max' => $effective?->max,
+                    // A live licence that leaves the row unchanged (no licence at all, or one
+                    // whose bounds already contain the row's own) reports false here — the
+                    // "configured" line only needs to appear beneath the effective one when
+                    // the two actually differ.
+                    'narrowed_by_licence' => $effective !== null && ($effective->min !== $versionMin || $effective->max !== $versionMax),
+                    // $effective is null only when a licence is present (applyLicence()
+                    // returns the row's own bounds unchanged whenever $licence is null) —
+                    // either it has expired, or its window and the row's no longer overlap.
+                    'emptied_by_licence' => $effective === null,
                     'available_until' => $pivot instanceof GroupPackage ? $pivot->available_until?->toDateString() : null,
                     'available_until_iso' => $pivot instanceof GroupPackage ? $pivot->available_until?->toIso8601String() : null,
                     'in_force' => in_array($group->id, $inForceGroupIds, true),
@@ -678,39 +716,64 @@ class PackageController extends Controller
     }
 
     /**
-     * Every organization holding a licence for this package, with the window and whether
-     * the term has lapsed — the "Organisationen" block on the Freigaben tab, and the source
-     * the registry rows below it are shown THROUGH (see the effective-window rule).
+     * Every organization's licence for this package, keyed by organization id — the single
+     * query both {@see organizationLicences()} (the "Organisationen" block's own payload)
+     * and {@see assignmentPayload()} (each registry row's effective window) read from, so a
+     * package licensed to many organizations costs one query here, not one per consumer and
+     * not one per registry row.
      *
      * `$org->getRelation('pivot')`, not `$org->pivot`: `Organization` has never been the
      * far side of a `belongsToMany` before this feature, so static analysis carries no
      * knowledge that it has a `$pivot` property at all — the same reason
-     * `assignmentPayload()` above reads `$group->getRelation('pivot')` rather than
-     * `$group->pivot`. `available_until` comes back already cast to Carbon by the pivot's
-     * own `datetime` cast (see `OrganizationPackage`), unlike
-     * `VersionEntitlement::organizationLicence()`'s raw `DB::table()` read of the same
-     * column — no second `parse()` is needed or correct here.
+     * `assignmentPayload()` reads `$group->getRelation('pivot')` rather than `$group->pivot`.
+     * `available_until` comes back already cast to Carbon by the pivot's own `datetime`
+     * cast (see `OrganizationPackage`), unlike `VersionEntitlement::organizationLicence()`'s
+     * raw `DB::table()` read of the same column — no `parse()` is needed here.
+     *
+     * @return Collection<string, array{name: string, licence: OrganizationLicence}>
+     */
+    private function licencesByOrganization(Package $package): Collection
+    {
+        return $package->licensedOrganizations()
+            ->orderBy('organizations.name')
+            ->get(['organizations.id', 'organizations.name'])
+            ->mapWithKeys(function (Organization $org): array {
+                $pivot = $org->getRelation('pivot');
+
+                return [
+                    (string) $org->id => [
+                        'name' => $org->name,
+                        'licence' => new OrganizationLicence(
+                            VersionBounds::fromPivot(
+                                $pivot instanceof OrganizationPackage ? $pivot->version_min : null,
+                                $pivot instanceof OrganizationPackage ? $pivot->version_max : null,
+                            ),
+                            $pivot instanceof OrganizationPackage ? $pivot->available_until : null,
+                        ),
+                    ],
+                ];
+            });
+    }
+
+    /**
+     * Every organization holding a licence for this package, with the window and whether
+     * the term has lapsed — the "Organisationen" block on the Freigaben tab, and the source
+     * the registry rows below it are shown THROUGH (see {@see assignmentPayload()}'s
+     * effective-window fields).
      *
      * @return list<array{organization_id: string, organization_name: string, version_min: ?string, version_max: ?string, available_until: ?string, expired: bool}>
      */
     private function organizationLicences(Package $package): array
     {
-        return $package->licensedOrganizations()
-            ->orderBy('organizations.name')
-            ->get(['organizations.id', 'organizations.name'])
-            ->map(function (Organization $org): array {
-                $pivot = $org->getRelation('pivot');
-                $availableUntil = $pivot instanceof OrganizationPackage ? $pivot->available_until : null;
-
-                return [
-                    'organization_id' => $org->id,
-                    'organization_name' => $org->name,
-                    'version_min' => $pivot instanceof OrganizationPackage ? $pivot->version_min : null,
-                    'version_max' => $pivot instanceof OrganizationPackage ? $pivot->version_max : null,
-                    'available_until' => $availableUntil?->toDateString(),
-                    'expired' => $availableUntil !== null && $availableUntil->isPast(),
-                ];
-            })
+        return $this->licencesByOrganization($package)
+            ->map(fn (array $entry, string $organizationId): array => [
+                'organization_id' => $organizationId,
+                'organization_name' => $entry['name'],
+                'version_min' => $entry['licence']->bounds->min,
+                'version_max' => $entry['licence']->bounds->max,
+                'available_until' => $entry['licence']->availableUntil?->toDateString(),
+                'expired' => $entry['licence']->isExpired(),
+            ])
             ->values()
             ->all();
     }

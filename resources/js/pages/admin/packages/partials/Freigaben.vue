@@ -25,7 +25,6 @@ import {
     type LicensableOrganization,
     type OrganizationLicenceRow,
 } from './freigaben';
-import { effectiveWindow, type Licence } from './lizenz';
 import LizenzEditor from './LizenzEditor.vue';
 
 const props = defineProps<{
@@ -51,25 +50,14 @@ const grouped = computed(() => groupByOrganization(props.assignments));
 
 const offersBounds = computed(() => props.packageType !== 'docker');
 
-// --- The effective-window rule: a registry row is shown THROUGH its organization's
-// licence, not by its own raw bounds alone — see `lizenz.ts`'s `effectiveWindow()`. ---
-
-// Maps the payload's `version_min`/`version_max`/`expired` onto `effectiveWindow`'s
-// `min`/`max`/`expired` shape — deliberately not the same field names: the helper is
-// ecosystem-agnostic (it knows nothing about "licences"), the payload is not, and renaming
-// either side to make them match would blur that boundary rather than clarify it.
-const licenceByOrg = computed<Record<string, Licence>>(() =>
-    Object.fromEntries(
-        props.organizationLicences.map((l) => [
-            l.organization_id,
-            { min: l.version_min, max: l.version_max, expired: l.expired },
-        ]),
-    ),
-);
-
-function effectiveFor(row: { organization_id: string; version_min: string | null; version_max: string | null }) {
-    return effectiveWindow({ min: row.version_min, max: row.version_max }, licenceByOrg.value[row.organization_id] ?? null);
-}
+// The effective window each registry row serves through its organization's licence
+// (`effective_version_min`/`effective_version_max`/`narrowed_by_licence`/
+// `emptied_by_licence` on `AssignmentRow`) is computed server-side by
+// `PackageController::assignmentPayload()` via `VersionEntitlement::applyLicence()` — the
+// exact rule the registry serve path itself uses. This component renders those fields
+// directly and performs no version comparison of its own; an earlier version computed the
+// effective window here with a string-splitting comparator that disagreed with the
+// server's type-aware semver/PEP 440 ordering on non-numeric suffixes (e.g. `-beta1`).
 
 // --- The licence editor dialog: shared between "Organisation freigeben" (create) and
 // editing/removing an existing organization licence. Embeds LizenzEditor.vue, the same
@@ -344,33 +332,38 @@ function removeAssignment(row: AssignmentRow) {
                         >
                             <td class="py-2 pr-4 pl-8">{{ row.group_name }}</td>
                             <td v-if="offersBounds" class="px-4 py-2 font-mono text-xs text-muted-foreground">
-                                <!-- The row's OWN bounds, always visible — the licence effect is
-                                     stated separately below so a "narrows nothing" row still shows
-                                     what it was actually configured to. -->
-                                {{ boundsLabel(row.version_min, row.version_max) }}
-                                <!-- The saved-typo case the spec's error table warns about: the live
-                                     preview in the editor only warns while the dialog is open, so a
-                                     bounds pair that admits nothing must stay visible here too, not
-                                     just at save time. -->
-                                <span
-                                    v-if="excludesAllVersions(props.versions, row.version_min, row.version_max)"
-                                    class="ml-1 inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
-                                >
-                                    schließt alle Versionen aus
+                                <!-- The PRIMARY value is what this row actually SERVES — the
+                                     configured bounds narrowed (or emptied) by the organization's
+                                     licence, computed server-side (see freigaben.ts's AssignmentRow
+                                     docblock). A licence that empties the row entirely is stated in
+                                     the destructive tone rather than rendered as an (impossible)
+                                     bounds pair. -->
+                                <span v-if="row.emptied_by_licence" class="font-sans text-destructive">
+                                    Durch die Lizenz dieser Organisation liefert diese Registry aktuell nichts.
                                 </span>
-                                <!-- What this row actually SERVES once its organization's licence is
-                                     applied — see lizenz.ts's effectiveWindow(). Distinct from the raw
-                                     bounds line above: a row can be syntactically fine and still be
-                                     narrowed, or emptied outright, by a licence the operator set
-                                     separately in the "Organisationen" block above. -->
-                                <span class="mt-0.5 block font-sans">
-                                    <span>{{ effectiveFor(row).min ?? '–' }} bis {{ effectiveFor(row).max ?? '–' }}</span>
-                                    <span v-if="effectiveFor(row).empty" class="block text-destructive">
-                                        Durch die Lizenz dieser Organisation liefert diese Registry aktuell nichts.
+                                <template v-else>
+                                    {{ boundsLabel(row.effective_version_min, row.effective_version_max) }}
+                                    <!-- The saved-typo case the spec's error table warns about: the live
+                                         preview in the editor only warns while the dialog is open, so a
+                                         bounds pair that admits nothing must stay visible here too, not
+                                         just at save time. Checked against the EFFECTIVE bounds, since
+                                         that is what is actually rendered above and what would actually
+                                         be served. -->
+                                    <span
+                                        v-if="excludesAllVersions(props.versions, row.effective_version_min, row.effective_version_max)"
+                                        class="ml-1 inline-flex items-center rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive"
+                                    >
+                                        schließt alle Versionen aus
                                     </span>
-                                    <span v-else-if="effectiveFor(row).narrowedByLicence" class="block text-muted-foreground">
-                                        Durch die Lizenz dieser Organisation eingegrenzt.
-                                    </span>
+                                </template>
+                                <!-- The row's OWN configured bounds, shown beneath the effective
+                                     value ONLY when the licence actually changes what is served —
+                                     an operator editing this row's bounds (openEditEditor() reads
+                                     row.version_min/version_max, never the effective ones) still
+                                     needs to see what they configured, but a row no licence touches
+                                     must not show the identical range twice. -->
+                                <span v-if="row.narrowed_by_licence" class="mt-0.5 block font-sans text-muted-foreground">
+                                    konfiguriert: {{ boundsLabel(row.version_min, row.version_max) }}
                                 </span>
                             </td>
                             <td class="px-4 py-2 text-xs text-muted-foreground">{{ availableUntilLabel(row.available_until) }}</td>

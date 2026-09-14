@@ -15,10 +15,26 @@ export interface AssignmentRow {
     organization_name: string;
     group_id: string;
     group_name: string;
-    /** Inclusive lower bound, or null for "no lower bound". */
+    /** Inclusive lower bound, or null for "no lower bound" — as CONFIGURED on this row. */
     version_min: string | null;
-    /** Exclusive upper bound, or null for "no upper bound". */
+    /** Exclusive upper bound, or null for "no upper bound" — as CONFIGURED on this row. */
     version_max: string | null;
+    /**
+     * What this row actually SERVES once its organization's licence (if any) is applied —
+     * computed server-side by `Admin\PackageController::assignmentPayload()` via
+     * `VersionEntitlement::applyLicence()`, the exact rule the registry serve path itself
+     * uses. Never re-derived here: an earlier version of this tab restated the ordering
+     * rule client-side (a string-splitting comparator) and it disagreed with the server's
+     * type-aware semver/PEP 440 comparison on its first real case. `null` together with
+     * `emptied_by_licence: true` means the licence leaves nothing for this row to serve;
+     * otherwise these are the pair to render as the primary value.
+     */
+    effective_version_min: string | null;
+    effective_version_max: string | null;
+    /** True when the effective window differs from the configured one (any way, including emptying it). */
+    narrowed_by_licence: boolean;
+    /** True when the organization's licence reduces this row to nothing — expired, or non-overlapping. */
+    emptied_by_licence: boolean;
     /** `YYYY-MM-DD`, or null for an open-ended assignment. */
     available_until: string | null;
     available_until_iso: string | null;
@@ -47,9 +63,10 @@ export interface AssignableGroup {
 
 /**
  * One organization's org-wide licence for this package, as `PackageController::show()`
- * sends it — the "Organisationen" block above the registry list, and the source
- * `Freigaben.vue`'s `licenceByOrg` reads to compute each registry row's effective window
- * (see `lizenz.ts`'s `effectiveWindow()`).
+ * sends it — the "Organisationen" block above the registry list. The effective window each
+ * registry row below it serves through this licence is computed server-side and arrives
+ * directly on `AssignmentRow` (`effective_version_min`/`effective_version_max`/
+ * `narrowed_by_licence`/`emptied_by_licence`), not derived from this array.
  */
 export interface OrganizationLicenceRow {
     organization_id: string;

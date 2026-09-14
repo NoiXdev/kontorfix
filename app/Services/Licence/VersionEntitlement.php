@@ -146,8 +146,29 @@ final class VersionEntitlement
             return null;
         }
 
-        $licence = $this->organizationLicence($group->organization_id, $package);
+        return $this->applyLicence($this->organizationLicence($group->organization_id, $package), $bounds, $package->type);
+    }
 
+    /**
+     * The licence-application half of {@see boundsFor()}, split out so a caller that
+     * already holds both a row's stored bounds AND its organization's licence — without a
+     * fresh query for either — can apply the identical rule.
+     *
+     * `PackageController::show()`'s Freigaben-tab payload is exactly that caller: it reads
+     * every assignment row's bounds and every organization's licence for the package in two
+     * bulk queries up front (one query total, not one per row), then calls this for each
+     * row to compute what it actually serves. Routing that through `boundsFor()` instead
+     * would reissue `storedBoundsFor()`'s row lookup AND `organizationLicence()`'s licence
+     * lookup once per row — an N+1 this method exists to avoid, without restating the rule
+     * itself: the three-way branch below (no licence / expired / intersect) is the exact
+     * body `boundsFor()` used to inline, moved here so there is exactly one copy of it.
+     *
+     * `$licence === null` returns `$bounds` unchanged — no licence, no ceiling. An EXPIRED
+     * licence returns null regardless of `$bounds` — see boundsFor()'s own docblock for why
+     * expiry must deny rather than fall back to "no licence". Otherwise, the intersection.
+     */
+    public function applyLicence(?OrganizationLicence $licence, VersionBounds $bounds, PackageType $type): ?VersionBounds
+    {
         if ($licence === null) {
             return $bounds;
         }
@@ -156,7 +177,7 @@ final class VersionEntitlement
             return null;
         }
 
-        return $this->intersect($licence->bounds, $bounds, $package->type);
+        return $this->intersect($licence->bounds, $bounds, $type);
     }
 
     /**
