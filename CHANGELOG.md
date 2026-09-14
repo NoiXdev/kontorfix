@@ -1,4 +1,33 @@
-## [0.12.0](https://github.com/NoiXdev/kontorfix/compare/v0.11.0...v) (2026-09-11)
+## [0.13.0](https://github.com/NoiXdev/kontorfix/compare/v0.12.0...v) (2026-09-14)
+
+
+### Features
+
+* **activity:** fold repeated activity-log entries into an expandable burst row ([dbfe477](https://github.com/NoiXdev/kontorfix/commit/dbfe4775f395b85ab22aba7786fdcae6f66314e2))
+
+
+### Bug Fixes
+
+* **activity:** collapse burst counts by subject and stop folding non-contiguous matches ([7c77c05](https://github.com/NoiXdev/kontorfix/commit/7c77c05490a180b8ef7ba32190436b52cd793167))
+* **auth:** bound and record guessing at the second factor ([0e4a0c8](https://github.com/NoiXdev/kontorfix/commit/0e4a0c8c0eb5a958354172bfe2227b8e594abd6d))
+* **docs:** serve the API browser's renderer from this origin instead of a CDN ([f90d76d](https://github.com/NoiXdev/kontorfix/commit/f90d76d7104235e3f513c3dd93dbbfcd591d2d9e))
+* **health:** surface a trusted-proxy set that is wider than the proxy ([d1943d0](https://github.com/NoiXdev/kontorfix/commit/d1943d09d66f783a1e9e916ea0dbc1dea3fc4d6d))
+* **licence:** degrade the dedupe gracefully on a cache-store outage ([d0bd201](https://github.com/NoiXdev/kontorfix/commit/d0bd201ea2e4f092a6db5decee6cfcbcc27b6361))
+* **licence:** make VersionEntitlement::boundsFor() fail closed on a missing assignment ([d1eb26e](https://github.com/NoiXdev/kontorfix/commit/d1eb26eaeb017fe8ab365502502130f2c88d3559))
+* **licence:** parse PEP 440 local versions and implicit post shorthand ([384d851](https://github.com/NoiXdev/kontorfix/commit/384d8518ed7451f924b5c664b28d0f7310e97469))
+* **licence:** surface the swallowed cache throwable instead of discarding it ([5a0b8bc](https://github.com/NoiXdev/kontorfix/commit/5a0b8bc4c5b6c1f7989a7c0f76fa31a9e3eddcfa))
+* **licence:** time-box the unparseable-version/bound log dedupe ([b10fc01](https://github.com/NoiXdev/kontorfix/commit/b10fc01764b534c418be774cb4291341562526b3))
+* **mirror:** redact dist-url credentials before they reach sync_error ([ba8f771](https://github.com/NoiXdev/kontorfix/commit/ba8f77121af1479bebb1b8ff5c7825e46e4dc60e))
+* **oidc:** confine email-based account linking to the provider's organization ([3975ad8](https://github.com/NoiXdev/kontorfix/commit/3975ad858055c455c30b227f3314b9b14b091933))
+* **oidc:** require TLS for every provider endpoint ([67cdde9](https://github.com/NoiXdev/kontorfix/commit/67cdde961ea7d944a307d1cebf8a9199a2da46a2))
+* **registry:** keep publishing a shared-package registry the operator's decision ([a770f93](https://github.com/NoiXdev/kontorfix/commit/a770f93e01b0112b976436de32157ff86d8ca206))
+* **registry:** stop /o/ confirming which companies are customers ([0bdbd83](https://github.com/NoiXdev/kontorfix/commit/0bdbd83d9bdc750ff940fa613b7f5745a94dc2ef))
+* **release:** point the deployment at the Docker Hub image, not Harbor ([dbaf8c9](https://github.com/NoiXdev/kontorfix/commit/dbaf8c9ff1fc330a2a5a155cbee691353c92118d))
+* **upstream:** cap the metadata an upstream may answer with ([f3ad963](https://github.com/NoiXdev/kontorfix/commit/f3ad963a309277619fa3e5b4dc91888ebda9039b))
+* **upstream:** connect to the address the SSRF check validated ([1f62353](https://github.com/NoiXdev/kontorfix/commit/1f62353a18b17ec89ffb2c1e9f0cf5d825ef15b2))
+* **vcs:** keep an in-url git credential off argv and out of the mirror remote ([c168086](https://github.com/NoiXdev/kontorfix/commit/c1680866e5c5f08c969a449bcacd300740efcff4))
+
+## [0.12.0](https://github.com/NoiXdev/kontorfix/compare/v0.11.0...v0.12.0) (2026-09-11)
 
 
 ### Features
