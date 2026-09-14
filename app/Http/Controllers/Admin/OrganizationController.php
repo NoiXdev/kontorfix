@@ -167,7 +167,17 @@ class OrganizationController extends Controller
             // organization does not already hold a licence for — shared and not Docker are
             // the two things AssignmentWriter::assertLicensable() refuses outright, kept out
             // of the picker rather than offered and then rejected.
-            'licensable_packages' => Package::query()
+            //
+            // Named `licensablePackages` (camelCase), matching this page's OWN top-level
+            // payload convention (`registryUrlTemplate`, `portalPathTemplate`,
+            // `registryTypes`, `ociAutoCreate`, `assignableUsers` above) — Show.vue's
+            // `defineProps<{...}>()` declares it the same way. Vue's prop resolution
+            // camelizes a HYPHENATED attribute name, never an UNDERSCORED one, so a
+            // `licensable_packages` key here would silently fail to bind to a
+            // `licensablePackages` prop (resolving to `undefined`, the raw key landing in
+            // `$attrs`) rather than raising anywhere `assertInertia` or `vue-tsc` would
+            // catch it — see OrganizationLicenceSectionTest's coupling guard.
+            'licensablePackages' => Package::query()
                 ->where('shared', true)
                 ->where('type', '!=', PackageType::Docker)
                 ->whereNotIn('id', $organization->licensedPackages()->pluck('packages.id'))
