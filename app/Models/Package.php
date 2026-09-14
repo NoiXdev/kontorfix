@@ -6,6 +6,7 @@ use App\Enums\GitProvider;
 use App\Enums\PackageSourceMode;
 use App\Enums\PackageType;
 use App\Enums\SyncStatus;
+use App\Services\Licence\VersionEntitlement;
 use App\Support\AbandonmentNotice;
 use App\Support\CredentialUrl;
 use App\Support\RepositoryAuthority;
@@ -282,6 +283,23 @@ class Package extends Model
     public function organization(): BelongsTo
     {
         return $this->belongsTo(Organization::class);
+    }
+
+    /**
+     * The organizations holding an org-wide licence for this package.
+     *
+     * The licence is the CEILING on every `group_package` row of the same organization —
+     * see {@see VersionEntitlement::boundsFor()} — and is served
+     * at `/o/{orgSlug}` even when no registry of that organization carries the package.
+     * Only a `shared` package may hold one; AssignmentWriter refuses anything else.
+     *
+     * @return BelongsToMany<Organization, $this, OrganizationPackage>
+     */
+    public function licensedOrganizations(): BelongsToMany
+    {
+        return $this->belongsToMany(Organization::class, 'organization_package')
+            ->using(OrganizationPackage::class)
+            ->withPivot('available_until', 'version_min', 'version_max');
     }
 
     /**

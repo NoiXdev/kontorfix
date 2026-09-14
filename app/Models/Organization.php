@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Licence\OrganizationLicence;
 use Database\Factories\OrganizationFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -72,6 +73,23 @@ class Organization extends Model
     public function members(): BelongsToMany
     {
         return $this->belongsToMany(User::class)->withPivot('role')->withTimestamps();
+    }
+
+    /**
+     * The shared packages this organization holds an org-wide licence for.
+     *
+     * Served at `/o/{orgSlug}` even with no registry assignment at all, and the upper limit
+     * on every registry assignment of the same package — see
+     * {@see OrganizationLicence} for why an EXPIRED licence is not
+     * the same as an absent one.
+     *
+     * @return BelongsToMany<Package, $this, OrganizationPackage>
+     */
+    public function licensedPackages(): BelongsToMany
+    {
+        return $this->belongsToMany(Package::class, 'organization_package')
+            ->using(OrganizationPackage::class)
+            ->withPivot('available_until', 'version_min', 'version_max');
     }
 
     /**
