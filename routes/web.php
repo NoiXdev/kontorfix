@@ -95,6 +95,12 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
         ->name('packages.assignments.destroy');
     // The org-wide licence behind both entry points (package page and customer page).
     // Keyed by organization + package, because that pair IS the licence's identity.
+    // Deliberately grouped here, beside packages/{package}/assignments, rather than
+    // beside the rest of `organizations.*` in the super-only group below: licensing a
+    // shared package is the same class of act as assigning one, reachable by any
+    // operator-org admin/maintainer, not only a super-admin. Moving these into the
+    // super group would quietly take the capability away from operator-org
+    // maintainers, who pass canAdministerConsole() but are not super-admins.
     Route::post('organizations/{organization}/licences', [Admin\OrganizationPackageController::class, 'store'])
         ->name('organizations.licences.store');
     Route::put('organizations/{organization}/licences/{package}', [Admin\OrganizationPackageController::class, 'update'])
