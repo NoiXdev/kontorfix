@@ -119,6 +119,17 @@ final class VersionEntitlement
      * docblock (an empty window list is not unlimited, for the same race, stated there
      * first) — the two must keep agreeing on which shape of "nothing found" is refused
      * versus which shape of "found, no bounds" is unlimited.
+     *
+     * The organization's licence for this package is the CEILING on top of the registry
+     * row, and the two combine into exactly three states: no licence row → the row's own
+     * bounds, unchanged, exactly as before this feature existed; a live licence → the
+     * intersection of the licence's bounds and the row's bounds, which may itself be null;
+     * an EXPIRED licence → null, always, regardless of what the row itself allows. That
+     * last state is deliberate: falling back to "no licence" once a term ends would make
+     * a licence EXPIRING widen access, the opposite of what a licence is for. This method
+     * still does not check the registry row's own expiry — that remains the caller's
+     * question, per the note above — only the licence's expiry is checked here, because
+     * this is the only place that reads the licence at all.
      */
     public function boundsFor(Group $group, Package $package): ?VersionBounds
     {
@@ -130,7 +141,19 @@ final class VersionEntitlement
             return null;
         }
 
-        return VersionBounds::fromPivot($assignment->pivot->version_min, $assignment->pivot->version_max);
+        $bounds = VersionBounds::fromPivot($assignment->pivot->version_min, $assignment->pivot->version_max);
+
+        $licence = $this->organizationLicence($group->organization_id, $package);
+
+        if ($licence === null) {
+            return $bounds;
+        }
+
+        if ($licence->isExpired()) {
+            return null;
+        }
+
+        return $this->intersect($licence->bounds, $bounds, $package->type);
     }
 
     /**
