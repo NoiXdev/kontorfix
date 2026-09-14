@@ -400,6 +400,54 @@ it('updates an existing assignments bounds through the update route, preserving 
         ->and($row->version_max)->toBe('2.0.0');
 });
 
+it('preserves the stored version_max under a narrower organization licence when only the date changes', function () {
+    // Bug: VersionEntitlement::boundsFor() now answers the licence-NARROWED window, not the
+    // stored one. Merging an available_until-only edit against it silently rewrote
+    // version_max from the stored 5.0.0 down to the licence's 2.9.9, as if the admin had
+    // asked to narrow it — a permanent shrinkage widening the licence again does not undo.
+    // storedBoundsFor() is what the merge must read instead.
+    $this->registryA->packages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '5.0.0']);
+    $this->customerA->licensedPackages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '2.9.9']);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.assignments.update', [$this->shared, $this->registryA]), [
+            'available_until' => null,
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $row = assignmentRowOf($this->registryA, $this->shared);
+    expect($row->version_min)->toBe('1.0.0')
+        ->and($row->version_max)->toBe('5.0.0');
+});
+
+it('reaches the writers own licence guard, not a false 404, when the organization licence has expired', function () {
+    // Bug: boundsFor() also answers null for an EXPIRED licence — a second, unrelated
+    // reason it can return null besides "the row does not exist" — and this controller's
+    // "cannot happen in practice" 404 fired on it exactly as if the pivot row were gone.
+    // storedBoundsFor() answers null for exactly one reason (the row itself is missing), so
+    // the request now reaches AssignmentWriter::write() for real, which gives the ACTUAL,
+    // actionable answer instead — the organization's licence for this package has expired.
+    // Task 7's own guard deliberately refuses EVERY write while a licence is expired (see
+    // AssignmentWriter::assertWithinOrganizationLicence()'s docblock), so this is not yet a
+    // path to a successful edit — only proof the request reaches that informative refusal
+    // instead of a misleading 404.
+    $this->registryA->packages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '2.0.0']);
+    $this->customerA->licensedPackages()->attach($this->shared->id, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.assignments.update', [$this->shared, $this->registryA]), [
+            'available_until' => null,
+        ])
+        ->assertStatus(302)
+        ->assertSessionHasErrors([
+            'version_min' => 'Die Lizenz dieser Organisation für dieses Paket ist abgelaufen. Verlängern Sie zuerst die Lizenz.',
+        ]);
+
+    // Never a 404: the row is untouched, not absent.
+    expect(assignmentRowOf($this->registryA, $this->shared))->not->toBeNull();
+});
+
 it('refuses updating an assignment that does not exist', function () {
     $this->actingAs($this->customerAdminA)
         ->put(route('admin.packages.assignments.update', [$this->own, $this->registryA]), [

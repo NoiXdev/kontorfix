@@ -332,6 +332,65 @@ it('preserves the existing bounds when the update route submits only the date', 
         ->and($row->available_until->toDateString())->toBe('2027-05-01');
 });
 
+// -----------------------------------------------------------------------------------------
+// Follow-up fix — storedBoundsFor(): the organization licence must never leak into the
+// partial-edit merge, and an EXPIRED licence must not masquerade as a missing row.
+// -----------------------------------------------------------------------------------------
+
+it('preserves the stored version_max under a narrower organization licence when only the date changes', function () {
+    // Bug: VersionEntitlement::boundsFor() now answers the licence-NARROWED window, not the
+    // stored one. Merging an available_until-only edit against it silently rewrote
+    // version_max from the stored 5.0.0 down to the licence's 2.9.9, as if the admin had
+    // asked to narrow it — a permanent shrinkage widening the licence again does not undo,
+    // since the original stored value is gone once this write lands. storedBoundsFor() is
+    // what the merge must read instead.
+    $this->registry->packages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '5.0.0']);
+    $this->customer->licensedPackages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '2.9.9']);
+
+    $this->actingAs(writerOperatorStaff($this->customer, $this->operator))
+        ->put(route('admin.groups.packages.update', [$this->registry, $this->shared]), [
+            'available_until' => '2027-05-01',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $row = writerAssignmentOf($this->registry, $this->shared);
+    expect($row->version_min)->toBe('1.0.0')
+        ->and($row->version_max)->toBe('5.0.0')
+        ->and($row->available_until->toDateString())->toBe('2027-05-01');
+});
+
+it('reaches the writers own licence guard, not a false 404, when the organization licence has expired', function () {
+    // Bug: boundsFor() also answers null for an EXPIRED licence — a second, unrelated
+    // reason it can return null besides "the row does not exist" — and this controller's
+    // "cannot happen in practice" 404 fired on it exactly as if the pivot row were gone. An
+    // admin could not so much as reach an assignment whose licence had lapsed, which is
+    // precisely when they would want to extend the term or wind it down.
+    // storedBoundsFor() answers null for exactly one reason (the row itself is missing), so
+    // the request now reaches AssignmentWriter::write() for real, which gives the ACTUAL,
+    // actionable answer — the organization's licence for this package has expired — a
+    // specific validation error rather than a bare 404 a still-existing row does not
+    // deserve. Task 7's own guard is what supplies that answer; it deliberately refuses
+    // EVERY write while a licence is expired (see AssignmentWriter::
+    // assertWithinOrganizationLicence()'s docblock), so this is not yet a path to a
+    // successful edit — only proof the request reaches the real, informative refusal
+    // instead of a misleading 404.
+    $this->registry->packages()->attach($this->shared->id, ['version_min' => '1.0.0', 'version_max' => '2.0.0']);
+    $this->customer->licensedPackages()->attach($this->shared->id, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(writerOperatorStaff($this->customer, $this->operator))
+        ->put(route('admin.groups.packages.update', [$this->registry, $this->shared]), [
+            'available_until' => null,
+        ])
+        ->assertStatus(302)
+        ->assertSessionHasErrors([
+            'version_min' => 'Die Lizenz dieser Organisation für dieses Paket ist abgelaufen. Verlängern Sie zuerst die Lizenz.',
+        ]);
+
+    // Never a 404: the row is untouched, not absent.
+    expect(writerAssignmentOf($this->registry, $this->shared))->not->toBeNull();
+});
+
 it('refuses an omitted version_min that would leave an impossible window against the stored one, writing nothing', function () {
     // Stored min is 5.0.0. Submitting only version_max=3.0.0 (min omitted) must validate
     // the EFFECTIVE pair after the controller's "omitted = keep stored" merge — 5.0.0 is

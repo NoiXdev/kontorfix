@@ -534,14 +534,21 @@ class GroupController extends Controller
         // Whatever is already stored, unless this request explicitly names a side of it —
         // see the FormRequest's docblock for why `has()`, not `filled()` or `??`, is the
         // right presence check here. This merged pair — not the raw request — is what
-        // write() validates and persists.
-        $current = $entitlement->boundsFor($group, $package);
+        // write() validates and persists. Deliberately storedBoundsFor(), not boundsFor():
+        // the latter is the organization licence's EFFECTIVE, narrowed answer, and merging
+        // a partial edit against it would silently rewrite the row to the licence's window
+        // — see storedBoundsFor()'s docblock for the incident this replaced.
+        $current = $entitlement->storedBoundsFor($group, $package);
 
         // Cannot happen in practice: the abort_unless() just above already proved the pivot
-        // row exists, and nothing in this request detaches it before this call. Handled
-        // anyway, defensively, now that boundsFor() can answer null at all — the same 404
-        // the existence check above would have given, not a null-pointer error reading
-        // $current->min/$current->max below.
+        // row exists, and nothing in this request detaches it before this call.
+        // storedBoundsFor() answers null for exactly one reason — the row itself does not
+        // exist — unlike boundsFor(), which can also answer null for a merely EXPIRED
+        // licence; that distinction is the whole reason this method reads storedBoundsFor()
+        // rather than boundsFor(). Handled anyway, defensively, for the same race
+        // {@see \App\Services\Licence\VersionEntitlement::storedBoundsFor()} documents: the
+        // same 404 the existence check above would have given, not a null-pointer error
+        // reading $current->min/$current->max below.
         if ($current === null) {
             abort(404);
         }

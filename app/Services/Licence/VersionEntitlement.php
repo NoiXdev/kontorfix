@@ -130,18 +130,21 @@ final class VersionEntitlement
      * still does not check the registry row's own expiry — that remains the caller's
      * question, per the note above — only the licence's expiry is checked here, because
      * this is the only place that reads the licence at all.
+     *
+     * THIS ANSWERS "what may this registry serve" — see {@see storedBoundsFor()} for its
+     * "what is written in the row" twin. The two agree only when no licence narrows
+     * anything; a caller that needs the raw stored pair (to merge a partial edit, or to
+     * decide whether the ROW exists rather than whether it currently serves) must read that
+     * one instead, never this one — see its docblock for the incident reading this one
+     * instead produced.
      */
     public function boundsFor(Group $group, Package $package): ?VersionBounds
     {
-        $assignment = $group->packages()
-            ->where('packages.id', $package->getKey())
-            ->first();
+        $bounds = $this->storedBoundsFor($group, $package);
 
-        if ($assignment === null) {
+        if ($bounds === null) {
             return null;
         }
-
-        $bounds = VersionBounds::fromPivot($assignment->pivot->version_min, $assignment->pivot->version_max);
 
         $licence = $this->organizationLicence($group->organization_id, $package);
 
@@ -154,6 +157,56 @@ final class VersionEntitlement
         }
 
         return $this->intersect($licence->bounds, $bounds, $package->type);
+    }
+
+    /**
+     * The bounds actually WRITTEN on the pivot row — `group_package.version_min` /
+     * `version_max`, raw — with NO organization licence applied. `null` means exactly one
+     * thing: the (group, package) assignment row itself does not exist. Unlike
+     * {@see boundsFor()}, there is no second, licence-driven reason to return null here —
+     * this method does not read `organizationLicence()` at all.
+     *
+     * THIS ANSWERS "what is written in the row" — boundsFor() answers "what may this
+     * registry serve" (the same pair, narrowed by a live licence, or refused outright by an
+     * expired one). They diverge exactly when a licence exists and either narrows the row or
+     * has expired, which is precisely when reading the wrong one causes silent damage:
+     *
+     *   - a caller merging a PARTIAL edit — {@see
+     *     \App\Http\Controllers\Admin\GroupController::updateAssignment()} and {@see
+     *     \App\Http\Controllers\Admin\PackageAssignmentController::update()}, both of which
+     *     let an admin submit only `available_until` and keep whatever bounds are already
+     *     stored — must merge against THIS method's answer. Merging against boundsFor()'s
+     *     instead would write the licence's narrower intersection back into the row as the
+     *     effective pair, as if the admin had asked for that narrower window: a permanent,
+     *     silent shrinkage that widening the licence again does not undo, because the row's
+     *     original stored value is gone by then. This is the exact bug those two call sites
+     *     shipped with, until this method existed for them to read instead;
+     *   - a caller deciding whether an assignment ROW exists, to tell "nothing to edit, 404"
+     *     apart from "something to edit", must not read boundsFor()'s null-on-EXPIRED-
+     *     licence as "no row" — the row is very much there, merely unable to serve right
+     *     now. Reading THIS method instead turns that case from an opaque, wrong 404 into
+     *     the two admin surfaces above reaching {@see
+     *     \App\Services\Package\AssignmentWriter}'s own licence guard for real, which then
+     *     gives the caller the ACTUAL reason a write is refused (the licence itself has
+     *     expired) rather than a 404 a still-existing row does not deserve. It does not, by
+     *     itself, make a bounds/date WRITE succeed under an expired licence — that refusal
+     *     is deliberate (see `AssignmentWriter::assertWithinOrganizationLicence()`); only
+     *     `revoke()`, which never reads bounds at all, remains open on such a row.
+     *
+     * Same fail-CLOSED race as boundsFor(): nothing holds a transaction across a caller's
+     * own existence check and this read, so a concurrent revoke() can still land in between.
+     */
+    public function storedBoundsFor(Group $group, Package $package): ?VersionBounds
+    {
+        $assignment = $group->packages()
+            ->where('packages.id', $package->getKey())
+            ->first();
+
+        if ($assignment === null) {
+            return null;
+        }
+
+        return VersionBounds::fromPivot($assignment->pivot->version_min, $assignment->pivot->version_max);
     }
 
     /**
