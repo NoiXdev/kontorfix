@@ -521,10 +521,16 @@ describe('windowsForOrganization', function () {
         // Three groups, so a naive one-query-per-group implementation would show up here as
         // 3 (or more) registry queries rather than 1 — the same shape OrgAccessServiceTest
         // pins packagesForOrganization() to, for the same reason: this sits on the
-        // /o/{orgSlug} metadata path. The count is 2, not 1, because the licence check at
-        // the top of the method (organizationLicence()) always runs one query of its own
-        // before the registry union query — here it finds no licence row and falls through
-        // — but that licence query is likewise independent of how many groups exist.
+        // /o/{orgSlug} metadata path.
+        //
+        // The count is 2, not 1, and 2 IS the correct, permanent value here — do not
+        // "restore" this to 1. The licence check at the top of the method
+        // (organizationLicence()) always runs one query of its own before the registry
+        // union query — here it finds no licence row and falls through — and that query is
+        // a single indexed lookup on organization_package's own primary key, not a join,
+        // so it costs nothing extra as the organization grows. The invariant this test
+        // actually protects is that NEITHER query scales with the number of groups: 2
+        // total regardless of whether there are 3 groups or 300, never 1-plus-N.
         $org = Organization::factory()->create();
         $package = Package::factory()->create(['organization_id' => $org->id]);
         $groupA = Group::factory()->for($org)->create();

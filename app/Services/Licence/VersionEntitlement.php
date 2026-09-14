@@ -5,7 +5,6 @@ namespace App\Services\Licence;
 use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Organization;
-use App\Models\OrganizationPackage;
 use App\Models\Package;
 use App\Support\Licence\OrganizationLicence;
 use App\Support\Licence\Pep440Version;
@@ -17,6 +16,7 @@ use Composer\Semver\Comparator;
 use Composer\Semver\VersionParser;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use LogicException;
 use Throwable;
@@ -211,29 +211,41 @@ final class VersionEntitlement
      * OrganizationLicence's docblock. Returning the row rather than a bare verdict is what
      * lets the callers tell them apart.
      *
-     * Reads the pivot via `getRelation('pivot')` rather than the usual `$model->pivot`
-     * property: `Organization` has never been the far side of a `belongsToMany` before this
-     * feature, so Larastan has no generic to type that property from and reports it as
-     * undefined. `getRelation()` is the same runtime data through the untyped, always-legal
-     * Eloquent accessor, cast once via the closure's declared return type instead of a bare
-     * property fetch.
+     * Reads `organization_package` directly by its `(organization_id, package_id)` primary
+     * key via `DB::table()` rather than through the `licensedOrganizations()` /
+     * `licensedPackages()` Eloquent relations: every column this method needs
+     * (`available_until`, `version_min`, `version_max`) lives entirely on the pivot, so
+     * going through either `BelongsToMany` relation would JOIN in the `organizations` (or
+     * `packages`) table purely to satisfy Eloquent's relation machinery — a join with
+     * nothing in it this method reads. `boundsFor()` and `windowsForOrganization()` both
+     * call this on the registry serve path, which a single `composer install` can hit
+     * hundreds of times, and `RegistryResolutionQueriesTest` pins the number of
+     * `organizations` queries the resolution runs — the join was showing up there as a
+     * second one. A future reader tempted to "restore" this to the relation for
+     * consistency should not: it would silently reintroduce that extra join on a hot path
+     * for zero benefit, since nothing here ever reads an `Organization` or `Package`
+     * column.
+     *
+     * `available_until` comes back as a raw string here, not a `Carbon` instance — the
+     * `OrganizationPackage` pivot's `datetime` cast is Eloquent-relation machinery too, and
+     * a plain `DB::table()` read never applies it. `CarbonImmutable::parse()` below is
+     * therefore doing real work, not redundant defensive parsing.
      */
     public function organizationLicence(string $organizationId, Package $package): ?OrganizationLicence
     {
-        $pivot = $package->licensedOrganizations()
-            ->where('organizations.id', $organizationId)
-            ->get()
-            ->map(static fn (Organization $organization): OrganizationPackage => $organization->getRelation('pivot'))
-            ->first();
+        $row = DB::table('organization_package')
+            ->where('organization_id', $organizationId)
+            ->where('package_id', $package->getKey())
+            ->first(['available_until', 'version_min', 'version_max']);
 
-        if ($pivot === null) {
+        if ($row === null) {
             return null;
         }
 
-        $until = $pivot->available_until;
+        $until = $row->available_until;
 
         return new OrganizationLicence(
-            VersionBounds::fromPivot($pivot->version_min, $pivot->version_max),
+            VersionBounds::fromPivot($row->version_min, $row->version_max),
             $until === null ? null : CarbonImmutable::parse($until),
         );
     }
