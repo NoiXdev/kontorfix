@@ -93,6 +93,14 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
         ->name('packages.assignments.update');
     Route::delete('packages/{package}/assignments/{group}', [Admin\PackageAssignmentController::class, 'destroy'])
         ->name('packages.assignments.destroy');
+    // The org-wide licence behind both entry points (package page and customer page).
+    // Keyed by organization + package, because that pair IS the licence's identity.
+    Route::post('organizations/{organization}/licences', [Admin\OrganizationPackageController::class, 'store'])
+        ->name('organizations.licences.store');
+    Route::put('organizations/{organization}/licences/{package}', [Admin\OrganizationPackageController::class, 'update'])
+        ->name('organizations.licences.update');
+    Route::delete('organizations/{organization}/licences/{package}', [Admin\OrganizationPackageController::class, 'destroy'])
+        ->name('organizations.licences.destroy');
     Route::resource('groups', Admin\GroupController::class)->only(['index', 'store', 'destroy']);
     Route::get('groups/{group}', [Admin\GroupController::class, 'show'])->name('groups.show');
     Route::put('groups/{group}', [Admin\GroupController::class, 'update'])->name('groups.update');
