@@ -174,6 +174,17 @@ final class VersionEntitlement
      */
     public function windowsForOrganization(Organization $org, Package $package): VersionWindows
     {
+        // A licence replaces the per-registry windows outright rather than joining them.
+        // Registry rows can only NARROW the licence (see boundsFor()), so at the org-wide
+        // source — which is not addressed through any single registry — they would add
+        // nothing, and an expired licence denies here through the same empty window list
+        // VersionWindows already refuses.
+        $licence = $this->organizationLicence($org->id, $package);
+
+        if ($licence !== null) {
+            return new VersionWindows($licence->isExpired() ? [] : [$licence->bounds]);
+        }
+
         // Same generic-over-Model predicate assignedPackages() applies from the Group side;
         // this call reaches it from the Package side, so it asserts the other of the two
         // concrete instantiations — see that method's comment for why.

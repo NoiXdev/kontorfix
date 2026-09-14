@@ -517,11 +517,14 @@ describe('windowsForOrganization', function () {
             ->and($this->svc->permitsAny($windows, PackageType::Composer, '999.0.0'))->toBeFalse();
     });
 
-    it('runs as a single query, not one per group of the organization', function () {
+    it('runs as two queries total, not one per group of the organization', function () {
         // Three groups, so a naive one-query-per-group implementation would show up here as
-        // 3 (or more) queries rather than 1 — the same shape OrgAccessServiceTest pins
-        // packagesForOrganization() to, for the same reason: this sits on the /o/{orgSlug}
-        // metadata path.
+        // 3 (or more) registry queries rather than 1 — the same shape OrgAccessServiceTest
+        // pins packagesForOrganization() to, for the same reason: this sits on the
+        // /o/{orgSlug} metadata path. The count is 2, not 1, because the licence check at
+        // the top of the method (organizationLicence()) always runs one query of its own
+        // before the registry union query — here it finds no licence row and falls through
+        // — but that licence query is likewise independent of how many groups exist.
         $org = Organization::factory()->create();
         $package = Package::factory()->create(['organization_id' => $org->id]);
         $groupA = Group::factory()->for($org)->create();
@@ -540,6 +543,6 @@ describe('windowsForOrganization', function () {
         $queryCount = count(DB::getQueryLog());
         DB::disableQueryLog();
 
-        expect($queryCount)->toBe(1);
+        expect($queryCount)->toBe(2);
     });
 });
