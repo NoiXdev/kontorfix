@@ -31,7 +31,15 @@ export interface AssignmentRow {
      */
     effective_version_min: string | null;
     effective_version_max: string | null;
-    /** True when the effective window differs from the configured one (any way, including emptying it). */
+    /**
+     * True when a live licence narrows the row's configured window WITHOUT emptying it.
+     * `false` in the emptied case too (see `emptied_by_licence`) — `PackageController.php`'s
+     * `assignmentPayload()` sets it from `$effective !== null && (...)`, which is
+     * unconditionally `false` once `$effective` is `null`. The two flags are mutually
+     * exclusive, not "emptied implies narrowed": render `emptied_by_licence`'s destructive
+     * message on its own, and `narrowed_by_licence`'s "konfiguriert: …" line only when the
+     * row survives but differs from what is configured.
+     */
     narrowed_by_licence: boolean;
     /** True when the organization's licence reduces this row to nothing — expired, or non-overlapping. */
     emptied_by_licence: boolean;

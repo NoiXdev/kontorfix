@@ -575,6 +575,7 @@ useOperatorChannel({
                     <Freigaben
                         :package-id="props.package.id"
                         :package-type="props.package.type"
+                        :shared="props.package.shared"
                         :can-manage="props.can_manage_assignments"
                         :assignments="props.assignments"
                         :versions="freigabenVersions"

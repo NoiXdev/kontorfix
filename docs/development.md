@@ -983,11 +983,18 @@ keeps serving exactly what it was configured to serve, unbounded again. Removing
 therefore the "this is no longer a commercial limit" action, not a revocation; revoking access is
 what letting the licence expire (or detaching the registry assignments themselves) is for.
 
-**The guard between the two is one-directional.** Creating or widening a registry assignment beyond
-what the organization's current licence admits is refused outright — `AssignmentWriter` intersects
-the proposed bounds against the licence before writing and rejects a window the licence does not
-cover, the same way it rejects an impossible bounds pair. *Narrowing* the licence afterwards is a
-different question and is always allowed: a licence may be tightened even while wider registry
+**The guard between the two is one-directional, and only refuses an EMPTY intersection.** Writing a
+registry assignment whose window does not overlap the organization's current licence AT ALL is
+refused outright — `AssignmentWriter` intersects the proposed bounds against the licence before
+writing and rejects only a window the licence and the row share no version with, the same way it
+rejects an impossible bounds pair. A window that merely reaches beyond the licence is accepted, not
+refused: a registry row `[1.0, 5.0)` under a licence `[1.0, 2.9)` is allowed — this is the spec's own
+example — because the licence still narrows what that row actually *serves*
+(`VersionEntitlement::applyLicence()`); it only blocks the write when narrowing would leave nothing.
+An **expired** licence is the one case where every bounds write to that organization's assignments of
+the package is refused outright, regardless of the proposed window — there is no "does it overlap"
+question to ask once the term is over. *Narrowing* the licence itself afterwards is a different
+question again and is always allowed: a licence may be tightened even while wider registry
 assignments already exist under it, and the effect is retroactive and immediate — every
 registry keeps its own stored bounds unchanged, but what it actually *serves* is filtered live
 through the licence's new, narrower window from that point on. Nothing needs to touch the registry

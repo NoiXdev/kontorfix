@@ -35,6 +35,13 @@ const props = defineProps<{
     // reaches this component (PackageController::show() redirects one to its own page
     // before this tab's props are built), but the guard costs nothing to keep honest.
     packageType: 'composer' | 'npm' | 'python' | 'docker';
+    // Whether "Für andere Organisationen freigeben" is on for THIS package — the
+    // prerequisite the "Organisationen" block's empty state names. Needed as its own prop
+    // rather than inferred from `licensableOrganizations`/`organizationLicences` being
+    // empty: both are also empty for a package that IS shared when the caller simply
+    // administers no organization in the active console scope (or every administered one
+    // already holds a licence), and that case must not tell the operator the switch is off.
+    shared: boolean;
     canManage: boolean;
     assignments: AssignmentRow[];
     // Every version this package has — order does not matter (see highestAdmittedForPreview()) —
@@ -289,10 +296,17 @@ function removeAssignment(row: AssignmentRow) {
                     </Button>
                 </div>
                 <p
-                    v-if="props.licensableOrganizations.length === 0 && props.organizationLicences.length === 0"
+                    v-if="!props.shared && props.licensableOrganizations.length === 0 && props.organizationLicences.length === 0"
                     class="text-xs text-muted-foreground"
                 >
                     Dieses Paket ist nicht freigegeben. Aktivieren Sie zuerst „Für andere Organisationen freigeben".
+                </p>
+                <p
+                    v-else-if="props.licensableOrganizations.length === 0 && props.organizationLicences.length === 0"
+                    class="text-xs text-muted-foreground"
+                >
+                    Keine Organisation zum Lizenzieren verfügbar — entweder halten alle bereits eine Lizenz, oder keine liegt in Ihrem
+                    aktuellen Bereich.
                 </p>
                 <table v-else class="w-full text-sm">
                     <tbody>
