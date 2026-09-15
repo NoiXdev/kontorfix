@@ -40,6 +40,7 @@ class ApiKey extends Model
             'permission' => ApiKeyPermission::class,
             'last_used_at' => 'datetime',
             'expires_at' => 'datetime',
+            'revoked_at' => 'datetime',
         ];
     }
 
@@ -72,6 +73,11 @@ class ApiKey extends Model
     {
         return static::query()
             ->where('key_hash', hash('sha256', $plain))
+            // Revoked is as final as expired. Checked here rather than at the call sites so
+            // a revoked key cannot authenticate through any path that resolves a key —
+            // hiding it from a listing while it still worked would be worse than the hard
+            // delete this replaced.
+            ->whereNull('revoked_at')
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))
             ->first();
     }

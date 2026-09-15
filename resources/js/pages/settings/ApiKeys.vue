@@ -25,6 +25,11 @@ interface ApiKeyRow {
     // `expires_at` arrives as an ISO date string (toDateString()), which Date.parse reads
     // directly — no sort-only twin needed here.
     expires_at: string | null;
+    // A revoked key keeps its row (see the migration): it can no longer authenticate, but
+    // the owner can still see that it existed and was withdrawn — which a hard delete, the
+    // previous behaviour, made impossible.
+    revoked: boolean;
+    revoked_at: string | null;
 }
 
 const props = defineProps<{
@@ -203,12 +208,25 @@ function destroyApiKey(id: string) {
                             :key="apiKey.id"
                             class="border-b border-sidebar-border/70 last:border-0 dark:border-sidebar-border"
                         >
-                            <td class="px-4 py-3 font-mono">{{ apiKey.name }}</td>
-                            <td class="px-4 py-3">{{ permissionLabel(apiKey.permission) }}</td>
+                            <td class="px-4 py-3 font-mono" :class="{ 'text-muted-foreground line-through': apiKey.revoked }">
+                                {{ apiKey.name }}
+                            </td>
+                            <td class="px-4 py-3" :class="{ 'text-muted-foreground': apiKey.revoked }">
+                                {{ permissionLabel(apiKey.permission) }}
+                            </td>
                             <td class="px-4 py-3 text-muted-foreground">{{ apiKey.last_used_at ?? 'nie' }}</td>
-                            <td class="px-4 py-3 text-muted-foreground">{{ apiKey.expires_at ?? '—' }}</td>
+                            <td class="px-4 py-3 text-muted-foreground">
+                                <span v-if="apiKey.revoked" class="text-destructive">widerrufen {{ apiKey.revoked_at }}</span>
+                                <span v-else>{{ apiKey.expires_at ?? '—' }}</span>
+                            </td>
                             <td class="px-4 py-3">
-                                <Button variant="ghost" size="icon" aria-label="API-Key widerrufen" @click="destroyApiKey(apiKey.id)">
+                                <Button
+                                    v-if="!apiKey.revoked"
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label="API-Key widerrufen"
+                                    @click="destroyApiKey(apiKey.id)"
+                                >
                                     <Trash2 class="size-4 text-destructive" />
                                 </Button>
                             </td>

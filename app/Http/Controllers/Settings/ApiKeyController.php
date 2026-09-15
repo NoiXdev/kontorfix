@@ -27,6 +27,11 @@ class ApiKeyController extends Controller
                     // and the sort value have to travel separately.
                     'last_used_at_iso' => $k->last_used_at?->toIso8601String(),
                     'expires_at' => $k->expires_at?->toDateString(),
+                    // Shown greyed out rather than hidden: a revoked row that vanished from
+                    // the listing would look identical to the hard delete this replaced, and
+                    // the point of keeping the row is that the owner can see it happened.
+                    'revoked' => $k->revoked_at !== null,
+                    'revoked_at' => $k->revoked_at?->diffForHumans(),
                 ]),
         ]);
     }
@@ -46,7 +51,11 @@ class ApiKeyController extends Controller
     public function destroy(Request $request, ApiKey $apiKey): RedirectResponse
     {
         abort_unless($apiKey->user_id === $request->user()->id, 403);
-        $apiKey->delete();
+
+        // Revoked, not deleted — see the migration. findByPlainText() refuses a revoked key,
+        // so this is as final for authentication as the delete it replaced, while leaving a
+        // record that the credential existed and was withdrawn.
+        $apiKey->forceFill(['revoked_at' => now()])->save();
 
         return back()->with('success', 'API-Key widerrufen.');
     }
