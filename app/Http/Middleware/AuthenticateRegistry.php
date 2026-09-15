@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\RegistryToken;
+use App\Support\Auth\RejectedCredentialLog;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +20,13 @@ class AuthenticateRegistry
         // is a heuristic and doesn't need second-level precision.
         if ($token && ($token->last_used_at === null || $token->last_used_at->lt(now()->subMinute()))) {
             $token->forceFill(['last_used_at' => now()])->saveQuietly();
+        }
+
+        // Only a credential that was PRESENTED and did not resolve. An ABSENT one is the
+        // normal case on a public registry, and recording that would bury the interesting
+        // lines under every anonymous composer install.
+        if ($candidate && $token === null) {
+            RejectedCredentialLog::record('Registry credential rejected.', $request);
         }
 
         $request->attributes->set('registryToken', $token); // null = anonymous; the ACL decides later

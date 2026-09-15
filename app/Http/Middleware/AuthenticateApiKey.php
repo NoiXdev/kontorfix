@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Enums\ApiKeyPermission;
 use App\Models\ApiKey;
+use App\Support\Auth\RejectedCredentialLog;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +19,10 @@ class AuthenticateApiKey
         $key = $plain ? ApiKey::findByPlainText($plain) : null;
 
         if ($key === null || $key->user === null) {
+            // Unlike the registry, every route behind this middleware requires a key, so a
+            // missing one is as much a signal as a wrong one.
+            RejectedCredentialLog::record('API key rejected.', $request);
+
             return response()->json(['message' => 'Ungültiger oder fehlender API-Key.'], 401);
         }
 
