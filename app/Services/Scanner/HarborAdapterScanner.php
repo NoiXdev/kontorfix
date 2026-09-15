@@ -6,6 +6,7 @@ use App\Enums\VulnerabilitySeverity;
 use App\Exceptions\ScannerException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -46,8 +47,10 @@ final class HarborAdapterScanner implements VulnerabilityScanner
             throw ScannerException::rejected('/api/v1/metadata', $response->status());
         }
 
+        $body = $this->decode($response, '/api/v1/metadata');
+
         /** @var array<string, mixed> $scanner */
-        $scanner = (array) $response->json('scanner', []);
+        $scanner = (array) ($body['scanner'] ?? []);
 
         return new ScannerMetadata(
             name: (string) ($scanner['name'] ?? 'Unbekannt'),
@@ -87,7 +90,8 @@ final class HarborAdapterScanner implements VulnerabilityScanner
             throw ScannerException::rejected('/api/v1/scan', $response->status());
         }
 
-        $id = $response->json('id');
+        $body = $this->decode($response, '/api/v1/scan');
+        $id = $body['id'] ?? null;
 
         if (! is_string($id) || $id === '') {
             throw ScannerException::rejected('/api/v1/scan', $response->status());
@@ -101,10 +105,9 @@ final class HarborAdapterScanner implements VulnerabilityScanner
         try {
             $response = $this->request()
                 ->withHeaders(['Accept' => self::REPORT_TYPE])
-                // The spec answers "not finished yet" with 302 + Location and no body. Following
-                // it would turn a normal in-progress poll into a request for a resource that
-                // does not exist yet.
-                ->withoutRedirecting()
+                // The spec answers "not finished yet" with 302 + Location and no body: without
+                // `request()`'s own `->withoutRedirecting()`, following it would turn a normal
+                // in-progress poll into a request for a resource that does not exist yet.
                 ->get($this->endpoint("/api/v1/scan/{$scanId}/report"));
         } catch (ConnectionException $e) {
             throw ScannerException::unreachable($this->baseUrl(), $e->getMessage());
@@ -124,8 +127,10 @@ final class HarborAdapterScanner implements VulnerabilityScanner
             throw ScannerException::unreadableReport((string) $response->header('Content-Type'));
         }
 
+        $body = $this->decode($response, "/api/v1/scan/{$scanId}/report");
+
         /** @var array<int, array<string, mixed>> $rows */
-        $rows = (array) $response->json('vulnerabilities', []);
+        $rows = (array) ($body['vulnerabilities'] ?? []);
 
         return new AdapterScanReport(array_values(array_map(
             fn (array $row): ScannedVulnerability => new ScannedVulnerability(
@@ -156,7 +161,16 @@ final class HarborAdapterScanner implements VulnerabilityScanner
         }
 
         return Http::timeout((int) config('kontorfix.scanner.request_timeout', 30))
-            ->connectTimeout(5);
+            ->connectTimeout(5)
+            // Every outbound hop is judged in this codebase (UrlSafety, AddressPin,
+            // UpstreamClient::follow), and `request()`'s check above only judges the
+            // pre-redirect, operator-configured URL. Rather than re-running that judgement on
+            // a redirect target, the adapter is simply not allowed to redirect at all: it has
+            // no legitimate reason to send a scan request or a metadata/report read anywhere
+            // but its own configured host. A 3xx therefore surfaces as an ordinary non-success
+            // status and falls into the same ScannerException::rejected() path as any other
+            // refusal, never as a followed hop.
+            ->withoutRedirecting();
     }
 
     private function baseUrl(): string
@@ -167,6 +181,29 @@ final class HarborAdapterScanner implements VulnerabilityScanner
     private function endpoint(string $path): string
     {
         return rtrim($this->baseUrl(), '/').$path;
+    }
+
+    /**
+     * The response body as an array, or a refusal.
+     *
+     * Illuminate's Response::json() decodes without JSON_THROW_ON_ERROR and answers with the
+     * default it was given, so an undecodable body is indistinguishable from an empty one. For
+     * this client that difference is the whole point: an empty `vulnerabilities` list is
+     * persisted as a verdict and rendered as "keine bekannten Schwachstellen", so a garbled
+     * body silently becomes a clean bill of health. Decoded strictly here instead, because the
+     * only safe reading of "we could not understand the scanner" is that we do not know.
+     *
+     * @return array<string, mixed>
+     */
+    private function decode(Response $response, string $endpoint): array
+    {
+        $decoded = json_decode($response->body(), true);
+
+        if (! is_array($decoded)) {
+            throw ScannerException::unreadableBody($endpoint);
+        }
+
+        return $decoded;
     }
 
     private static function nullableString(mixed $value): ?string

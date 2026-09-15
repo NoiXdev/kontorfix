@@ -198,16 +198,3 @@ parameters:
             identifier: pest.expectation.redundant
             count: 1
             path: tests/Unit/SystemHostResolverTest.php
-        -
-            # `expect(false)->toBeTrue('message')` inside a try block's tail is the idiom for
-            # "fail the test if the preceding call did NOT throw": the try body calls a method
-            # that must throw ScannerException, and this line only runs at all when it didn't.
-            # PHPStan sees a literal `false` argument to `toBeTrue()` and correctly reports that
-            # as statically impossible — it has no notion of "only reached if an exception was
-            # not thrown", so the report is unavoidable given how the idiom is written, not a
-            # sign the assertion is wrong. Two occurrences, one per exception-must-be-thrown
-            # assertion in this file.
-            message: '#^Calling toBeTrue\(\) on Expectation\<false\>; assertion is impossible\.$#'
-            identifier: pest.expectation.impossible
-            count: 2
-            path: tests/Feature/Oci/HarborAdapterScannerTest.php

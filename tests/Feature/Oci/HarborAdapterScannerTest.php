@@ -124,16 +124,33 @@ it('refuses a report in a media type it does not read, naming the type', functio
     // Body is a JSON string for the same reason as above: an array body would make
     // Http::response() silently overwrite the very Content-Type this test sets.
     Http::fake(['scanner:8080/api/v1/scan/scan-1/report' => Http::response(
-        json_encode(['whatever' => true]), 200, ['Content-Type' => 'application/vnd.scanner.adapter.vuln.report.raw']
+        json_encode(['whatever' => true], JSON_THROW_ON_ERROR), 200,
+        ['Content-Type' => 'application/vnd.scanner.adapter.vuln.report.raw']
     )]);
 
-    try {
-        app(HarborAdapterScanner::class)->fetchReport('scan-1');
-        expect(false)->toBeTrue('An unreadable media type must not be parsed.');
-    } catch (ScannerException $e) {
-        expect($e->getMessage())->toContain('vnd.scanner.adapter.vuln.report.raw');
-    }
-});
+    app(HarborAdapterScanner::class)->fetchReport('scan-1');
+})->throws(ScannerException::class, 'vnd.scanner.adapter.vuln.report.raw');
+
+it('refuses a report body it cannot decode, rather than reading it as a clean image', function () {
+    // An empty findings list is a VERDICT — persisted as ok, rendered as "keine bekannten
+    // Schwachstellen", never blocking. A body we could not parse must not become one.
+    Http::fake(['scanner:8080/api/v1/scan/scan-1/report' => Http::response(
+        '{"vulnerabilities": [', 200,
+        ['Content-Type' => 'application/vnd.security.vulnerability.report; version=1.1']
+    )]);
+
+    app(HarborAdapterScanner::class)->fetchReport('scan-1');
+})->throws(ScannerException::class);
+
+it('does not follow a redirect off the scanner host', function () {
+    // Every outbound hop is judged in this codebase (UrlSafety, AddressPin,
+    // UpstreamClient::follow) — the last audit's only HIGH was a rebinding gap on exactly that
+    // path. An adapter has no reason to redirect a scan request elsewhere, so the simpler and
+    // stricter answer is to refuse rather than to re-judge.
+    Http::fake(['scanner:8080/api/v1/metadata' => Http::response('', 302, ['Location' => 'http://169.254.169.254/'])]);
+
+    app(HarborAdapterScanner::class)->metadata();
+})->throws(ScannerException::class);
 
 it('refuses a scanner address that is neither public nor explicitly allowed', function () {
     // The SSRF policy is not widened for the scanner: its private address is reached only
@@ -154,10 +171,7 @@ it('refuses to speak to a scanner whose address is not permitted', function () {
     config(['kontorfix.scanner.allowed_hosts' => []]);
     Http::fake();
 
-    try {
-        app(HarborAdapterScanner::class)->metadata();
-        expect(false)->toBeTrue('An unpermitted scanner address must not be dialled.');
-    } catch (ScannerException $e) {
-        Http::assertNothingSent();
-    }
+    expect(fn () => app(HarborAdapterScanner::class)->metadata())->toThrow(ScannerException::class);
+
+    Http::assertNothingSent();
 });

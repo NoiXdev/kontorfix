@@ -40,4 +40,9 @@ final class ScannerException extends Exception
     {
         return new self('Es ist kein Scanner konfiguriert (KONTORFIX_SCANNER_URL).');
     }
+
+    public static function unreadableBody(string $endpoint): self
+    {
+        return new self("Die Antwort des Scanners auf {$endpoint} war kein lesbares JSON-Objekt.");
+    }
 }
