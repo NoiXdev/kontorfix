@@ -10,6 +10,8 @@ use App\Enums\GitProvider;
 use App\Models\GitCredential;
 use App\Models\Organization;
 use App\Models\Package;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /** Re-runs the backfill against rows that look like a pre-upgrade database. */
@@ -18,6 +20,23 @@ function runHostBackfill(): void
     Schema::table('git_credentials', function ($table) {
         $table->dropColumn('host');
     });
+
+    // `packages.repository_url` is an `encrypted` cast since 2026_09_15_110000, but this
+    // migration predates that by weeks and reads the column RAW, with the query builder, to
+    // derive hosts. In real migration order it only ever sees plaintext — on a fresh
+    // install it runs long before the encryption, and on an existing one it ran before the
+    // encryption shipped. This test is the one caller that re-runs it against a modern
+    // schema, so it has to restore the world the migration was written for. Decrypting
+    // inside the migration instead would be wrong: at its point in history there is nothing
+    // to decrypt.
+    foreach (DB::table('packages')->whereNotNull('repository_url')->get(['id', 'repository_url']) as $row) {
+        try {
+            DB::table('packages')->where('id', $row->id)
+                ->update(['repository_url' => Crypt::decryptString($row->repository_url)]);
+        } catch (Throwable) {
+            // Already plaintext — nothing to undo.
+        }
+    }
 
     $migration = require database_path('migrations/2026_08_07_100000_add_host_to_git_credentials.php');
     $migration->up();

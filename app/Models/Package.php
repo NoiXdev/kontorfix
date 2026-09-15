@@ -144,6 +144,13 @@ class Package extends Model
             'retention_rules' => 'array',
             'shared' => 'bool',
             // Encrypted at rest; decrypted transparently when building git auth.
+            // Encrypted like `repository_token` beside it: this column legitimately carries a
+            // git credential (see App\Support\CredentialUrl), and was the one such column
+            // left in the clear. NOT moved into `repository_token` instead — gitAuth()'s
+            // inline branch always answers GitProvider::GitHub with a null username, so a
+            // migrated `oauth2:…@gitlab` would silently start authenticating as
+            // `x-access-token` at the next sync.
+            'repository_url' => 'encrypted',
             'repository_token' => 'encrypted',
         ];
     }
