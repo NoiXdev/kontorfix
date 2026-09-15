@@ -433,7 +433,7 @@ class GroupController extends Controller
         return back()->with('success', 'Registry aktualisiert.');
     }
 
-    public function attachPackages(Request $request, Group $group, SharedAssignment $sharedAssignment): RedirectResponse
+    public function attachPackages(Request $request, Group $group, SharedAssignment $sharedAssignment, AssignmentWriter $writer): RedirectResponse
     {
         $this->assertAdministersGroupInScope($group);
 
@@ -454,6 +454,12 @@ class GroupController extends Controller
         // a shared package arriving over an own one, or an own one arriving over a shared
         // package already assigned.
         $sharedAssignment->assertAssignable($group, $data['package_ids']);
+
+        // The organization's licence is the ceiling here too. This path writes the pivot
+        // directly rather than through AssignmentWriter::assign() — see that class's
+        // assertBatchWithinOrganizationLicence() for why the rule is asked for rather than
+        // the write being routed through it.
+        $writer->assertBatchWithinOrganizationLicence($group, $data['package_ids']);
 
         // syncWithoutDetaching keeps the packages already in the group.
         $group->packages()->syncWithoutDetaching($data['package_ids']);

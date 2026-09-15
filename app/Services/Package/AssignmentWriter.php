@@ -222,6 +222,37 @@ final class AssignmentWriter
     }
 
     /**
+     * The licence ceiling, asked for a BATCH that is about to be attached without bounds.
+     *
+     * `GroupController::attachPackages()` does not go through assign(): it writes the pivot
+     * with `syncWithoutDetaching($ids)` and no pivot data, deliberately, so re-submitting a
+     * package that already carries bounds leaves them alone. Routing it through assign()
+     * would hand every row an unlimited window and wipe those bounds.
+     *
+     * So the rule is exposed instead of the write. It still lives here — one statement, in
+     * the class whose docblock claims to hold it — and the second write path asks rather
+     * than restating it. Without this, "Pakete zur Registry hinzufügen" accepted exactly
+     * what "Registry freigeben" refused, and a guard that holds on some paths is not one.
+     *
+     * A package already assigned is skipped: it is not an assignment being made, which is
+     * the same reasoning attachPackages() applies to its own shadowing check.
+     *
+     * @param  list<string>  $packageIds
+     */
+    public function assertBatchWithinOrganizationLicence(Group $group, array $packageIds): void
+    {
+        $alreadyAssigned = $group->packages()->pluck('packages.id')->all();
+
+        foreach (Package::query()->whereIn('id', $packageIds)->get() as $package) {
+            if (in_array($package->getKey(), $alreadyAssigned, true)) {
+                continue;
+            }
+
+            $this->assertWithinOrganizationLicence($group, $package, VersionBounds::unlimited());
+        }
+    }
+
+    /**
      * A registry assignment may narrow the organization's licence, never escape it.
      *
      * ONE-DIRECTIONAL, deliberately, and this is where it differs from
