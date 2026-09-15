@@ -82,7 +82,7 @@ class PortalPackages
      * one this page exists NOT to have. The customer's build gets a 404 for such a package,
      * and this is the page where that becomes explicable. See PortalPackagesTest.
      *
-     * @return Collection<int, array{package: Package, groups: Collection<int, PortalRegistryAssignment>, in_force: bool}>
+     * @return Collection<int, array{package: Package, groups: Collection<int, PortalRegistryAssignment>, org_wide: bool, in_force: bool}>
      */
     public function for(Organization $organization): Collection
     {
@@ -152,6 +152,31 @@ class PortalPackages
             }
         }
 
+        // Packages the organization can reach through its org-wide licence ALONE — no
+        // registry of theirs carries them, so the loop above never saw them. Without this
+        // the portal omitted exactly the packages `/o/{orgSlug}` serves, on the page the
+        // customer opens to learn what they have, while handing them the org-wide token on
+        // the tab next to it.
+        //
+        // Only packages with no registry row: one a registry already carries is the same
+        // package, listed once, with the licence acting as the ceiling on that registry —
+        // a second row would tell the customer they have it twice.
+        $licenceOnly = $organization->licensedPackages()
+            ->whereNotIn('packages.id', array_keys($rows))
+            ->get()
+            ->filter(function (Package $package) use ($organization): bool {
+                $licence = $this->entitlement->organizationLicence((string) $organization->id, $package);
+
+                // Expiry is not absence: a lapsed licence reaches nothing, so it belongs on
+                // no list. Same rule the registry and /o/ read paths apply.
+                return $licence !== null && ! $licence->isExpired();
+            });
+
+        foreach ($licenceOnly as $package) {
+            $package->unsetRelation('pivot');
+            $rows[$package->id] = ['package' => $package, 'groups' => []];
+        }
+
         $ordered = array_values($rows);
         usort($ordered, fn (array $a, array $b): int => strcmp($a['package']->name, $b['package']->name));
 
@@ -188,13 +213,20 @@ class PortalPackages
                 licence: $this->licenceNoteFor($package, $this->applyLicenceCeiling($licence, $entry['bounds'], $package)),
             ));
 
+            // Reachable only through the organization-wide source: no registry entry at all,
+            // but a live licence. The registry column says so instead of standing empty,
+            // which would read as "available nowhere" — the opposite of the truth.
+            $orgWide = $groups->isEmpty() && $licence !== null && ! $licence->isExpired();
+
             $result[] = [
                 'package' => $package,
                 'groups' => $groups,
+                'org_wide' => $orgWide,
                 // Derived from the entries, never accumulated alongside them: in force in at
                 // least one registry. The package is usable, and the registry column says
                 // through which ones.
-                'in_force' => $groups->contains(fn (PortalRegistryAssignment $entry): bool => $entry->in_force),
+                'in_force' => $orgWide
+                    || $groups->contains(fn (PortalRegistryAssignment $entry): bool => $entry->in_force),
             ];
         }
 

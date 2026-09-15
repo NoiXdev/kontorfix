@@ -179,6 +179,12 @@ class PackageController extends Controller
                 // registries — the `geteilt` badge.
                 'shared' => $row['package']->shared,
                 'in_force' => $row['in_force'],
+                // Reachable only through the organization-wide source `/o/{orgSlug}`: no
+                // registry of this organization carries it, but a live org licence does.
+                // The registry column says so rather than standing empty, which would read
+                // as "available nowhere" — the opposite of the truth, on the page the
+                // customer opens to find out what they have.
+                'org_wide' => $row['org_wide'],
                 // Only registries the portal shows: PortalPackages filters on
                 // `groups.portal_enabled`, so no link rendered from this list can reach a
                 // registry GroupPolicy::view() would answer 403 for.

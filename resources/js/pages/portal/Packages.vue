@@ -34,6 +34,10 @@ interface PackageRow {
     // question as an entry's own `in_force`; see `portalPackages.ts`.
     in_force: boolean;
     registries: RegistryEntry[];
+    // Reachable only through the organization-wide source — no registry carries it. The
+    // registry column names that source instead of standing empty; an empty cell reads as
+    // "available nowhere", which is the opposite of what an org licence means.
+    org_wide: boolean;
 }
 
 const props = defineProps<{
@@ -180,6 +184,9 @@ const breadcrumbs: BreadcrumbItem[] = [{ title: 'Pakete', href: route('portal.pa
                                          no longer a dead end; it is the way to the one page written
                                          to tell this customer why their build fails, and the page
                                          they land on is the one page that must not withhold it. -->
+                                    <span v-if="pkg.org_wide" class="text-muted-foreground">
+                                        Organisationsweite Quelle
+                                    </span>
                                     <span v-for="reg in pkg.registries" :key="reg.id" class="inline-flex items-center gap-1">
                                         <Link :href="route('portal.registries.package', [props.orgSlug, reg.id, pkg.id])" class="hover:underline">
                                             {{ reg.name }}
