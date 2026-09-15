@@ -1,4 +1,42 @@
-## [0.13.0](https://github.com/NoiXdev/kontorfix/compare/v0.12.0...v) (2026-09-14)
+## [0.14.0](https://github.com/NoiXdev/kontorfix/compare/v0.13.0...v) (2026-09-15)
+
+
+### Features
+
+* **api:** revoke an API key instead of deleting it ([65315cd](https://github.com/NoiXdev/kontorfix/commit/65315cdf9d241c31ac5ba0ca1edf1083bab70a1d))
+* **auth:** record a rejected registry token or API key ([01a3e0d](https://github.com/NoiXdev/kontorfix/commit/01a3e0d3edf546b23b86ca9faa0f2dc007082cf6))
+* **auth:** warn the account holder when their second factor is under attack ([ca7cbbb](https://github.com/NoiXdev/kontorfix/commit/ca7cbbbdae0399c8352723ad92f94f50dfe10260))
+* **licence:** add the org licence write surface ([565ca7f](https://github.com/NoiXdev/kontorfix/commit/565ca7f85b993bcddab88962295176dfc0c50404))
+* **licence:** add the organization_package licence table ([abb27a2](https://github.com/NoiXdev/kontorfix/commit/abb27a2aab23ce906938d4a97fa7652c17fecd79))
+* **licence:** make the org licence the ceiling on a registry assignment ([6c68c1e](https://github.com/NoiXdev/kontorfix/commit/6c68c1ea6fba28c2d7a1e6d36d6f3a576bc25fc1))
+* **licence:** manage org licences from the customer page ([d9b005b](https://github.com/NoiXdev/kontorfix/commit/d9b005bd1d173ad2ad62942d4b891fbba5e56f09))
+* **licence:** manage org licences from the package page ([ccca6a8](https://github.com/NoiXdev/kontorfix/commit/ccca6a8386982108b6f024fe0c7ca23bc7290e35))
+* **licence:** offer org-licensed packages at /o/ and withdraw lapsed ones ([c9e6740](https://github.com/NoiXdev/kontorfix/commit/c9e67401d489f6b6eb0c9dd42d109030889410ba))
+* **licence:** read an org licence and intersect two version windows ([99e4e75](https://github.com/NoiXdev/kontorfix/commit/99e4e754916ffec9e10c75b9a4792691e3cb0867))
+* **licence:** refuse a registry assignment outside the org licence ([332047b](https://github.com/NoiXdev/kontorfix/commit/332047b8f41cab78e52bb5da2441829e4aadff67))
+* **licence:** serve the licence window at the org endpoint ([9d4857a](https://github.com/NoiXdev/kontorfix/commit/9d4857aa7f6a007acc24b1c761cb21be9fe4ca3b))
+* **licence:** show what a licence narrowing will do before it is saved ([080f794](https://github.com/NoiXdev/kontorfix/commit/080f794157125967cda3b2973a7709d22740724c))
+* **licence:** write org licences through the single assignment writer ([cbb7821](https://github.com/NoiXdev/kontorfix/commit/cbb7821b8b25677aa5f9afcef781a6a245a4d34e))
+* **oidc:** rotate a client secret without unlinking every SSO identity ([2c7d332](https://github.com/NoiXdev/kontorfix/commit/2c7d3326f22fc4a79f12ca7585d16a8bf87fcc94))
+* **portal:** list packages an org licence alone makes reachable ([8b5a772](https://github.com/NoiXdev/kontorfix/commit/8b5a7728d8aba36dd5fd48b14be48e50ee529454))
+
+
+### Bug Fixes
+
+* **licence:** agree on Y-m-d for available_until across both licence payloads ([0007cdb](https://github.com/NoiXdev/kontorfix/commit/0007cdb140f94c18c4ef595351664dab5d9a3f9b))
+* **licence:** apply the licence ceiling to the second attach path too ([f4d3acb](https://github.com/NoiXdev/kontorfix/commit/f4d3acbfb6a44695b54c6266509cff78668e5619))
+* **licence:** compute the effective window server-side, not with a second comparator ([c072af9](https://github.com/NoiXdev/kontorfix/commit/c072af9dc63da6ad5cd918078e49382af92d8e66))
+* **licence:** fail closed on single-sided unparseable bounds and guard Docker in compareBounds ([c14bc2b](https://github.com/NoiXdev/kontorfix/commit/c14bc2bc462ff7b7ca32c1d822296428464e46c1))
+* **licence:** match the customer pages licensable-packages prop casing ([92b88e3](https://github.com/NoiXdev/kontorfix/commit/92b88e3aa9231e2e5e3c873959d4a6983a3c5023))
+* **licence:** read organization_package by primary key, not through a join ([c1e33a3](https://github.com/NoiXdev/kontorfix/commit/c1e33a3e453b3c14d872695a7a1558f685ae7371))
+* **licence:** refuse un-sharing a package that still carries an org licence ([8601aed](https://github.com/NoiXdev/kontorfix/commit/8601aed0ff1fce1abf52bf014cbbbfac2f543e0e))
+* **licence:** stop merging partial assignment edits against the licence-narrowed bounds ([ebebc0d](https://github.com/NoiXdev/kontorfix/commit/ebebc0dafb224bc73028c331f389634b3f660e4d))
+* **licence:** treat a touching intersection as empty, not as a window ([f4ffe77](https://github.com/NoiXdev/kontorfix/commit/f4ffe77605e7cebd860e418169afea488c961b98))
+* **security:** encrypt packages.repository_url at rest ([c324aec](https://github.com/NoiXdev/kontorfix/commit/c324aec8b38f54ea621224d0fa34b3dcedfebae3))
+* **security:** harden three shipped defaults the audit left as backlog ([ceff146](https://github.com/NoiXdev/kontorfix/commit/ceff14666bb6d21794f68506661cbabb3c304ae5))
+* **tests:** move Licence unit tests to Feature to get RefreshDatabase ([aa8ad0c](https://github.com/NoiXdev/kontorfix/commit/aa8ad0cc508c5f68a89c3609eb6b4b50716c8c23))
+
+## [0.13.0](https://github.com/NoiXdev/kontorfix/compare/v0.12.0...v0.13.0) (2026-09-14)
 
 
 ### Features
