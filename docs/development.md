@@ -1704,6 +1704,31 @@ assert.
 
 Deliberately classified as low and documented in the security audit (non-blocking):
 
+- **An empty `KONTORFIX_OCI_SWEEP_BLOB_LIMIT` silently disables storage sweeping.**
+  `config/kontorfix.php` reads `(int) env('KONTORFIX_OCI_SWEEP_BLOB_LIMIT', 1000)`, so an
+  env var that is PRESENT but empty casts to `0` — and the `1000` fallback inside
+  `SweepOciStorage::handle()` is dead code, because the config key always exists. Every
+  scheduled sweep then removes nothing, permanently, with no error anywhere while storage
+  grows. Current behaviour is pinned by `tests/Feature/Oci/SweepOciStorageJobTest.php`,
+  explicitly as *is* rather than *should*. Hardening it is a behaviour change: either treat
+  `0` as "not configured" and fall back, or surface it on the operator health page the way
+  the `TRUSTED_PROXIES` check does.
+- **Org licences: the console shows a narrowing only AFTER it is saved.** The spec
+  (`2026-09-14-org-level-package-licences-design.md`, §Risks) argues the one-directional
+  guard is acceptable because "the UI must show that before saving, not after" — as built,
+  the package page renders `emptied_by_licence` on the next load, and the customer page
+  carries no registry information at all. That page is where a single edit narrows several
+  registries at once, so it is the one that most needs the preview.
+- **Org licences: a licence-only package is invisible in the customer portal.**
+  `PortalPackages::for()` walks the organization's groups, so a package reachable only
+  through `/o/` has no entry. The customer collects their organization-wide token from that
+  very portal but cannot see there what they are licensed for.
+- **Org licences: `attachPackages()` bypasses the licence guard.**
+  `GroupController::attachPackages()` writes `group_package` directly rather than through
+  `AssignmentWriter`, so under an EXPIRED licence `assign()` refuses while "add packages to
+  registry" accepts. The row serves nothing (`boundsFor()` returns null), so this widens no
+  access — but the rule holds at two of the seven write paths rather than all of them.
+
 - **Git credentials embedded in `repository_url` are stored in plaintext.** The column is a
   supported credential carrier (see `App\Support\CredentialUrl`), and unlike the dedicated
   `repository_token` it is not an encrypted cast. The two places that used to publish the

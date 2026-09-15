@@ -27,3 +27,6 @@ yarn-error.log
 /.vscode
 /.zed
 /tests/E2E/.context.json
+
+# Scratch file for `git commit -F` — must never be committed (it was once, in 587f663).
+.commitmsg
