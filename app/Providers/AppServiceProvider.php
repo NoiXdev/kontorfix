@@ -14,6 +14,8 @@ use App\Models\Organization;
 use App\Models\SystemSetting;
 use App\Models\User;
 use App\Services\Broadcasting\ReverbConfigGuard;
+use App\Services\Scanner\HarborAdapterScanner;
+use App\Services\Scanner\VulnerabilityScanner;
 use App\Services\Upstream\HostResolver;
 use App\Services\Upstream\SystemHostResolver;
 use Dedoc\Scramble\Scramble;
@@ -46,6 +48,10 @@ class AppServiceProvider extends ServiceProvider
         // resolver through the container instead of a public static setter that
         // production code could also reach.
         $this->app->singleton(HostResolver::class, SystemHostResolver::class);
+
+        // One shipped implementation, bound to the interface so an operator running a
+        // non-adapter scanner can rebind it without touching anything that uses it.
+        $this->app->bind(VulnerabilityScanner::class, HarborAdapterScanner::class);
 
         // The interactive API browser is a vendor view that loads Stoplight Elements from
         // unpkg.com and runs it on this origin, un-SRI'd, with a `credentials: include`

@@ -362,4 +362,63 @@ return [
             : filter_var(env('KONTORFIX_SETUP_REQUIRE_TOKEN'), FILTER_VALIDATE_BOOL),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Vulnerability scanner
+    |--------------------------------------------------------------------------
+    |
+    | The external scanner kontorfix hands its OCI artifacts to. It speaks the Harbor
+    | Pluggable Scanner Adapter API, so any adapter-compatible scanner works; the
+    | compose file ships Trivy.
+    |
+    | `url` is where the adapter listens. `registry_url` is the reverse direction — the
+    | address the ADAPTER reaches US on, to pull the layers it is scanning. They are
+    | different questions and one value cannot answer both: from inside the compose
+    | network the registry is `app:8080`, while APP_URL is the public address, which
+    | behind a firewall either does not resolve or leaves the network and comes back.
+    |
+    | `allowed_hosts` is what lets a scanner on a private address be dialled at all. The
+    | outbound address policy (App\Services\Upstream\UrlSafety) refuses private and
+    | loopback addresses, and a sibling container has exactly such an address — so the
+    | host is named explicitly here, exactly as `vcs.allowed_hosts` does for a
+    | self-hosted git server. The policy itself is never widened.
+    |
+    | `rescan_limit` bounds the daily sweep the way `oci_sweep_blob_limit` bounds the
+    | sweeper: a registry with ten thousand manifests must not enqueue ten thousand jobs
+    | in one scheduler tick. What is left over is reported, never silent.
+    |
+    | Every numeric value reads with `?:` rather than a default argument, because
+    | env('X', 200) returns '' for a variable that is set but empty and (int) '' is 0 —
+    | which is how KONTORFIX_OCI_SWEEP_BLOB_LIMIT silently disables sweeping.
+    |
+    */
+
+    'scanner' => [
+        'enabled' => filter_var(env('KONTORFIX_SCANNER_ENABLED', false), FILTER_VALIDATE_BOOL),
+
+        'url' => env('KONTORFIX_SCANNER_URL'),
+
+        'registry_url' => env('KONTORFIX_SCANNER_REGISTRY_URL') ?: env('APP_URL'),
+
+        'allowed_hosts' => array_values(array_filter(array_map(
+            fn (string $host): string => strtolower(trim($host)),
+            explode(',', (string) env('KONTORFIX_SCANNER_ALLOWED_HOSTS', '')),
+        ))),
+
+        /** Seconds for a single HTTP call to the adapter. */
+        'request_timeout' => (int) (env('KONTORFIX_SCANNER_REQUEST_TIMEOUT') ?: 30),
+
+        /** Seconds to keep polling one scan before giving up on it. */
+        'timeout' => (int) (env('KONTORFIX_SCANNER_TIMEOUT') ?: 600),
+
+        /** Seconds between polls. */
+        'poll_interval' => (int) (env('KONTORFIX_SCANNER_POLL_INTERVAL') ?: 5),
+
+        /** Manifests re-scanned per scheduled run. */
+        'rescan_limit' => (int) (env('KONTORFIX_SCANNER_RESCAN_LIMIT') ?: 200),
+
+        /** Days a new finding is reported before it may block, for a registry that has no own value. */
+        'default_grace_days' => (int) (env('KONTORFIX_SCANNER_DEFAULT_GRACE_DAYS') ?: 7),
+    ],
+
 ];
