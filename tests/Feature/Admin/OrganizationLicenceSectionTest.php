@@ -19,6 +19,43 @@ it('sends this organization licences to the customer page', function () {
             ->where('licences.0.version_min', '1.0.0'));
 });
 
+/**
+ * Regression for the two licence payloads disagreeing on the date shape (see
+ * PackageLicencePayloadTest.php's identical test on the OTHER host for the full story):
+ * `OrganizationController::show()` used to send the pivot's raw `datetime`-cast value (an
+ * ISO instant, e.g. "2026-12-31T23:59:59.000000Z") while `PackageController` sent
+ * `->toDateString()`. Every other test in this file sends `available_until => null`, which
+ * both shapes agree on, so this is the one that sends a REAL date, reads it back through
+ * THIS page's own payload, edits only a version bound (resubmitting the same date, since the
+ * frontend always does — see LizenzEditor.vue), and asserts the date survives unchanged and
+ * in the same `Y-m-d` shape the package page also sends.
+ */
+it('round-trips a real available_until date through the customer page payload, surviving an edit to only a version bound', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $customer = Organization::factory()->create();
+    $package = Package::factory()->for($operator)->create(['shared' => true, 'type' => PackageType::Composer, 'name' => 'acme/lizenz']);
+
+    $this->actingAs(superAdmin())->post(route('admin.organizations.licences.store', $customer), [
+        'package_id' => $package->id,
+        'available_until' => '2026-12-31',
+        'version_min' => '1.0.0',
+        'version_max' => '2.9.9',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs(superAdmin())->get(route('admin.organizations.show', $customer))
+        ->assertInertia(fn (AssertableInertia $page) => $page->where('licences.0.available_until', '2026-12-31'));
+
+    $this->actingAs(superAdmin())->put(route('admin.organizations.licences.update', [$customer, $package]), [
+        'available_until' => '2026-12-31',
+        'version_max' => '1.9.9',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs(superAdmin())->get(route('admin.organizations.show', $customer))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('licences.0.available_until', '2026-12-31')
+            ->where('licences.0.version_max', '1.9.9'));
+});
+
 it('offers only shared packages for licensing', function () {
     $operator = Organization::factory()->create(['is_operator' => true]);
     $customer = Organization::factory()->create();

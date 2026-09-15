@@ -25,6 +25,44 @@ it('sends the organization licences to the package page', function () {
             ->where('organization_licences.0.expired', false));
 });
 
+/**
+ * Regression for the two licence payloads disagreeing on the date shape:
+ * `PackageController::organizationLicences()` sent `->toDateString()` (`Y-m-d`) while
+ * `OrganizationController::show()` sent the pivot's raw `datetime`-cast value (an ISO
+ * instant). `LizenzEditor.vue` is ONE component embedded by both hosts, feeding the value
+ * into an `<input type="date">` that only round-trips `Y-m-d` — every prior test in this
+ * file and in OrganizationLicenceRoutesTest.php sends `available_until => null`, which is
+ * exactly the value both shapes agree on, so the drift on the OTHER host went unnoticed here.
+ * This one sends a REAL date and reads it back through THIS page's own payload, then edits
+ * only a version bound (resubmitting the same date, since the frontend always does — see
+ * LizenzEditor.vue) and asserts the date is still exactly what was stored, in the same shape.
+ */
+it('round-trips a real available_until date through the package page payload, surviving an edit to only a version bound', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $customer = Organization::factory()->create(['name' => 'Kunde AG']);
+    $package = Package::factory()->for($operator)->create(['shared' => true, 'type' => PackageType::Composer]);
+
+    $this->actingAs(superAdmin())->post(route('admin.organizations.licences.store', $customer), [
+        'package_id' => $package->id,
+        'available_until' => '2026-12-31',
+        'version_min' => '1.0.0',
+        'version_max' => '2.9.9',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $package))
+        ->assertInertia(fn (AssertableInertia $page) => $page->where('organization_licences.0.available_until', '2026-12-31'));
+
+    $this->actingAs(superAdmin())->put(route('admin.organizations.licences.update', [$customer, $package]), [
+        'available_until' => '2026-12-31',
+        'version_max' => '1.9.9',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs(superAdmin())->get(route('admin.packages.show', $package))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('organization_licences.0.available_until', '2026-12-31')
+            ->where('organization_licences.0.version_max', '1.9.9'));
+});
+
 it('offers no licensable organizations for a package that is not shared', function () {
     $package = Package::factory()->create(['shared' => false, 'type' => PackageType::Composer]);
 

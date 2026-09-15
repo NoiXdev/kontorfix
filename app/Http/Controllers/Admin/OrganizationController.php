@@ -19,7 +19,8 @@ use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\RegistryTokenLifecycleService;
 use App\Services\Slugs\SlugClaimGuard;
-use Carbon\CarbonImmutable;
+use App\Support\Licence\OrganizationLicence;
+use App\Support\Licence\VersionBounds;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -149,20 +150,36 @@ class OrganizationController extends Controller
             // "Organisationen" block already uses. `expired` is computed here, the same way
             // PackageController::organizationLicences() computes it for the package-page
             // entry point, rather than left to the client to compare against "now" a second
-            // time.
+            // time — through the same `OrganizationLicence::isExpired()` that class uses,
+            // not a second, independently-written comparison against `now()` that could
+            // drift from it.
             'licences' => $organization->licensedPackages()
                 ->orderBy('packages.name')
                 ->get(['packages.id', 'packages.name', 'packages.type'])
-                ->map(fn (Package $p): array => [
-                    'package_id' => $p->id,
-                    'package_name' => $p->name,
-                    'package_type' => $p->type->value,
-                    'version_min' => $p->pivot->version_min,
-                    'version_max' => $p->pivot->version_max,
-                    'available_until' => $p->pivot->available_until,
-                    'expired' => $p->pivot->available_until !== null
-                        && CarbonImmutable::parse($p->pivot->available_until)->isPast(),
-                ])->values()->all(),
+                ->map(function (Package $p): array {
+                    $licence = new OrganizationLicence(
+                        VersionBounds::fromPivot($p->pivot->version_min, $p->pivot->version_max),
+                        $p->pivot->available_until,
+                    );
+
+                    return [
+                        'package_id' => $p->id,
+                        'package_name' => $p->name,
+                        'package_type' => $p->type->value,
+                        'version_min' => $licence->bounds->min,
+                        'version_max' => $licence->bounds->max,
+                        // `Y-m-d`, matching PackageController::organizationLicences()'s
+                        // `->toDateString()` exactly — LizenzEditor.vue is ONE component
+                        // embedded by both this page and the package page, and its
+                        // `<input type="date">` both displays and round-trips only that
+                        // shape. Sending the pivot's raw `datetime`-cast value here (an ISO
+                        // instant) instead of the same date string the other host sends
+                        // made the date input silently discard the value on this page while
+                        // the other page worked fine — the two payloads must always agree.
+                        'available_until' => $licence->availableUntil?->toDateString(),
+                        'expired' => $licence->isExpired(),
+                    ];
+                })->values()->all(),
             // The "Paket lizenzieren" picker's own options: shared, non-Docker packages this
             // organization does not already hold a licence for — shared and not Docker are
             // the two things AssignmentWriter::assertLicensable() refuses outright, kept out
