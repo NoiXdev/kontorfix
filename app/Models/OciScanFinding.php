@@ -31,7 +31,6 @@ class OciScanFinding extends Model
         'report_id',
         'vulnerability_id',
         'severity',
-        'severity_rank',
         'package_name',
         'installed_version',
         'fixed_version',
@@ -45,6 +44,23 @@ class OciScanFinding extends Model
             'severity_rank' => 'integer',
             'first_seen_at' => 'datetime',
         ];
+    }
+
+    /**
+     * `severity_rank` is `severity`'s rank, always — derived here rather than passed in.
+     *
+     * The column exists so the blocking rule can compare an indexed integer on the
+     * `docker pull` hot path instead of a set of severity strings. That makes it a
+     * denormalised copy, and a copy that any caller can set independently is a copy that
+     * will eventually disagree with the thing it copies — at which point the rule and the
+     * display say different things about the same image, and neither is falsifiable from
+     * the other. Deriving it on save removes the possibility rather than testing for it.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $finding): void {
+            $finding->severity_rank = $finding->severity->rank();
+        });
     }
 
     /** The day this finding starts blocking under a given grace period. */

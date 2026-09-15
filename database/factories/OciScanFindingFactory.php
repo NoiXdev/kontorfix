@@ -15,20 +15,17 @@ class OciScanFindingFactory extends Factory
     protected $model = OciScanFinding::class;
 
     /**
-     * `severity_rank` is derived from `severity` here rather than randomised independently,
-     * so no test can accidentally build a row the coupling guard forbids.
+     * `severity_rank` is not set here — `OciScanFinding::booted()` derives it from
+     * `severity` on save, so this factory never has to (and never could) get it wrong.
      *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
-        $severity = VulnerabilitySeverity::High;
-
         return [
             'report_id' => OciScanReport::factory(),
             'vulnerability_id' => 'CVE-2026-'.$this->faker->unique()->numberBetween(1000, 9999),
-            'severity' => $severity,
-            'severity_rank' => $severity->rank(),
+            'severity' => VulnerabilitySeverity::High,
             'package_name' => 'openssl',
             'installed_version' => '3.0.1',
             'fixed_version' => '3.0.2',
@@ -40,7 +37,6 @@ class OciScanFindingFactory extends Factory
     {
         return $this->state(fn (): array => [
             'severity' => $severity,
-            'severity_rank' => $severity->rank(),
         ]);
     }
 

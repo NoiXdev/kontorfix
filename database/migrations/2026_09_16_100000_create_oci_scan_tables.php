@@ -53,7 +53,8 @@ return new class extends Migration
             $table->string('severity');
 
             // VulnerabilitySeverity::rank(), denormalised. See that enum for why, and
-            // ScanSchemaTest's coupling guard for what keeps it honest.
+            // OciScanFinding::booted() for what keeps it honest — the model derives this
+            // column from `severity` on every save, so no caller can set it independently.
             $table->unsignedTinyInteger('severity_rank');
 
             $table->string('package_name');

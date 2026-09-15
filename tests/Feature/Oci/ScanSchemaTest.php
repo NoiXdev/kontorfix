@@ -16,8 +16,10 @@ use Illuminate\Support\Facades\DB;
  * columns exist":
  *
  *  - `severity_rank` is a denormalised copy of `severity`, kept so the blocking rule is an
- *    indexed integer comparison on the `docker pull` hot path rather than a string set. The
- *    coupling test below is what keeps the copy honest.
+ *    indexed integer comparison on the `docker pull` hot path rather than a string set.
+ *    `OciScanFinding::booted()` is what keeps the copy honest — it derives the rank on every
+ *    save, so no caller can set it independently — and the test below asserts exactly that
+ *    by trying to store a mismatched rank and checking the model overrules it.
  *  - `first_seen_at` is a plain column with no default, because the only correct value is
  *    decided by ScanReportWriter (Task 3) and a database default would quietly make "now"
  *    look right on a rescan.
@@ -78,17 +80,20 @@ it('deletes findings with their report and reports with their manifest', functio
         ->and(OciScanFinding::count())->toBe(0);
 });
 
-it('keeps severity_rank in step with severity', function () {
-    // The coupling guard for the denormalisation. `severity_rank` exists only so the
-    // blocking rule can compare an indexed integer; the moment a row's rank stops matching
-    // its severity, the rule and the display disagree and nothing else would notice.
-    foreach (VulnerabilitySeverity::cases() as $severity) {
-        $finding = OciScanFinding::factory()->create([
-            'severity' => $severity,
-            'severity_rank' => $severity->rank(),
-        ]);
+it('derives severity_rank from severity, whatever a caller tries to store', function () {
+    // The guard for the denormalisation, and it has to be able to fail: a row is written
+    // with a rank that contradicts its severity, and the model overrules it. Asserting that
+    // an already-consistent row stays consistent would pass whether or not anything enforced
+    // it — which is what this test used to do.
+    $finding = OciScanFinding::factory()->create(['severity' => VulnerabilitySeverity::Low]);
+    $finding->forceFill(['severity_rank' => 99])->save();
 
-        expect($finding->fresh()->severity->rank())->toBe($finding->fresh()->severity_rank);
+    expect($finding->fresh()->severity_rank)->toBe(VulnerabilitySeverity::Low->rank());
+
+    foreach (VulnerabilitySeverity::cases() as $severity) {
+        $row = OciScanFinding::factory()->create(['severity' => $severity]);
+
+        expect($row->fresh()->severity_rank)->toBe($severity->rank());
     }
 });
 
