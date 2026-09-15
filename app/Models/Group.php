@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\VulnerabilitySeverity;
 use App\Services\Package\AssignmentWriter;
 use Closure;
 use Database\Factories\GroupFactory;
@@ -83,6 +84,11 @@ class Group extends Model
 
     protected $attributes = [
         'portal_enabled' => true,
+        // Mirrors the migration's DB-level default. Group uses HasUuids (no
+        // auto-increment refetch on create()), so without this the in-memory model would
+        // show null here until the row is reloaded — the same reason portal_enabled above
+        // is listed here rather than left to the column default alone.
+        'scan_block_grace_days' => 7,
     ];
 
     protected function casts(): array
@@ -90,6 +96,9 @@ class Group extends Model
         return [
             'public' => 'bool',
             'portal_enabled' => 'bool',
+            // Null = this registry does not block on findings, which is the shipped default.
+            'scan_block_severity' => VulnerabilitySeverity::class,
+            'scan_block_grace_days' => 'integer',
         ];
     }
 

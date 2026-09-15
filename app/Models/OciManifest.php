@@ -62,4 +62,16 @@ class OciManifest extends Model
     {
         return $this->hasMany(OciTag::class, 'manifest_id');
     }
+
+    /**
+     * Every scanner's verdict on this manifest. Plural because switching an instance to a
+     * different scanner leaves the previous one's report in place rather than overwriting
+     * it — see the unique key on oci_scan_reports.
+     *
+     * @return HasMany<OciScanReport, $this>
+     */
+    public function scanReports(): HasMany
+    {
+        return $this->hasMany(OciScanReport::class, 'manifest_id');
+    }
 }
