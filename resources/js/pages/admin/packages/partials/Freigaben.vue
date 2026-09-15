@@ -25,7 +25,7 @@ import {
     type LicensableOrganization,
     type OrganizationLicenceRow,
 } from './freigaben';
-import LizenzEditor from './LizenzEditor.vue';
+import LizenzEditor, { type LicencePreview } from './LizenzEditor.vue';
 
 const props = defineProps<{
     packageId: string;
@@ -102,6 +102,37 @@ function openLicenceEditor(row?: OrganizationLicenceRow) {
 
 function closeLicenceEditor() {
     licenceEditorOpen.value = false;
+}
+
+const licencePreview = ref<LicencePreview | null>(null);
+
+/**
+ * Same preview as the customer page, with the roles of the two ids swapped: here the
+ * ORGANISATION comes from the picker and the package is fixed. Server-side for the same
+ * reason — see LizenzEditor's `preview` prop.
+ */
+async function fetchLicencePreview(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
+    const organizationId = licenceEditorMode.value === 'create' ? payload.id : (licenceEditorTarget.value?.organization_id ?? null);
+
+    if (organizationId === null) {
+        licencePreview.value = null;
+
+        return;
+    }
+
+    licencePreview.value = null;
+
+    try {
+        const response = await fetch(route('admin.organizations.licences.preview', organizationId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ ...payload, package_id: props.packageId }),
+        });
+
+        licencePreview.value = response.ok ? await response.json() : null;
+    } catch {
+        licencePreview.value = null;
+    }
 }
 
 function saveLicenceEditor(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
@@ -520,6 +551,8 @@ function removeAssignment(row: AssignmentRow) {
             :initial="licenceEditorInitial"
             :errors="licenceEditorErrors"
             :saving="licenceEditorSaving"
+            :preview="licencePreview"
+            @preview="fetchLicencePreview"
             @update:open="licenceEditorOpen = $event"
             @submit="saveLicenceEditor"
         />

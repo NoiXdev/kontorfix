@@ -101,6 +101,9 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // operator-org admin/maintainer, not only a super-admin. Moving these into the
     // super group would quietly take the capability away from operator-org
     // maintainers, who pass canAdministerConsole() but are not super-admins.
+    // Read-only: what a proposed window would do, before it is written. See preview().
+    Route::post('organizations/{organization}/licences/preview', [Admin\OrganizationPackageController::class, 'preview'])
+        ->name('organizations.licences.preview');
     Route::post('organizations/{organization}/licences', [Admin\OrganizationPackageController::class, 'store'])
         ->name('organizations.licences.store');
     Route::put('organizations/{organization}/licences/{package}', [Admin\OrganizationPackageController::class, 'update'])

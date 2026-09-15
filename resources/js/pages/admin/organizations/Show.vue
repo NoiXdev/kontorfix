@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { OCI_AUTO_CREATE_LABEL } from '@/pages/admin/ociAutoCreate';
-import LizenzEditor from '@/pages/admin/packages/partials/LizenzEditor.vue';
+import LizenzEditor, { type LicencePreview } from '@/pages/admin/packages/partials/LizenzEditor.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { Trash2 } from 'lucide-vue-next';
@@ -318,6 +318,38 @@ function closeLicenceEditor() {
     licenceEditorOpen.value = false;
 }
 
+const licencePreview = ref<LicencePreview | null>(null);
+
+/**
+ * Asks the server what the entered window would do before it is written. Fetched rather
+ * than computed here on purpose: comparing versions in the browser needs ecosystem-aware
+ * ordering, and the last client-side attempt rated `2.0.0-beta1` equal to `2.0.0`. The
+ * endpoint runs the same method that later decides for real.
+ */
+async function fetchLicencePreview(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
+    if (payload.id === null) {
+        licencePreview.value = null;
+
+        return;
+    }
+
+    licencePreview.value = null;
+
+    try {
+        const response = await fetch(route('admin.organizations.licences.preview', props.organization.id), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ ...payload, package_id: payload.id }),
+        });
+
+        licencePreview.value = response.ok ? await response.json() : null;
+    } catch {
+        // A failed preview stays silent rather than claiming anything: it is an aid, and a
+        // wrong count is worse than none where the operator is about to act on it.
+        licencePreview.value = null;
+    }
+}
+
 function saveLicence(payload: { id: string | null; available_until: string | null; version_min: string | null; version_max: string | null }) {
     licenceEditorSaving.value = true;
     licenceEditorErrors.value = {};
@@ -582,6 +614,8 @@ function removeLicence(row: LicenceRow) {
                     :initial="licenceEditorInitial"
                     :errors="licenceEditorErrors"
                     :saving="licenceEditorSaving"
+                    :preview="licencePreview"
+                    @preview="fetchLicencePreview"
                     @submit="saveLicence"
                 />
             </div>
