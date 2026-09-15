@@ -33,7 +33,11 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // `serve => true` registers GET and PUT on /storage/{path}. Both are gated by a
+            // valid relative signed URL, and this application mints none for this disk — so
+            // the routes are dead, and a dead PUT is still a write surface whose only guard
+            // is APP_KEY. The `artifacts` disk beside it has always been false; this matches.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

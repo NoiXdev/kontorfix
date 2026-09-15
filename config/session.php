@@ -47,7 +47,11 @@ return [
     |
     */
 
-    'encrypt' => env('SESSION_ENCRYPT', false),
+    // Defaults to ON: the sessions table carries one-time secrets in flash data. Whoever
+    // can read that table already holds every live session id, so this is defence in depth
+    // rather than a fix — but turning it on costs a line, and turning it on LATER logs
+    // everybody out once, which is a worse moment to discover it.
+    'encrypt' => env('SESSION_ENCRYPT', true),
 
     /*
     |--------------------------------------------------------------------------
@@ -194,7 +198,13 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // Secure by default everywhere except local development. A flat `true` would break a
+    // plain-http `php artisan serve` (DDEV terminates TLS, a bare PHP server does not), and
+    // a flat `false` — today's effective value when the variable is unset — ships the
+    // session cookie over cleartext on any deployment whose operator never read the
+    // template. APP_ENV is read directly because config/ is resolved before the application
+    // instance exists.
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') !== 'local'),
 
     /*
     |--------------------------------------------------------------------------
