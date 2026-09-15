@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /Users/noidee/_dev/code-registry/ 2>/dev/null && ls /Users/noidee/_dev/ | head -30)",
+      "Bash(ddev exec *)"
+    ]
+  }
+}

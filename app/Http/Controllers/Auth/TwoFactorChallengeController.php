@@ -4,16 +4,19 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Notifications\SecondFactorAttemptsDetected;
 use App\Services\Auth\TwoFactorAuthenticator;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Lockout;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 class TwoFactorChallengeController extends Controller
 {
@@ -127,6 +130,8 @@ class TwoFactorChallengeController extends Controller
             $dailyFailures = RateLimiter::hit($dailyKey, self::DAILY_DECAY_SECONDS);
 
             if ($dailyFailures === 5) {
+                $this->warnAccountHolder($user);
+
                 // Exactly once per burst, on the guess that spends the per-minute
                 // allowance — five is the last failure that still reaches this branch,
                 // since the sixth request is refused by the limiter above before anything
@@ -153,5 +158,31 @@ class TwoFactorChallengeController extends Controller
         $request->session()->regenerate();
 
         return redirect()->intended(route('dashboard', absolute: false));
+    }
+
+    /**
+     * Tell the account holder, once per burst.
+     *
+     * Reached from the branch that already signals a burst, which is keyed on the DAILY
+     * counter — that counter does not roll off with the per-minute window, so however long
+     * an attack runs this is reached at most once per account per day. The attacker decides
+     * how many failures happen, so a signal that re-armed would be a mail bomb aimed at the
+     * person it exists to protect.
+     *
+     * Failures are swallowed on purpose. Queueing can throw for reasons that have nothing
+     * to do with this request — no mail transport configured, the queue connection down —
+     * and none of them may turn a wrong 2FA code into a 500 on the login path. The throwable
+     * is logged rather than discarded, so a silently undelivered warning is still findable.
+     */
+    private function warnAccountHolder(User $user): void
+    {
+        try {
+            $user->notify(new SecondFactorAttemptsDetected);
+        } catch (Throwable $e) {
+            Log::warning('Could not notify the account holder of second-factor attempts.', [
+                'user_id' => $user->getKey(),
+                'exception' => $e,
+            ]);
+        }
     }
 }
