@@ -29,6 +29,21 @@ it('refuses a new assignment that falls wholly outside the licence', function ()
     expect($this->group->packages()->count())->toBe(0);
 });
 
+it('refuses a new assignment that only touches the licence boundary, admitting nothing', function () {
+    // Licence [2.0.0, 3.0.0), row [1.0.0, 2.0.0): the row's upper bound exactly equals the
+    // licence's lower bound. version_max is exclusive, so this is NOT an overlap — the
+    // registry would serve nothing — and the write must be refused exactly like the wholly
+    // disjoint case above. Regression for intersect() once accepting a touching window as a
+    // non-null (and therefore "fine") intersection.
+    $writer = app(AssignmentWriter::class);
+    $writer->assignToOrganization($this->customer, $this->package, null, new VersionBounds('2.0.0', '3.0.0'));
+
+    expect(fn () => $writer->assign($this->group, $this->package, null, new VersionBounds('1.0.0', '2.0.0')))
+        ->toThrow(ValidationException::class);
+
+    expect($this->group->packages()->count())->toBe(0);
+});
+
 it('accepts an assignment that overlaps the licence', function () {
     $writer = app(AssignmentWriter::class);
     $writer->assignToOrganization($this->customer, $this->package, null, new VersionBounds('1.0.0', '2.9.9'));

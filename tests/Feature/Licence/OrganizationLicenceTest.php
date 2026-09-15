@@ -70,6 +70,27 @@ it('returns null for disjoint windows', function () {
     ))->toBeNull();
 });
 
+it('treats a touching window as empty, not as a single-point interval', function () {
+    // version_max is EXCLUSIVE throughout this class (see permits()'s Comparator::lessThan
+    // and AssignmentWriter::assertValidBounds()'s strict min < max), so a licence ending
+    // exactly where a row begins admits no version at all. Regression for a bug where
+    // boundsAreOrdered() accepted `min == max` and intersect() handed back a non-null
+    // `[2.0.0, 2.0.0)` window for a row that is, in fact, wholly outside the licence.
+    expect(licenceEntitlement()->intersect(
+        new VersionBounds('2.0.0', '3.0.0'),
+        new VersionBounds('1.0.0', '2.0.0'),
+        PackageType::Composer,
+    ))->toBeNull();
+});
+
+it('treats a touching PEP 440 window as empty too', function () {
+    expect(licenceEntitlement()->intersect(
+        new VersionBounds('2.0', '3.0'),
+        new VersionBounds('1.0', '2.0'),
+        PackageType::Python,
+    ))->toBeNull();
+});
+
 it('keeps the other side when one is unlimited', function () {
     $result = licenceEntitlement()->intersect(
         VersionBounds::unlimited(),

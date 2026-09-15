@@ -6,6 +6,7 @@ use App\Enums\PackageType;
 use App\Models\Group;
 use App\Models\Organization;
 use App\Models\Package;
+use App\Services\Package\AssignmentWriter;
 use App\Support\Licence\OrganizationLicence;
 use App\Support\Licence\Pep440Version;
 use App\Support\Licence\VersionBounds;
@@ -433,11 +434,25 @@ final class VersionEntitlement
             : (Comparator::lessThan($normalisedA, $normalisedB) ? -1 : 1);
     }
 
+    /**
+     * Strict ordering only: `min == max` is NOT ordered, even though it would be a valid
+     * (empty) mathematical interval.
+     *
+     * `version_max` is exclusive throughout this class — {@see permits()} runs it through
+     * `Comparator::lessThan`, and {@see AssignmentWriter::assertValidBounds()}'s
+     * own `isOrdered()` correspondingly requires strict `min < max` at write time, refusing
+     * `min == max` as an impossible bounds pair rather than accepting it as "admits
+     * nothing". `intersect()`, the only caller of this method, has to agree: a touching
+     * intersection (the licence's `max` equal to the row's `min`, or vice versa) admits no
+     * version either, and treating `<= 0` as ordered here would hand `intersect()` a
+     * non-null `[x, x)` window for a row that is, in fact, wholly outside the licence — the
+     * caller then reads "a licence exists here" instead of "refuse this write".
+     */
     private function boundsAreOrdered(PackageType $type, string $min, string $max): bool
     {
         $ordered = $this->compareBounds($type, $min, $max);
 
-        return $ordered !== null && $ordered <= 0;
+        return $ordered !== null && $ordered < 0;
     }
 
     /**
