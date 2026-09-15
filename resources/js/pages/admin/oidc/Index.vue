@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus, ShieldCheck, ShieldOff, Trash2 } from 'lucide-vue-next';
+import { KeyRound, Plus, ShieldCheck, ShieldOff, Trash2 } from 'lucide-vue-next';
 
 type Role = 'member' | 'maintainer' | 'admin';
 
@@ -86,6 +86,25 @@ function toggleTrust(provider: ProviderRow) {
                     'Provider als nicht vertrauenswürdig für E-Mail-Zusicherungen markieren? Bestehende Konten werden dann nicht mehr automatisch über die E-Mail-Adresse verknüpft.',
                 ),
         },
+    );
+}
+
+/**
+ * Rotating a secret used to mean deleting the provider and recreating it, which cascades
+ * away every linked SSO identity — a penalty applied to exactly the secret most in need of
+ * rotating. This asks for the new value and sends it to the single-purpose route.
+ */
+function rotateSecret(provider: ProviderRow) {
+    const secret = prompt(`Neues Client-Secret für „${provider.name}“:`);
+
+    if (secret === null || secret.trim() === '') {
+        return;
+    }
+
+    router.patch(
+        route('admin.oidc.secret', provider.id),
+        { client_secret: secret },
+        { preserveScroll: true },
     );
 }
 
@@ -172,6 +191,15 @@ const badgeClasses = (on: boolean) =>
                             <span v-else class="text-muted-foreground">—</span>
                         </td>
                         <td class="px-4 py-3">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                @click="rotateSecret(provider)"
+                                aria-label="Client-Secret rotieren"
+                                title="Client-Secret rotieren — bestehende SSO-Verknüpfungen bleiben erhalten"
+                            >
+                                <KeyRound class="size-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" @click="destroyProvider(provider.id)" aria-label="Provider löschen">
                                 <Trash2 class="size-4 text-destructive" />
                             </Button>

@@ -84,6 +84,33 @@ class OidcProviderController extends Controller
             : 'Provider als nicht vertrauenswürdig für E-Mail-Zusicherungen markiert.');
     }
 
+    /**
+     * Rotates the client secret in place.
+     *
+     * Single-purpose, like {@see trust()} beside it, and for the same reason: the resource
+     * route exposes no update action, so the only way to change a leaked secret used to be
+     * delete-and-recreate — which cascades away every OidcIdentity linked to the provider.
+     * Rotating therefore meant unlinking every SSO user, which is a penalty applied to
+     * exactly the secret most in need of rotating.
+     *
+     * Only the secret. Re-discovering endpoints or renaming a provider are different acts
+     * with different risks, and a combined edit form would let one of them ride along
+     * unnoticed with the other.
+     */
+    public function rotateSecret(Request $request, OidcProvider $provider): RedirectResponse
+    {
+        $validated = $request->validate([
+            // `required` rather than `nullable`: an empty value would leave the provider
+            // present but unable to authenticate, which looks like a working configuration
+            // and fails only at the next login.
+            'client_secret' => ['required', 'string', 'max:500'],
+        ]);
+
+        $provider->update(['client_secret' => $validated['client_secret']]);
+
+        return back()->with('success', 'Client-Secret rotiert. Bestehende SSO-Verknüpfungen bleiben erhalten.');
+    }
+
     public function discover(Request $request): JsonResponse
     {
         $validated = $request->validate([
