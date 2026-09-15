@@ -108,6 +108,79 @@ it('does not apply the un-share check when sharing', function () {
     expect($package->fresh()->shared)->toBeTrue();
 });
 
+/*
+ * The headline case this feature (org-level package licences) exists for: a package
+ * licensed org-wide to a customer with NO registry assignment at all, served purely through
+ * `/o/{orgSlug}`. The pre-existing guard above only ever looked at `group_package`, so
+ * un-sharing here found nothing to refuse and let the flag clear — RegistryAccessService's
+ * ownership predicate then stops `/o/` from serving the package at all, while the licence
+ * row survives reporting `expired: false` and becomes uneditable (AssignmentWriter's
+ * assertLicensable() refuses any write to a non-shared package) — only removing it stays
+ * possible. This pins the fix: a foreign org_package row must refuse the un-share exactly
+ * like a foreign group_package row does.
+ */
+
+it('refuses to un-share a package licensed to another organization with no registry assignment at all', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    $customer = Organization::factory()->create(['name' => 'Kunde AG']);
+    $customer->licensedPackages()->attach($package->id);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch an die Organisation Kunde AG lizenziert. '
+            .'Entfernen Sie die Lizenz zuerst.']);
+
+    expect($package->fresh()->shared)->toBeTrue()
+        ->and($customer->licensedPackages()->whereKey($package->id)->exists())->toBeTrue();
+});
+
+it('names every organization, in the plural, when the package is licensed to more than one', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    Organization::factory()->create(['name' => 'Erste Kunde AG'])->licensedPackages()->attach($package->id);
+    Organization::factory()->create(['name' => 'Zweite Kunde AG'])->licensedPackages()->attach($package->id);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch an folgende Organisationen lizenziert: '
+            .'Erste Kunde AG, Zweite Kunde AG. Entfernen Sie die Lizenzen zuerst.']);
+
+    expect($package->fresh()->shared)->toBeTrue();
+});
+
+it('refuses the un-share even when the licence has expired, the same as an expired registry assignment', function () {
+    // Mirrors "refuses the un-share even when the cross-organization assignment has expired"
+    // above: the licence-existence check counts every row, expired or not — the invariant is
+    // about the ROW existing, not about what it currently serves.
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    $customer = Organization::factory()->create(['name' => 'Kunde AG']);
+    $customer->licensedPackages()->attach($package->id, ['available_until' => now()->subDay()]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertSessionHasErrors(['shared' => 'Dieses Paket ist noch an die Organisation Kunde AG lizenziert. '
+            .'Entfernen Sie die Lizenz zuerst.']);
+
+    expect($package->fresh()->shared)->toBeTrue();
+});
+
+it('un-shares a package that carries neither a foreign registry assignment nor a licence', function () {
+    $operator = Organization::factory()->create(['is_operator' => true]);
+    $package = Package::factory()->for($operator)->create(['shared' => true]);
+
+    $this->actingAs(superAdmin())
+        ->put(route('admin.packages.shared', $package), ['shared' => false])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($package->fresh()->shared)->toBeFalse();
+});
+
 it('names every registry, in the plural, when the package is assigned to more than one', function () {
     $operator = Organization::factory()->create(['is_operator' => true]);
     $package = Package::factory()->for($operator)->create(['shared' => true]);

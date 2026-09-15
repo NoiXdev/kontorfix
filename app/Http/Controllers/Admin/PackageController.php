@@ -761,6 +761,15 @@ class PackageController extends Controller
      * the registry rows below it are shown THROUGH (see {@see assignmentPayload()}'s
      * effective-window fields).
      *
+     * `available_until` is `->toDateString()` (`Y-m-d`), deliberately, and must stay that
+     * shape: `LizenzEditor.vue` is ONE component embedded both here and by
+     * `OrganizationController::show()`'s "Lizenzierte Pakete" section, and it feeds the
+     * value straight into an `<input type="date">`, which both displays and round-trips
+     * only `Y-m-d`. `OrganizationController::show()` builds the identical
+     * `App\Support\Licence\OrganizationLicence` value and formats it the same way for
+     * exactly this reason — the two payloads disagreeing here once meant this page's dates
+     * worked and the customer page's did not.
+     *
      * @return list<array{organization_id: string, organization_name: string, version_min: ?string, version_max: ?string, available_until: ?string, expired: bool}>
      */
     private function organizationLicences(Package $package): array
@@ -1677,6 +1686,33 @@ class PackageController extends Controller
                             .'zugewiesen. Entfernen Sie es dort zuerst.'
                         : 'Dieses Paket ist noch Registrys anderer Organisationen zugewiesen: '
                             .$foreign->implode(', ').'. Entfernen Sie es dort zuerst.',
+                ]);
+            }
+
+            // The same invariant, for the org-wide ceiling rather than a per-registry row.
+            // An `organization_package` licence for a foreign organization is this feature's
+            // headline case — a package licensed org-wide with NO registry assignment at
+            // all, served purely through `/o/{orgSlug}`. Un-sharing would strand it exactly
+            // like a foreign `group_package` row would: the ownership predicate at
+            // RegistryAccessService::organizationPackagesQuery() requires `shared`, so `/o/`
+            // stops serving the package the instant the flag clears, while the licence row
+            // survives, still reporting `expired: false`, and becomes uneditable because
+            // AssignmentWriter::assertLicensable() refuses any write to a non-shared
+            // package — only removing the licence stays possible. Refuse and name the
+            // customers, the same shape as the registry check above, rather than detaching
+            // licences on the operator's behalf.
+            $foreignLicensees = $package->licensedOrganizations()
+                ->where('organizations.id', '!=', $package->organization_id)
+                ->orderBy('organizations.name')
+                ->pluck('organizations.name');
+
+            if ($foreignLicensees->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'shared' => $foreignLicensees->count() === 1
+                        ? "Dieses Paket ist noch an die Organisation {$foreignLicensees->first()} lizenziert. "
+                            .'Entfernen Sie die Lizenz zuerst.'
+                        : 'Dieses Paket ist noch an folgende Organisationen lizenziert: '
+                            .$foreignLicensees->implode(', ').'. Entfernen Sie die Lizenzen zuerst.',
                 ]);
             }
         }
