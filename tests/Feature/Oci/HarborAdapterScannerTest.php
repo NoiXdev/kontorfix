@@ -142,6 +142,18 @@ it('refuses a report body it cannot decode, rather than reading it as a clean im
     app(HarborAdapterScanner::class)->fetchReport('scan-1');
 })->throws(ScannerException::class);
 
+it('refuses a report body that is not an object, however well-formed', function () {
+    // `[]` is valid JSON and decodes without complaint, and every lookup against it answers
+    // with its default — so an empty findings list, and therefore a clean image, out of a body
+    // that is not a report. Refused for the same reason a truncated body is: an answer we
+    // cannot read is not a verdict.
+    Http::fake(['scanner:8080/api/v1/scan/scan-1/report' => Http::response(
+        '[]', 200, ['Content-Type' => 'application/vnd.security.vulnerability.report; version=1.1']
+    )]);
+
+    app(HarborAdapterScanner::class)->fetchReport('scan-1');
+})->throws(ScannerException::class);
+
 it('does not follow a redirect off the scanner host', function () {
     // Every outbound hop is judged in this codebase (UrlSafety, AddressPin,
     // UpstreamClient::follow) — the last audit's only HIGH was a rebinding gap on exactly that

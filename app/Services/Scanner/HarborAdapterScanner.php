@@ -199,7 +199,12 @@ final class HarborAdapterScanner implements VulnerabilityScanner
     {
         $decoded = json_decode($response->body(), true);
 
-        if (! is_array($decoded)) {
+        // `is_array()` alone is not enough: it is true for a JSON LIST as well, so a body of
+        // `[]` would decode cleanly and then answer every `$body['…'] ?? default` lookup with
+        // the default — which for the report endpoint means an empty findings list, i.e. a
+        // clean bill of health produced by a body that is not a report at all. All three
+        // endpoints of this API answer with an object, so requiring one refuses nothing real.
+        if (! is_array($decoded) || array_is_list($decoded)) {
             throw ScannerException::unreadableBody($endpoint);
         }
 
