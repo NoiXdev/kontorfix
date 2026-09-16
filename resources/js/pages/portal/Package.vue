@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PortalHeader from '@/components/kontorfix/PortalHeader.vue';
 import ReadmeContent from '@/components/kontorfix/ReadmeContent.vue';
+import ScanFindings, { type ScanCard } from '@/components/kontorfix/ScanFindings.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -97,6 +98,12 @@ const props = defineProps<{
         abandoned_at: string | null;
         replacement_package: string | null;
         abandonment_reason: string | null;
+        // The same verdict the operator's Docker page shows for this repository's PULL
+        // tag — read-only here, with no trigger: the customer sees what is inside the
+        // image they are pulling, not a way to queue a scan of it. Null while the scanner
+        // is off, or while the repository has no verdict yet; the card says "noch nicht
+        // geprüft" from that, never "keine Funde".
+        scan: ScanCard | null;
     };
     versions: VersionRow[];
     // Empty for every type but Docker, and the list below renders it INSTEAD of `versions`
@@ -318,6 +325,19 @@ function depCount(deps: Record<string, string>): number {
                             </tr>
                         </tbody>
                     </table>
+                </div>
+
+                <!-- VULNERABILITIES, READ-ONLY: the same verdict the operator's Docker page
+                     shows for this repository's PULL tag — see props.package.scan's own
+                     comment for why it is null rather than "keine Funde" while unchecked.
+                     No trigger here: the customer sees what is inside the image they are
+                     pulling, not a way to queue a scan of it. Always rendered for a Docker
+                     repository, the same as the retention card below — ScanFindings itself
+                     states "Noch nicht geprüft" for a null verdict rather than the section
+                     vanishing. -->
+                <div v-if="isDocker" class="rounded-xl border border-sidebar-border/70 p-4 text-sm dark:border-sidebar-border">
+                    <h2 class="mb-2 font-medium">Schwachstellen</h2>
+                    <ScanFindings :scan="props.package.scan" />
                 </div>
 
                 <!-- RETENTION, READ-ONLY (plate 5's customer half): why tags disappear, and

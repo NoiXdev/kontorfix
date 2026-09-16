@@ -2,6 +2,7 @@
 import ActivityTimeline from '@/components/kontorfix/ActivityTimeline.vue';
 import { dockerDomainNote, dockerNoRegistryMessage, dockerSetupSnippet } from '@/components/kontorfix/dockerSetup';
 import FlashToast from '@/components/kontorfix/FlashToast.vue';
+import ScanFindings, { type ScanCard } from '@/components/kontorfix/ScanFindings.vue';
 import SharedBadge from '@/components/kontorfix/SharedBadge.vue';
 import TypeBadge from '@/components/kontorfix/TypeBadge.vue';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,9 @@ interface TagRow {
     size_bytes: number | null;
     shared: boolean;
     pushed_at: string | null;
+    // Null means NOT CHECKED — never "no findings" (ScanCardPresenter's own docblock). The
+    // column below renders the two differently.
+    scan: ScanCard | null;
 }
 
 interface ActivityRow {
@@ -96,12 +100,35 @@ const props = defineProps<{
         rule_types: { value: string; label: string; shield: boolean; untagged: boolean }[];
         policies: { id: string; name: string }[];
     };
+    // Whether the scanner is switched on at all (KONTORFIX_SCANNER_ENABLED) — the same
+    // switch ScanCardPresenter itself reads. The scan column and "Jetzt prüfen" are hidden
+    // entirely when this is false, rather than shown disabled: offering a trigger
+    // ScanController::store() would refuse with a 409 explains nothing a hidden column
+    // does not already say.
+    scan_enabled: boolean;
 }>();
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Pakete', href: '/admin/packages' },
     { title: props.package.name, href: route('admin.packages.show', props.package.id) },
 ];
+
+// --- Scanning: one manifest at a time, addressed by digest (see Admin\ScanController::store()). ---
+const scanningDigest = ref<string | null>(null);
+
+function scanNow(digest: string | null) {
+    if (digest === null) {
+        return;
+    }
+
+    scanningDigest.value = digest;
+
+    router.post(
+        route('admin.packages.scan', props.package.id),
+        { digest },
+        { preserveScroll: true, onFinish: () => (scanningDigest.value = null) },
+    );
+}
 
 // --- Retention card state ---
 
@@ -400,6 +427,7 @@ function saveShared() {
                                         <th class="px-4 py-3 font-medium">Plattform</th>
                                         <th class="px-4 py-3 text-right font-medium">Größe</th>
                                         <th class="px-4 py-3 font-medium">Gepusht</th>
+                                        <th v-if="props.scan_enabled" class="px-4 py-3 font-medium">Schwachstellen</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -418,9 +446,23 @@ function saveShared() {
                                             <template v-else>{{ formatBytes(tag.size_bytes) }}</template>
                                         </td>
                                         <td class="px-4 py-3 text-muted-foreground">{{ tag.pushed_at ?? '—' }}</td>
+                                        <td v-if="props.scan_enabled" class="px-4 py-3">
+                                            <div class="flex flex-col gap-2">
+                                                <ScanFindings :scan="tag.scan" />
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    class="w-fit"
+                                                    :disabled="tag.digest === null || scanningDigest === tag.digest"
+                                                    @click="scanNow(tag.digest)"
+                                                >
+                                                    {{ scanningDigest === tag.digest ? 'Wird eingereiht …' : 'Jetzt prüfen' }}
+                                                </Button>
+                                            </div>
+                                        </td>
                                     </tr>
                                     <tr v-if="props.tags.length === 0">
-                                        <td colspan="5" class="px-4 py-8 text-center text-muted-foreground">
+                                        <td :colspan="props.scan_enabled ? 6 : 5" class="px-4 py-8 text-center text-muted-foreground">
                                             Noch keine Tags gepusht (via <code>docker push</code>).
                                         </td>
                                     </tr>

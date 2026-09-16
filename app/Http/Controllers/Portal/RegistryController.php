@@ -16,6 +16,7 @@ use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
 use App\Services\RegistryAccessService;
+use App\Services\Scanner\ScanCardPresenter;
 use App\Support\VersionOrder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
@@ -279,6 +280,10 @@ class RegistryController extends Controller
                 'abandoned_at' => $package->abandoned_at?->toDateString(),
                 'replacement_package' => $package->replacement_package,
                 'abandonment_reason' => $package->abandonment_reason,
+                // The customer sees the same findings the operator does, for their own
+                // images. They are the ones pulling it, and a registry that knows what is
+                // inside an image while the person running it does not is not doing the job.
+                'scan' => $this->scanFor($package, $group),
             ],
             'versions' => $package->versions->map(fn (PackageVersion $v) => [
                 'version' => $v->version_pretty ?? $v->version,
@@ -316,6 +321,34 @@ class RegistryController extends Controller
             'in_force' => $inForce,
             'retention' => $this->retentionFor($package),
         ]);
+    }
+
+    /**
+     * The customer's view of this repository's verdict.
+     *
+     * The tag a `docker pull` names is the one this answers for — the same first row
+     * OciTag::scopeInPullOrder() produces and the same one the install snippet above the
+     * table prints, so the card and the command cannot describe different images.
+     *
+     * Null for a non-Docker package and for a repository with no verdict; the page says
+     * "noch nicht geprüft" from that, never "keine Funde".
+     *
+     * @return array<string, mixed>|null
+     */
+    private function scanFor(Package $package, Group $group): ?array
+    {
+        if ($package->type !== PackageType::Docker) {
+            return null;
+        }
+
+        $tag = $package->ociTags()->with('manifest')->inPullOrder()->first();
+
+        if ($tag?->manifest === null) {
+            return null;
+        }
+
+        return app(ScanCardPresenter::class)
+            ->forManifests(collect([$tag->manifest]), $group)[$tag->manifest->id] ?? null;
     }
 
     /**

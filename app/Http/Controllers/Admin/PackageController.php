@@ -35,6 +35,7 @@ use App\Services\Package\SharedAssignment;
 use App\Services\Registry\RegistryTypeService;
 use App\Services\Registry\RegistryUrl;
 use App\Services\Registry\SetupSnippetBuilder;
+use App\Services\Scanner\ScanCardPresenter;
 use App\Services\Scope\OrgScope;
 use App\Services\Vcs\RepositoryProbe;
 use App\Support\ActivityPresenter;
@@ -920,7 +921,31 @@ class PackageController extends Controller
             fn (OciManifest $m): array => [$m->id => $this->platformFor($m, $organizationId, $blobStore)]
         );
 
-        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest): array {
+        // A Docker repository can be assigned to more than one registry, and since
+        // ResolveOciContext every one of them is a working `docker pull` address — so this
+        // is a choice between addresses, not between an address and nothing. A registry with
+        // a custom domain is preferred because its reference is the shorter one; failing
+        // that, the first visible registry, addressed on the instance host. Deterministic
+        // either way (Collection::first() preserves the `groups` query's own order); a
+        // repository shared across several domained registries is a real but rare shape this
+        // page does not need to disambiguate further.
+        //
+        // Null only when the repository is in NO registry this viewer can see — the one
+        // remaining case with no address at all, which dockerSetup.ts's
+        // dockerNoRegistryMessage() states.
+        //
+        // Computed here, ahead of the scan card below, because the scan block preview it
+        // feeds ScanCardPresenter is REGISTRY-scoped: whether this artifact is refused is a
+        // question about the registry a `docker pull` would actually go through, and that
+        // is $dockerGroup, not just any visible one.
+        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
+            ?? $visibleGroups->first();
+
+        // Batched over the manifests this page already deduplicated, for the reason
+        // ScanCardPresenter documents: two tags on one image must not cost two reads.
+        $scanByManifest = app(ScanCardPresenter::class)->forManifests($uniqueManifests, $dockerGroup);
+
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest, $scanByManifest): array {
             $manifest = $tag->manifest;
             $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
 
@@ -934,23 +959,11 @@ class PackageController extends Controller
                 'size_bytes' => $shared || $manifest === null ? null : $bytesByManifest->get($manifest->id),
                 'shared' => $shared,
                 'pushed_at' => $tag->updated_at?->diffForHumans(),
+                // Null means NOT CHECKED — never "no findings". The page renders the two
+                // differently, because they are different statements to whoever reads them.
+                'scan' => $manifest !== null ? ($scanByManifest[$manifest->id] ?? null) : null,
             ];
         });
-
-        // A Docker repository can be assigned to more than one registry, and since
-        // ResolveOciContext every one of them is a working `docker pull` address — so this
-        // is a choice between addresses, not between an address and nothing. A registry with
-        // a custom domain is preferred because its reference is the shorter one; failing
-        // that, the first visible registry, addressed on the instance host. Deterministic
-        // either way (Collection::first() preserves the `groups` query's own order); a
-        // repository shared across several domained registries is a real but rare shape this
-        // page does not need to disambiguate further.
-        //
-        // Null only when the repository is in NO registry this viewer can see — the one
-        // remaining case with no address at all, which dockerSetup.ts's
-        // dockerNoRegistryMessage() states.
-        $dockerGroup = $visibleGroups->first(fn (Group $g): bool => $g->domains->isNotEmpty())
-            ?? $visibleGroups->first();
 
         return Inertia::render('admin/packages/DockerTags', [
             'package' => [
@@ -988,6 +1001,10 @@ class PackageController extends Controller
             ],
             'activities' => ActivityPresenter::recentFor($package),
             'retention' => $this->retentionCard($request, $package),
+            // Whether the "Jetzt prüfen" button and the scan column have anything to show
+            // at all — the same switch ScanCardPresenter itself reads, so the page cannot
+            // offer a trigger that ScanController::store() would refuse with a 409.
+            'scan_enabled' => (bool) config('kontorfix.scanner.enabled', false),
         ]);
     }
 
