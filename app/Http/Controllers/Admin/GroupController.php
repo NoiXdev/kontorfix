@@ -178,6 +178,16 @@ class GroupController extends Controller
             'activities' => ActivityPresenter::recentFor($group),
             // Same gate as the create sheet's flag of the same name — see index() above.
             'can_manage_organization' => (bool) Auth::user()?->isSuperAdmin(),
+            // `enabled` is the instance-wide switch, not this registry's own setting: a
+            // threshold nobody will evaluate is worse than no threshold, because the
+            // operator believes they are protected. The section says so instead of offering
+            // a control that does nothing.
+            'scan_blocking' => [
+                'enabled' => (bool) config('kontorfix.scanner.enabled', false),
+                'severity' => $group->scan_block_severity?->value,
+                'grace_days' => $group->scan_block_grace_days,
+                'default_grace_days' => (int) config('kontorfix.scanner.default_grace_days', 7),
+            ],
         ]);
     }
 

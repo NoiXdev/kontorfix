@@ -125,6 +125,12 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // SharedAssignment.
     Route::put('groups/{group}/packages/{package}', [Admin\GroupController::class, 'updateAssignment'])->name('groups.packages.update');
     Route::delete('groups/{group}/packages/{package}', [Admin\GroupController::class, 'detachPackage'])->name('groups.packages.destroy');
+    // The per-registry blocking threshold and grace period (Task 6), and the read-only
+    // preview of what a proposed setting would do before it is saved. Deliberately NOT
+    // gated on `kontorfix.scanner.enabled` — see ScanController::update()/preview() — so an
+    // operator can configure a threshold before switching scanning on instance-wide.
+    Route::put('groups/{group}/scan-blocking', [Admin\ScanController::class, 'update'])->name('groups.scan-blocking');
+    Route::post('groups/{group}/scan-preview', [Admin\ScanController::class, 'preview'])->name('groups.scan-preview');
     Route::get('package-search', Admin\PackageSearchController::class)->name('package-search');
     Route::get('search', Admin\GlobalSearchController::class)->name('search');
     Route::resource('tokens', Admin\TokenController::class)->only(['index', 'create', 'destroy']);

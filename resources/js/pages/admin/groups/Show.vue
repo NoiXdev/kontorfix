@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useRegistryTypes } from '@/composables/useRegistryTypes';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { type Severity } from '@/lib/severity';
 import { cn } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3';
@@ -29,6 +30,7 @@ import {
     type AssignedPackage,
     type NameHolding,
 } from './packageAssignment';
+import ScanBlocking from './partials/ScanBlocking.vue';
 
 interface GroupInfo {
     id: string;
@@ -128,6 +130,11 @@ const props = defineProps<{
     // management is super-admin only (see EnsureSuperAdmin). Decided server-side rather than
     // re-derived here: see GroupController::show()'s docblock on the field of the same name.
     can_manage_organization: boolean;
+    // The registry's own vulnerability-blocking threshold and grace period, plus whether
+    // scanning is switched on for the instance at all — see GroupController::show()'s
+    // docblock on the field of the same name for why `enabled` is not this registry's own
+    // setting.
+    scan_blocking: { enabled: boolean; severity: Severity | null; grace_days: number; default_grace_days: number };
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -533,6 +540,8 @@ async function copyToken() {
                             </div>
                         </form>
                     </section>
+
+                    <ScanBlocking :group-id="props.group.id" :blocking="props.scan_blocking" class="mt-4" />
                 </TabsContent>
 
                 <TabsContent value="pakete">

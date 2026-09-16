@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, type Ref } from 'vue';
+import { postPreviewJson } from './previewTransport';
 
 /**
  * One tag's verdict under the rule set currently being tried out — the same shape both
@@ -135,36 +136,15 @@ export function createRetentionPreview(options: { debounceMs?: number } = {}): R
     return { summary, tags, error, loading, schedule, runNow, cancel };
 }
 
-/** Reads the CSRF cookie Sanctum/Laravel sets, the same way `Form.vue`'s prior hand-rolled fetch did. */
-function xsrfToken(): string {
-    const match = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
-}
-
 /**
  * The one non-Inertia POST both preview endpoints are reached through: same headers, same
  * CSRF cookie, same "the 422 body's `message` is the error text" contract. Exported so a
- * page only has to name its URL and body, not repeat the fetch plumbing.
+ * page only has to name its URL and body, not repeat the fetch plumbing. The transport
+ * itself lives in `./previewTransport` — shared with the scan-blocking preview, the second
+ * caller that made this worth extracting.
  */
 export async function postRetentionPreview(url: string, body: Record<string, unknown>, signal: AbortSignal): Promise<RetentionPreviewResult> {
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            'X-XSRF-TOKEN': xsrfToken(),
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify(body),
-        signal,
-    });
-
-    const data: unknown = await response.json().catch(() => null);
-    const record = data !== null && typeof data === 'object' ? (data as Record<string, unknown>) : {};
-
-    if (!response.ok) {
-        throw new Error(typeof record.message === 'string' ? record.message : 'Der Probelauf ist fehlgeschlagen.');
-    }
+    const record = await postPreviewJson(url, body, signal, 'Der Probelauf ist fehlgeschlagen.');
 
     return {
         summary: Array.isArray(record.summary) ? (record.summary as string[]) : [],
