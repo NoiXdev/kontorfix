@@ -244,12 +244,19 @@ services:
     image: ${KONTORFIX_SCANNER_IMAGE:-aquasec/harbor-scanner-trivy:0.31.4}
     environment:
       SCANNER_API_SERVER_ADDR: ':8080'
-      # Database 1, not 0: the app and worker services point their own REDIS_* at database 0
-      # (docker/.env.example), and giving the adapter a namespace of its own means a
-      # database-level operation against one (FLUSHDB, a backup, a migration) cannot also
-      # wipe or block on the other's keys. The key prefixes already differ in normal
-      # operation; this is what keeps that true under maintenance too.
-      SCANNER_REDIS_URL: redis://redis:6379/1
+      # Database 2 — neither index this stack's own Laravel connections default to.
+      # config/database.php's `default` connection (REDIS_DB, unset = 0) carries the queue
+      # (config/queue.php's redis connection defaults to it), Horizon (config/horizon.php:
+      # `'use' => 'default'`), the session store when SESSION_DRIVER=redis (its own
+      # `connection` is unset, which falls through to `default`), and Reverb's broadcasting
+      # (config/reverb.php reads REDIS_DB too). config/database.php's `cache` connection
+      # (REDIS_CACHE_DB, unset = 1) carries CACHE_STORE=redis, the docker/.env.example
+      # default. 0 and 1 are therefore both spoken for before this service exists — giving
+      # the adapter a namespace of its own on 2 means a database-level operation against any
+      # one of these (FLUSHDB, a backup, a migration) cannot also wipe or block on another's
+      # keys. The key prefixes already differ in normal operation; this is what keeps that
+      # true under maintenance too.
+      SCANNER_REDIS_URL: redis://redis:6379/2
       # Vulnerabilities only. The adapter's default (`vuln,config,secret`) also runs
       # misconfiguration and secret detection, which this feature stores nothing from —
       # paying for it would be slower scans for results nobody reads. Verified against
