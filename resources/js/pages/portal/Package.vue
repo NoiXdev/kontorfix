@@ -145,6 +145,11 @@ const props = defineProps<{
     in_force: boolean;
     // The organization the URL addresses — the first segment of every portal link here.
     orgSlug: string;
+    // Whether the "Schwachstellen" card has anything to show at all (KONTORFIX_SCANNER_ENABLED)
+    // — the same switch the admin Docker page's `scan_enabled` reads. Hidden entirely when
+    // false, the same as the admin page's column, rather than shown stating "Noch nicht
+    // geprüft" forever on an instance that never scans at all.
+    scan_enabled: boolean;
 }>();
 
 const isAbandoned = computed(() => props.package.abandoned_at !== null);
@@ -331,11 +336,17 @@ function depCount(deps: Record<string, string>): number {
                      shows for this repository's PULL tag — see props.package.scan's own
                      comment for why it is null rather than "keine Funde" while unchecked.
                      No trigger here: the customer sees what is inside the image they are
-                     pulling, not a way to queue a scan of it. Always rendered for a Docker
-                     repository, the same as the retention card below — ScanFindings itself
+                     pulling, not a way to queue a scan of it. Rendered for a Docker
+                     repository whenever scanning is switched on — ScanFindings itself
                      states "Noch nicht geprüft" for a null verdict rather than the section
-                     vanishing. -->
-                <div v-if="isDocker" class="rounded-xl border border-sidebar-border/70 p-4 text-sm dark:border-sidebar-border">
+                     vanishing — but hidden entirely (the same as the admin page's own
+                     column) when scanning is off instance-wide: otherwise every repository
+                     would carry a permanent "Noch nicht geprüft" implying a check is
+                     merely pending. -->
+                <div
+                    v-if="isDocker && props.scan_enabled"
+                    class="rounded-xl border border-sidebar-border/70 p-4 text-sm dark:border-sidebar-border"
+                >
                     <h2 class="mb-2 font-medium">Schwachstellen</h2>
                     <ScanFindings :scan="props.package.scan" />
                 </div>

@@ -15,7 +15,13 @@ export interface ScanFinding {
 export interface ScanCard {
     status: 'pending' | 'ok' | 'failed';
     status_label: string;
-    scanner: string;
+    // Null on the portal card: the scanner's product/version is operator-internal detail,
+    // withheld from the customer (ScanCardPresenter's `$forCustomer` mode). Not rendered
+    // here either way — kept nullable so the type says what the payload actually carries.
+    scanner: string | null;
+    // A relative stamp ("vor 3 Tagen"), the same as every other timestamp this page
+    // renders (e.g. `pushed_at`) — never the raw `Y-m-d H:i:s` a customer would have to
+    // parse themselves.
     scanned_at: string | null;
     stale: boolean;
     error: string | null;
@@ -50,6 +56,12 @@ const ordered: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
                 </span>
             </template>
             <span v-if="total === 0 && scan.status === 'ok'" class="text-muted-foreground">Keine bekannten Schwachstellen</span>
+            <!-- `pending` and `failed` are DIFFERENT statements ("nobody has looked yet" vs.
+                 "we looked and it went wrong" — ScanStatus's own docblock) and must not
+                 render identically. Before this, `pending` matched none of the branches
+                 here and the whole card went blank — an operator who just clicked "Jetzt
+                 prüfen" saw an EMPTIER cell than the "Noch nicht geprüft" it replaced. -->
+            <span v-if="scan.status === 'pending'" class="text-muted-foreground">{{ scan.status_label }}</span>
             <span v-if="scan.status === 'failed'" class="text-destructive">{{ scan.status_label }}</span>
         </div>
 
@@ -57,7 +69,8 @@ const ordered: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
         <p v-else-if="scan.blocks_at" class="text-amber-700 dark:text-amber-400">Ab {{ scan.blocks_at }} wird dieses Image nicht mehr ausgeliefert.</p>
 
         <p v-if="scan.stale" class="text-amber-700 dark:text-amber-400">
-            Dieses Ergebnis ist vom {{ scan.scanned_at }} — seither ist keine Prüfung mehr gelungen<span v-if="scan.error">: {{ scan.error }}</span
+            Letzte erfolgreiche Prüfung: {{ scan.scanned_at }} — seither ist keine Prüfung mehr gelungen<span v-if="scan.error"
+                >: {{ scan.error }}</span
             >.
         </p>
 

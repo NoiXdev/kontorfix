@@ -320,6 +320,12 @@ class RegistryController extends Controller
             // answers 404 is worse than saying nothing.
             'in_force' => $inForce,
             'retention' => $this->retentionFor($package),
+            // Whether the "Schwachstellen" card has anything to show at all — the same
+            // switch the admin Docker page's `scan_enabled` reads. Without it, an instance
+            // with scanning switched off would show every Docker repository a permanent
+            // "Noch nicht geprüft" card that implies a check is merely pending, rather than
+            // hiding the section the way the admin page already does.
+            'scan_enabled' => (bool) config('kontorfix.scanner.enabled', false),
         ]);
     }
 
@@ -347,8 +353,11 @@ class RegistryController extends Controller
             return null;
         }
 
+        // $forCustomer: true — this card reaches a customer, so the operator-internal
+        // scanner identity and any raw failure text are withheld (see ScanCardPresenter's
+        // own doc on why); the admin Docker page below calls the same method without it.
         return app(ScanCardPresenter::class)
-            ->forManifests(collect([$tag->manifest]), $group)[$tag->manifest->id] ?? null;
+            ->forManifests(collect([$tag->manifest]), $group, forCustomer: true)[$tag->manifest->id] ?? null;
     }
 
     /**

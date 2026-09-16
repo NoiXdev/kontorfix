@@ -857,7 +857,17 @@ class PackageController extends Controller
         // can address it, so the panel below asks a narrower question — which of them has a
         // hostname of its own, because that is the SHORTER address and the absence of one is
         // what puts the note under the snippet. See the comment on `$dockerGroup`.
-        $package->load(['groups:id,name,slug,organization_id', 'groups.organization:id,slug', 'groups.domains']);
+        //
+        // `scan_block_severity, scan_block_grace_days`: $dockerGroup (below) is handed
+        // straight to ScanCardPresenter as the registry a `docker pull` would actually go
+        // through — without these two columns in the select, every Group model loaded here
+        // reads back `scan_block_severity` as null regardless of what is actually
+        // configured, and the scan card silently computed `blocked: false` for every
+        // artifact on this page no matter the registry's real threshold.
+        $package->load([
+            'groups:id,name,slug,organization_id,scan_block_severity,scan_block_grace_days',
+            'groups.organization:id,slug', 'groups.domains',
+        ]);
 
         // Same visibility rule show() applies above: a cross-organization row for a shared
         // package is not this caller's business beyond a count. See that method's comment.

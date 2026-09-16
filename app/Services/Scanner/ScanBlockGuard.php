@@ -10,6 +10,7 @@ use App\Models\OciManifest;
 use App\Models\OciScanFinding;
 use App\Models\OciTag;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 
 /**
  * Whether a registry refuses to serve an artifact, and what the operator would be doing to
@@ -95,6 +96,40 @@ final class ScanBlockGuard
     }
 
     /**
+     * The earliest instant ANY of the given findings would start refusing the artifact under
+     * this threshold and grace — the MINIMUM of `blocksAt()` over every finding at or above
+     * the threshold. Null when none qualify.
+     *
+     * This is deliberately NOT "the worst-severity finding's own `blocksAt()`", which is what
+     * `preview()` and Task 7's `ScanCardPresenter` each used to compute independently before
+     * this method existed, and both got it wrong the same way: severity and "how long known"
+     * are independent axes, so the worst-severity finding is not necessarily the one whose
+     * grace runs out soonest. A High seen 25 days ago under a 30-day grace starts blocking in
+     * 5 days; a Critical seen yesterday under the same grace starts blocking in 29. Naming the
+     * Critical's date — because it sorts first by severity — told the reader a cut-off the
+     * registry does not actually honour, and in the worse case left `blocked: true` sitting
+     * next to a `blocks_at` that still reads as the future.
+     *
+     * The minimum is correct by construction: it IS the instant the first of these findings'
+     * `refuses()` flips from false to true, so `blocked` (computed via `refuses()` over the
+     * same set) and `blocks_at` (computed here) can never contradict each other.
+     *
+     * @param  iterable<OciScanFinding>  $findings
+     */
+    public function earliestBlockAt(iterable $findings, VulnerabilitySeverity $threshold, int $graceDays): ?Carbon
+    {
+        $dates = [];
+
+        foreach ($findings as $finding) {
+            if ($finding->severity->atLeast($threshold)) {
+                $dates[] = $finding->blocksAt($graceDays);
+            }
+        }
+
+        return $dates === [] ? null : min($dates);
+    }
+
+    /**
      * What a proposed threshold would do to this registry, BEFORE it is saved.
      *
      * This exists because switching blocking on can refuse a customer's pull, and an
@@ -136,7 +171,11 @@ final class ScanBlockGuard
                 ->whereHas('manifest', fn (Builder $m) => $m->whereIn('package_id', $packageIds)))
             ->orderByDesc('severity_rank')
             ->orderBy('first_seen_at')
-            ->get();
+            ->get()
+            // A candidate whose manifest relation did not resolve (an orphaned report row)
+            // names nothing to group by and nothing to show — dropped here, once, rather
+            // than guarded again at every read below.
+            ->filter(fn (OciScanFinding $f): bool => $f->report?->manifest !== null);
 
         $tagsByManifest = OciTag::whereIn('manifest_id', $candidates->pluck('report.manifest_id')->unique())
             ->get()
@@ -146,17 +185,32 @@ final class ScanBlockGuard
         $now = now();
         $artifacts = [];
 
-        // One row per MANIFEST, keyed on its worst finding — the ordering above means the
-        // first one seen for a manifest is the one to report. A list with one row per CVE
-        // would show the same image thirty times and tell the operator nothing extra.
-        foreach ($candidates as $finding) {
-            $manifest = $finding->report?->manifest;
+        // One row per MANIFEST — grouping preserves the query's own worst-first,
+        // earliest-first_seen order, so the first GROUP encountered is still the manifest
+        // carrying the single worst candidate overall, the same ordering the old per-row
+        // loop produced.
+        $byManifest = $candidates->groupBy(fn (OciScanFinding $f): string => (string) $f->report->manifest_id);
 
-            if ($manifest === null || isset($artifacts[$manifest->id])) {
+        foreach ($byManifest as $manifestFindings) {
+            // The finding this row NAMES — worst severity first, earliest first_seen
+            // breaking a tie, the ordering the query above already sorted by and groupBy()
+            // preserves within each group. Naming which CVE to show is a different question
+            // from `blocks_at` below: it does not have to be the finding whose grace runs
+            // out first, only the one worth telling the operator to act on.
+            $finding = $manifestFindings->first();
+            $manifest = $finding->report->manifest;
+
+            // Over EVERY candidate this manifest carries, not just the named one — see
+            // earliestBlockAt()'s own doc for why the worst-severity finding and the one
+            // whose grace runs out first are not always the same finding.
+            $blocksAt = $this->earliestBlockAt($manifestFindings, $threshold, $graceDays);
+
+            if ($blocksAt === null) {
+                // Cannot happen — every member of $manifestFindings already passed
+                // atOrAboveThreshold() — but this stays honest about that rather than
+                // asserting it with a non-null assumption the next edit could invalidate.
                 continue;
             }
-
-            $blocksAt = $finding->blocksAt($graceDays);
 
             $artifacts[$manifest->id] = [
                 'package' => $manifest->package?->name,
