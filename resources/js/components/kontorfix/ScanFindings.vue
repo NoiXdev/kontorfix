@@ -28,6 +28,14 @@ export interface ScanCard {
     counts: { critical: number; high: number; medium: number; low: number; unknown: number };
     blocked: boolean;
     blocks_at: string | null;
+    /**
+     * How many findings the verdict holds — NOT `findings.length`. A Debian-based image
+     * routinely reports several hundred CVEs and `ScanCardPresenter` caps what it sends
+     * (the admin page embeds this card for every manifest of a repository), so the table
+     * below shows the worst of them and says how many it is not showing.
+     */
+    findings_total: number;
+    /** The worst findings, capped — see `findings_total`. */
     findings: ScanFinding[];
 }
 
@@ -42,6 +50,9 @@ const props = defineProps<{ scan: ScanCard | null }>();
 
 const open = ref(false);
 const total = computed(() => (props.scan ? Object.values(props.scan.counts).reduce((a, b) => a + b, 0) : 0));
+// How many of the verdict's findings the capped list leaves out — clamped so a payload
+// without `findings_total` (or an older one) can only suppress the line, never invert it.
+const hidden = computed(() => (props.scan ? Math.max(0, props.scan.findings_total - props.scan.findings.length) : 0));
 const ordered: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
 </script>
 
@@ -75,7 +86,7 @@ const ordered: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
         </p>
 
         <button v-if="scan.findings.length > 0" type="button" class="underline" @click="open = !open">
-            {{ open ? 'Funde ausblenden' : `${scan.findings.length} Fund(e) anzeigen` }}
+            {{ open ? 'Funde ausblenden' : `${scan.findings_total} Fund(e) anzeigen` }}
         </button>
 
         <table v-if="open" class="w-full text-left text-xs">
@@ -102,5 +113,7 @@ const ordered: Severity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
                 </tr>
             </tbody>
         </table>
+
+        <p v-if="open && hidden > 0" class="text-xs text-muted-foreground">… und {{ hidden }} weitere.</p>
     </div>
 </template>

@@ -29,6 +29,18 @@ final class ScanCardPresenter
      */
     private const CUSTOMER_FACING_ERROR = 'Die letzte Prüfung ist fehlgeschlagen.';
 
+    /**
+     * How many findings the card CARRIES, however many the report holds.
+     *
+     * A Debian-based image routinely reports 500-1500 CVEs, and this card is embedded in the
+     * page payload of a repository page whose findings table sits behind a collapsed toggle
+     * almost nobody opens. Serialising the full set turned a page that existed long before
+     * scanning into tens of thousands of objects of JSON. `counts` — the five totals the card
+     * actually leads with — is exact regardless, `findings_total` says how many exist, and
+     * the table names the worst of them, which is the half an operator acts on.
+     */
+    private const DISPLAYED_FINDINGS = 25;
+
     public function __construct(
         // The one and only place `blocked` is allowed to come from — see present()'s own
         // comment on why this is injected rather than instantiated inline per call.
@@ -168,7 +180,12 @@ final class ScanCardPresenter
             ],
             'blocked' => $blocked,
             'blocks_at' => $blocksAt?->toDateString(),
-            'findings' => $findings->map(fn (OciScanFinding $f): array => [
+            // Every finding the presented report carries, NOT `count($card['findings'])` —
+            // the list below is capped (see DISPLAYED_FINDINGS) and the surfaces render
+            // "… und N weitere" off the difference, so a truncated table can never read as
+            // the complete one.
+            'findings_total' => $findings->count(),
+            'findings' => $findings->take(self::DISPLAYED_FINDINGS)->map(fn (OciScanFinding $f): array => [
                 'vulnerability_id' => $f->vulnerability_id,
                 'severity' => $f->severity->value,
                 'severity_label' => $f->severity->label(),

@@ -36,20 +36,25 @@ it('shows a tag its severity counts and its findings', function () {
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.status', 'ok')
-            ->where('tags.0.scan.counts.critical', 1)
-            ->where('tags.0.scan.counts.high', 2)
-            ->where('tags.0.scan.findings.0.vulnerability_id', 'CVE-2026-1')
-            ->where('tags.0.scan.findings.0.fixed_version', '3.0.2')
+            ->where('scans.'.$this->manifest->id.'.status', 'ok')
+            ->where('scans.'.$this->manifest->id.'.counts.critical', 1)
+            ->where('scans.'.$this->manifest->id.'.counts.high', 2)
+            ->where('scans.'.$this->manifest->id.'.findings.0.vulnerability_id', 'CVE-2026-1')
+            ->where('scans.'.$this->manifest->id.'.findings.0.fixed_version', '3.0.2')
             ->etc());
 });
 
 it('says "not checked" rather than "no findings" for an unscanned tag', function () {
     // The two are entirely different statements, and rendering them identically is how a
-    // broken scanner reads as a clean registry.
+    // broken scanner reads as a clean registry. The tag still names its manifest — the page
+    // looks the card up by that id — and the absence of an entry under `scans` is what the
+    // component reads as NOT CHECKED.
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
-        ->assertInertia(fn (AssertableInertia $page) => $page->where('tags.0.scan', null)->etc());
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('tags.0.manifest_id', $this->manifest->id)
+            ->where('scans', [])
+            ->etc());
 });
 
 it('marks a verdict as stale when the last attempt failed', function () {
@@ -63,22 +68,25 @@ it('marks a verdict as stale when the last attempt failed', function () {
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.stale', true)
-            ->where('tags.0.scan.error', 'Scanner nicht erreichbar')
+            ->where('scans.'.$this->manifest->id.'.stale', true)
+            ->where('scans.'.$this->manifest->id.'.error', 'Scanner nicht erreichbar')
             ->etc());
 });
 
-it('computes the card for many tags without one query per tag', function () {
-    // Two tags on one manifest share one report by construction; a presenter that read per
-    // tag would also read per manifest, and a repository with fifty tags would cost fifty
-    // round trips on a page that already counts its queries.
-    // Named explicitly rather than left to the factory's `fake()->word()` default: with 9
-    // rows sharing one `package_id`, an unqualified Faker word collides against the
-    // `(package_id, name)` unique index often enough to flake this test — reproduced twice
-    // in ~10 runs while writing it.
-    OciTag::factory()->count(9)->sequence(fn ($sequence) => ['name' => 'tag-'.$sequence->index])->create([
-        'package_id' => $this->package->id, 'manifest_id' => $this->manifest->id,
-    ]);
+it('costs the same number of queries for ten tags on one manifest as for three', function () {
+    // The INVARIANT, not a ceiling. Two tags on one manifest share one report by
+    // construction, so the page's read count must scale with distinct MANIFESTS and not
+    // with how many names point at them.
+    //
+    // A ceiling alone could not fail for the regression it was named after: this page
+    // measured 29 queries with 10 tags, the old assertion was "< 40", and a full per-tag
+    // reader costs about +1 per tag — landing at 39 and passing. Equality at two different
+    // tag counts is unsatisfiable for a per-tag reader at ANY ceiling. The absolute bound
+    // is kept alongside it, for growth that is per-PAGE rather than per-tag.
+    //
+    // Tag names are given explicitly rather than left to the factory's `fake()->word()`
+    // default: with several rows sharing one `package_id`, an unqualified Faker word
+    // collides against the `(package_id, name)` unique index often enough to flake.
     OciScanReport::factory()->for($this->manifest, 'manifest')->create(['status' => ScanStatus::Ok]);
 
     $queries = 0;
@@ -86,14 +94,74 @@ it('computes the card for many tags without one query per tag', function () {
         $queries++;
     });
 
-    $this->actingAs(superAdmin())->get(route('admin.packages.show', $this->package))->assertOk();
+    $admin = superAdmin();
 
-    $scanQueries = $queries;
+    $render = function () use ($admin, &$queries): int {
+        $queries = 0;
+        $this->actingAs($admin)->get(route('admin.packages.show', $this->package))->assertOk();
 
-    // Measured at 29 for this page with 10 tags on one manifest. 80 let a full per-tag
-    // regression (roughly +1 query per extra tag) pass unnoticed; this ceiling still allows
-    // headroom for unrelated page growth but fails well before "one query per tag" territory.
-    expect($scanQueries)->toBeLessThan(40);
+        return $queries;
+    };
+
+    // Discarded: the very first render of the run also pays for whatever the session and
+    // permission layers memoise once, which is not a per-tag cost and would otherwise show
+    // up as a difference between the two measurements below.
+    $render();
+
+    // `beforeEach` already created `latest`.
+    OciTag::factory()->count(2)->sequence(fn ($sequence) => ['name' => 'few-'.$sequence->index])->create([
+        'package_id' => $this->package->id, 'manifest_id' => $this->manifest->id,
+    ]);
+    $withThreeTags = $render();
+
+    OciTag::factory()->count(7)->sequence(fn ($sequence) => ['name' => 'many-'.$sequence->index])->create([
+        'package_id' => $this->package->id, 'manifest_id' => $this->manifest->id,
+    ]);
+    $withTenTags = $render();
+
+    expect($withTenTags)->toBe($withThreeTags);
+    // Measured at 20 for a warmed-up render of this page. Tight enough to notice a new
+    // per-page read, and the equality above is what actually guards the per-tag shape.
+    expect($withTenTags)->toBeLessThan(25);
+});
+
+it('sends one scan card per manifest, not one per tag that names it', function () {
+    // The cost this shape exists to remove: 20 tags over 15 manifests at ~800 findings each
+    // put ~16,000 finding objects into the page JSON, behind a collapsed toggle almost
+    // nobody opens. The card is keyed by manifest and the tag rows carry only the id.
+    OciTag::factory()->count(4)->sequence(fn ($sequence) => ['name' => 'alias-'.$sequence->index])->create([
+        'package_id' => $this->package->id, 'manifest_id' => $this->manifest->id,
+    ]);
+    OciScanReport::factory()->for($this->manifest, 'manifest')->create(['status' => ScanStatus::Ok]);
+
+    $this->actingAs(superAdmin())
+        ->get(route('admin.packages.show', $this->package))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->has('tags', 5)
+            ->has('scans', 1)
+            ->where('tags.0.manifest_id', $this->manifest->id)
+            // The card itself never rides along on a tag row.
+            ->missing('tags.0.scan')
+            ->etc());
+});
+
+it('caps the findings it embeds and says how many it is not showing', function () {
+    // `counts` is the exact statement of how many there are; the list is the worst of them.
+    // `findings_total` is what keeps the capped table from reading as the complete one.
+    $report = OciScanReport::factory()->for($this->manifest, 'manifest')->create([
+        'status' => ScanStatus::Ok, 'high_count' => 40,
+    ]);
+    OciScanFinding::factory()->count(40)->for($report, 'report')->severity(VulnerabilitySeverity::High)
+        ->sequence(fn ($sequence) => ['vulnerability_id' => 'CVE-2026-'.$sequence->index])
+        ->create();
+
+    $this->actingAs(superAdmin())
+        ->get(route('admin.packages.show', $this->package))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('scans.'.$this->manifest->id.'.findings_total', 40)
+            ->where('scans.'.$this->manifest->id.'.counts.high', 40)
+            ->has('scans.'.$this->manifest->id.'.findings', 25)
+            ->etc());
 });
 
 it('shows the customer the findings for their own image', function () {
@@ -179,8 +247,8 @@ it('shows a pending scan as "in progress", not as a blank card indistinguishable
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.status', 'pending')
-            ->where('tags.0.scan.status_label', 'Prüfung läuft')
+            ->where('scans.'.$this->manifest->id.'.status', 'pending')
+            ->where('scans.'.$this->manifest->id.'.status_label', 'Prüfung läuft')
             ->etc());
 });
 
@@ -205,9 +273,9 @@ it('withholds the operator-internal scanner identity and error text from the por
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.stale', true)
-            ->where('tags.0.scan.error', $rawError)
-            ->where('tags.0.scan.scanner', 'Trivy 0.50.1')
+            ->where('scans.'.$this->manifest->id.'.stale', true)
+            ->where('scans.'.$this->manifest->id.'.error', $rawError)
+            ->where('scans.'.$this->manifest->id.'.scanner', 'Trivy 0.50.1')
             ->etc());
 
     $this->actingAs(adminOf($this->org))
@@ -250,8 +318,8 @@ it('shows the OK verdict rather than a failed one from another scanner, regardle
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.status', 'ok')
-            ->where('tags.0.scan.counts.critical', 1)
+            ->where('scans.'.$this->manifest->id.'.status', 'ok')
+            ->where('scans.'.$this->manifest->id.'.counts.critical', 1)
             ->etc());
 });
 
@@ -316,8 +384,8 @@ it('derives blocks_at from whichever finding crosses the threshold soonest, not 
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.blocked', true)
-            ->where('tags.0.scan.blocks_at', now()->subDays(23)->toDateString())
+            ->where('scans.'.$this->manifest->id.'.blocked', true)
+            ->where('scans.'.$this->manifest->id.'.blocks_at', now()->subDays(23)->toDateString())
             ->etc());
 });
 
@@ -369,7 +437,7 @@ it('unions findings across every Ok report on the manifest when deciding blocked
     $this->actingAs(superAdmin())
         ->get(route('admin.packages.show', $this->package))
         ->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('tags.0.scan.scanner', 'NewScanner 0.50.1')
-            ->where('tags.0.scan.blocked', true)
+            ->where('scans.'.$this->manifest->id.'.scanner', 'NewScanner 0.50.1')
+            ->where('scans.'.$this->manifest->id.'.blocked', true)
             ->etc());
 });

@@ -955,7 +955,7 @@ class PackageController extends Controller
         // ScanCardPresenter documents: two tags on one image must not cost two reads.
         $scanByManifest = app(ScanCardPresenter::class)->forManifests($uniqueManifests, $dockerGroup);
 
-        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest, $scanByManifest): array {
+        $tagRows = $tags->map(function (OciTag $tag) use ($tagsPerManifest, $platformByManifest, $bytesByManifest): array {
             $manifest = $tag->manifest;
             $shared = $manifest !== null && ($tagsPerManifest->get($tag->manifest_id) ?? 0) > 1;
 
@@ -969,9 +969,14 @@ class PackageController extends Controller
                 'size_bytes' => $shared || $manifest === null ? null : $bytesByManifest->get($manifest->id),
                 'shared' => $shared,
                 'pushed_at' => $tag->updated_at?->diffForHumans(),
-                // Null means NOT CHECKED — never "no findings". The page renders the two
-                // differently, because they are different statements to whoever reads them.
-                'scan' => $manifest !== null ? ($scanByManifest[$manifest->id] ?? null) : null,
+                // The KEY into `scans` below, never the card itself. Two tags on one image
+                // share one verdict, and embedding the card per TAG serialised that verdict
+                // — findings and all — once per name pointing at it: twenty tags over
+                // fifteen manifests turned into twenty copies of a payload the page renders
+                // at most once. The card is sent once per manifest instead and looked up
+                // here; null (no manifest row) still means NOT CHECKED, the same statement
+                // a missing entry in `scans` makes.
+                'manifest_id' => $tag->manifest_id,
             ];
         });
 
@@ -1004,6 +1009,10 @@ class PackageController extends Controller
                 'has_domain' => $dockerGroup !== null && $dockerGroup->domains->isNotEmpty(),
             ],
             'tags' => $tagRows->values(),
+            // Keyed by manifest id, once per manifest — see the tag row's `manifest_id`.
+            // Cast to an object so an instance with no verdicts at all sends `{}` rather
+            // than PHP's empty-array `[]`, which the page would have to type as a union.
+            'scans' => (object) $scanByManifest,
             'stats' => [
                 'tag_count' => $tags->count(),
                 'occupied_bytes' => $occupiedBytes,

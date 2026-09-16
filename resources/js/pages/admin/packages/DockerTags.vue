@@ -48,9 +48,12 @@ interface TagRow {
     size_bytes: number | null;
     shared: boolean;
     pushed_at: string | null;
-    // Null means NOT CHECKED — never "no findings" (ScanCardPresenter's own docblock). The
-    // column below renders the two differently.
-    scan: ScanCard | null;
+    // The KEY into `props.scans`, never the card itself: two tags on one image share one
+    // verdict, and carrying the card per tag serialised the same findings once per name
+    // pointing at it. Null (and a manifest id `scans` does not know) both mean NOT CHECKED
+    // — never "no findings" (ScanCardPresenter's own docblock); the column renders the two
+    // differently.
+    manifest_id: string | null;
 }
 
 interface ActivityRow {
@@ -106,7 +109,20 @@ const props = defineProps<{
     // ScanController::store() would refuse with a 409 explains nothing a hidden column
     // does not already say.
     scan_enabled: boolean;
+    // One card per MANIFEST, keyed by its id — see TagRow.manifest_id. Empty while
+    // `scan_enabled` is false, in which case the whole column is hidden anyway.
+    scans: Record<string, ScanCard>;
 }>();
+
+/**
+ * The verdict for a tag's image, or null for NOT CHECKED.
+ *
+ * `?? null` rather than `?? undefined`: `ScanFindings` distinguishes "nobody has looked yet"
+ * from "we looked and found nothing" on exactly this value, and only `null` says the former.
+ */
+function scanFor(tag: TagRow): ScanCard | null {
+    return tag.manifest_id === null ? null : (props.scans[tag.manifest_id] ?? null);
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Pakete', href: '/admin/packages' },
@@ -448,7 +464,7 @@ function saveShared() {
                                         <td class="px-4 py-3 text-muted-foreground">{{ tag.pushed_at ?? '—' }}</td>
                                         <td v-if="props.scan_enabled" class="px-4 py-3">
                                             <div class="flex flex-col gap-2">
-                                                <ScanFindings :scan="tag.scan" />
+                                                <ScanFindings :scan="scanFor(tag)" />
                                                 <Button
                                                     variant="outline"
                                                     size="sm"
