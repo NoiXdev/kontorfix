@@ -153,6 +153,44 @@ it('rotates past a manifest whose every scan fails instead of pinning it to the 
     Queue::assertNotPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $neverScanned->id);
 });
 
+it('does not count a manifest re-attempted today as still needing a rescan just because its one success is weeks old', function () {
+    // COALESCE(MAX(scanned_at), MAX(failed_at)) freezes the sort key at the last SUCCESS
+    // forever, once there is one — it never looks at `failed_at` at all when `scanned_at` is
+    // non-null. A manifest that succeeded 30 days ago and has failed every rescan since keeps
+    // that 30-day-old key even though it was genuinely attempted (and failed) just now, so it
+    // reads as overdue on every run — inflating the "left behind" count and outranking a
+    // manifest that has truly never been touched since before that success. GREATEST fixes
+    // this: it takes the later of the two columns, so a fresh failed attempt correctly retires
+    // the stale success.
+    Queue::fake();
+    [, $package] = scanTriggerFixture();
+
+    // Created FIRST: the genuinely stale manifest, whose only attempt predates both of the
+    // other manifest's timestamps, so it alone earns the run's single budget slot regardless
+    // of which sort key is in play — the bug this test targets is not about who gets queued,
+    // but about who gets counted as still needing one afterwards.
+    $trulyStale = OciManifest::factory()->for($package)->create();
+    OciScanReport::factory()->for($trulyStale, 'manifest')->create(['scanned_at' => now()->subDays(40)]);
+
+    // Two report rows on the SAME manifest, one per scanner — `oci_scan_reports` is unique on
+    // (manifest_id, scanner_name), so a second attempt after a success needs its own scanner
+    // row just like the genuine "instance switched adapters" case above does.
+    $reattemptedToday = OciManifest::factory()->for($package)->create();
+    OciScanReport::factory()->for($reattemptedToday, 'manifest')->create([
+        'scanner_name' => 'Trivy', 'scanned_at' => now()->subDays(30),
+    ]);
+    OciScanReport::factory()->for($reattemptedToday, 'manifest')->create([
+        'scanner_name' => 'Grype', 'status' => ScanStatus::Failed, 'scanned_at' => null, 'failed_at' => now(),
+    ]);
+
+    artisan('oci:scan', ['--limit' => 1])
+        ->doesntExpectOutputToContain('Manifest(e) mit veraltetem Befund')
+        ->assertSuccessful();
+
+    Queue::assertPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $trulyStale->id);
+    Queue::assertNotPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $reattemptedToday->id);
+});
+
 it('counts only manifests that still need a scan as left behind', function () {
     // This warning is the ONLY signal that the rotation is not keeping up. Counting every
     // Docker manifest made it fire every night on any registry larger than the budget —

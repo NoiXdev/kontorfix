@@ -85,8 +85,14 @@ class RescanOciArtifacts extends Command
             ->groupBy('manifest_id');
 
         // A failed attempt is still an attempt. Deprioritising after one is what keeps the
-        // rotation moving past an artifact that can never produce a verdict.
-        $lastAttempt = 'coalesce(latest_scans.latest_scanned_at, latest_scans.latest_failed_at)';
+        // rotation moving past an artifact that can never produce a verdict. GREATEST, not
+        // COALESCE: COALESCE would freeze the key at the last SUCCESS forever, once there is
+        // one — a manifest that succeeded once and has failed every rescan since would keep
+        // that old `scanned_at` as its key permanently, sitting at the head of every nightly
+        // run while healthy manifests advance past it. Postgres GREATEST ignores NULLs, so the
+        // result is NULL only when both inputs are, which preserves the "never attempted sorts
+        // first" clause below.
+        $lastAttempt = 'greatest(latest_scans.latest_scanned_at, latest_scans.latest_failed_at)';
 
         $candidates = OciManifest::query()
             ->whereHas('package', fn ($q) => $q->where('type', PackageType::Docker))
