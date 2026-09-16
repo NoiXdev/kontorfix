@@ -408,6 +408,17 @@ return [
         /** Seconds for a single HTTP call to the adapter. */
         'request_timeout' => (int) (env('KONTORFIX_SCANNER_REQUEST_TIMEOUT') ?: 30),
 
+        /**
+         * Seconds the OPERATOR HEALTH CHECK gives the adapter's metadata endpoint —
+         * deliberately not `request_timeout` above. `request_timeout` is the scan-submission
+         * budget, and an operator running a slow scanner may legitimately raise it well past
+         * what a monitoring poll of `/admin/status` should ever wait for; HealthService swaps
+         * `request_timeout` for this value only around its one call and restores it
+         * immediately after, so a raised scan budget cannot turn the health page into a slow
+         * request against every scanner outage.
+         */
+        'health_timeout' => (int) (env('KONTORFIX_SCANNER_HEALTH_TIMEOUT') ?: 5),
+
         /** Seconds to keep polling one scan before giving up on it. */
         'timeout' => (int) (env('KONTORFIX_SCANNER_TIMEOUT') ?: 600),
 
@@ -419,6 +430,16 @@ return [
 
         /** Days a new finding is reported before it may block, for a registry that has no own value. */
         'default_grace_days' => (int) (env('KONTORFIX_SCANNER_DEFAULT_GRACE_DAYS') ?: 7),
+
+        /**
+         * Days the newest successful verdict on the instance may age before
+         * HealthService::scannerFreshness() goes red. The nightly `oci:scan` means it should
+         * normally be a day or two old; 7 is slack for a quiet instance. Config rather than a
+         * hardcoded number because it is the one scanner tuneable the operator's own rescan
+         * cadence directly decides: an instance rescanning weekly, not nightly, needs this
+         * raised or every install shows red between runs.
+         */
+        'freshness_days' => (int) (env('KONTORFIX_SCANNER_FRESHNESS_DAYS') ?: 7),
     ],
 
 ];

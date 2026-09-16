@@ -73,11 +73,19 @@ class HealthService
     {
         $url = (string) config('kontorfix.scanner.url', '');
 
+        // Bounded by kontorfix.scanner.health_timeout (5s default), NOT
+        // request_timeout (30s default, and an operator-raisable scan-submission budget):
+        // this route is polled by monitoring, so a scanner an operator has deliberately given
+        // a long scan-submission timeout must not turn every poll of /admin/status into a
+        // multi-minute request. HarborAdapterScanner::request() reads request_timeout by
+        // name, so the swap-and-restore below is what makes it honour the health budget for
+        // this one call without threading a parameter through the VulnerabilityScanner
+        // interface — restored in a finally so an exception here cannot leave the scan
+        // budget clamped for anything else that reads it afterwards.
+        $originalTimeout = config('kontorfix.scanner.request_timeout');
+        config(['kontorfix.scanner.request_timeout' => (int) config('kontorfix.scanner.health_timeout', 5)]);
+
         try {
-            // Bounded by kontorfix.scanner.request_timeout (30s default) plus a 5s connect
-            // timeout, the same budget every other adapter call uses (HarborAdapterScanner)
-            // — this route is polled by monitoring, so a hanging scanner must not pile up
-            // requests here any more than it should on a scan in flight.
             $metadata = app(VulnerabilityScanner::class)->metadata();
 
             return [
@@ -96,6 +104,8 @@ class HealthService
                 // address needs.
                 'detail' => $e->getMessage(),
             ];
+        } finally {
+            config(['kontorfix.scanner.request_timeout' => $originalTimeout]);
         }
     }
 
@@ -118,19 +128,22 @@ class HealthService
             ];
         }
 
-        $age = Carbon::parse($newest)->diffInDays(now());
+        $newestDate = Carbon::parse($newest);
+        $age = $newestDate->diffInDays(now());
 
-        // The daily rescan means the newest verdict on the instance should never be more
-        // than a day or two old. A week is generous slack for a quiet instance; beyond it,
+        // The nightly rescan means the newest verdict on the instance should normally be a
+        // day or two old. kontorfix.scanner.freshness_days (7 by default) is slack for a
+        // quiet instance and the one knob an operator's own rescan cadence directly decides
+        // — raise it if `oci:scan` runs weekly rather than nightly. Beyond the threshold,
         // something has stopped running and the numbers on every image page are fiction.
-        $ok = $age <= 7;
+        $ok = $age <= (int) config('kontorfix.scanner.freshness_days', 7);
 
         return [
             'key' => 'scanner-freshness',
             'label' => 'Aktualität der Prüfungen',
             'ok' => $ok,
             'detail' => $ok
-                ? 'Die neueste Prüfung ist vom '.Carbon::parse($newest)->toDateString().'.'
+                ? 'Die neueste Prüfung ist vom '.$newestDate->toDateString().'.'
                 : 'Die neueste erfolgreiche Prüfung ist '.(int) $age.' Tage alt — läuft "oci:scan" noch, und aktualisiert der Scanner seine Datenbank?',
         ];
     }

@@ -222,6 +222,16 @@ services:
   # community build of the same adapter Harbor ships as `goharbor/trivy-adapter-photon`;
   # there is no functional difference between them.
   #
+  # `:0.31.4` below is a PIN, not a moving tag, for the same reason the header of this file
+  # pins the first-party image: every vulnerability verdict this feature ever produces comes
+  # from whatever this line resolves to, so `docker compose pull` must not silently swap that
+  # component. KONTORFIX_SCANNER_IMAGE overrides it — set it to a newer release tag, or to
+  # `…@sha256:<digest>` once you have verified one, the same as KONTORFIX_IMAGE at the top of
+  # this file. If you bump the version, re-check SCANNER_TRIVY_SECURITY_CHECKS below against
+  # that release's own config (pkg/etc/config.go in aquasecurity/harbor-scanner-trivy): it was
+  # renamed to SCANNER_TRIVY_SCANNERS in some later Trivy-adapter lineages, and a rename this
+  # file has not followed is silently ignored rather than refused.
+  #
   # THE ADAPTER PULLS THE IMAGE FROM US. It reaches the registry at `app:8080` over this
   # network — which is why KONTORFIX_SCANNER_REGISTRY_URL exists and is not APP_URL — and it
   # presents a short-lived, read-only token minted per scan for exactly one registry.
@@ -231,13 +241,20 @@ services:
   # a scanner that cannot update reports reassuring zeros, which the health page's
   # "Aktualität der Prüfungen" check exists to catch.
   scanner:
-    image: ${KONTORFIX_SCANNER_IMAGE:-aquasec/harbor-scanner-trivy:latest}
+    image: ${KONTORFIX_SCANNER_IMAGE:-aquasec/harbor-scanner-trivy:0.31.4}
     environment:
       SCANNER_API_SERVER_ADDR: ':8080'
-      SCANNER_REDIS_URL: redis://redis:6379
+      # Database 1, not 0: the app and worker services point their own REDIS_* at database 0
+      # (docker/.env.example), and giving the adapter a namespace of its own means a
+      # database-level operation against one (FLUSHDB, a backup, a migration) cannot also
+      # wipe or block on the other's keys. The key prefixes already differ in normal
+      # operation; this is what keeps that true under maintenance too.
+      SCANNER_REDIS_URL: redis://redis:6379/1
       # Vulnerabilities only. The adapter's default (`vuln,config,secret`) also runs
       # misconfiguration and secret detection, which this feature stores nothing from —
-      # paying for it would be slower scans for results nobody reads.
+      # paying for it would be slower scans for results nobody reads. Verified against
+      # v0.31.4's own pkg/etc/config.go, which still reads this exact name — see the pin
+      # comment above before changing KONTORFIX_SCANNER_IMAGE.
       SCANNER_TRIVY_SECURITY_CHECKS: vuln
       SCANNER_LOG_LEVEL: ${SCANNER_LOG_LEVEL:-info}
     # Not published on the host, like `app`: it is reached over this network by name, and
@@ -247,6 +264,17 @@ services:
     logging: *logging
     depends_on:
       redis: { condition: service_healthy }
+    # The adapter's own liveness probe (GET /probe/healthy, HTTP 200 when up), not a
+    # reinvented check — nothing `depends_on` this service, so without this the container
+    # could start and immediately die with no Docker-level signal at all, only a red
+    # "Schwachstellen-Scanner" health check minutes later. `wget` rather than `curl`: the
+    # runtime image is Trivy's own (`aquasec/trivy`), which is Alpine-based and ships
+    # BusyBox's `wget` but not `curl`.
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:8080/probe/healthy']
+      interval: 15s
+      timeout: 5s
+      retries: 5
     volumes:
       - trivycache:/home/scanner/.cache
     mem_limit: 1g

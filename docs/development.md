@@ -1285,11 +1285,17 @@ information", not to "every image blocked".
 Two health checks (`GET /admin/status`, `HealthService::scanner()`) are the signal that the
 numbers on the image pages still mean something:
 
-- **`scanner`** — is the adapter reachable at all. Backed by `VulnerabilityScanner::metadata()`.
+- **`scanner`** — is the adapter reachable at all. Backed by `VulnerabilityScanner::metadata()`,
+  bounded by `KONTORFIX_SCANNER_HEALTH_TIMEOUT` (5s default) — deliberately its own budget,
+  not `KONTORFIX_SCANNER_REQUEST_TIMEOUT` (the scan-submission budget, 30s default and
+  commonly raised for a slow scanner): `/admin/status` is polled by monitoring, and it must
+  not inherit whatever timeout an operator raised for scan submission.
 - **`scanner-freshness`** — is the newest successful verdict on the instance recent (age
-  `<= 7` days). This is the more important of the two: a scanner that answers every request
-  but whose vulnerability database stopped updating reports reassuring zeros, which
-  reachability alone cannot catch — freshness is what does.
+  `<= KONTORFIX_SCANNER_FRESHNESS_DAYS`, 7 by default). This is the more important of the
+  two: a scanner that answers every request but whose vulnerability database stopped
+  updating reports reassuring zeros, which reachability alone cannot catch — freshness is
+  what does. Raise the threshold if `oci:scan` is scheduled weekly rather than nightly, or
+  every install shows red between runs.
 
 Both are absent, not red, on an instance with `KONTORFIX_SCANNER_ENABLED=false`: a deployment
 that deliberately does not scan must not grow a permanently failing check for a feature it
