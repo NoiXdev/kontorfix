@@ -67,6 +67,27 @@ it('refuses a negative grace period', function () {
         ])->assertSessionHasErrors('scan_block_grace_days');
 });
 
+it('refuses a grace period beyond the yearly ceiling, in German', function () {
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.scan-blocking', $this->group), [
+            'scan_block_severity' => 'high',
+            'scan_block_grace_days' => 366,
+        ])->assertSessionHasErrors(['scan_block_grace_days' => 'Die Schonfrist ist auf 365 Tage begrenzt.']);
+});
+
+it('accepts a grace period of zero — block as soon as a finding is recorded', function () {
+    // 0 is legal and deliberately so: it means "no grace at all", which is a real choice an
+    // operator should be able to make, not a value the request happens to tolerate. See
+    // UpdateScanBlockingRequest's own comment on this exact edge.
+    $this->actingAs(superAdmin())
+        ->put(route('admin.groups.scan-blocking', $this->group), [
+            'scan_block_severity' => 'high',
+            'scan_block_grace_days' => 0,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($this->group->fresh()->scan_block_grace_days)->toBe(0);
+});
+
 it('refuses a caller who does not administer the registry', function () {
     $this->actingAs(adminOf(Organization::factory()->create()))
         ->put(route('admin.groups.scan-blocking', $this->group), [
@@ -138,4 +159,21 @@ it('tells the registry page that scanning is switched off instance-wide', functi
     $this->actingAs(superAdmin())
         ->get(route('admin.groups.show', $this->group))
         ->assertInertia(fn (AssertableInertia $page) => $page->where('scan_blocking.enabled', false));
+});
+
+it('keeps a configured threshold visible even while scanning is switched off instance-wide', function () {
+    // The two facts are independent and the page must report BOTH honestly: `enabled` says
+    // whether anything on this instance still evaluates the rule, `severity`/`grace_days`
+    // say what THIS registry is configured to do once it does — and, per ScanBlockGuard's
+    // own docblock, once it already IS doing to any finding recorded before the scanner was
+    // switched off. Neither is ever reset by the other.
+    config(['kontorfix.scanner.enabled' => false]);
+    $this->group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
+
+    $this->actingAs(superAdmin())
+        ->get(route('admin.groups.show', $this->group))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('scan_blocking.enabled', false)
+            ->where('scan_blocking.severity', 'high')
+            ->where('scan_blocking.grace_days', 7));
 });

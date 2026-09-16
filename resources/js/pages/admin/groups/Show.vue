@@ -134,7 +134,7 @@ const props = defineProps<{
     // scanning is switched on for the instance at all — see GroupController::show()'s
     // docblock on the field of the same name for why `enabled` is not this registry's own
     // setting.
-    scan_blocking: { enabled: boolean; severity: Severity | null; grace_days: number; default_grace_days: number };
+    scan_blocking: { enabled: boolean; severity: Severity | null; grace_days: number };
 }>();
 
 function formatBytes(bytes: number | null | undefined): string {

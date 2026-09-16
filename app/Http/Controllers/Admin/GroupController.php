@@ -186,7 +186,6 @@ class GroupController extends Controller
                 'enabled' => (bool) config('kontorfix.scanner.enabled', false),
                 'severity' => $group->scan_block_severity?->value,
                 'grace_days' => $group->scan_block_grace_days,
-                'default_grace_days' => (int) config('kontorfix.scanner.default_grace_days', 7),
             ],
         ]);
     }

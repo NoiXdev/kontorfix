@@ -38,6 +38,12 @@ class UpdateScanBlockingRequest extends FormRequest
     {
         return [
             'scan_block_severity.enum' => 'Wählen Sie einen der fünf Schweregrade oder „keine Blockierung".',
+            // `required`/`integer` covered too: this app has no `lang/` directory, so their
+            // absence here falls through to Laravel's built-in English validation strings —
+            // and the preview endpoint shares this same request, so an operator who clears
+            // the field while the debounced preview fires sees the English default today.
+            'scan_block_grace_days.required' => 'Die Schonfrist ist erforderlich.',
+            'scan_block_grace_days.integer' => 'Die Schonfrist muss eine ganze Zahl sein.',
             'scan_block_grace_days.min' => 'Die Schonfrist kann nicht negativ sein.',
             'scan_block_grace_days.max' => 'Die Schonfrist ist auf 365 Tage begrenzt.',
         ];

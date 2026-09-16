@@ -161,6 +161,22 @@ it('does not exempt an ordinary read token', function () {
     pullManifest($group, 'latest')->assertStatus(403);
 });
 
+it('keeps refusing a pull while the instance-wide scanner is switched off', function () {
+    // `kontorfix.scanner.enabled` gates only whether NEW scans are dispatched (see
+    // ScanOciArtifact and the "Jetzt prüfen" action) — it is never consulted on the pull
+    // path. An operator who removes the scanner container must not have every previously
+    // recorded finding start passing through: that would turn a scanner outage into a
+    // blanket bypass of every threshold every registry on the instance has configured,
+    // which is exactly the "outage becomes a bypass" property the grace-period rule exists
+    // to prevent (see ScanBlockGuard's own docblock).
+    config(['kontorfix.scanner.enabled' => false]);
+    [$group, , $manifest] = blockingFixture();
+    $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
+    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+
+    pullManifest($group, 'latest')->assertStatus(403);
+});
+
 it('asks the database nothing while the registry does not block', function () {
     // The rule runs on EVERY manifest resolution, and blocking is off by default — so the
     // default has to cost nothing at all, not one cheap query.

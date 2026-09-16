@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, type Ref } from 'vue';
+import { createPreviewEngine } from './previewEngine';
 import { postPreviewJson } from './previewTransport';
 
 /**
@@ -54,86 +55,38 @@ export interface RetentionPreviewCore {
  * Shared by the retention policy form's Probelauf panel (a picked repository, or none yet —
  * see the endpoint's optional `package_id`) and the package page's inline-rules editor (the
  * package IS the repository, no picker) — one debounce implementation, not two.
+ *
+ * The debounce/abort machinery itself lives in `./previewEngine` — generalised out of this
+ * function when the scan-blocking preview became a second caller of the same state machine.
+ * This function keeps its OWN return shape (`summary`/`tags`, not a generic `result`)
+ * unchanged on purpose: this is the untouched regression gate for that extraction
+ * (`useRetentionPreview.test.ts`), and a generic Ref this function merely re-exported would
+ * have been a behaviour change the test suite exists to catch, not a refactor.
  */
 export function createRetentionPreview(options: { debounceMs?: number } = {}): RetentionPreviewCore {
-    const debounceMs = options.debounceMs ?? 600;
-
     const summary = ref<string[]>([]);
     const tags = ref<RetentionPreviewTag[] | null>(null);
     const error = ref<string | null>(null);
     const loading = ref(false);
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let controller: AbortController | undefined;
+    const engine = createPreviewEngine<RetentionPreviewResult>(
+        {
+            onResult: (result) => {
+                summary.value = result.summary;
+                tags.value = result.tags;
+                error.value = null;
+            },
+            onError: (message) => {
+                error.value = message;
+            },
+            onLoadingChange: (value) => {
+                loading.value = value;
+            },
+        },
+        { debounceMs: options.debounceMs, fallbackMessage: 'Der Probelauf ist fehlgeschlagen.' },
+    );
 
-    async function run(request: RetentionPreviewRequest): Promise<void> {
-        // Aborting the PREVIOUS controller, not this call's own: two rapid schedule() calls
-        // must not race, and the second one's response is the only one allowed to land.
-        controller?.abort();
-        const own = new AbortController();
-        controller = own;
-        loading.value = true;
-
-        try {
-            const result = await request(own.signal);
-
-            // A response can arrive after its own controller was aborted (the abort raced
-            // the fetch's own resolution) — discarded either way, since a newer request has
-            // already taken over `controller`.
-            if (own.signal.aborted) {
-                return;
-            }
-
-            summary.value = result.summary;
-            tags.value = result.tags;
-            error.value = null;
-        } catch (err) {
-            if (own.signal.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
-                return;
-            }
-
-            error.value = err instanceof Error ? err.message : 'Der Probelauf ist fehlgeschlagen.';
-        } finally {
-            if (!own.signal.aborted) {
-                loading.value = false;
-            }
-        }
-    }
-
-    function schedule(request: RetentionPreviewRequest): void {
-        if (timer !== undefined) {
-            clearTimeout(timer);
-        }
-
-        timer = setTimeout(() => {
-            timer = undefined;
-            void run(request);
-        }, debounceMs);
-    }
-
-    async function runNow(request: RetentionPreviewRequest): Promise<void> {
-        if (timer !== undefined) {
-            clearTimeout(timer);
-            timer = undefined;
-        }
-
-        await run(request);
-    }
-
-    function cancel(): void {
-        if (timer !== undefined) {
-            clearTimeout(timer);
-            timer = undefined;
-        }
-
-        controller?.abort();
-
-        // Safe even when nothing was in flight: every run() sets loading back to true, so
-        // this can never mask a request that is genuinely still pending.
-        loading.value = false;
-    }
-
-    return { summary, tags, error, loading, schedule, runNow, cancel };
+    return { summary, tags, error, loading, schedule: engine.schedule, runNow: engine.runNow, cancel: engine.cancel };
 }
 
 /**
