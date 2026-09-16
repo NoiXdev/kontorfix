@@ -17,6 +17,7 @@ use App\Services\Scanner\AdapterScanReport;
 use App\Services\Scanner\RegistryCredential;
 use App\Services\Scanner\ScannedVulnerability;
 use App\Services\Scanner\ScannerMetadata;
+use App\Services\Scanner\ScanReportWriter;
 use App\Services\Scanner\ScanRunner;
 use App\Services\Scanner\ScanTarget;
 use App\Services\Scanner\VulnerabilityScanner;
@@ -41,6 +42,9 @@ class FakeScanner implements VulnerabilityScanner
 
     public int $pollsBeforeReady = 0;
 
+    /** Fires from inside requestScan(), while the report is still in flight. */
+    public ?Closure $onRequestScan = null;
+
     private int $polls = 0;
 
     /** @param list<ScannedVulnerability> $findings */
@@ -64,6 +68,10 @@ class FakeScanner implements VulnerabilityScanner
         $this->target = $target;
         $this->credential = $registry;
 
+        if ($this->onRequestScan !== null) {
+            ($this->onRequestScan)();
+        }
+
         return 'scan-1';
     }
 
@@ -82,9 +90,9 @@ function vuln(string $id, VulnerabilitySeverity $severity = VulnerabilitySeverit
     return new ScannedVulnerability($id, $severity, $package, '3.0.1', '3.0.2');
 }
 
-function scannableManifest(): OciManifest
+function scannableManifest(string $orgSlug = '3b'): OciManifest
 {
-    $org = Organization::factory()->create(['slug' => '3b']);
+    $org = Organization::factory()->create(['slug' => $orgSlug]);
     $group = Group::factory()->for($org)->create(['slug' => 'intern']);
     $package = Package::factory()->for($org)->create(['type' => PackageType::Docker, 'name' => 'meinapp']);
     $group->packages()->attach($package->id);
@@ -281,4 +289,70 @@ it('does nothing at all while scanning is switched off', function () {
     app(ScanRunner::class)->run($manifest);
 
     expect(OciScanReport::count())->toBe(0);
+});
+
+it('replaces the orphaned placeholder row once the scanner identifies itself', function () {
+    // A first scan that fails before the adapter can even say who it is has no real name to
+    // key the Failed row on, so it lands under the reserved placeholder. When the scanner
+    // recovers, the real-named row it writes must be the ONLY row left for this manifest —
+    // the placeholder must not survive beside it and shadow it under
+    // orderByDesc('scanned_at') (NULLS FIRST on Postgres).
+    $manifest = scannableManifest();
+    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $failed = app(ScanRunner::class)->run($manifest);
+
+    expect(OciScanReport::where('manifest_id', $manifest->id)->count())->toBe(1)
+        ->and($failed->scanner_name)->toBe(ScanReportWriter::UNIDENTIFIED_SCANNER)
+        ->and($failed->status)->toBe(ScanStatus::Failed);
+
+    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    $recovered = app(ScanRunner::class)->run($manifest);
+
+    expect(OciScanReport::where('manifest_id', $manifest->id)->count())->toBe(1)
+        ->and($recovered->status)->toBe(ScanStatus::Ok)
+        ->and($recovered->scanner_name)->toBe('Trivy');
+});
+
+it('does not touch another manifests placeholder row when cleaning up after a real name recovers', function () {
+    // The cleanup in ScanReportWriter is scoped to ONE manifest. A placeholder sitting on a
+    // manifest that is still failing must survive a successful scan of an unrelated one.
+    $stillFailing = scannableManifest('3b-a');
+    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    app(ScanRunner::class)->run($stillFailing);
+
+    $recovers = scannableManifest('3b-b');
+    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    app(ScanRunner::class)->run($recovers);
+    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    app(ScanRunner::class)->run($recovers);
+
+    $stillFailingRow = OciScanReport::where('manifest_id', $stillFailing->id)->sole();
+
+    expect($stillFailingRow->scanner_name)->toBe(ScanReportWriter::UNIDENTIFIED_SCANNER)
+        ->and($stillFailingRow->status)->toBe(ScanStatus::Failed)
+        ->and(OciScanReport::where('manifest_id', $recovers->id)->count())->toBe(1);
+});
+
+it('marks the manifest pending while the scan is in flight, and clean once it succeeds', function () {
+    $manifest = scannableManifest();
+    $seenWhileInFlight = null;
+    $scanner = new FakeScanner([vuln('CVE-2026-1')]);
+    $scanner->onRequestScan = function () use ($manifest, &$seenWhileInFlight) {
+        $seenWhileInFlight = OciScanReport::where('manifest_id', $manifest->id)->sole()->status;
+    };
+    app()->instance(VulnerabilityScanner::class, $scanner);
+
+    $report = app(ScanRunner::class)->run($manifest);
+
+    expect($seenWhileInFlight)->toBe(ScanStatus::Pending)
+        ->and($report->status)->toBe(ScanStatus::Ok)
+        ->and(OciScanReport::where('manifest_id', $manifest->id)->count())->toBe(1);
+});
+
+it('sizes the uniqueness lock to outlast the jobs own timeout', function () {
+    config(['kontorfix.scanner.timeout' => 60]);
+
+    $job = new ScanOciArtifact('some-manifest-id');
+
+    expect($job->uniqueFor)->toBeGreaterThan($job->timeout);
 });

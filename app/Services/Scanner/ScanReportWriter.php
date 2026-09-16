@@ -20,6 +20,17 @@ use Illuminate\Support\Facades\DB;
  */
 final class ScanReportWriter
 {
+    /**
+     * Reserved placeholder scanner identity for a report row written when a scan failed
+     * before any scanner could say who it is — there is no real name to key the row on yet.
+     *
+     * No real scanner is ever given this name: `recordSuccess()` and `recordFailure()` both
+     * take the actual adapter name from `ScannerMetadata`/the caller, and a row under this
+     * placeholder is deleted the moment a real name is known for the same manifest (see
+     * `deletePlaceholder()`), so it can never linger beside — or shadow — a genuine verdict.
+     */
+    public const UNIDENTIFIED_SCANNER = 'Scanner (unbekannt)';
+
     /** The row for a manifest that has been queued but never scanned. */
     public function recordPending(OciManifest $manifest, string $scannerName): OciScanReport
     {
@@ -54,6 +65,13 @@ final class ScanReportWriter
 
             $this->replaceFindings($row, $report);
 
+            // The scanner has now identified itself for real: any placeholder row left
+            // behind by an earlier "unreachable before it could say who it is" failure is
+            // superseded by this one and must not survive beside it.
+            if ($scanner->name !== self::UNIDENTIFIED_SCANNER) {
+                $this->deletePlaceholder($manifest);
+            }
+
             return $row;
         });
     }
@@ -69,22 +87,46 @@ final class ScanReportWriter
      */
     public function recordFailure(OciManifest $manifest, string $scannerName, string $error): OciScanReport
     {
-        $row = OciScanReport::firstOrNew([
-            'manifest_id' => $manifest->id,
-            'scanner_name' => $scannerName,
-        ]);
+        return DB::transaction(function () use ($manifest, $scannerName, $error): OciScanReport {
+            $row = OciScanReport::firstOrNew([
+                'manifest_id' => $manifest->id,
+                'scanner_name' => $scannerName,
+            ]);
 
-        $row->error = $error;
-        $row->failed_at = now();
+            $row->error = $error;
+            $row->failed_at = now();
 
-        // Only a manifest that has NEVER been scanned successfully lands in Failed.
-        if ($row->status !== ScanStatus::Ok) {
-            $row->status = ScanStatus::Failed;
-        }
+            // Only a manifest that has NEVER been scanned successfully lands in Failed.
+            if ($row->status !== ScanStatus::Ok) {
+                $row->status = ScanStatus::Failed;
+            }
 
-        $row->save();
+            $row->save();
 
-        return $row;
+            // A real name recovered — any placeholder row from an earlier "couldn't even
+            // identify itself" failure on this manifest is now stale and must go. Skipped
+            // when $scannerName IS the placeholder: that would mean deleting the very row
+            // just written above.
+            if ($scannerName !== self::UNIDENTIFIED_SCANNER) {
+                $this->deletePlaceholder($manifest);
+            }
+
+            return $row;
+        });
+    }
+
+    /**
+     * Removes this manifest's placeholder row, if any. Real scanner rows are never touched:
+     * the query is scoped to the reserved placeholder name only, and every row it finds is
+     * deleted through the model so the usual Eloquent lifecycle still applies.
+     */
+    private function deletePlaceholder(OciManifest $manifest): void
+    {
+        OciScanReport::query()
+            ->where('manifest_id', $manifest->id)
+            ->where('scanner_name', self::UNIDENTIFIED_SCANNER)
+            ->get()
+            ->each(fn (OciScanReport $placeholder) => $placeholder->delete());
     }
 
     /**

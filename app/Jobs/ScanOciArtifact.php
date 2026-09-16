@@ -30,9 +30,25 @@ class ScanOciArtifact implements ShouldBeUnique, ShouldQueue
      */
     public int $timeout;
 
+    /**
+     * How long the uniqueness lock survives — deliberately longer than $timeout, and for
+     * that reason NOT left at the ShouldBeUnique default of 0 (which never expires on its
+     * own). Workers here are killed mid-job by design on every Portainer redeploy, and a
+     * lock with no expiry would then outlive the job that took it: the manifest would never
+     * be scanned again, not by a retry and not by the nightly rescan, until someone notices
+     * and clears the lock by hand. Set in the constructor alongside $timeout because a
+     * property initialiser cannot read config.
+     */
+    public int $uniqueFor;
+
     public function __construct(public readonly string $manifestId)
     {
-        $this->timeout = (int) config('kontorfix.scanner.timeout', 600) + 180;
+        $pollBudget = (int) config('kontorfix.scanner.timeout', 600);
+        $this->timeout = $pollBudget + 180;
+        // Longer than $timeout by construction: the lock must outlive the worst case the
+        // job itself is sized for, or it could expire while a legitimately slow scan is
+        // still running and let a duplicate job start alongside it.
+        $this->uniqueFor = $pollBudget + 300;
     }
 
     public function uniqueId(): string

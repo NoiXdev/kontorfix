@@ -52,6 +52,11 @@ final class ScanRunner
 
             $metadata = $this->scanner->metadata();
 
+            // The real scanner name is known from here on — a scan in flight is visible as
+            // `pending` rather than indistinguishable from "never scanned", and firstOrCreate
+            // means this can never clobber a verdict that already exists.
+            $this->writer->recordPending($manifest, $metadata->name);
+
             $scanId = $this->scanner->requestScan(
                 new ScanTarget($this->repositoryPath($group, $manifest), $manifest->digest),
                 new RegistryCredential($this->registryUrl(), $plain),
@@ -60,9 +65,10 @@ final class ScanRunner
             $report = $this->poll($scanId);
 
             return $this->writer->recordSuccess($manifest, $metadata, $report);
-        } catch (ScannerException $e) {
-            return $this->writer->recordFailure($manifest, $this->scannerName($manifest), $e->getMessage());
         } catch (Throwable $e) {
+            // ScannerException carries its own German, operator-facing message, and every
+            // other Throwable is caught by the very same clause and recorded the same way —
+            // there is nothing case-specific left to do once we're just persisting a message.
             return $this->writer->recordFailure($manifest, $this->scannerName($manifest), $e->getMessage());
         } finally {
             // In a finally, not after the happy path: a scan that dies mid-poll must not
@@ -170,15 +176,18 @@ final class ScanRunner
      * So: ask the scanner first. If it cannot answer, reuse whichever scanner most recently
      * reported on THIS manifest — the identity a retry against the same adapter will land
      * back on once it recovers. Only a manifest that has never produced a single report
-     * falls through to the fixed label, and it is a harmless orphan there: there is no
-     * earlier verdict for it to shadow.
+     * falls through to `ScanReportWriter::UNIDENTIFIED_SCANNER`, a reserved placeholder
+     * identity — never a real scanner's name — that `ScanReportWriter` deletes on this
+     * manifest's behalf the moment a real name becomes known, so it cannot outlive its
+     * purpose and shadow a later, genuine verdict.
      */
     private function scannerName(OciManifest $manifest): string
     {
         try {
             return $this->scanner->metadata()->name;
         } catch (Throwable) {
-            return $manifest->scanReports()->latest('updated_at')->value('scanner_name') ?? 'Scanner';
+            return $manifest->scanReports()->latest('updated_at')->value('scanner_name')
+                ?? ScanReportWriter::UNIDENTIFIED_SCANNER;
         }
     }
 
