@@ -428,9 +428,6 @@ return [
         /** Manifests re-scanned per scheduled run. */
         'rescan_limit' => (int) (env('KONTORFIX_SCANNER_RESCAN_LIMIT') ?: 200),
 
-        /** Days a new finding is reported before it may block, for a registry that has no own value. */
-        'default_grace_days' => (int) (env('KONTORFIX_SCANNER_DEFAULT_GRACE_DAYS') ?: 7),
-
         /**
          * Days the newest successful verdict on the instance may age before
          * HealthService::scannerFreshness() goes red. The nightly `oci:scan` means it should
