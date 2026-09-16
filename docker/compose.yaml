@@ -213,6 +213,45 @@ services:
     # down with the reason in its logs and on the operator health page.
     restart: on-failure:5
 
+  # The vulnerability scanner. Its own service rather than a binary inside the app image:
+  # the vulnerability database lives in its own volume, the app image stays slim, and a scan
+  # that hangs cannot take the web service with it.
+  #
+  # It speaks the Harbor Pluggable Scanner Adapter API, so any adapter-compatible scanner can
+  # take its place — set KONTORFIX_SCANNER_IMAGE. `aquasec/harbor-scanner-trivy` is the
+  # community build of the same adapter Harbor ships as `goharbor/trivy-adapter-photon`;
+  # there is no functional difference between them.
+  #
+  # THE ADAPTER PULLS THE IMAGE FROM US. It reaches the registry at `app:8080` over this
+  # network — which is why KONTORFIX_SCANNER_REGISTRY_URL exists and is not APP_URL — and it
+  # presents a short-lived, read-only token minted per scan for exactly one registry.
+  #
+  # It also needs OUTBOUND internet access to fetch the Trivy vulnerability database from
+  # ghcr.io. On an air-gapped host, mirror the database and set SCANNER_TRIVY_DB_REPOSITORY;
+  # a scanner that cannot update reports reassuring zeros, which the health page's
+  # "Aktualität der Prüfungen" check exists to catch.
+  scanner:
+    image: ${KONTORFIX_SCANNER_IMAGE:-aquasec/harbor-scanner-trivy:latest}
+    environment:
+      SCANNER_API_SERVER_ADDR: ':8080'
+      SCANNER_REDIS_URL: redis://redis:6379
+      # Vulnerabilities only. The adapter's default (`vuln,config,secret`) also runs
+      # misconfiguration and secret detection, which this feature stores nothing from —
+      # paying for it would be slower scans for results nobody reads.
+      SCANNER_TRIVY_SECURITY_CHECKS: vuln
+      SCANNER_LOG_LEVEL: ${SCANNER_LOG_LEVEL:-info}
+    # Not published on the host, like `app`: it is reached over this network by name, and
+    # its API is unauthenticated by design — it is meant to sit behind the thing that calls
+    # it. Publishing it would hand anyone who can reach the host an image-pull oracle.
+    expose: ['8080']
+    logging: *logging
+    depends_on:
+      redis: { condition: service_healthy }
+    volumes:
+      - trivycache:/home/scanner/.cache
+    mem_limit: 1g
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -245,6 +284,7 @@ volumes:
   pgdata:
   redisdata:
   artifacts:
+  trivycache:
 # Attach the reverse proxy's network so it can route to `app:8080` / `reverb:8080`
 # without any port being published on the host. Uncomment and name the proxy network:
 #

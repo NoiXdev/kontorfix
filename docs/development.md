@@ -1222,6 +1222,79 @@ therefore leaves permanently empty `packages` rows behind, and nothing reclaims 
 appear in package lists, in counts and in the customer portal, and are removed by hand. The
 system settings page states this beside the switch.
 
+### Schwachstellenprüfung
+
+Every Docker manifest can be handed to an external vulnerability scanner, whose verdict
+(no findings / a list of CVEs by severity) shows up on the admin Docker page and in the
+customer portal. The scanner speaks the Harbor Pluggable Scanner Adapter API
+(`App\Services\Scanner\VulnerabilityScanner`, implemented by `HarborAdapterScanner`), so any
+adapter-compatible scanner works; `docker/compose.yaml`'s `scanner` service ships Trivy via
+`aquasec/harbor-scanner-trivy`.
+
+**Off by default** (`KONTORFIX_SCANNER_ENABLED=false`): it needs the `scanner` service
+running and, for that service, outbound internet access to fetch the Trivy vulnerability
+database from ghcr.io. Switching it on:
+
+1. Start the `scanner` service (it is part of the default `docker compose up -d`, no
+   profile needed).
+2. Set `KONTORFIX_SCANNER_ENABLED=true` and `KONTORFIX_SCANNER_URL=http://scanner:8080`.
+3. **The adapter pulls the image from us**, not the other way round — it dials this
+   application over the compose network to fetch the layers it is scanning. That address is
+   `KONTORFIX_SCANNER_REGISTRY_URL`, deliberately not `APP_URL`: from inside the network the
+   registry answers as `app:8080`, while `APP_URL` is the public address, which behind a
+   firewall either does not resolve or leaves the network and comes back.
+4. The scanner sits on a private compose address, and the outbound address policy
+   (`App\Services\Upstream\UrlSafety`) refuses private and loopback addresses by design. Name
+   the scanner's host in `KONTORFIX_SCANNER_ALLOWED_HOSTS` (`scanner` for the shipped
+   service) to exempt it — the same escape hatch `KONTORFIX_VCS_ALLOWED_HOSTS` is for a
+   self-hosted git server. The policy itself is never widened.
+
+Three triggers feed the same write path (`ScanRunner` → `ScanReportWriter`): a push to a
+Docker repository queues a scan of the pushed manifest, the nightly `oci:scan` command
+(scheduled `04:10`, bounded by `kontorfix.scanner.rescan_limit` per run) rescans
+everything, and an admin can trigger one on demand from the package page ("Jetzt prüfen",
+`Admin\ScanController::store()`).
+
+**Blocking a `docker pull` on findings is per registry and off by default.** A registry
+(`Group`) names an optional `scan_block_severity` threshold; with none set, nothing is ever
+refused. When a threshold is set, `App\Services\Scanner\ScanBlockGuard` measures age from
+`first_seen_at` — when the finding was first observed on that manifest — not from when the
+blocking scan ran, and only after `scan_block_grace_days` (per-registry, default 7 days) have
+passed does it start refusing pulls. The
+registry settings page's preview shows what a proposed threshold would block today versus
+later, before it is saved.
+
+Blocking only ever refuses the **manifest** GET, never a layer (blob) download: a blob is
+content-addressed and shared, so refusing one would break every unrelated image built on the
+same base. It is a supply-chain control on `docker pull`, not an access control, and it never
+blocks a `docker push` — a scan takes seconds to minutes, which a push cannot wait for.
+
+A **blocked artifact stays rescannable**: the read-only, registry-scoped token `ScanRunner`
+mints for the scanner itself (`for_scanner` on `RegistryToken`) is exempt from the block
+(`ManifestController::assertNotBlocked()`), so a withdrawn advisory or a corrected severity
+can still reach the registry the normal way — a scan — and unblock the artifact. Without that
+exemption a blocked manifest could never be rescanned at all, since the adapter pulls it over
+the very endpoint the block guards.
+
+**An unscanned or never-successfully-scanned artifact is served, never blocked.**
+`ScanBlockGuard` only matches findings attached to a report with `status = ok`; a manifest
+with no report yet, or one whose every scan attempt has failed, has no such report to match
+and is therefore never refused on that basis. A scanner outage degrades to "no additional
+information", not to "every image blocked".
+
+Two health checks (`GET /admin/status`, `HealthService::scanner()`) are the signal that the
+numbers on the image pages still mean something:
+
+- **`scanner`** — is the adapter reachable at all. Backed by `VulnerabilityScanner::metadata()`.
+- **`scanner-freshness`** — is the newest successful verdict on the instance recent (age
+  `<= 7` days). This is the more important of the two: a scanner that answers every request
+  but whose vulnerability database stopped updating reports reassuring zeros, which
+  reachability alone cannot catch — freshness is what does.
+
+Both are absent, not red, on an instance with `KONTORFIX_SCANNER_ENABLED=false`: a deployment
+that deliberately does not scan must not grow a permanently failing check for a feature it
+does not use.
+
 ### Organization-scoped registry slugs
 
 The registry URL is `/r/{orgSlug}/{groupSlug}` — the one statement of that form is

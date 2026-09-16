@@ -3,14 +3,17 @@
 namespace App\Services\Health;
 
 use App\Enums\PackageType;
+use App\Models\OciScanReport;
 use App\Models\Upstream;
 use App\Services\Broadcasting\ReverbConfigGuard;
 use App\Services\Http\AppUrl;
+use App\Services\Scanner\VulnerabilityScanner;
 use App\Services\Storage\StorageManager;
 use App\Services\Upstream\UrlSafety;
 use App\Services\Users\EmailUniquenessIndex;
 use App\Support\CredentialUrl;
 use App\Support\TrustedProxies;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -35,6 +38,100 @@ class HealthService
             $this->emailUniqueness(),
             ...$this->broadcasting(),
             ...$this->upstreams(),
+            ...$this->scanner(),
+        ];
+    }
+
+    /**
+     * The scanner, if there is one.
+     *
+     * TWO checks, not one, because they fail independently and only one of them is obvious.
+     * Reachability answers "does the scanner answer"; freshness answers "is what it says
+     * still worth anything". A scanner whose vulnerability database stopped updating three
+     * weeks ago answers every request and reports reassuring zeros — it is more dangerous
+     * than no scanner at all, and reachability alone is green for exactly that case.
+     *
+     * Empty — not green, not red — when the feature is switched off. An instance that
+     * deliberately does not scan must not grow a permanently failing check, because a check
+     * an operator learns to ignore is worse than no check.
+     *
+     * @return list<array{key:string,label:string,ok:bool,detail:string}>
+     */
+    private function scanner(): array
+    {
+        if (! config('kontorfix.scanner.enabled', false)) {
+            return [];
+        }
+
+        return [$this->scannerReachability(), $this->scannerFreshness()];
+    }
+
+    /**
+     * @return array{key:string,label:string,ok:bool,detail:string}
+     */
+    private function scannerReachability(): array
+    {
+        $url = (string) config('kontorfix.scanner.url', '');
+
+        try {
+            // Bounded by kontorfix.scanner.request_timeout (30s default) plus a 5s connect
+            // timeout, the same budget every other adapter call uses (HarborAdapterScanner)
+            // — this route is polled by monitoring, so a hanging scanner must not pile up
+            // requests here any more than it should on a scan in flight.
+            $metadata = app(VulnerabilityScanner::class)->metadata();
+
+            return [
+                'key' => 'scanner',
+                'label' => 'Schwachstellen-Scanner',
+                'ok' => true,
+                'detail' => trim($metadata->name.' '.(string) $metadata->version).' unter '.$url.' erreichbar.',
+            ];
+        } catch (Throwable $e) {
+            return [
+                'key' => 'scanner',
+                'label' => 'Schwachstellen-Scanner',
+                'ok' => false,
+                // The message, not a generic sentence: ScannerException's messages already
+                // name the thing to go and look at, including the allowlist entry a refused
+                // address needs.
+                'detail' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @return array{key:string,label:string,ok:bool,detail:string}
+     */
+    private function scannerFreshness(): array
+    {
+        $newest = OciScanReport::whereNotNull('scanned_at')->max('scanned_at');
+
+        // No verdict at all is not a failure: an instance with no images yet, or one that
+        // has only just switched this on, is in a normal state and a red check there would
+        // train the operator to ignore this row.
+        if ($newest === null) {
+            return [
+                'key' => 'scanner-freshness',
+                'label' => 'Aktualität der Prüfungen',
+                'ok' => true,
+                'detail' => 'Es liegt noch kein Prüfergebnis vor.',
+            ];
+        }
+
+        $age = Carbon::parse($newest)->diffInDays(now());
+
+        // The daily rescan means the newest verdict on the instance should never be more
+        // than a day or two old. A week is generous slack for a quiet instance; beyond it,
+        // something has stopped running and the numbers on every image page are fiction.
+        $ok = $age <= 7;
+
+        return [
+            'key' => 'scanner-freshness',
+            'label' => 'Aktualität der Prüfungen',
+            'ok' => $ok,
+            'detail' => $ok
+                ? 'Die neueste Prüfung ist vom '.Carbon::parse($newest)->toDateString().'.'
+                : 'Die neueste erfolgreiche Prüfung ist '.(int) $age.' Tage alt — läuft "oci:scan" noch, und aktualisiert der Scanner seine Datenbank?',
         ];
     }
 
