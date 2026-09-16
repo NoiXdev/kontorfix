@@ -48,14 +48,24 @@ export function parseScanPreview(record: Record<string, unknown>): ScanPreview {
 }
 
 /**
- * The request body for both the preview and the save endpoint — `Number()`'d here, once,
- * so a grace-days field the operator has cleared (the Input component's v-model always
- * yields a string; an emptied field yields `''`) never round-trips as the literal string
- * `''`. `Number('')` is `0`, a legal grace period; `Number()` of anything genuinely
- * non-numeric is `NaN`, which `JSON.stringify` turns into `null` — surfacing as the
- * `required`/`integer` validation error on the FormRequest rather than being silently
- * accepted as a string the server would have to parse itself.
+ * The request body for both the preview and the save endpoint.
+ *
+ * A BLANK field is passed through as `null`, never `Number()`'d: `Number('')` is `0`, not
+ * `NaN`, so a grace-days field the operator has cleared (the Input component's v-model always
+ * yields a string; an emptied field yields `''`) would otherwise silently become `0` — the
+ * STRICTEST setting this control can express, "block as soon as a finding is recorded" — and
+ * a customer-visible pull outage produced by someone who believed they had emptied a field is
+ * not a harmless default. `null` falls into the FormRequest's `required` rule instead, the
+ * same way a genuinely missing field always has, so the operator sees "Die Schonfrist ist
+ * erforderlich." rather than having their input silently reinterpreted.
+ *
+ * Everything else IS converted with `Number()`: a value the operator actually typed, however
+ * it arrived (a real `number` from the initial page load, or a numeric string from the
+ * Input's v-model), is sent as a number rather than a string the server would have to parse
+ * itself. `0` stays reachable — typing it is not blank.
  */
 export function scanBlockingPayload(severity: Severity | null, graceDays: number | string): Record<string, unknown> {
-    return { scan_block_severity: severity, scan_block_grace_days: Number(graceDays) };
+    const isBlank = typeof graceDays === 'string' && graceDays.trim() === '';
+
+    return { scan_block_severity: severity, scan_block_grace_days: isBlank ? null : Number(graceDays) };
 }

@@ -2,11 +2,11 @@
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { createPreviewEngine } from '@/composables/previewEngine';
+import { createPreviewEngine, type PreviewRequest } from '@/composables/previewEngine';
 import { postPreviewJson } from '@/composables/previewTransport';
 import { SEVERITY_OPTIONS, severityClass, type Severity } from '@/lib/severity';
 import { useForm } from '@inertiajs/vue3';
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { parseScanPreview, scanBlockingPayload, type ScanPreview } from '../scanBlocking';
 
 const props = defineProps<{
@@ -30,9 +30,8 @@ const previewLoading = ref(false);
 
 // The debounce/abort state machine itself is `createPreviewEngine()` — the same one
 // `useRetentionPreview.ts` uses, generalised out of it rather than hand-rolled here a
-// second time. `onBeforeUnmount` is wired explicitly (not `usePreviewEngine()`) only because
-// this file already imports `ref`/`watch` from 'vue' directly and there is no lifecycle
-// wrapper savings otherwise; the abort-on-unmount guarantee is identical either way.
+// second time. `onBeforeUnmount(previewEngine.cancel)` below is this component's own
+// lifecycle wiring, the same one `useRetentionPreview()` does for its callers.
 const previewEngine = createPreviewEngine<ScanPreview>(
     {
         onResult: (result) => {
@@ -49,6 +48,24 @@ const previewEngine = createPreviewEngine<ScanPreview>(
     { fallbackMessage: 'Die Vorschau ist fehlgeschlagen.' },
 );
 onBeforeUnmount(previewEngine.cancel);
+
+/**
+ * Builds one preview request, closing over the currently-committed form values. Shared by
+ * the debounced path (`refreshPreview()`, below) and the immediate first pass (see the
+ * `runNow` call at the bottom of this block) so the request itself is stated once.
+ */
+function previewRequest(): PreviewRequest<ScanPreview> {
+    const severity = form.scan_block_severity as Severity;
+    const graceDays = form.scan_block_grace_days;
+
+    return (signal) =>
+        postPreviewJson(
+            route('admin.groups.scan-preview', props.groupId),
+            scanBlockingPayload(severity, graceDays),
+            signal,
+            'Die Vorschau ist fehlgeschlagen.',
+        ).then(parseScanPreview);
+}
 
 /**
  * Every change to either field re-runs the preview, debounced ~600ms with the stale request
@@ -72,20 +89,46 @@ function refreshPreview(): void {
         return;
     }
 
-    const severity = form.scan_block_severity;
-    const graceDays = form.scan_block_grace_days;
-
-    previewEngine.schedule((signal) =>
-        postPreviewJson(
-            route('admin.groups.scan-preview', props.groupId),
-            scanBlockingPayload(severity, graceDays),
-            signal,
-            'Die Vorschau ist fehlgeschlagen.',
-        ).then(parseScanPreview),
-    );
+    previewEngine.schedule(previewRequest());
 }
 
-watch(() => [form.scan_block_severity, form.scan_block_grace_days], refreshPreview, { immediate: true });
+watch(() => [form.scan_block_severity, form.scan_block_grace_days], refreshPreview);
+
+// The mount-time pass skips the debounce (same idiom as retention/Form.vue's own
+// `runPreviewNow`, used there "right after picking a repository"): a registry that already
+// has a configured threshold should show its preview immediately, not an empty box for
+// ~600ms while `previewLoading` and `preview` both sit at their initial falsy/null values.
+if (form.scan_block_severity !== null) {
+    void previewEngine.runNow(previewRequest());
+}
+
+/**
+ * The instance-wide-disabled hint's text, which has to be honest about TWO independent
+ * facts and must not conflate them:
+ *
+ *  - `blocking.enabled` says whether anything on this instance still evaluates the rule at
+ *    all (see GroupController::show()'s docblock on the field of the same name).
+ *  - `blocking.severity` — the STORED setting, not whatever the operator is currently
+ *    drafting in the form — says whether THIS registry already has a threshold that
+ *    `ScanBlockGuard::blockingFinding()` is enforcing (or would be, were scanning on).
+ *
+ * A registry with no stored threshold blocks nothing regardless of the instance-wide switch,
+ * so telling its operator that "previously found vulnerabilities keep blocking" would be a
+ * claim about vulnerabilities that cannot exist here — this control cannot express one
+ * without a severity, and `ScanBlockGuard::blockingFinding()` returns immediately for a null
+ * threshold. Read against the STORED value rather than the form's, because a threshold the
+ * operator has only drafted, not saved, is not yet doing anything for this sentence to be
+ * honest about either.
+ */
+const scannerDisabledHint = computed<string | null>(() => {
+    if (props.blocking.enabled) {
+        return null;
+    }
+
+    return props.blocking.severity !== null
+        ? 'Für diese Instanz ist keine Schwachstellenprüfung eingerichtet. Es werden keine neuen Scans ausgeführt — bereits gefundene Schwachstellen blockieren die Auslieferung aber weiterhin.'
+        : 'Für diese Instanz ist keine Schwachstellenprüfung eingerichtet. Es werden keine neuen Scans ausgeführt.';
+});
 
 function save(): void {
     form.transform((data) => scanBlockingPayload(data.scan_block_severity, data.scan_block_grace_days)).put(
@@ -105,9 +148,8 @@ function save(): void {
             </p>
         </header>
 
-        <p v-if="!blocking.enabled" class="rounded border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950">
-            Für diese Instanz ist keine Schwachstellenprüfung eingerichtet. Es werden keine neuen Scans ausgeführt —
-            bereits gefundene Schwachstellen blockieren die Auslieferung aber weiterhin.
+        <p v-if="scannerDisabledHint" class="rounded border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950">
+            {{ scannerDisabledHint }}
         </p>
 
         <form class="flex flex-col gap-4" @submit.prevent="save">

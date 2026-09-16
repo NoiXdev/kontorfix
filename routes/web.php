@@ -130,7 +130,7 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     // gated on `kontorfix.scanner.enabled` — see ScanController::update()/preview() — so an
     // operator can configure a threshold before switching scanning on instance-wide.
     Route::put('groups/{group}/scan-blocking', [Admin\ScanController::class, 'update'])->name('groups.scan-blocking');
-    // Throttled like `packages.retention.preview` above, and for the same reason: aborting
+    // Throttled like `packages.retention.preview` below, and for the same reason: aborting
     // the client fetch does not stop the PHP request already running, so an unthrottled
     // debounced editor can still drive `ScanBlockGuard::preview()`'s findings query plus an
     // OciTag query to completion once per keystroke burst. The budget is per account, so one

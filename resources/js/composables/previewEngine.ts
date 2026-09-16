@@ -1,5 +1,3 @@
-import { onBeforeUnmount } from 'vue';
-
 /**
  * The debounce/abort state machine every preview panel on this frontend needs, generalised
  * over the result type.
@@ -131,16 +129,4 @@ export function createPreviewEngine<TResult>(
     }
 
     return { schedule, runNow, cancel };
-}
-
-/** The Vue-lifecycle wrapper: the core above, plus aborting whatever is in flight on unmount. */
-export function usePreviewEngine<TResult>(
-    handlers: PreviewEngineHandlers<TResult>,
-    options: { debounceMs?: number; fallbackMessage?: string } = {},
-): PreviewEngine<TResult> {
-    const engine = createPreviewEngine(handlers, options);
-
-    onBeforeUnmount(engine.cancel);
-
-    return engine;
 }
