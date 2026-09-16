@@ -124,6 +124,25 @@ final class OciException extends Exception
         return new self(400, 'UNSUPPORTED', $message);
     }
 
+    /**
+     * A pull refused because the registry blocks on vulnerability findings.
+     *
+     * DENIED / 403: the caller is authenticated and entitled to this repository — the
+     * registry is declining to hand over THIS artifact, which is exactly what the OCI
+     * spec's DENIED covers. A 404 would be a lie the customer cannot debug, and a bare 403
+     * with no envelope makes the Docker client print "unknown error".
+     *
+     * The message names the vulnerability and the severity because it is printed straight
+     * into a terminal, most likely a CI log, and the person reading it has to be able to go
+     * and do something about it without access to this console.
+     */
+    public static function blockedByVulnerability(string $vulnerabilityId, string $severityLabel): self
+    {
+        return new self(403, 'DENIED', "Dieses Image wird nicht ausgeliefert: {$vulnerabilityId} ({$severityLabel}) "
+            .'ist seit länger als der zulässigen Schonfrist bekannt. Bauen Sie das Image mit einer aktualisierten '
+            .'Basis neu, oder lassen Sie die Blockierung für diese Registry anpassen.');
+    }
+
     public function render(): JsonResponse
     {
         return response()->json(

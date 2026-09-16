@@ -6,9 +6,13 @@ use App\Enums\PackageType;
 use App\Exceptions\OciException;
 use App\Http\Controllers\Controller;
 use App\Jobs\ScanOciArtifact;
+use App\Models\Group;
+use App\Models\OciManifest;
 use App\Models\OciTag;
+use App\Models\RegistryToken;
 use App\Services\Oci\ManifestStore;
 use App\Services\RegistryAccessService;
+use App\Services\Scanner\ScanBlockGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -37,6 +41,7 @@ class ManifestController extends Controller
     public function __construct(
         private readonly RegistryAccessService $access,
         private readonly ManifestStore $manifests,
+        private readonly ScanBlockGuard $scanBlock,
     ) {}
 
     protected function access(): RegistryAccessService
@@ -61,11 +66,43 @@ class ManifestController extends Controller
             throw OciException::manifestUnknown($reference);
         }
 
+        // At manifest RESOLUTION, so `docker pull` stops here rather than part-way through
+        // the layer download — and so the client gets one clear error instead of a partial
+        // image and a confusing failure. Layers stay readable by design: a blob is
+        // content-addressed and shared, so refusing one would break every unrelated image
+        // built on the same base.
+        $this->assertNotBlocked($request, $manifest, $group);
+
         return response($manifest->payload, 200, [
             'Content-Type' => $manifest->media_type,
             'Content-Length' => (string) $manifest->size,
             'Docker-Content-Digest' => $manifest->digest,
         ]);
+    }
+
+    /**
+     * Refuses a manifest this registry blocks on vulnerability findings.
+     *
+     * A scanner token is exempt, and that exemption is what keeps the feature reversible:
+     * the adapter pulls the artifact over this very endpoint, so without it a blocked
+     * artifact could never be rescanned and therefore never unblocked — not by a withdrawn
+     * advisory, not by a corrected severity, not by anything. Such a token is minted only
+     * by ScanOciArtifact, is read-only, is scoped to one registry, is short-lived, and is
+     * never offered in the console.
+     */
+    private function assertNotBlocked(Request $request, OciManifest $manifest, Group $group): void
+    {
+        $token = $request->attributes->get('registryToken');
+
+        if ($token instanceof RegistryToken && $token->for_scanner) {
+            return;
+        }
+
+        $finding = $this->scanBlock->blockingFinding($manifest, $group);
+
+        if ($finding !== null) {
+            throw OciException::blockedByVulnerability($finding->vulnerability_id, $finding->severity->label());
+        }
     }
 
     /**

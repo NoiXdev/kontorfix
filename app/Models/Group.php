@@ -80,6 +80,8 @@ class Group extends Model
         'slug',
         'public',
         'portal_enabled',
+        'scan_block_severity',
+        'scan_block_grace_days',
     ];
 
     protected $attributes = [
