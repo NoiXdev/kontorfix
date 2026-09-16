@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Registry\Oci;
 
+use App\Enums\PackageType;
 use App\Exceptions\OciException;
 use App\Http\Controllers\Controller;
+use App\Jobs\ScanOciArtifact;
 use App\Models\OciTag;
 use App\Services\Oci\ManifestStore;
 use App\Services\RegistryAccessService;
@@ -89,6 +91,15 @@ class ManifestController extends Controller
         }
 
         $manifest = $this->manifests->put($package, $reference, $this->readManifestBody($request), $mediaType);
+
+        // AFTER the store, never inside it: ManifestStore::put() runs in a transaction, and
+        // a job dispatched inside one can be picked up by a worker before the transaction
+        // commits — the worker then finds no manifest and the push silently goes unscanned.
+        // Gated here rather than in the job so a disabled scanner costs no queue traffic at
+        // all; the job re-checks anyway, because a config change can land between the two.
+        if (config('kontorfix.scanner.enabled', false) && $package->type === PackageType::Docker) {
+            ScanOciArtifact::dispatch($manifest->id);
+        }
 
         // Addressed name, not the bare one: on a path-namespaced address a Location built
         // from `{name}` alone points at a URL that names no registry. See

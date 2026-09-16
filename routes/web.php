@@ -81,6 +81,10 @@ Route::middleware(['auth', 'operator'])->prefix('admin')->name('admin.')->group(
     Route::put('packages/{package}/shared', [Admin\PackageController::class, 'shared'])->name('packages.shared');
     // Re-queue a sync for a git-sourced package; refused (409) for a publish-based one.
     Route::post('packages/{package}/resync', [Admin\PackageController::class, 'resync'])->name('packages.resync');
+    // "Jetzt prüfen": queue an on-demand vulnerability scan for one manifest (see
+    // Admin\ScanController::store()). Inside this existing admin group, whose name prefix
+    // supplies the `admin.` — so the route name is `admin.packages.scan`.
+    Route::post('packages/{package}/scan', [Admin\ScanController::class, 'store'])->name('packages.scan');
     // The package page's own "Freigaben" tab: the same three assignment writes
     // GroupController offers from the registry side, reached here from the package's own
     // detail page instead. `group_id` travels in store()'s body (the row does not exist
