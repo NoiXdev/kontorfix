@@ -78,7 +78,12 @@ final class HarborAdapterScanner implements VulnerabilityScanner
                         'repository' => $target->repository,
                         'digest' => $target->digest,
                         'tag' => $target->tag,
-                        'mime_type' => 'application/vnd.docker.distribution.manifest.v2+json',
+                        // What the manifest actually says, never a hardcoded Docker
+                        // schema 2 — see ScanTarget::$mediaType. Dropped by the
+                        // array_filter below when the manifest records none, so the
+                        // adapter falls back to its own detection rather than being
+                        // handed a guess.
+                        'mime_type' => $target->mediaType,
                     ], fn ($value): bool => $value !== null),
                 ]);
         } catch (ConnectionException $e) {

@@ -34,7 +34,11 @@ use function Pest\Laravel\travel;
  * adapter is told to pull and from where, and — the one that matters most — that a rescan
  * does not reset `first_seen_at`.
  */
-class FakeScanner implements VulnerabilityScanner
+// Prefixed rather than bare (`FakeScanner`, `vuln()`, `scannableManifest()`): this is a Pest
+// file, so every top-level declaration in it lives as a GLOBAL for the whole test run once
+// the file is loaded, and a collision with a second file wanting the same name is a FATAL,
+// not a failing assertion. Same discipline as ScannerHealthTest's own prefixes.
+class ScanRunnerFakeScanner implements VulnerabilityScanner
 {
     public ?ScanTarget $target = null;
 
@@ -85,12 +89,12 @@ class FakeScanner implements VulnerabilityScanner
     }
 }
 
-function vuln(string $id, VulnerabilitySeverity $severity = VulnerabilitySeverity::High, string $package = 'openssl'): ScannedVulnerability
+function scanRunnerVuln(string $id, VulnerabilitySeverity $severity = VulnerabilitySeverity::High, string $package = 'openssl'): ScannedVulnerability
 {
     return new ScannedVulnerability($id, $severity, $package, '3.0.1', '3.0.2');
 }
 
-function scannableManifest(string $orgSlug = '3b'): OciManifest
+function scanRunnerManifest(string $orgSlug = '3b'): OciManifest
 {
     $org = Organization::factory()->create(['slug' => $orgSlug]);
     $group = Group::factory()->for($org)->create(['slug' => 'intern']);
@@ -112,11 +116,11 @@ beforeEach(function () {
 });
 
 it('records a verdict with its severity counts', function () {
-    $manifest = scannableManifest();
-    $scanner = new FakeScanner([
-        vuln('CVE-2026-1', VulnerabilitySeverity::Critical),
-        vuln('CVE-2026-2', VulnerabilitySeverity::High),
-        vuln('CVE-2026-3', VulnerabilitySeverity::High, 'zlib'),
+    $manifest = scanRunnerManifest();
+    $scanner = new ScanRunnerFakeScanner([
+        scanRunnerVuln('CVE-2026-1', VulnerabilitySeverity::Critical),
+        scanRunnerVuln('CVE-2026-2', VulnerabilitySeverity::High),
+        scanRunnerVuln('CVE-2026-3', VulnerabilitySeverity::High, 'zlib'),
     ]);
     app()->instance(VulnerabilityScanner::class, $scanner);
 
@@ -132,8 +136,8 @@ it('records a verdict with its severity counts', function () {
 });
 
 it('hands the adapter the path-addressed repository and our in-network address', function () {
-    $manifest = scannableManifest();
-    $scanner = new FakeScanner;
+    $manifest = scanRunnerManifest();
+    $scanner = new ScanRunnerFakeScanner;
     app()->instance(VulnerabilityScanner::class, $scanner);
 
     app(ScanRunner::class)->run($manifest);
@@ -146,8 +150,8 @@ it('hands the adapter the path-addressed repository and our in-network address',
 });
 
 it('mints a scanner token scoped to one registry and revokes it afterwards', function () {
-    $manifest = scannableManifest();
-    $scanner = new FakeScanner;
+    $manifest = scanRunnerManifest();
+    $scanner = new ScanRunnerFakeScanner;
     app()->instance(VulnerabilityScanner::class, $scanner);
 
     app(ScanRunner::class)->run($manifest);
@@ -162,8 +166,8 @@ it('mints a scanner token scoped to one registry and revokes it afterwards', fun
 });
 
 it('revokes the token even when the scan fails', function () {
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
 
     app(ScanRunner::class)->run($manifest);
 
@@ -172,8 +176,8 @@ it('revokes the token even when the scan fails', function () {
 });
 
 it('records a failure when the scanner cannot be reached and serves nothing about it', function () {
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
 
     $report = app(ScanRunner::class)->run($manifest);
 
@@ -189,11 +193,11 @@ it('keeps a good verdict when a later rescan fails', function () {
     // already succeeded, stopping the scanner container would unblock every artifact on the
     // instance at once — an outage turned into a bypass, reachable by anyone who can kill a
     // container. A failure records itself beside the good report and leaves it alone.
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($manifest);
 
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
     $report = app(ScanRunner::class)->run($manifest)->fresh();
 
     expect($report->status)->toBe(ScanStatus::Ok)
@@ -207,26 +211,26 @@ it('does not reset first_seen_at when a rescan finds the same vulnerability', fu
     // THE MUTATION-CHECKED TEST. `first_seen_at` is the entire mechanism of the grace
     // period: reset it on every rescan and the clock restarts nightly, so nothing ever
     // reaches its grace and blocking silently degrades to "off" with no other test failing.
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($manifest);
 
     $originalFirstSeen = OciScanFinding::sole()->first_seen_at;
 
     travel(30)->days();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($manifest);
 
     expect(OciScanFinding::sole()->first_seen_at->timestamp)->toBe($originalFirstSeen->timestamp);
 });
 
 it('stamps first_seen_at now for a vulnerability that was not there before', function () {
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($manifest);
 
     travel(30)->days();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1'), vuln('CVE-2026-2')]));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1'), scanRunnerVuln('CVE-2026-2')]));
     app(ScanRunner::class)->run($manifest);
 
     $fresh = OciScanFinding::where('vulnerability_id', 'CVE-2026-2')->sole();
@@ -235,19 +239,19 @@ it('stamps first_seen_at now for a vulnerability that was not there before', fun
 });
 
 it('drops a finding a rescan no longer reports', function () {
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1'), vuln('CVE-2026-2')]));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1'), scanRunnerVuln('CVE-2026-2')]));
     app(ScanRunner::class)->run($manifest);
 
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($manifest);
 
     expect(OciScanFinding::pluck('vulnerability_id')->all())->toBe(['CVE-2026-1']);
 });
 
 it('keeps polling until the report is ready', function () {
-    $manifest = scannableManifest();
-    $scanner = new FakeScanner([vuln('CVE-2026-1')]);
+    $manifest = scanRunnerManifest();
+    $scanner = new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]);
     $scanner->pollsBeforeReady = 3;
     app()->instance(VulnerabilityScanner::class, $scanner);
 
@@ -260,7 +264,7 @@ it('fails the scan when the repository is in no registry', function () {
     // clean image.
     $package = Package::factory()->create(['type' => PackageType::Docker]);
     $manifest = OciManifest::factory()->for($package)->create();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner);
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner);
 
     $report = app(ScanRunner::class)->run($manifest);
 
@@ -271,7 +275,7 @@ it('fails the scan when the repository is in no registry', function () {
 it('runs one job per manifest however many tags point at it', function () {
     Bus::fake();
 
-    $manifest = scannableManifest();
+    $manifest = scanRunnerManifest();
 
     ScanOciArtifact::dispatch($manifest->id);
     ScanOciArtifact::dispatch($manifest->id);
@@ -283,8 +287,8 @@ it('runs one job per manifest however many tags point at it', function () {
 it('does nothing at all while scanning is switched off', function () {
     config(['kontorfix.scanner.enabled' => false]);
 
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
 
     app(ScanRunner::class)->run($manifest);
 
@@ -297,15 +301,15 @@ it('replaces the orphaned placeholder row once the scanner identifies itself', f
     // recovers, the real-named row it writes must be the ONLY row left for this manifest —
     // the placeholder must not survive beside it and shadow it under
     // orderByDesc('scanned_at') (NULLS FIRST on Postgres).
-    $manifest = scannableManifest();
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
     $failed = app(ScanRunner::class)->run($manifest);
 
     expect(OciScanReport::where('manifest_id', $manifest->id)->count())->toBe(1)
         ->and($failed->scanner_name)->toBe(ScanReportWriter::UNIDENTIFIED_SCANNER)
         ->and($failed->status)->toBe(ScanStatus::Failed);
 
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     $recovered = app(ScanRunner::class)->run($manifest);
 
     expect(OciScanReport::where('manifest_id', $manifest->id)->count())->toBe(1)
@@ -316,14 +320,14 @@ it('replaces the orphaned placeholder row once the scanner identifies itself', f
 it('does not touch another manifests placeholder row when cleaning up after a real name recovers', function () {
     // The cleanup in ScanReportWriter is scoped to ONE manifest. A placeholder sitting on a
     // manifest that is still failing must survive a successful scan of an unrelated one.
-    $stillFailing = scannableManifest('3b-a');
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $stillFailing = scanRunnerManifest('3b-a');
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
     app(ScanRunner::class)->run($stillFailing);
 
-    $recovers = scannableManifest('3b-b');
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([], ScannerException::notConfigured()));
+    $recovers = scanRunnerManifest('3b-b');
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([], ScannerException::notConfigured()));
     app(ScanRunner::class)->run($recovers);
-    app()->instance(VulnerabilityScanner::class, new FakeScanner([vuln('CVE-2026-1')]));
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]));
     app(ScanRunner::class)->run($recovers);
 
     $stillFailingRow = OciScanReport::where('manifest_id', $stillFailing->id)->sole();
@@ -334,9 +338,9 @@ it('does not touch another manifests placeholder row when cleaning up after a re
 });
 
 it('marks the manifest pending while the scan is in flight, and clean once it succeeds', function () {
-    $manifest = scannableManifest();
+    $manifest = scanRunnerManifest();
     $seenWhileInFlight = null;
-    $scanner = new FakeScanner([vuln('CVE-2026-1')]);
+    $scanner = new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-1')]);
     $scanner->onRequestScan = function () use ($manifest, &$seenWhileInFlight) {
         $seenWhileInFlight = OciScanReport::where('manifest_id', $manifest->id)->sole()->status;
     };
@@ -355,4 +359,68 @@ it('sizes the uniqueness lock to outlast the jobs own timeout', function () {
     $job = new ScanOciArtifact('some-manifest-id');
 
     expect($job->uniqueFor)->toBeGreaterThan($job->timeout);
+});
+
+it('hands the adapter the media type the manifest actually records', function () {
+    // The runner is where the true value is available: `OciManifest::$media_type` holds
+    // what was pushed, and every buildx/BuildKit push is an OCI manifest rather than the
+    // Docker schema 2 the adapter used to be told unconditionally.
+    $manifest = scanRunnerManifest();
+    $scanner = new ScanRunnerFakeScanner;
+    app()->instance(VulnerabilityScanner::class, $scanner);
+
+    app(ScanRunner::class)->run($manifest);
+
+    expect($scanner->target->mediaType)->toBe($manifest->media_type)
+        ->and($scanner->target->mediaType)->toBe('application/vnd.oci.image.manifest.v1+json');
+});
+
+/*
+ * ScanOciArtifact::handle() itself — the one method all three triggers (push, nightly,
+ * on-demand) funnel through.
+ *
+ * Every trigger test fakes the bus and every runner test calls `run()` directly, so container
+ * resolution, the eager load, the deleted-manifest no-op and the non-Docker gate had no
+ * execution coverage at all between them.
+ */
+it('scans a Docker manifest when the job itself is executed', function () {
+    $manifest = scanRunnerManifest();
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner([scanRunnerVuln('CVE-2026-42')]));
+
+    (new ScanOciArtifact($manifest->id))->handle(app(ScanRunner::class));
+
+    $report = OciScanReport::where('manifest_id', $manifest->id)->sole();
+
+    expect($report->status)->toBe(ScanStatus::Ok)
+        ->and($report->findings()->count())->toBe(1);
+});
+
+it('is a quiet no-op for a manifest deleted between dispatch and execution', function () {
+    // Retention running overnight is an ordinary reason for this. The manifest is carried
+    // by ID precisely so this is a no-op rather than a ModelNotFoundException per retry.
+    $manifest = scanRunnerManifest();
+    $manifestId = $manifest->id;
+    $manifest->delete();
+
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner);
+
+    (new ScanOciArtifact($manifestId))->handle(app(ScanRunner::class));
+
+    expect(OciScanReport::count())->toBe(0);
+});
+
+it('writes nothing for a manifest whose package is not Docker', function () {
+    // ScanRunner::scannable() is the v1 scope gate, and the job is where it is enforced —
+    // a non-Docker artifact must not even reach the runner, let alone acquire a report row.
+    $org = Organization::factory()->create(['slug' => '3b']);
+    $group = Group::factory()->for($org)->create(['slug' => 'intern']);
+    $package = Package::factory()->for($org)->create(['type' => PackageType::Composer, 'name' => 'meinapp']);
+    $group->packages()->attach($package->id);
+    $manifest = OciManifest::factory()->for($package)->create();
+
+    app()->instance(VulnerabilityScanner::class, new ScanRunnerFakeScanner);
+
+    (new ScanOciArtifact($manifest->id))->handle(app(ScanRunner::class));
+
+    expect(OciScanReport::count())->toBe(0);
 });

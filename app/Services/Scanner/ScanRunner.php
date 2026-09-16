@@ -58,7 +58,15 @@ final class ScanRunner
             $this->writer->recordPending($manifest, $metadata->name);
 
             $scanId = $this->scanner->requestScan(
-                new ScanTarget($this->repositoryPath($group, $manifest), $manifest->digest),
+                // The manifest's own media type, never a fabricated one: the registry
+                // stored what was pushed, and telling the adapter something else about the
+                // very artifact it is being asked to pull is the one input to the scan we
+                // can always state truthfully.
+                new ScanTarget(
+                    $this->repositoryPath($group, $manifest),
+                    $manifest->digest,
+                    mediaType: $manifest->media_type,
+                ),
                 new RegistryCredential($this->registryUrl(), $plain),
             );
 
