@@ -15,10 +15,17 @@ use Illuminate\Database\Eloquent\Builder;
  * Whether a registry refuses to serve an artifact, and what the operator would be doing to
  * their customers by switching that on.
  *
- * ONE predicate, asked twice. The refusal and the preview go through the same
- * `atOrAboveThreshold()` scope, because a preview that used its own comparison could
- * disagree with the outcome — and a preview nobody can trust is worse than none, since the
- * operator acts on it. This is the same discipline the licence preview already follows.
+ * The SEVERITY half of the rule is asked twice through one statement: the refusal and the
+ * preview both filter through `atOrAboveThreshold()`, because a preview that used its own
+ * severity comparison could disagree with the outcome — and a preview nobody can trust is
+ * worse than none, since the operator acts on it. This is the same discipline the licence
+ * preview already follows. The GRACE half cannot share a single statement the same way — SQL
+ * needs `first_seen_at <= now() - grace` to stay indexable, while `preview()` needs every
+ * candidate regardless of grace (grace only decides which column a row lands in) and
+ * `refuses()` needs an in-memory comparison over an already-loaded model — so both non-SQL
+ * call sites collapse onto `OciScanFinding::blocksAt()` instead: that method is the one place
+ * "known since when" turns into "blocked as of when", and every caller but the SQL query itself
+ * goes through it.
  *
  * Three facts decide a refusal, and none of them is "is this image bad":
  *
@@ -26,11 +33,11 @@ use Illuminate\Database\Eloquent\Builder;
  *  - a SUCCESSFUL scan reported a finding at or above it;
  *  - that finding has been known — `first_seen_at`, not scan time — longer than the grace.
  *
- * The rule is stated a THIRD time, unavoidably, in `refuses()`: an Eloquent query predicate
- * (`atOrAboveThreshold()`, used by both `blockingFinding()` and `preview()`) and an in-memory
- * predicate over an already-loaded model cannot literally be one statement. `refuses()` is
- * kept beside the two query-based callers rather than in, say, ScanCardPresenter, precisely
- * so a future edit to the rule sees all statements of it in one file.
+ * The rule is still stated a SECOND time for the grace half, unavoidably, in `refuses()`: SQL's
+ * `first_seen_at <= now() - grace` and `blocksAt($graceDays)->lte(now())` cannot literally be
+ * one statement. `refuses()` is kept beside the SQL query rather than in, say,
+ * ScanCardPresenter, precisely so a future edit to the rule sees both statements of it in one
+ * file — and the boundary-agreement test below is what keeps the two honest.
  */
 final class ScanBlockGuard
 {
@@ -68,10 +75,12 @@ final class ScanBlockGuard
      *
      * `$finding->severity` and `$finding->severity_rank` say the same thing by construction
      * (`OciScanFinding::booted()`), so comparing `severity` against the threshold here
-     * mirrors `severity_rank >= $threshold->rank()` in `atOrAboveThreshold()` exactly. This
-     * does NOT check the finding's report status — the caller is expected to already be
-     * looking at findings from an `Ok` report, the same way `preview()`'s `whereHas` filters
-     * before any finding reaches this comparison.
+     * mirrors `severity_rank >= $threshold->rank()` in `atOrAboveThreshold()` exactly. The
+     * grace half goes through `OciScanFinding::blocksAt()` — the same method `preview()` uses
+     * for its own `blocked` column — rather than re-deriving `first_seen_at` plus `grace_days`
+     * a third time. This does NOT check the finding's report status — the caller is expected
+     * to already be looking at findings from an `Ok` report, the same way `preview()`'s
+     * `whereHas` filters before any finding reaches this comparison.
      */
     public function refuses(OciScanFinding $finding, Group $group): bool
     {
@@ -82,7 +91,7 @@ final class ScanBlockGuard
         }
 
         return $finding->severity->atLeast($threshold)
-            && $finding->first_seen_at->lte(now()->subDays($group->scan_block_grace_days));
+            && $finding->blocksAt($group->scan_block_grace_days)->lte(now());
     }
 
     /**

@@ -139,7 +139,7 @@ final class OciException extends Exception
     public static function blockedByVulnerability(string $vulnerabilityId, string $severityLabel): self
     {
         return new self(403, 'DENIED', "Dieses Image wird nicht ausgeliefert: {$vulnerabilityId} ({$severityLabel}) "
-            .'ist seit länger als der zulässigen Schonfrist bekannt. Bauen Sie das Image mit einer aktualisierten '
+            .'ist länger bekannt, als die zulässige Schonfrist erlaubt. Bauen Sie das Image mit einer aktualisierten '
             .'Basis neu, oder lassen Sie die Blockierung für diese Registry anpassen.');
     }
 

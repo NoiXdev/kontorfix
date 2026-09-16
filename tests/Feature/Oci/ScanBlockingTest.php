@@ -230,30 +230,59 @@ it('previews nothing when no threshold is proposed', function () {
  * their image is fine while the registry refuses to serve it — so this test asserts the two
  * paths AGREE at the boundary rather than checking each against its own independently
  * written expectation.
+ *
+ * Time is frozen for the whole test: the boundary finding's `first_seen_at` is written as
+ * `now()->subDays(7)` and the guard later computes its own cutoff as `now()->subDays(7)` —
+ * without freezing, those two `now()` calls land at different instants (the write happens
+ * strictly before the read), so the row would always be a hair PAST the cutoff and the
+ * `<=` half of the rule would never actually be exercised at `=`. Freezing makes the two
+ * calls resolve to the same instant, which is the only way "exactly at the boundary" is a
+ * real condition here rather than "some very small amount of time past it".
+ *
+ * Frozen at the START of a second, specifically, not at whatever microsecond `now()` happens
+ * to land on: `OciScanFinding`'s `first_seen_at` cast round-trips new values through
+ * Carbon/Eloquent's `Y-m-d H:i:s` datetime format the moment they are set — with no database
+ * round-trip needed to see it — which truncates sub-second precision on the IN-MEMORY model
+ * attribute. Freezing at an arbitrary microsecond would make `$atBoundary->first_seen_at`
+ * (truncated) compare as strictly BEFORE `now()` (not truncated) even at the intended
+ * boundary, which silently hides the exact instant this test exists to pin. Starting the
+ * frozen instant at a whole second removes that gap: there is no fractional part left to lose.
+ *
+ * The two findings get their OWN manifest and report apiece: `blockingFinding()` returns
+ * only the single worst-then-earliest row for a manifest, so putting both findings on one
+ * manifest would make it answer only for whichever one sorts first, leaving the other
+ * checked against nothing but `refuses()`'s own output — exactly the "two independently
+ * written expectations" shape this test exists to avoid.
  */
 it('agrees between the SQL guard and the in-memory guard at the exact boundary', function () {
-    [$group, , $manifest] = blockingFixture();
-    $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
+    $this->travelTo(now()->startOfSecond());
 
-    $report = OciScanReport::factory()->for($manifest, 'manifest')->create(['status' => ScanStatus::Ok]);
+    [$group, $package, $manifestAtBoundary] = blockingFixture();
+    $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
 
     // Severity exactly at the threshold, first_seen_at exactly at the grace cutoff — the
     // rule is "at or above" / "at or before", so this finding must block under both paths.
-    $atBoundary = OciScanFinding::factory()->for($report, 'report')
+    $reportAtBoundary = OciScanReport::factory()->for($manifestAtBoundary, 'manifest')->create(['status' => ScanStatus::Ok]);
+    $atBoundary = OciScanFinding::factory()->for($reportAtBoundary, 'report')
         ->severity(VulnerabilitySeverity::High)
         ->create(['first_seen_at' => now()->subDays(7), 'vulnerability_id' => 'CVE-AT-BOUNDARY']);
 
-    // One second inside the grace period — must NOT block under either path.
-    $insideGrace = OciScanFinding::factory()->for($report, 'report')
+    // A second, independent manifest one second inside the grace period — must NOT block
+    // under either path.
+    $manifestInsideGrace = OciManifest::factory()->for($package)->create([
+        'digest' => 'sha256:'.str_repeat('e', 64),
+    ]);
+    $reportInsideGrace = OciScanReport::factory()->for($manifestInsideGrace, 'manifest')->create(['status' => ScanStatus::Ok]);
+    $insideGrace = OciScanFinding::factory()->for($reportInsideGrace, 'report')
         ->severity(VulnerabilitySeverity::High)
         ->create(['first_seen_at' => now()->subDays(7)->addSecond(), 'vulnerability_id' => 'CVE-INSIDE-GRACE']);
 
     $guard = app(ScanBlockGuard::class);
 
-    $sqlVerdict = $guard->blockingFinding($manifest, $group);
-
-    expect($sqlVerdict?->vulnerability_id)->toBe('CVE-AT-BOUNDARY')
-        ->and($guard->refuses($atBoundary, $group))->toBe($sqlVerdict !== null && $sqlVerdict->is($atBoundary))
+    expect($guard->refuses($atBoundary, $group))
+        ->toBe($guard->blockingFinding($manifestAtBoundary, $group) !== null)
         ->and($guard->refuses($atBoundary, $group))->toBeTrue()
+        ->and($guard->refuses($insideGrace, $group))
+        ->toBe($guard->blockingFinding($manifestInsideGrace, $group) !== null)
         ->and($guard->refuses($insideGrace, $group))->toBeFalse();
 });
