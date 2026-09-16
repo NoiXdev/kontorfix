@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\PackageType;
+use App\Enums\ScanStatus;
 use App\Enums\TokenAbility;
 use App\Jobs\ScanOciArtifact;
 use App\Models\Group;
@@ -109,6 +110,72 @@ it('rescans the never-scanned first, then the stalest', function () {
     Queue::assertPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $never->id);
     Queue::assertPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $old->id);
     Queue::assertNotPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $fresh->id);
+});
+
+it('rotates past a manifest whose every scan fails instead of pinning it to the head forever', function () {
+    // `latest_scanned_at` is MAX(scanned_at), and ScanReportWriter::recordFailure() never
+    // writes that column — so a manifest whose every attempt fails keeps NULL forever and
+    // used to sort as "never scanned" on EVERY run, deterministically the same rows first.
+    // With as many such manifests as the budget allows (a repository detached from every
+    // registry records "keiner Registry zugeordnet" on every run, no exotic setup needed),
+    // no healthy image is ever rescanned again — while `scanner-freshness` stays green,
+    // because it asks for the newest successful scan ANYWHERE and fresh pushes keep
+    // supplying one.
+    Queue::fake();
+    [, $package] = scanTriggerFixture();
+
+    // Created FIRST, so it wins the `oci_manifests.id` tie-break the old ordering fell
+    // through to once both rows sorted as null.
+    $alwaysFails = OciManifest::factory()->for($package)->create();
+    OciScanReport::factory()->for($alwaysFails, 'manifest')->create([
+        'status' => ScanStatus::Failed, 'scanned_at' => null, 'failed_at' => now()->subHour(),
+    ]);
+
+    $neverScanned = OciManifest::factory()->for($package)->create();
+
+    artisan('oci:scan', ['--limit' => 1])->assertSuccessful();
+
+    Queue::assertPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $neverScanned->id);
+    Queue::assertNotPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $alwaysFails->id);
+
+    // The never-scanned one now fails too — both manifests can only ever fail. The budget
+    // must move on to the one attempted longest ago rather than handing the same row the
+    // whole run again.
+    OciScanReport::factory()->for($neverScanned, 'manifest')->create([
+        'status' => ScanStatus::Failed, 'scanned_at' => null, 'failed_at' => now(),
+    ]);
+
+    Queue::fake();
+
+    artisan('oci:scan', ['--limit' => 1])->assertSuccessful();
+
+    Queue::assertPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $alwaysFails->id);
+    Queue::assertNotPushed(ScanOciArtifact::class, fn (ScanOciArtifact $j): bool => $j->manifestId === $neverScanned->id);
+});
+
+it('counts only manifests that still need a scan as left behind', function () {
+    // This warning is the ONLY signal that the rotation is not keeping up. Counting every
+    // Docker manifest made it fire every night on any registry larger than the budget —
+    // including one where everything had been verified hours earlier — which is how an
+    // operator learns to ignore it.
+    Queue::fake();
+    [, $package] = scanTriggerFixture();
+
+    $stale = OciManifest::factory()->count(2)->for($package)->create();
+    $fresh = OciManifest::factory()->count(5)->for($package)->create();
+
+    foreach ($stale as $manifest) {
+        OciScanReport::factory()->for($manifest, 'manifest')->create(['scanned_at' => now()->subDays(30)]);
+    }
+
+    foreach ($fresh as $manifest) {
+        OciScanReport::factory()->for($manifest, 'manifest')->create(['scanned_at' => now()->subHour()]);
+    }
+
+    // The budget reaches one of the two stale manifests; exactly one stale manifest is left.
+    artisan('oci:scan', ['--limit' => 1])
+        ->expectsOutputToContain('1 Manifest(e) mit veraltetem Befund')
+        ->assertSuccessful();
 });
 
 it('says how many manifests the budget left behind', function () {
@@ -261,4 +328,35 @@ it('answers a plain form submission for a foreign digest with a redirect and a s
         ->assertSessionHasErrors('digest');
 
     Queue::assertNothingPushed();
+});
+
+it('runs on a queue of its own so a hung scanner cannot starve every other job', function () {
+    // ScanRunner::poll() blocks its worker for the whole poll budget against an adapter
+    // that accepted the scan and never reports. On the shared `default` queue, a nightly
+    // run of 200 such jobs holds every production process for hours and nothing else on
+    // the instance runs. Its own supervisor bounds that to its own pool.
+    expect((new ScanOciArtifact('01HZZZZZZZZZZZZZZZZZZZZZZZ'))->queue)->toBe(ScanOciArtifact::QUEUE);
+
+    /** @var array<string, array<string, mixed>> $supervisors */
+    $supervisors = config('horizon.defaults');
+
+    $scanPool = collect($supervisors)->filter(
+        fn (array $options): bool => in_array(ScanOciArtifact::QUEUE, (array) $options['queue'], true)
+    );
+
+    expect($scanPool)->toHaveCount(1);
+    // Small on purpose: more workers would only mean more of them parked on a dead adapter.
+    expect($scanPool->first()['maxProcesses'])->toBeLessThanOrEqual(2);
+    // And the shared pool must not pick the queue up as well, or the isolation is nominal.
+    expect((array) $supervisors['supervisor-1']['queue'])->not->toContain(ScanOciArtifact::QUEUE);
+    // Every environment Horizon provisions gets it — ProvisioningPlan::applyDefaultOptions()
+    // array_replace_recursive()s `defaults` into each entry of `environments`, so a local or
+    // e2e `php artisan horizon` processes the queue without its own entry.
+    foreach (array_keys((array) config('horizon.environments')) as $environment) {
+        $merged = array_replace_recursive($supervisors, (array) config('horizon.environments.'.$environment));
+
+        expect(collect($merged)->contains(
+            fn (array $options): bool => in_array(ScanOciArtifact::QUEUE, (array) $options['queue'], true)
+        ))->toBeTrue();
+    }
 });

@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ScanOciArtifact;
 use App\Jobs\SyncPackage;
 use Illuminate\Support\Str;
 
@@ -99,6 +100,11 @@ return [
 
     'waits' => [
         'redis:default' => 60,
+        // Deliberately far more slack than `default`: one ScanOciArtifact legitimately
+        // occupies its worker for the whole poll budget (kontorfix.scanner.timeout), so a
+        // short threshold here would alert on a scanner that is merely slow rather than on
+        // a queue that is actually backing up.
+        'redis:'.ScanOciArtifact::QUEUE => 1800,
     ],
 
     /*
@@ -237,12 +243,61 @@ return [
             'timeout' => SyncPackage::TIMEOUT,
             'nice' => 0,
         ],
+
+        /*
+         * App\Jobs\ScanOciArtifact alone, on a queue of its own.
+         *
+         * That job blocks its worker inside ScanRunner::poll() for up to
+         * kontorfix.scanner.timeout waiting on an adapter that accepted the scan and never
+         * answers — a real and observed scanner failure mode. Left on `default`, a nightly
+         * rescan of 200 manifests would hold all ten production processes for hours and
+         * stop every other job on the instance (SyncPackage, DeliverWebhook,
+         * SendNotificationDigest, SyncMirrorPackage, SweepOciStorage). Its own supervisor
+         * with a small pool bounds a scanner outage to the scans themselves.
+         *
+         * Listed in `defaults` and therefore provisioned in EVERY environment —
+         * Laravel\Horizon\ProvisioningPlan::applyDefaultOptions() array_replace_recursive()s
+         * these into each entry of `environments`, so a local or e2e `php artisan horizon`
+         * picks the queue up without a per-environment entry. Production raises only the
+         * process count below.
+         *
+         * `maxProcesses` is small on purpose: scans are the one workload here whose latency
+         * nobody is waiting on, and a bigger pool would only mean more workers parked on a
+         * dead adapter.
+         *
+         * The timeout mirrors App\Jobs\ScanOciArtifact's own `$uniqueFor` margin over the
+         * poll budget, so the supervisor-level kill paths (ProcessPool's hang-stop and the
+         * master supervisor's terminate wait — see supervisor-1's own note) outlast the job
+         * they are supervising instead of cutting a legitimately slow scan short. Read from
+         * env directly because a config file cannot read another config file.
+         */
+        'supervisor-scans' => [
+            'connection' => 'redis',
+            'queue' => [ScanOciArtifact::QUEUE],
+            'balance' => 'auto',
+            'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => (int) (env('KONTORFIX_SCANNER_TIMEOUT') ?: 600) + 300,
+            'nice' => 0,
+        ],
     ],
 
     'environments' => [
         'production' => [
             'supervisor-1' => [
                 'maxProcesses' => 10,
+                'balanceMaxShift' => 1,
+                'balanceCooldown' => 3,
+            ],
+
+            // Two, not ten: a scanner that accepts scans and never reports parks a worker
+            // for the whole poll budget, and the cost of that outage has to stay bounded.
+            'supervisor-scans' => [
+                'maxProcesses' => 2,
                 'balanceMaxShift' => 1,
                 'balanceCooldown' => 3,
             ],

@@ -23,6 +23,21 @@ class ScanOciArtifact implements ShouldBeUnique, ShouldQueue
     use Queueable;
 
     /**
+     * Its OWN queue, never the shared `default` one — and the reason is this job's poll
+     * loop. ScanRunner::poll() blocks a worker for up to `kontorfix.scanner.timeout`
+     * (600s by default) waiting for an adapter that accepted the scan but never answers
+     * with a report. On the single `default` queue that config/horizon.php provisions with
+     * ten processes in production, a nightly run of 200 such jobs occupies every worker for
+     * hours, and SyncPackage, DeliverWebhook, SendNotificationDigest, SyncMirrorPackage and
+     * SweepOciStorage simply stop running for the duration. A scanner outage is the
+     * scanner's problem; it must not become the whole instance's.
+     *
+     * config/horizon.php provisions `supervisor-scans` for exactly this queue, with a small
+     * process pool of its own, so the blast radius of a hung adapter is that pool.
+     */
+    public const QUEUE = 'scans';
+
+    /**
      * Declared, never inherited: config/horizon.php raises the supervisor timeout to
      * SyncPackage's 900s and Worker::timeoutForJob() hands that to any job that declares
      * none. Sized to outlast the runner's own poll budget plus its final write, so the
@@ -49,6 +64,8 @@ class ScanOciArtifact implements ShouldBeUnique, ShouldQueue
         // job itself is sized for, or it could expire while a legitimately slow scan is
         // still running and let a duplicate job start alongside it.
         $this->uniqueFor = $pollBudget + 300;
+
+        $this->onQueue(self::QUEUE);
     }
 
     public function uniqueId(): string
