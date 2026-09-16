@@ -30,6 +30,15 @@ class ScanController extends Controller
     {
         $this->assertCanTouchPackage($package);
 
+        // Same guard and the same German wording `oci:scan` already uses. Dispatching anyway
+        // would flash "eingereiht" while ScanRunner::run() returns null without writing a
+        // verdict — the operator would be left waiting for a result that can never arrive.
+        abort_if(
+            ! config('kontorfix.scanner.enabled', false),
+            409,
+            'Die Schwachstellenprüfung ist deaktiviert (KONTORFIX_SCANNER_ENABLED).',
+        );
+
         $data = $request->validate(['digest' => ['required', 'string', 'regex:/^sha256:[a-f0-9]{64}$/']]);
 
         // Resolved WITHIN this package. A digest is only unique per repository, so a global

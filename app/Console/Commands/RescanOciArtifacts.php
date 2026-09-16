@@ -35,7 +35,22 @@ class RescanOciArtifacts extends Command
             return self::SUCCESS;
         }
 
-        $limit = (int) ($this->option('limit') ?: config('kontorfix.scanner.rescan_limit', 200));
+        // Same shape as `oci:sweep`'s own guard, and for the same reason: `--limit=-1`
+        // would otherwise reach Builder::limit(), which silently ignores a negative value
+        // and enqueues the ENTIRE candidate set in one tick — exactly what a budget exists
+        // to prevent. `--limit=abc` casts to 0, which queues nothing and reports the whole
+        // registry as "left behind" — equally wrong in the other direction. Refused with a
+        // non-zero exit rather than clamped, so a typo'd cron entry is loud instead of
+        // quietly running under a different budget than the operator intended.
+        $limit = $this->option('limit') !== null
+            ? (int) $this->option('limit')
+            : (int) config('kontorfix.scanner.rescan_limit', 200);
+
+        if ($limit < 1) {
+            $this->error('Das Budget muss mindestens 1 Manifest betragen.');
+
+            return self::FAILURE;
+        }
 
         // `oci_scan_reports` carries one row per (manifest, scanner) by design — an instance
         // that switched scanners leaves both scanners' rows behind on the same manifest. A
@@ -48,6 +63,14 @@ class RescanOciArtifacts extends Command
         // the ordering: MAX() ignores NULLs, so a manifest whose only rows are unscanned
         // (never-succeeded) attempts still sorts as null, alongside one with no report row
         // at all.
+        //
+        // MAX rather than MIN, deliberately: MIN would let a manifest carrying one ancient
+        // row from a retired, long-swapped-out scanner sort at the head of every nightly run
+        // forever, however recently the CURRENT scanner verified it — the stale row would
+        // starve everything else of the budget indefinitely. MAX's failure mode is the
+        // opposite and bounded: right after a scanner swap such a manifest is deprioritised
+        // (it now looks "recently scanned" via the retired scanner's row) until that row
+        // ages past its peers, a one-time, self-correcting cost rather than a permanent one.
         $latestScans = OciScanReport::query()
             ->selectRaw('manifest_id, MAX(scanned_at) as latest_scanned_at')
             ->groupBy('manifest_id');

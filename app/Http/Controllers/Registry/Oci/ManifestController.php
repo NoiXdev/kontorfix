@@ -12,6 +12,8 @@ use App\Services\RegistryAccessService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Manifests and tags: the part that turns the layers Task 4's blob protocol uploaded into a
@@ -97,8 +99,22 @@ class ManifestController extends Controller
         // commits — the worker then finds no manifest and the push silently goes unscanned.
         // Gated here rather than in the job so a disabled scanner costs no queue traffic at
         // all; the job re-checks anyway, because a config change can land between the two.
+        //
+        // The manifest is already committed by this point, so a dispatch failure here (the
+        // queue connection down, Redis unreachable, …) must not turn a successful push into
+        // a 500 — the client stored its image and is entitled to believe that. The failure is
+        // logged rather than silently discarded, and the nightly `oci:scan` is the backstop:
+        // it sorts never-scanned manifests first, so a dropped dispatch self-heals within a
+        // day without anyone having to notice or retry it by hand.
         if (config('kontorfix.scanner.enabled', false) && $package->type === PackageType::Docker) {
-            ScanOciArtifact::dispatch($manifest->id);
+            try {
+                ScanOciArtifact::dispatch($manifest->id);
+            } catch (Throwable $e) {
+                Log::warning('Konnte den Schwachstellen-Scan nach dem Push nicht einreihen.', [
+                    'manifest_id' => $manifest->id,
+                    'exception' => $e,
+                ]);
+            }
         }
 
         // Addressed name, not the bare one: on a path-namespaced address a Location built
