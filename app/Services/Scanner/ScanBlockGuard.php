@@ -11,6 +11,7 @@ use App\Models\OciScanFinding;
 use App\Models\OciTag;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * Whether a registry refuses to serve an artifact, and what the operator would be doing to
@@ -42,6 +43,16 @@ use Illuminate\Support\Carbon;
  */
 final class ScanBlockGuard
 {
+    /**
+     * How many artifacts `preview()` NAMES at most.
+     *
+     * The list is an illustration, not an inventory: it exists so the operator can recognise
+     * what they are about to affect, and fifty rows is already more than anyone reads. The
+     * COUNTS beside it are exact regardless, and `artifacts_total` is what lets the screen
+     * say how much it is not showing.
+     */
+    private const ARTIFACT_LIMIT = 50;
+
     /**
      * The worst finding that refuses this artifact in this registry, or null.
      *
@@ -137,7 +148,28 @@ final class ScanBlockGuard
      * `blocking_later` is the half that makes the grace period legible: those artifacts are
      * not refused today, and the date says when that changes.
      *
-     * @return array{threshold: ?string, grace_days: int, blocking_now: int, blocking_later: int, artifacts: list<array<string, mixed>>}
+     * BOUNDED, in every direction, because of where this runs. The settings screen fires it
+     * on a debounced keystroke — up to ten times a minute per operator — against the same
+     * database the pull path uses, and a Debian-based image routinely carries 500-1500 CVEs.
+     * Hydrating every qualifying finding in the registry (50 repositories x 20 manifests is
+     * 10^5-10^6 rows) turned the one screen the operator needs before switching blocking on
+     * into a 500. So:
+     *
+     *  - `blocking_now` / `blocking_later` are COUNT queries over distinct manifests. They
+     *    stay exact however large the registry is, and no row is hydrated to produce them.
+     *  - the NAMED list is capped at ARTIFACT_LIMIT manifests, chosen worst-first by a
+     *    grouped query that returns at most that many ids and hydrates nothing.
+     *  - the two per-manifest facts each row needs — which finding to name, and which one's
+     *    grace runs out first — come from ONE row per manifest each, via Postgres
+     *    `DISTINCT ON`, never from the manifest's whole finding set. So a manifest with 1500
+     *    findings costs two rows here, not 1500, and `blocks_at` is still computed over the
+     *    real earliest-known finding rather than over an arbitrarily truncated subset (which
+     *    is how a capped list would otherwise start contradicting `blocking_now`).
+     *
+     * `artifacts_total` is what lets the screen say "… und N weitere" honestly: the list is
+     * a bounded view, the counts are the whole registry.
+     *
+     * @return array{threshold: ?string, grace_days: int, blocking_now: int, blocking_later: int, artifacts_total: int, artifacts: list<array<string, mixed>>}
      */
     public function preview(Group $group, ?VulnerabilitySeverity $threshold, int $graceDays): array
     {
@@ -146,6 +178,7 @@ final class ScanBlockGuard
             'grace_days' => $graceDays,
             'blocking_now' => 0,
             'blocking_later' => 0,
+            'artifacts_total' => 0,
             'artifacts' => [],
         ];
 
@@ -153,7 +186,12 @@ final class ScanBlockGuard
             return $empty;
         }
 
-        $packageIds = $group->packages()
+        // assignedPackages(), not packages(): every serve-time predicate in this codebase
+        // asks the expiry-filtered relation (see Group::assignedPackages()'s own docblock,
+        // which names itself the one statement of that rule), and a preview counting images
+        // this registry has already stopped serving would put the operator back to guessing
+        // which of the listed artifacts the change actually affects.
+        $packageIds = $group->assignedPackages()
             ->where('packages.type', PackageType::Docker)
             ->pluck('packages.id');
 
@@ -161,23 +199,26 @@ final class ScanBlockGuard
             return $empty;
         }
 
-        // Every candidate, grace ignored — the grace decides which COLUMN a row lands in,
-        // not whether it is shown. An operator has to see what is coming, not only what has
-        // already arrived.
-        $candidates = $this->atOrAboveThreshold($threshold, graceDays: null)
-            ->with(['report.manifest.package:id,name'])
-            ->whereHas('report', fn (Builder $q) => $q
-                ->where('status', ScanStatus::Ok)
-                ->whereHas('manifest', fn (Builder $m) => $m->whereIn('package_id', $packageIds)))
-            ->orderByDesc('severity_rank')
-            ->orderBy('first_seen_at')
-            ->get()
-            // A candidate whose manifest relation did not resolve (an orphaned report row)
-            // names nothing to group by and nothing to show — dropped here, once, rather
-            // than guarded again at every read below.
-            ->filter(fn (OciScanFinding $f): bool => $f->report?->manifest !== null);
+        // Exact, and independent of the capped list below. Grace applied = what would be
+        // refused the moment this is saved; grace ignored = everything that qualifies at
+        // all, so the difference is what is still inside its grace period.
+        $blockingNow = $this->qualifyingManifestCount($packageIds, $threshold, $graceDays);
+        $blockingTotal = $this->qualifyingManifestCount($packageIds, $threshold, null);
 
-        $tagsByManifest = OciTag::whereIn('manifest_id', $candidates->pluck('report.manifest_id')->unique())
+        $manifestIds = $this->worstManifestIds($packageIds, $threshold);
+
+        // The finding each row NAMES — worst severity, earliest first_seen breaking a tie.
+        // Naming which CVE to show is a different question from `blocks_at`: it does not
+        // have to be the finding whose grace runs out first, only the one worth telling the
+        // operator to act on.
+        $named = $this->onePerManifest($manifestIds, $threshold, worstFirst: true);
+        // The finding whose grace runs out FIRST — see earliestBlockAt()'s own doc for why
+        // that is not always the worst-severity one.
+        $earliest = $this->onePerManifest($manifestIds, $threshold, worstFirst: false);
+
+        $manifests = OciManifest::with('package:id,name')->whereIn('id', $manifestIds)->get()->keyBy('id');
+
+        $tagsByManifest = OciTag::whereIn('manifest_id', $manifestIds)
             ->get()
             ->groupBy('manifest_id')
             ->map(fn ($tags) => $tags->pluck('name')->sort()->values()->all());
@@ -185,34 +226,28 @@ final class ScanBlockGuard
         $now = now();
         $artifacts = [];
 
-        // One row per MANIFEST — grouping preserves the query's own worst-first,
-        // earliest-first_seen order, so the first GROUP encountered is still the manifest
-        // carrying the single worst candidate overall, the same ordering the old per-row
-        // loop produced.
-        $byManifest = $candidates->groupBy(fn (OciScanFinding $f): string => (string) $f->report->manifest_id);
+        foreach ($manifestIds as $manifestId) {
+            $manifest = $manifests->get($manifestId);
+            $finding = $named->get($manifestId);
+            $earliestFinding = $earliest->get($manifestId);
 
-        foreach ($byManifest as $manifestFindings) {
-            // The finding this row NAMES — worst severity first, earliest first_seen
-            // breaking a tie, the ordering the query above already sorted by and groupBy()
-            // preserves within each group. Naming which CVE to show is a different question
-            // from `blocks_at` below: it does not have to be the finding whose grace runs
-            // out first, only the one worth telling the operator to act on.
-            $finding = $manifestFindings->first();
-            $manifest = $finding->report->manifest;
-
-            // Over EVERY candidate this manifest carries, not just the named one — see
-            // earliestBlockAt()'s own doc for why the worst-severity finding and the one
-            // whose grace runs out first are not always the same finding.
-            $blocksAt = $this->earliestBlockAt($manifestFindings, $threshold, $graceDays);
-
-            if ($blocksAt === null) {
-                // Cannot happen — every member of $manifestFindings already passed
-                // atOrAboveThreshold() — but this stays honest about that rather than
-                // asserting it with a non-null assumption the next edit could invalidate.
+            // A report row whose manifest no longer resolves names nothing to show. Cannot
+            // normally happen — the ranking query inner-joins oci_manifests — but this stays
+            // honest about it rather than asserting it with a non-null assumption.
+            if ($manifest === null || $finding === null || $earliestFinding === null) {
                 continue;
             }
 
-            $artifacts[$manifest->id] = [
+            // Through the SAME shared method ScanCardPresenter uses, over the one finding the
+            // database already reduced to the minimum — so the operator's preview and the
+            // customer-facing card cannot name two different cut-off dates for one image.
+            $blocksAt = $this->earliestBlockAt([$earliestFinding], $threshold, $graceDays);
+
+            if ($blocksAt === null) {
+                continue;
+            }
+
+            $artifacts[] = [
                 'package' => $manifest->package?->name,
                 'digest' => $manifest->digest,
                 'tags' => $tagsByManifest->get($manifest->id, []),
@@ -224,15 +259,110 @@ final class ScanBlockGuard
             ];
         }
 
-        $artifacts = array_values($artifacts);
-
         return [
             'threshold' => $threshold->value,
             'grace_days' => $graceDays,
-            'blocking_now' => count(array_filter($artifacts, fn (array $a): bool => $a['blocked'])),
-            'blocking_later' => count(array_filter($artifacts, fn (array $a): bool => ! $a['blocked'])),
+            'blocking_now' => $blockingNow,
+            'blocking_later' => max(0, $blockingTotal - $blockingNow),
+            'artifacts_total' => $blockingTotal,
             'artifacts' => $artifacts,
         ];
+    }
+
+    /**
+     * How many DISTINCT manifests of these packages carry a qualifying finding.
+     *
+     * A count query rather than `count()` over a hydrated collection, so the two numbers the
+     * operator actually acts on stay exact no matter how far the listed artifacts are capped.
+     * Joined rather than `whereHas`ed because the join to `oci_manifests` is also what drops
+     * a report row whose manifest is gone.
+     *
+     * @param  Collection<int, string>  $packageIds
+     * @param  int|null  $graceDays  null = ignore the grace, i.e. everything that qualifies at all
+     */
+    private function qualifyingManifestCount(Collection $packageIds, VulnerabilitySeverity $threshold, ?int $graceDays): int
+    {
+        return $this->qualifying($packageIds, $threshold, $graceDays)
+            ->distinct()
+            ->count('oci_scan_reports.manifest_id');
+    }
+
+    /**
+     * The manifests the preview NAMES, worst first — at most ARTIFACT_LIMIT of them.
+     *
+     * Grouped in the database and plucked as bare ids: picking which manifests to show must
+     * not itself hydrate the finding set this method exists to avoid loading.
+     *
+     * @param  Collection<int, string>  $packageIds
+     * @return list<string>
+     */
+    private function worstManifestIds(Collection $packageIds, VulnerabilitySeverity $threshold): array
+    {
+        /** @var list<string> $ids */
+        $ids = $this->qualifying($packageIds, $threshold, graceDays: null)
+            ->groupBy('oci_scan_reports.manifest_id')
+            ->select('oci_scan_reports.manifest_id')
+            ->selectRaw('max(oci_scan_findings.severity_rank) as worst_rank, min(oci_scan_findings.first_seen_at) as earliest_seen')
+            ->orderByDesc('worst_rank')
+            ->orderBy('earliest_seen')
+            ->limit(self::ARTIFACT_LIMIT)
+            ->pluck('manifest_id')
+            ->all();
+
+        return $ids;
+    }
+
+    /**
+     * Exactly one qualifying finding per manifest, via Postgres `DISTINCT ON`.
+     *
+     * The whole point is the row count: with `$worstFirst` the row is the one the preview
+     * names, without it the row is the one whose grace expires first, and either way a
+     * manifest carrying 1500 findings contributes one row rather than 1500.
+     *
+     * @param  list<string>  $manifestIds
+     * @return Collection<string, OciScanFinding> keyed by manifest id
+     */
+    private function onePerManifest(array $manifestIds, VulnerabilitySeverity $threshold, bool $worstFirst): Collection
+    {
+        if ($manifestIds === []) {
+            return collect();
+        }
+
+        $query = $this->atOrAboveThreshold($threshold, graceDays: null)
+            ->join('oci_scan_reports', 'oci_scan_reports.id', '=', 'oci_scan_findings.report_id')
+            ->where('oci_scan_reports.status', ScanStatus::Ok)
+            ->whereIn('oci_scan_reports.manifest_id', $manifestIds)
+            ->select('oci_scan_findings.*', 'oci_scan_reports.manifest_id as preview_manifest_id')
+            ->distinct(['oci_scan_reports.manifest_id'])
+            // `DISTINCT ON` requires its own expression to lead the ordering; what follows it
+            // is what decides WHICH row of each manifest survives.
+            ->orderBy('oci_scan_reports.manifest_id');
+
+        $query = $worstFirst
+            ? $query->orderByDesc('oci_scan_findings.severity_rank')->orderBy('oci_scan_findings.first_seen_at')
+            : $query->orderBy('oci_scan_findings.first_seen_at')->orderByDesc('oci_scan_findings.severity_rank');
+
+        /** @var Collection<string, OciScanFinding> $rows */
+        $rows = $query->get()->keyBy('preview_manifest_id');
+
+        return $rows;
+    }
+
+    /**
+     * Every qualifying finding of these packages, as a joined query — the shared body of the
+     * count, the ranking and (via atOrAboveThreshold) the per-manifest reads above, so the
+     * three can never come to disagree about which finding qualifies.
+     *
+     * @param  Collection<int, string>  $packageIds
+     * @return Builder<OciScanFinding>
+     */
+    private function qualifying(Collection $packageIds, VulnerabilitySeverity $threshold, ?int $graceDays): Builder
+    {
+        return $this->atOrAboveThreshold($threshold, $graceDays)
+            ->join('oci_scan_reports', 'oci_scan_reports.id', '=', 'oci_scan_findings.report_id')
+            ->join('oci_manifests', 'oci_manifests.id', '=', 'oci_scan_reports.manifest_id')
+            ->where('oci_scan_reports.status', ScanStatus::Ok)
+            ->whereIn('oci_manifests.package_id', $packageIds);
     }
 
     /**
@@ -245,10 +375,13 @@ final class ScanBlockGuard
      */
     private function atOrAboveThreshold(VulnerabilitySeverity $threshold, ?int $graceDays): Builder
     {
-        $query = OciScanFinding::query()->where('severity_rank', '>=', $threshold->rank());
+        // Table-qualified: preview()'s reads join `oci_scan_reports` and `oci_manifests` into
+        // the same query, and an unqualified column name there is one added column away from
+        // becoming ambiguous — or, worse, from silently binding to the wrong table.
+        $query = OciScanFinding::query()->where('oci_scan_findings.severity_rank', '>=', $threshold->rank());
 
         if ($graceDays !== null) {
-            $query->where('first_seen_at', '<=', now()->subDays($graceDays));
+            $query->where('oci_scan_findings.first_seen_at', '<=', now()->subDays($graceDays));
         }
 
         return $query;

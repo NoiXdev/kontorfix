@@ -7,7 +7,7 @@ import { postPreviewJson } from '@/composables/previewTransport';
 import { SEVERITY_OPTIONS, severityClass, type Severity } from '@/lib/severity';
 import { useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { parseScanPreview, scanBlockingPayload, type ScanPreview } from '../scanBlocking';
+import { hiddenArtifacts, parseScanPreview, scanBlockingPayload, type ScanPreview } from '../scanBlocking';
 
 const props = defineProps<{
     groupId: string;
@@ -130,6 +130,13 @@ const scannerDisabledHint = computed<string | null>(() => {
         : 'Für diese Instanz ist keine Schwachstellenprüfung eingerichtet. Es werden keine neuen Scans ausgeführt.';
 });
 
+/**
+ * The tail of a capped list, as a sentence rather than as silence. `ScanBlockGuard::preview()`
+ * names at most fifty artifacts however many qualify; without this the operator would read a
+ * list of fifty as the complete answer while `blocking_now` said otherwise.
+ */
+const hiddenCount = computed<number>(() => (preview.value === null ? 0 : hiddenArtifacts(preview.value)));
+
 function save(): void {
     form.transform((data) => scanBlockingPayload(data.scan_block_severity, data.scan_block_grace_days)).put(
         route('admin.groups.scan-blocking', props.groupId),
@@ -199,6 +206,7 @@ function save(): void {
                             </span>
                         </li>
                     </ul>
+                    <p v-if="hiddenCount > 0" class="text-muted-foreground">… und {{ hiddenCount }} weitere.</p>
                     <p v-if="preview.artifacts.length === 0" class="text-muted-foreground">
                         Mit dieser Einstellung würde derzeit kein Image blockiert.
                     </p>

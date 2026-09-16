@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseScanPreview, scanBlockingPayload } from './scanBlocking';
+import { hiddenArtifacts, parseScanPreview, scanBlockingPayload } from './scanBlocking';
 
 describe('parseScanPreview', () => {
     it('parses a well-formed preview response', () => {
@@ -14,20 +14,42 @@ describe('parseScanPreview', () => {
             blocks_at: '2026-01-01',
         };
 
-        expect(parseScanPreview({ blocking_now: 1, blocking_later: 2, artifacts: [artifact] })).toEqual({
+        expect(parseScanPreview({ blocking_now: 1, blocking_later: 2, artifacts_total: 3, artifacts: [artifact] })).toEqual({
             blocking_now: 1,
             blocking_later: 2,
+            artifacts_total: 3,
             artifacts: [artifact],
         });
     });
 
+    it('falls back to the list length when the body names no total', () => {
+        // Never 0: `hiddenArtifacts()` would then report a negative remainder, which reads
+        // as "we are showing more artifacts than exist".
+        const artifact = { digest: 'sha256:abc' } as never;
+
+        expect(parseScanPreview({ artifacts: [artifact, artifact] }).artifacts_total).toBe(2);
+    });
+
     it('defaults every field rather than throwing on a malformed body', () => {
-        expect(parseScanPreview({})).toEqual({ blocking_now: 0, blocking_later: 0, artifacts: [] });
+        expect(parseScanPreview({})).toEqual({ blocking_now: 0, blocking_later: 0, artifacts_total: 0, artifacts: [] });
         expect(parseScanPreview({ blocking_now: 'not a number', artifacts: 'not an array' })).toEqual({
             blocking_now: 0,
             blocking_later: 0,
+            artifacts_total: 0,
             artifacts: [],
         });
+    });
+});
+
+describe('hiddenArtifacts', () => {
+    it('reports how many qualifying artifacts the capped list leaves out', () => {
+        // `ScanBlockGuard::preview()` names at most fifty artifacts however many qualify, so
+        // the screen has to say so — a list of fifty must not read as the whole answer.
+        expect(hiddenArtifacts({ blocking_now: 60, blocking_later: 0, artifacts_total: 60, artifacts: new Array(50).fill({}) as never })).toBe(10);
+    });
+
+    it('never claims a negative remainder', () => {
+        expect(hiddenArtifacts({ blocking_now: 1, blocking_later: 0, artifacts_total: 0, artifacts: [{}] as never })).toBe(0);
     });
 });
 

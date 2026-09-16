@@ -24,9 +24,14 @@ use Illuminate\Testing\TestResponse;
  * what this feature promises is the SHAPE of the refusal: a bare 403 makes the Docker client
  * print "unknown error", which leaves the customer with a broken build and nothing to act on.
  *
+ * Prefixed rather than bare (`blockingFixture()`, `pullManifest()`, `okFinding()`): this is a
+ * Pest file, so every top-level declaration in it lives as a GLOBAL for the whole test run
+ * once the file is loaded, and a collision with a second file wanting the same name is a
+ * FATAL, not a failing assertion. Same discipline as ScannerHealthTest's own prefixes.
+ *
  * @return array{0: Group, 1: Package, 2: OciManifest}
  */
-function blockingFixture(): array
+function scanBlockingFixture(): array
 {
     $org = Organization::factory()->create(['slug' => '3b']);
     $group = Group::factory()->for($org)->create(['slug' => 'intern']);
@@ -46,7 +51,7 @@ function blockingFixture(): array
 }
 
 /** @return TestResponse<Response> */
-function pullManifest(Group $group, string $reference, ?string $plainToken = null): TestResponse
+function scanBlockingPull(Group $group, string $reference, ?string $plainToken = null): TestResponse
 {
     return test()->call(
         'GET',
@@ -55,7 +60,7 @@ function pullManifest(Group $group, string $reference, ?string $plainToken = nul
     );
 }
 
-function okFinding(OciManifest $manifest, VulnerabilitySeverity $severity, int $daysKnown): OciScanFinding
+function scanBlockingOkFinding(OciManifest $manifest, VulnerabilitySeverity $severity, int $daysKnown): OciScanFinding
 {
     $report = OciScanReport::factory()->for($manifest, 'manifest')->create(['status' => ScanStatus::Ok]);
 
@@ -69,44 +74,44 @@ it('serves an artifact nobody has scanned', function () {
     // The one place this design deliberately does not fail closed. The alternative is that
     // switching a threshold on takes the registry down until the scan backlog drains — a
     // self-inflicted outage at the moment of enabling.
-    [$group] = blockingFixture();
+    [$group] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::Low, 'scan_block_grace_days' => 0]);
 
-    pullManifest($group, 'latest')->assertOk();
+    scanBlockingPull($group, 'latest')->assertOk();
 });
 
 it('serves an artifact whose only scan failed', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::Low, 'scan_block_grace_days' => 0]);
     OciScanReport::factory()->for($manifest, 'manifest')->create([
         'status' => ScanStatus::Failed, 'scanned_at' => null, 'error' => 'Scanner nicht erreichbar',
     ]);
 
-    pullManifest($group, 'latest')->assertOk();
+    scanBlockingPull($group, 'latest')->assertOk();
 });
 
 it('serves an artifact whose findings are all below the threshold', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::Critical, 'scan_block_grace_days' => 0]);
-    okFinding($manifest, VulnerabilitySeverity::High, 90);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::High, 90);
 
-    pullManifest($group, 'latest')->assertOk();
+    scanBlockingPull($group, 'latest')->assertOk();
 });
 
 it('serves an artifact whose finding is still inside its grace period', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 3);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 3);
 
-    pullManifest($group, 'latest')->assertOk();
+    scanBlockingPull($group, 'latest')->assertOk();
 });
 
 it('refuses an artifact whose finding is past its grace period, with an OCI error body', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    $f = okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    $f = scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
-    $response = pullManifest($group, 'latest')->assertStatus(403);
+    $response = scanBlockingPull($group, 'latest')->assertStatus(403);
 
     // A well-formed OCI envelope, not a bare 403 — this string is what the Docker client
     // prints straight into the customer's terminal, so it has to name the vulnerability.
@@ -118,15 +123,15 @@ it('refuses an artifact whose finding is past its grace period, with an OCI erro
 it('refuses a digest-addressed pull of the same artifact', function () {
     // Tag or digest, the same manifest resolves — so the same refusal has to apply, or the
     // rule is bypassed by the address form every CI system actually uses.
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
-    pullManifest($group, $manifest->digest)->assertStatus(403);
+    scanBlockingPull($group, $manifest->digest)->assertStatus(403);
 });
 
 it('names the worst finding when several would block', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::Medium, 'scan_block_grace_days' => 7]);
 
     $report = OciScanReport::factory()->for($manifest, 'manifest')->create(['status' => ScanStatus::Ok]);
@@ -135,7 +140,7 @@ it('names the worst finding when several would block', function () {
     OciScanFinding::factory()->for($report, 'report')->severity(VulnerabilitySeverity::Critical)
         ->firstSeenDaysAgo(30)->create(['vulnerability_id' => 'CVE-CRITICAL']);
 
-    expect(pullManifest($group, 'latest')->json('errors.0.message'))->toContain('CVE-CRITICAL');
+    expect(scanBlockingPull($group, 'latest')->json('errors.0.message'))->toContain('CVE-CRITICAL');
 });
 
 it('serves a blocked artifact to a scanner token', function () {
@@ -143,22 +148,22 @@ it('serves a blocked artifact to a scanner token', function () {
     // very endpoint the rule refuses, so a blocked artifact could never be rescanned — and
     // therefore never unblocked, not by a withdrawn advisory, not by a corrected severity,
     // not by anything.
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
     [$token, $plain] = RegistryToken::issue($group->organization, 'scanner', $group, TokenAbility::Read);
     $token->forceFill(['for_scanner' => true])->save();
 
-    pullManifest($group, 'latest', $plain)->assertOk();
+    scanBlockingPull($group, 'latest', $plain)->assertOk();
 });
 
 it('does not exempt an ordinary read token', function () {
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
-    pullManifest($group, 'latest')->assertStatus(403);
+    scanBlockingPull($group, 'latest')->assertStatus(403);
 });
 
 it('keeps refusing a pull while the instance-wide scanner is switched off', function () {
@@ -170,18 +175,18 @@ it('keeps refusing a pull while the instance-wide scanner is switched off', func
     // which is exactly the "outage becomes a bypass" property the grace-period rule exists
     // to prevent (see ScanBlockGuard's own docblock).
     config(['kontorfix.scanner.enabled' => false]);
-    [$group, , $manifest] = blockingFixture();
+    [$group, , $manifest] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
-    pullManifest($group, 'latest')->assertStatus(403);
+    scanBlockingPull($group, 'latest')->assertStatus(403);
 });
 
 it('asks the database nothing while the registry does not block', function () {
     // The rule runs on EVERY manifest resolution, and blocking is off by default — so the
     // default has to cost nothing at all, not one cheap query.
-    [$group, , $manifest] = blockingFixture();
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    [$group, , $manifest] = scanBlockingFixture();
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
     $queries = 0;
     DB::listen(function () use (&$queries) {
@@ -196,9 +201,9 @@ it('applies each registry its own threshold for one shared manifest', function (
     // The verdict belongs to the artifact; the threshold belongs to the registry. A
     // repository assigned to two registries can legitimately be blocked in one and served
     // in the other.
-    [$strict, $package, $manifest] = blockingFixture();
+    [$strict, $package, $manifest] = scanBlockingFixture();
     $strict->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
     $lenient = Group::factory()->for($strict->organization)->create(['slug' => 'offen']);
     $lenient->packages()->attach($package->id);
@@ -208,8 +213,8 @@ it('applies each registry its own threshold for one shared manifest', function (
 });
 
 it('previews what a proposed threshold would block, and when', function () {
-    [$group, , $manifest] = blockingFixture();
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    [$group, , $manifest] = scanBlockingFixture();
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
     $preview = app(ScanBlockGuard::class)->preview($group, VulnerabilitySeverity::High, 7);
 
@@ -221,8 +226,8 @@ it('previews what a proposed threshold would block, and when', function () {
 });
 
 it('separates what would block now from what would block later', function () {
-    [$group, , $manifest] = blockingFixture();
-    okFinding($manifest, VulnerabilitySeverity::Critical, 2);
+    [$group, , $manifest] = scanBlockingFixture();
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 2);
 
     $preview = app(ScanBlockGuard::class)->preview($group, VulnerabilitySeverity::High, 7);
 
@@ -233,8 +238,8 @@ it('separates what would block now from what would block later', function () {
 });
 
 it('previews nothing when no threshold is proposed', function () {
-    [$group, , $manifest] = blockingFixture();
-    okFinding($manifest, VulnerabilitySeverity::Critical, 30);
+    [$group, , $manifest] = scanBlockingFixture();
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
 
     expect(app(ScanBlockGuard::class)->preview($group, null, 7)['artifacts'])->toBe([]);
 });
@@ -273,7 +278,7 @@ it('previews nothing when no threshold is proposed', function () {
 it('agrees between the SQL guard and the in-memory guard at the exact boundary', function () {
     $this->travelTo(now()->startOfSecond());
 
-    [$group, $package, $manifestAtBoundary] = blockingFixture();
+    [$group, $package, $manifestAtBoundary] = scanBlockingFixture();
     $group->update(['scan_block_severity' => VulnerabilitySeverity::High, 'scan_block_grace_days' => 7]);
 
     // Severity exactly at the threshold, first_seen_at exactly at the grace cutoff — the
@@ -301,4 +306,56 @@ it('agrees between the SQL guard and the in-memory guard at the exact boundary',
         ->and($guard->refuses($insideGrace, $group))
         ->toBe($guard->blockingFinding($manifestInsideGrace, $group) !== null)
         ->and($guard->refuses($insideGrace, $group))->toBeFalse();
+});
+
+it('leaves out an artifact this registry no longer serves', function () {
+    // `Group::assignedPackages()` names itself the one statement of the serve-time
+    // predicate, and every other caller asks IT. A preview counting an assignment that
+    // expired yesterday tells the operator they are about to affect an image this registry
+    // already refuses to address — which is exactly the guessing the preview exists to
+    // remove.
+    [$group, $package, $manifest] = scanBlockingFixture();
+    scanBlockingOkFinding($manifest, VulnerabilitySeverity::Critical, 30);
+
+    $group->packages()->updateExistingPivot($package->id, ['available_until' => now()->subDay()]);
+
+    $preview = app(ScanBlockGuard::class)->preview($group, VulnerabilitySeverity::High, 7);
+
+    expect($preview['blocking_now'])->toBe(0)
+        ->and($preview['blocking_later'])->toBe(0)
+        ->and($preview['artifacts'])->toBe([]);
+});
+
+it('caps the artifacts it names while counting the whole registry exactly', function () {
+    // The preview runs on a debounced keystroke, up to ten times a minute per operator,
+    // against the same Postgres the pull path uses — and a Debian-based image carries
+    // 500-1500 CVEs. Loading every qualifying finding of every manifest was a five- to
+    // six-figure hydration per request. The LIST is a bounded illustration; the two numbers
+    // the operator acts on are exact, and `artifacts_total` is what lets the screen say how
+    // much it is not showing.
+    [$group, $package] = scanBlockingFixture();
+
+    $blockingNow = 55;
+    $blockingLater = 4;
+
+    foreach (range(1, $blockingNow + $blockingLater) as $index) {
+        $manifest = OciManifest::factory()->for($package)->create([
+            'digest' => 'sha256:'.str_pad((string) $index, 64, '0', STR_PAD_LEFT),
+        ]);
+
+        scanBlockingOkFinding(
+            $manifest,
+            VulnerabilitySeverity::Critical,
+            $index <= $blockingNow ? 30 : 1,
+        );
+    }
+
+    $preview = app(ScanBlockGuard::class)->preview($group, VulnerabilitySeverity::High, 7);
+
+    expect($preview['blocking_now'])->toBe($blockingNow)
+        ->and($preview['blocking_later'])->toBe($blockingLater)
+        ->and($preview['artifacts_total'])->toBe($blockingNow + $blockingLater)
+        // Capped, and never silently: ScanBlocking.vue renders the difference as
+        // "… und N weitere".
+        ->and($preview['artifacts'])->toHaveCount(50);
 });

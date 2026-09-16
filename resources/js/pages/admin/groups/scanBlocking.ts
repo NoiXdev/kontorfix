@@ -30,6 +30,15 @@ export interface PreviewArtifact {
 export interface ScanPreview {
     blocking_now: number;
     blocking_later: number;
+    /**
+     * Every artifact the proposed threshold qualifies, which is NOT `artifacts.length`:
+     * `ScanBlockGuard::preview()` caps the named list (a registry can carry far more images
+     * than anyone would read, and hydrating them all is what used to take the settings
+     * screen down) while counting the whole registry exactly. The difference is what
+     * `hiddenArtifacts()` turns into the "… und N weitere" line, so a capped list never
+     * reads as the complete one.
+     */
+    artifacts_total: number;
     artifacts: PreviewArtifact[];
 }
 
@@ -40,11 +49,27 @@ export interface ScanPreview {
  * "nothing would be blocked" rather than throwing past the caller's own error handling.
  */
 export function parseScanPreview(record: Record<string, unknown>): ScanPreview {
+    const artifacts = Array.isArray(record.artifacts) ? (record.artifacts as PreviewArtifact[]) : [];
+
     return {
         blocking_now: typeof record.blocking_now === 'number' ? record.blocking_now : 0,
         blocking_later: typeof record.blocking_later === 'number' ? record.blocking_later : 0,
-        artifacts: Array.isArray(record.artifacts) ? (record.artifacts as PreviewArtifact[]) : [],
+        // Falls back to what the list itself carries rather than to 0: a body without the
+        // field must not make `hiddenArtifacts()` claim a NEGATIVE remainder, which would
+        // read as "we are showing more than exists".
+        artifacts_total: typeof record.artifacts_total === 'number' ? record.artifacts_total : artifacts.length,
+        artifacts,
     };
+}
+
+/**
+ * How many qualifying artifacts the preview is NOT showing — see `ScanPreview.artifacts_total`.
+ *
+ * Clamped at zero so a stale or hand-rolled body can only ever suppress the line, never
+ * invert it.
+ */
+export function hiddenArtifacts(preview: ScanPreview): number {
+    return Math.max(0, preview.artifacts_total - preview.artifacts.length);
 }
 
 /**
