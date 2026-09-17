@@ -1,4 +1,42 @@
-## [0.14.0](https://github.com/NoiXdev/kontorfix/compare/v0.13.0...v) (2026-09-15)
+## [0.15.0](https://github.com/NoiXdev/kontorfix/compare/v0.14.0...v) (2026-09-17)
+
+
+### Features
+
+* **scanner:** health checks, the scanner service and operator documentation ([953b202](https://github.com/NoiXdev/kontorfix/commit/953b202f99b30a789e8bc33066ee21cc34222ebf))
+* **scanner:** per-registry blocking threshold with a preview before saving ([8bdc2b5](https://github.com/NoiXdev/kontorfix/commit/8bdc2b53f3138aaf4d242f543150c59be3b3b627))
+* **scanner:** refuse artifacts whose findings outlived the grace period ([5a8a577](https://github.com/NoiXdev/kontorfix/commit/5a8a5771a0acec70bdd3099c224b79be1dc33b11))
+* **scanner:** run scans and persist verdicts without resetting first_seen_at ([96fcf83](https://github.com/NoiXdev/kontorfix/commit/96fcf83e858fd19a9be67840f601a2fc4daac63b))
+* **scanner:** scan on push, nightly and on demand ([b3212fd](https://github.com/NoiXdev/kontorfix/commit/b3212fd3a05a0ee920585f51686a1580fa7a94c6))
+* **scanner:** schema for OCI vulnerability reports and findings ([e3fc778](https://github.com/NoiXdev/kontorfix/commit/e3fc7787bfdeafdaef35bed906a898abb446cdf9))
+* **scanner:** show findings on the image pages and in the customer portal ([e52d76e](https://github.com/NoiXdev/kontorfix/commit/e52d76ed9eb2ece1b30b58e078054f3152118c95))
+* **scanner:** speak the Harbor pluggable scanner adapter API ([47f0118](https://github.com/NoiXdev/kontorfix/commit/47f0118092e6509b4798c43e20904bac202af0d6))
+
+
+### Bug Fixes
+
+* **scanner:** clean up placeholder verdicts, cap the unique lock, and reach the pending state ([784a396](https://github.com/NoiXdev/kontorfix/commit/784a396e1ffd77091d0ecd4b4efbe3ef96a205c6))
+* **scanner:** correct the blocking hint, surface save errors, throttle the preview ([c1ba4d9](https://github.com/NoiXdev/kontorfix/commit/c1ba4d9f6911dfc9c13fec181fc4e7f439778324))
+* **scanner:** decode scanner responses strictly and refuse every redirect hop ([35dacf2](https://github.com/NoiXdev/kontorfix/commit/35dacf2517e77db5ae54cfeceba87371ab7e7e4a))
+* **scanner:** derive severity_rank on save instead of trusting the caller ([a366ac5](https://github.com/NoiXdev/kontorfix/commit/a366ac50db50133973561c41df98b2d94ec4eb38))
+* **scanner:** keep the nightly rescan rotating and off the shared queue ([0717bf7](https://github.com/NoiXdev/kontorfix/commit/0717bf7812f3a325c6b82266698e461fe6a9f7d8))
+* **scanner:** move the scanner off Redis DB 1, which the cache store owns ([357430b](https://github.com/NoiXdev/kontorfix/commit/357430b5b8420440667206189efe236ad78deea5))
+* **scanner:** pin the grace boundary with frozen time and one shared predicate ([54c973c](https://github.com/NoiXdev/kontorfix/commit/54c973c1243e19f146c6263cb16c5a0c65a029bc))
+* **scanner:** pin the scanner image, bound the health check's own timeout ([e2a4139](https://github.com/NoiXdev/kontorfix/commit/e2a4139031804ba8f0d16c2b43be3cb4d00571a3))
+* **scanner:** refuse a top-level JSON list as an undecodable scanner body ([bc21ef3](https://github.com/NoiXdev/kontorfix/commit/bc21ef3c8de8407407683681886ce63c26a4fa4c))
+* **scanner:** send the adapter the media type the manifest actually records ([03dee2a](https://github.com/NoiXdev/kontorfix/commit/03dee2a54c8f13f1ead34382adb4ad11feeb0f99))
+* **scanner:** stop a cleared grace field from silently becoming zero ([9bbf614](https://github.com/NoiXdev/kontorfix/commit/9bbf614f6185781c709ea1a4dc10f81ffb1750ff))
+* **scanner:** stop the portal card from leaking operator internals and mis-timed blocking ([ff15986](https://github.com/NoiXdev/kontorfix/commit/ff1598659ec349c90a341e2780164ce6c585db82))
+* **scanner:** survive a queue outage on push and refuse a disabled scanner on demand ([fb25099](https://github.com/NoiXdev/kontorfix/commit/fb25099a9206baf3d9e8112e94256a32f57964dc))
+* **scanner:** use GREATEST, not COALESCE, for the rescan sort key ([0f8ba42](https://github.com/NoiXdev/kontorfix/commit/0f8ba421bdfa9b6bf03b7355ae0cd8de5e6fec9b))
+
+
+### Performance Improvements
+
+* **scanner:** bound the blocking preview and scope it to assigned packages ([0940398](https://github.com/NoiXdev/kontorfix/commit/094039821db080331c14c3e8289086cfcd374df1))
+* **scanner:** key the scan cards by manifest and cap the findings they carry ([a29c795](https://github.com/NoiXdev/kontorfix/commit/a29c795768791c8691bd997198b84e8d2deb6356))
+
+## [0.14.0](https://github.com/NoiXdev/kontorfix/compare/v0.13.0...v0.14.0) (2026-09-15)
 
 
 ### Features
