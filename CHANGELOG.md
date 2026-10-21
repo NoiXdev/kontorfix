@@ -1,4 +1,11 @@
-## [0.15.0](https://github.com/NoiXdev/kontorfix/compare/v0.14.0...v) (2026-09-17)
+## [0.15.1](https://github.com/NoiXdev/kontorfix/compare/v0.15.0...v) (2026-10-21)
+
+
+### Bug Fixes
+
+* **docker:** refuse to build an image with PHP below 8.4.27 ([2681845](https://github.com/NoiXdev/kontorfix/commit/2681845baa992fa82ffbd5ccb8abb842050c1228))
+
+## [0.15.0](https://github.com/NoiXdev/kontorfix/compare/v0.14.0...v0.15.0) (2026-09-17)
 
 
 ### Features
