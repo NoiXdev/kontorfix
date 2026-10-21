@@ -161,6 +161,11 @@ jobs:
           context: .
           file: docker/Dockerfile
           platforms: linux/amd64
+          # Always re-resolve the FrankenPHP base image instead of trusting a cached
+          # layer. PHP is compiled into that image, so a stale base is the one way this
+          # pipeline can ship a known-vulnerable PHP (see the MIN_PHP_VERSION guard in
+          # docker/Dockerfile).
+          pull: true
           push: ${{ inputs.dry_run == false }}
           # Compiled into the JS bundle at build time — see docker/Dockerfile.
           # Unset vars build an image without realtime updates, which is supported.
